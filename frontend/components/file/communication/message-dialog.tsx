@@ -1,5 +1,6 @@
 "use client";
 
+import { MailClientDialog } from "@/components/file/communication/mail-client-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -9,12 +10,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  messageMailtoUrl,
   useAttachUploadLink,
   useMessageDetail,
   useSaveDraftBody,
   useSendDraft,
 } from "@/lib/api/communications";
+import { usePreferences, useUpdatePreferences } from "@/lib/api/preferences";
+import {
+  composeButtonLabel,
+  composeUrl,
+  effectiveClient,
+} from "@/lib/communication/compose-routes";
 import { copyMessage } from "@/lib/markdown/copy-rich";
 import { emailBodyToHtml } from "@/lib/markdown/email-body";
 import { htmlToEmailBody } from "@/lib/markdown/from-html";
@@ -58,7 +64,7 @@ const MessageEditor = dynamic(
 const BODY_PROSE =
   "[&_p]:mb-3 [&_p:last-child]:mb-0 [&_ul]:mb-3 [&_ul]:ml-5 [&_ul]:list-disc [&_li]:mb-1.5 [&_strong]:font-semibold";
 import { messageInstant, messageTimeFull, messageTimeLabel } from "@/lib/message-time";
-import { Check, Copy, Link as LinkIcon, Mail, Send } from "lucide-react";
+import { Check, Copy, ExternalLink, Link as LinkIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
@@ -145,10 +151,54 @@ export function MessageDialog({
   // to an address they know and have never typed in here. A body is still required: there is no
   // message to have sent without one.
   const canSend = bodyPlain.trim().length > 0 && !send.isPending;
-  // Built from the EDITED body and the typed recipient, so the link carries what is on screen.
-  // ALWAYS THE PLAIN DERIVATION: `mailto:` bodies are plain text by RFC 6068 and no client renders
-  // markup in one, so handing it HTML would put tags in the borrower's message.
-  const mailtoHref = data ? messageMailtoUrl(data, recipient, bodyPlain) : null;
+
+  // LP-855 — WHERE THIS PROCESSOR WRITES THEIR EMAIL, and the picker that asks once.
+  //
+  // `null` is "nobody has been asked", which is not the same as choosing the desktop default —
+  // see `MailClient`. The picker opens on the first EDITABLE draft they see, which is the moment
+  // the answer is about to matter, and never again once answered.
+  const preferences = usePreferences();
+  const savePreferences = useUpdatePreferences();
+  const [askedThisSession, setAskedThisSession] = useState(false);
+  const needsClient =
+    data?.is_editable === true &&
+    preferences.data !== undefined &&
+    preferences.data.mail_client === null &&
+    !askedThisSession;
+
+  /** What just happened to the compose window — see the sentence under the buttons. */
+  const [opened, setOpened] = useState<"idle" | "opened" | "blocked">("idle");
+
+  /**
+   * The whole send path, in one click.
+   *
+   * ORDER MATTERS: THE CLIPBOARD FIRST. `window.open` can be refused by a popup blocker, and if it
+   * were first a refusal would leave the processor with neither a window nor a copy. Copying first
+   * means the worst case is "the message is on your clipboard, open your mail app yourself" —
+   * which is exactly what the sentence under the buttons then says.
+   */
+  async function copyAndOpen() {
+    if (!data) return;
+    await copyMessage(bodyForSend, format);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+
+    const url = composeUrl(effectiveClient(preferences.data?.mail_client ?? null), {
+      to: recipient.trim(),
+      subject,
+    });
+    // `mailto:` is handled by the OS rather than opened as a tab, and a blocker does not apply; the
+    // web routes are ordinary windows and can be refused.
+    const window_ = window.open(url, "_blank", "noopener,noreferrer");
+    setOpened(window_ === null ? "blocked" : "opened");
+  }
+  // LP-855 — `messageMailtoUrl` AND ITS LENGTH GATE ARE GONE FROM THIS SCREEN.
+  //
+  // `mailto_max_chars` exists because a long BODY overflows the URL, and `mailto:` does not fail
+  // when it is too long — it opens a compose window holding half a message. There is no longer a
+  // body in the URL, so the ceiling has nothing to measure: what remains is the subject and the
+  // address, capped by `SendDraftRequest` at 256 each, against a ceiling of 1,800. Hiding the
+  // button because a message is long is the behaviour that stops.
 
   // LP-853 — SAVED WHEN THE WORDS MOVE, AND NOT WHEN THEY DO NOT.
   //
@@ -205,64 +255,76 @@ export function MessageDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(next) => !next && close()}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="text-base">
-            {data?.subject ?? (isPending ? "Loading…" : "Message")}
-          </DialogTitle>
-          <DialogDescription className="text-xs">
-            {data
-              ? [
-                  data.direction === "inbound" ? "From" : "To",
-                  data.counterparty ?? "nobody yet",
-                  "·",
-                  // LP-838 — SAME INSTANT AS THE LIST, SAME RULE, longer form. `messageInstant`
-                  // applies `_message_at`'s rule rather than restating it, so a row and the message
-                  // it opens cannot disagree about when it happened.
-                  messageTimeLabel(data),
-                  messageTimeFull(messageInstant(data)),
-                ].join(" ")
-              : null}
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      {/* LP-855 — THE MESSAGE WAITS WHILE THE PICKER IS UP, and this is a correctness fix rather
+          than a preference about order.
 
-        {isError ? (
-          <p className="text-sm text-danger">
-            This message could not be loaded. It may have been deleted.
-          </p>
-        ) : isPending ? (
-          <p className="text-sm text-muted-foreground">Loading the message…</p>
-        ) : data ? (
-          <div className="flex flex-col gap-4">
-            {/* THE BODY IS THE POINT — before this endpoint a sent message's words were readable
+          TWO OPEN RADIX MODALS HIDE EACH OTHER. Each marks everything outside itself `aria-hidden`,
+          so with both open NOTHING is in the accessibility tree — measured: zero buttons and zero
+          dialogs reachable by role, while the picker's text was still findable by `getByText`. A
+          screen reader would have announced neither, and a keyboard user could have reached
+          neither. Reordering them did not help, because the problem is that there are two.
+
+          So there is one at a time. The picker is one question that takes one click, and the draft
+          opens behind it the moment it is answered. */}
+      <Dialog open={open && !needsClient} onOpenChange={(next) => !next && close()}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-base">
+              {data?.subject ?? (isPending ? "Loading…" : "Message")}
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              {data
+                ? [
+                    data.direction === "inbound" ? "From" : "To",
+                    data.counterparty ?? "nobody yet",
+                    "·",
+                    // LP-838 — SAME INSTANT AS THE LIST, SAME RULE, longer form. `messageInstant`
+                    // applies `_message_at`'s rule rather than restating it, so a row and the message
+                    // it opens cannot disagree about when it happened.
+                    messageTimeLabel(data),
+                    messageTimeFull(messageInstant(data)),
+                  ].join(" ")
+                : null}
+            </DialogDescription>
+          </DialogHeader>
+
+          {isError ? (
+            <p className="text-sm text-danger">
+              This message could not be loaded. It may have been deleted.
+            </p>
+          ) : isPending ? (
+            <p className="text-sm text-muted-foreground">Loading the message…</p>
+          ) : data ? (
+            <div className="flex flex-col gap-4">
+              {/* THE BODY IS THE POINT — before this endpoint a sent message's words were readable
                 nowhere in the product. Pre-wrapped rather than rendered: this is plain text a person
                 wrote, and interpreting it as anything else is how a borrower's sentence becomes
                 markup. */}
-            {data.is_editable ? (
-              <div className="flex flex-col gap-3">
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="font-medium text-foreground">Send to</span>
-                  <input
-                    type="email"
-                    value={recipient}
-                    onChange={(event) => setRecipient(event.target.value)}
-                    placeholder="borrower@example.com"
-                    className="rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  />
-                </label>
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="font-medium text-foreground">Subject</span>
-                  <input
-                    type="text"
-                    value={subject}
-                    onChange={(event) => setSubject(event.target.value)}
-                    className="rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  />
-                </label>
-                <div className="flex flex-col gap-1 text-sm">
-                  <span className="font-medium text-foreground">Message</span>
-                  {/* LP-849 — A MESSAGE BOX, NOT A NOTEPAD. LP-844 put Markdown in a textarea with
+              {data.is_editable ? (
+                <div className="flex flex-col gap-3">
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium text-foreground">Send to</span>
+                    <input
+                      type="email"
+                      value={recipient}
+                      onChange={(event) => setRecipient(event.target.value)}
+                      placeholder="borrower@example.com"
+                      className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium text-foreground">Subject</span>
+                    <input
+                      type="text"
+                      value={subject}
+                      onChange={(event) => setSubject(event.target.value)}
+                      className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <div className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium text-foreground">Message</span>
+                    {/* LP-849 — A MESSAGE BOX, NOT A NOTEPAD. LP-844 put Markdown in a textarea with
                       a Preview toggle to avoid an editor dependency; a processor used it and
                       reported it as "simple notepad version" with "old scholl ***bold***". The
                       toggle is gone because a WYSIWYG IS the preview.
@@ -271,194 +333,226 @@ export function MessageDialog({
                       processor types. `data.body_format` says which language the body arrived in;
                       everything below derives the plain form on demand rather than holding a
                       second copy of the message. */}
-                  <MessageEditor
-                    value={data.body_format === "html" ? data.body : emailBodyToHtml(data.body)}
-                    format={data.body_format}
-                    onChange={onEdit}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {/* WHICH ROUTE KEEPS THE FORMATTING. `mailto:` bodies are plain text by RFC
+                    <MessageEditor
+                      value={data.body_format === "html" ? data.body : emailBodyToHtml(data.body)}
+                      format={data.body_format}
+                      onChange={onEdit}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {/* WHICH ROUTE KEEPS THE FORMATTING. `mailto:` bodies are plain text by RFC
                         6068 — no client renders markup in one — so the two buttons below are not
                         equivalent and a processor should not have to discover that by sending a
                         flattened email. */}
-                    Formatting survives <span className="text-foreground">Copy message</span>; the
-                    mail-client link sends plain text.
-                  </p>
+                      Formatting survives <span className="text-foreground">Copy message</span>; the
+                      mail-client link sends plain text.
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              // LP-844 — READ AS A LETTER, NOT AS A DUMP. This was a monospace `<pre>`, which is
-              // part of why the message read as machine-generated: the product showed a business
-              // letter in a code font.
-              //
-              // A borrower's sentence is still not markup. `emailBodyToHtml` escapes every
-              // character that could start a tag BEFORE it emits one, so `dangerouslySetInnerHTML`
-              // here is handed a string in which the only tags are the ones that function built.
-              // That ordering is the entire safety argument and it is tested directly.
-              <div
-                className={`message-body break-words rounded-md border border-input bg-muted px-3 py-2 text-sm text-foreground ${BODY_PROSE}`}
-                // biome-ignore lint/security/noDangerouslySetInnerHtml: escape-first renderer for a plain body, server-side allowlist for an authored one — see below
-                dangerouslySetInnerHTML={{
-                  // LP-853 — AN AUTHORED BODY IS ALREADY MARKUP AND IS NOT RE-RENDERED. Running it
-                  // through `emailBodyToHtml` would escape the processor's own tags into view, so
-                  // the message they wrote would read back as source. What makes this safe is the
-                  // server: `sanitise_html` rebuilds every saved body from an allowlist on the way
-                  // IN, so the column cannot hold a tag that was not permitted — which is a
-                  // stronger guarantee than sanitising here, because every other reader of the row
-                  // inherits it without knowing the rule.
-                  __html: data.body_format === "html" ? data.body : emailBodyToHtml(data.body),
-                }}
-              />
-            )}
+              ) : (
+                // LP-844 — READ AS A LETTER, NOT AS A DUMP. This was a monospace `<pre>`, which is
+                // part of why the message read as machine-generated: the product showed a business
+                // letter in a code font.
+                //
+                // A borrower's sentence is still not markup. `emailBodyToHtml` escapes every
+                // character that could start a tag BEFORE it emits one, so `dangerouslySetInnerHTML`
+                // here is handed a string in which the only tags are the ones that function built.
+                // That ordering is the entire safety argument and it is tested directly.
+                <div
+                  className={`message-body break-words rounded-md border border-input bg-muted px-3 py-2 text-sm text-foreground ${BODY_PROSE}`}
+                  // biome-ignore lint/security/noDangerouslySetInnerHtml: escape-first renderer for a plain body, server-side allowlist for an authored one — see below
+                  dangerouslySetInnerHTML={{
+                    // LP-853 — AN AUTHORED BODY IS ALREADY MARKUP AND IS NOT RE-RENDERED. Running it
+                    // through `emailBodyToHtml` would escape the processor's own tags into view, so
+                    // the message they wrote would read back as source. What makes this safe is the
+                    // server: `sanitise_html` rebuilds every saved body from an allowlist on the way
+                    // IN, so the column cannot hold a tag that was not permitted — which is a
+                    // stronger guarantee than sanitising here, because every other reader of the row
+                    // inherits it without knowing the rule.
+                    __html: data.body_format === "html" ? data.body : emailBodyToHtml(data.body),
+                  }}
+                />
+              )}
 
-            {data.documents.length > 0 ? (
-              <div className="flex flex-col gap-1 text-sm">
-                <span className="font-medium text-foreground">What it asks for</span>
-                <ul className="list-inside list-disc text-muted-foreground">
-                  {data.documents.map((title) => (
-                    <li key={title}>{title}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
-            {data.attachments.length > 0 ? (
-              <div className="flex flex-col gap-1 text-sm">
-                <span className="font-medium text-foreground">What arrived</span>
-                <ul className="list-inside list-disc text-muted-foreground">
-                  {/* The disposition travels with the name (LP-825): "accepted" and "not yet
-                      accepted" are the difference between a document in the file and one still
-                      waiting for somebody. */}
-                  {data.attachments.map((attachment) => (
-                    <li key={attachment.name}>
-                      {attachment.name} · {attachment.disposition.replaceAll("_", " ")}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
-            {data.error_detail ? (
-              <p className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
-                Delivery failed: {data.error_detail}
-              </p>
-            ) : null}
-
-            <dl className="grid gap-1 border-t border-border pt-3 text-xs text-muted-foreground">
-              <div className="flex gap-2">
-                <dt className="font-medium text-foreground">Status</dt>
-                <dd>{data.status}</dd>
-              </div>
-              {data.template_key ? (
-                <div className="flex gap-2">
-                  <dt className="font-medium text-foreground">Template</dt>
-                  <dd>
-                    {data.template_key} {data.template_version ?? ""}
-                  </dd>
+              {data.documents.length > 0 ? (
+                <div className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-foreground">What it asks for</span>
+                  <ul className="list-inside list-disc text-muted-foreground">
+                    {data.documents.map((title) => (
+                      <li key={title}>{title}</li>
+                    ))}
+                  </ul>
                 </div>
               ) : null}
-            </dl>
 
-            {data.is_editable ? (
-              <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
-                {/* LP-831 REVIEW — THE TWO CONTROLS THAT ACTUALLY SEND, restored.
-                    `OutboundDraftPanel` carried "Copy message" and "Open in mail client" and this
-                    ticket took it off the page, leaving "Mark as sent" alone. Nothing in this
-                    product transmits mail — LP-828's own analysis says so — so those two were the
-                    only ways a message reached anybody, and the one remaining button records an
-                    outbound event, moves every need to REQUESTED and starts LP-814's reminder
-                    clock. A processor could mark a message sent with no way to send it. */}
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="gap-2"
-                  onClick={async () => {
-                    // LP-844 — BOTH FLAVOURS. This is the send path, so bold and bullets survive
-                    // here or nowhere: `mailto:` bodies are plain text by RFC 6068 and no client
-                    // renders markup in one.
-                    await copyMessage(bodyForSend, format);
-                    setCopied(true);
-                    window.setTimeout(() => setCopied(false), 2000);
-                  }}
-                >
-                  {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                  {copied ? "Copied" : "Copy message"}
-                </Button>
+              {data.attachments.length > 0 ? (
+                <div className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-foreground">What arrived</span>
+                  <ul className="list-inside list-disc text-muted-foreground">
+                    {/* The disposition travels with the name (LP-825): "accepted" and "not yet
+                      accepted" are the difference between a document in the file and one still
+                      waiting for somebody. */}
+                    {data.attachments.map((attachment) => (
+                      <li key={attachment.name}>
+                        {attachment.name} · {attachment.disposition.replaceAll("_", " ")}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
 
-                {/* THE EDITED BODY, not the stored one — the borrower must receive what the record
-                    stores. A null href is the length gate: `mailto:` does not fail when it is too
-                    long, it opens a compose window holding half a message. */}
-                {mailtoHref ? (
-                  <Button asChild variant="outline" className="gap-2">
-                    <a href={mailtoHref}>
-                      <Mail className="h-4 w-4" /> Open in mail client
-                    </a>
-                  </Button>
-                ) : (
-                  <Button type="button" variant="outline" className="gap-2" disabled>
-                    <Mail className="h-4 w-4" /> Open in mail client
-                  </Button>
-                )}
+              {data.error_detail ? (
+                <p className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
+                  Delivery failed: {data.error_detail}
+                </p>
+              ) : null}
 
-                <Button
-                  type="button"
-                  className="gap-2"
-                  disabled={!canSend}
-                  onClick={() =>
-                    send.mutate(
-                      {
-                        draftId: data.id,
-                        recipient: recipient.trim(),
-                        subject,
-                        body: bodyForSend,
-                      },
-                      { onSuccess: onClose },
-                    )
-                  }
-                >
-                  <Send className="h-4 w-4" /> {send.isPending ? "Recording…" : "Mark as sent"}
-                </Button>
-                {/* LP-834 — THE LINK IS ADDED FROM INSIDE THE DRAFT, which is the gap this
-                    closes: it was minted on a panel below and pasted by hand.
+              <dl className="grid gap-1 border-t border-border pt-3 text-xs text-muted-foreground">
+                <div className="flex gap-2">
+                  <dt className="font-medium text-foreground">Status</dt>
+                  <dd>{data.status}</dd>
+                </div>
+                {data.template_key ? (
+                  <div className="flex gap-2">
+                    <dt className="font-medium text-foreground">Template</dt>
+                    <dd>
+                      {data.template_key} {data.template_version ?? ""}
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
 
-                    THE WARNING IS BEFORE THE CLICK, NOT AFTER. Minting expires every other live
-                    link on the file, so a borrower already sent one loses it — they click and are
-                    refused, with no explanation on their end. That is the right trade against two
-                    live credentials and it is not a thing to discover afterwards. */}
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="gap-2"
-                  disabled={attachLink.isPending}
-                  title={
-                    data.body.includes("/upload/")
-                      ? "Replaces the link in this draft. Any link already sent stops working."
-                      : "Any link already sent to this borrower stops working."
-                  }
-                  onClick={() => attachLink.mutate()}
-                >
-                  <LinkIcon className="h-4 w-4" />
-                  {data.body.includes("/upload/")
-                    ? "Replace the secure link"
-                    : "Add a secure upload link"}
-                </Button>
-                {/* NOTHING HERE TRANSMITS, and the label says so rather than implying otherwise.
-                    LP-816 shipped the transport seam with no provider, so the message still leaves
-                    from the processor's own mail client and this records that it went. */}
-                <span className="text-xs text-muted-foreground">
-                  Records that you sent it. Nothing is transmitted from here.
-                </span>
-              </div>
-            ) : null}
-            {send.isError ? (
-              <p className="text-sm text-danger">
-                This was not recorded as sent. It may already have been sent, or this address may
-                have been emailed too recently.
-              </p>
-            ) : null}
-          </div>
-        ) : null}
-      </DialogContent>
-    </Dialog>
+              {data.is_editable ? (
+                <div className="flex flex-col gap-2 border-t border-border pt-3">
+                  {/* SCREEN 2's BUTTON BAR:
+                      `Copy & open <client>` · `Copy message` · `Mark as sent` — spacer — `Delete`
+
+                    THERE IS NO SEND BUTTON, NOT EVEN DISABLED. `mail_transport` is an interface
+                    with no provider behind it, so a greyed-out Send would be a promise this version
+                    cannot keep and the first thing a processor would click. The absence is asserted
+                    in `message-dialog.test.tsx`, with a positive control naming the buttons that
+                    ARE here — a not-assertion over a whole screen otherwise passes on a screen that
+                    failed to render. */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* THE WHOLE SEND PATH IN ONE CLICK. It copies the RICH body AND opens the
+                      compose window with To and Subject filled and the body EMPTY — every compose
+                      route takes the body as plain text, so filling it would hand the processor a
+                      message that looks finished and has quietly lost its structure. An empty body
+                      is obviously unfinished, which is the point. */}
+                    <Button
+                      type="button"
+                      className="gap-2"
+                      disabled={!canSend}
+                      onClick={() => void copyAndOpen()}
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      {composeButtonLabel(preferences.data?.mail_client ?? null)}
+                    </Button>
+
+                    {/* KEPT FOR ANYBODY DOING IT THEIR OWN WAY — and it is the fallback when a popup
+                      blocker eats the compose window. */}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="gap-2"
+                      onClick={async () => {
+                        // LP-844 — BOTH FLAVOURS. This is the send path, so bold and bullets survive
+                        // here or nowhere.
+                        await copyMessage(bodyForSend, format);
+                        setCopied(true);
+                        window.setTimeout(() => setCopied(false), 2000);
+                      }}
+                    >
+                      {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                      {copied ? "Copied" : "Copy message"}
+                    </Button>
+
+                    {/* THE CLAIM, ATTRIBUTED. Nothing observed a send, so what this records is that a
+                      processor says they sent it — `Marked sent by Priya · Tue 16:41` on the list.
+                      It starts no clock, because there are no reminders in this version. */}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="gap-2"
+                      disabled={!canSend}
+                      onClick={() =>
+                        send.mutate(
+                          {
+                            draftId: data.id,
+                            recipient: recipient.trim(),
+                            subject,
+                            body: bodyForSend,
+                          },
+                          { onSuccess: onClose },
+                        )
+                      }
+                    >
+                      <Check className="h-4 w-4" /> {send.isPending ? "Recording…" : "Mark as sent"}
+                    </Button>
+
+                    {/* LP-834 — the secure link. LP-857 takes it off the page with the rest of the
+                      next phase; it stays here until then. */}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="gap-2"
+                      disabled={attachLink.isPending}
+                      title={
+                        data.body.includes("/upload/")
+                          ? "Replaces the link in this draft. Any link already sent stops working."
+                          : "Any link already sent to this borrower stops working."
+                      }
+                      onClick={() => attachLink.mutate()}
+                    >
+                      <LinkIcon className="h-4 w-4" />
+                      {data.body.includes("/upload/")
+                        ? "Replace the secure link"
+                        : "Add a secure upload link"}
+                    </Button>
+                  </div>
+
+                  {/* WHAT JUST HAPPENED, in the processor's next action rather than as reassurance.
+                    A popup blocker eating the compose window is the ordinary failure here, and the
+                    copy still worked — so the message says so rather than reporting an error about
+                    a window. */}
+                  <p className="text-xs text-muted-foreground">
+                    {opened === "blocked"
+                      ? "Your browser blocked the compose window — the message is on your clipboard, so open your mail app and paste it."
+                      : opened === "opened"
+                        ? "Paste into the message — ⌘V."
+                        : "Records that you sent it. Nothing is transmitted from here."}
+                  </p>
+                </div>
+              ) : null}
+              {send.isError ? (
+                <p className="text-sm text-danger">
+                  This was not recorded as sent. It may already have been sent, or this address may
+                  have been emailed too recently.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+      {/* LP-855 — ASKED ONCE, ON THE FIRST DRAFT, AND RENDERED LAST.
+
+          The order is load-bearing rather than stylistic. Two modals are open at once here, and
+          Radix marks everything outside the TOPMOST one `aria-hidden` — so with the picker first it
+          was rendered, visible to `getByText`, and absent from the accessibility tree: a question a
+          screen reader never announced and a keyboard user could not reach, sitting in front of the
+          button it configures. Caught by the picker's own test failing to find its primary.
+
+          Last means topmost, which is also the right order for the person: answer where you write
+          your email, then send the message. */}
+      <MailClientDialog
+        open={needsClient}
+        suggested={preferences.data?.suggested_mail_client ?? "mailto"}
+        reason={preferences.data?.mail_client_suggestion_reason ?? ""}
+        pending={savePreferences.isPending}
+        onChoose={(client) => {
+          setAskedThisSession(true);
+          savePreferences.mutate({ mail_client: client });
+        }}
+      />
+    </>
   );
 }

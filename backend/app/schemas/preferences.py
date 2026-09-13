@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, field_validator
 
-from app.models.user import RowDensity
+from app.models.user import MailClient, RowDensity
 from app.verification.confidence import AggressionLevel
 
 
@@ -22,6 +22,23 @@ class UserPreferences(BaseModel):
     #: `[list_pct, canvas_pct]`. `None` means never adjusted — the UI shows its
     #: own default rather than a value nobody chose.
     reviewer_pane_split: list[int] | None = None
+    #: LP-855 — where this processor writes their email. `None` means nobody has asked yet, which is
+    #: NOT the same as choosing the desktop default: the picker is shown once on the first draft,
+    #: and a column that could not tell the two apart would show it forever or never.
+    mail_client: MailClient | None = None
+    #: LP-855 — which option the picker should PRE-SELECT, derived from the caller's own sign-in
+    #: domain, and never applied. See `suggest_mail_client`.
+    #:
+    #: SERVED EVEN ONCE `mail_client` IS SET, because it costs nothing and the settings screen that
+    #: lets a processor change their mind wants the same sentence the picker showed.
+    #: DEFAULTED TO THE SAFE ANSWER, which is not a placeholder: `suggest_mail_client` returns
+    #: exactly this for a domain that says nothing, which is the common case. So a caller that
+    #: builds this model from the ORM row alone gets the same answer the suggester would have given
+    #: it, rather than a value that has to be corrected before it is true.
+    suggested_mail_client: MailClient = MailClient.MAILTO
+    #: The sentence explaining the suggestion, in the picker's own words. Empty when the domain
+    #: says nothing, in which case the safe answer is suggested and needs no explanation.
+    mail_client_suggestion_reason: str = ""
 
     model_config = {"from_attributes": True}
 
@@ -38,6 +55,9 @@ class UserPreferencesUpdate(BaseModel):
     default_aggression_level: AggressionLevel | None = None
     density: RowDensity | None = None
     reviewer_pane_split: list[int] | None = None
+    #: LP-855 — the answer to the picker. Optional like the rest, so a client changing density does
+    #: not have to send back a mail client it is not changing.
+    mail_client: MailClient | None = None
 
     @field_validator("reviewer_pane_split")
     @classmethod

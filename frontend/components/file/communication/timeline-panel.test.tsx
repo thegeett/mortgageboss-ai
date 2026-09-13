@@ -45,6 +45,14 @@ vi.mock("next/navigation", () => ({
 }));
 
 const mockMessageDetail = vi.fn(() => ({ data: undefined, isPending: false, isError: false }));
+// LP-855 — the dialog this panel opens now reads the mail-client preference. These cases are about
+// the LIST; the dialog has its own file.
+vi.mock("@/lib/api/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/preferences")>()),
+  usePreferences: () => ({ data: { mail_client: "mailto" } }),
+  useUpdatePreferences: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
 vi.mock("@/lib/api/communications", () => ({
   useMessageDetail: (...args: unknown[]) => {
     mockMessageDetailArgs.push(args);

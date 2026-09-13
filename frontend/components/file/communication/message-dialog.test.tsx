@@ -23,6 +23,24 @@ const saveState = { mutate: mockSave, isPending: false, isError: false };
 // LP-831 REVIEW — THE REAL `messageMailtoUrl`, not a stub. What the "Open in mail client" link
 // carries is the assertion; a mocked builder would let the button exist while the link was wrong.
 // Only the two hooks are replaced.
+// LP-855 — the mail-client preference. Mocked like the rest of the data layer: these cases are
+// about the DIALOG, and `usePreferences` is a query that would otherwise need a provider.
+// `mail_client: "gmail"` means the picker has been answered, so it does not open over the cases
+// below; `the mail-client picker` describes the unanswered state explicitly.
+const mockPreferences = vi.fn(() => ({
+  data: {
+    mail_client: "gmail",
+    suggested_mail_client: "gmail",
+    mail_client_suggestion_reason: "you sign in as priya@gmail.com",
+  },
+}));
+const mockSavePreferences = { mutate: vi.fn(), isPending: false };
+vi.mock("@/lib/api/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/preferences")>()),
+  usePreferences: () => mockPreferences(),
+  useUpdatePreferences: () => mockSavePreferences,
+}));
+
 vi.mock("@/lib/api/communications", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/communications")>()),
   useMessageDetail: (...args: unknown[]) => mockUseMessageDetail(...args),
@@ -41,6 +59,15 @@ beforeEach(() => {
   vi.clearAllMocks();
   sendState.isPending = false;
   sendState.isError = false;
+  // LP-855 — RESET, or `unanswered()` in one case leaks into the next and the picker opens over
+  // tests that are about something else. `vi.clearAllMocks` clears CALLS, not a `mockReturnValue`.
+  mockPreferences.mockReturnValue({
+    data: {
+      mail_client: "gmail",
+      suggested_mail_client: "gmail",
+      mail_client_suggestion_reason: "you sign in as priya@gmail.com",
+    },
+  });
 });
 
 function detail(overrides: Partial<MessageDetail> = {}): { data: MessageDetail } {
@@ -385,7 +412,11 @@ describe("MessageDialog", () => {
  * for a reply, and have had no way to send the message at all.
  */
 describe("MessageDialog — a draft can actually be sent", () => {
-  it("offers both ways a message leaves, on the edited body", async () => {
+  it("copies the body, and the copy carries no markup on a plain draft", async () => {
+    // LP-855 — THE `mailto:` LINK IS GONE FROM THIS BAR. It was a second control carrying the body
+    // in the URL; the primary now copies the rich body and opens the compose window with the body
+    // EMPTY, which is `copies AND opens` below. What survives from LP-849 is the half that still
+    // matters here: what the clipboard carries.
     mockUseMessageDetail.mockReturnValue(
       state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
     );
@@ -393,30 +424,10 @@ describe("MessageDialog — a draft can actually be sent", () => {
     Object.assign(navigator, { clipboard: { writeText } });
     render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
-    // LP-849 — BOTH ROUTES CARRY THE BODY THE EDITOR HOLDS, which is plain text. This drove the
-    // field with `fireEvent.change`, which does nothing to a contenteditable — so it would now
-    // assert the unedited body while appearing to test an edit. What matters here is that copy and
-    // mailto: both take the SAME body the send would, and that neither carries HTML.
     fireEvent.click(screen.getByRole("button", { name: /copy message/i }));
     const copied = writeText.mock.calls[0]?.[0] as string;
     expect(copied).toContain("Please send the bank statements.");
     expect(copied).not.toContain("<p>");
-
-    const href =
-      screen.getByRole("link", { name: /open in mail client/i }).getAttribute("href") ?? "";
-    // `encodeURIComponent` percent-encodes the `@`, as `mailtoUrl` has since LP-811a — assert what
-    // the link IS rather than what it reads like.
-    expect(href.slice(0, href.indexOf("?"))).toBe("mailto:sarah%40example.com");
-    // PARSED, NOT SUBSTRING-MATCHED. `URLSearchParams` encodes a space as `+`, which
-    // `decodeURIComponent` does not undo — so a naive `toContain("Edited before sending.")` fails on
-    // a link that is perfectly correct. Found by instrumenting; the first version of this assertion
-    // was wrong about the code rather than the other way round.
-    const params = new URLSearchParams(href.slice(href.indexOf("?") + 1));
-    // THE SAME BODY AS THE COPY, so the two routes cannot disagree about what was sent — which is
-    // the thing a processor would never notice until a borrower replied to the wrong list.
-    expect(params.get("body")).toBe(copied);
-    expect(params.get("bcc")).toBe("lf-abc@imbox.example.test");
-    expect(params.get("subject")).toBe("Documents we need");
   });
 
   it("does not offer them on a message that cannot be edited", () => {
@@ -431,17 +442,106 @@ describe("MessageDialog — a draft can actually be sent", () => {
     expect(screen.getByText(/Please send the bank statements/)).toBeTruthy();
   });
 
-  it("disables the mail link when the server says it will not carry", () => {
-    // `mailto:` does not fail when it is too long — it opens a compose window holding half a
-    // message. A disabled control is the honest answer; a link that truncates is not.
+  it("LP-855 — a long message no longer hides the way to send it", () => {
+    // `mailto_max_chars` exists because a long BODY overflows the URL, and `mailto:` does not fail
+    // when it is too long — it opens a compose window holding half a message. THERE IS NO LONGER A
+    // BODY IN THE URL, so the ceiling has nothing to measure: what remains is the subject and the
+    // address, capped by `SendDraftRequest` at 256 each against a ceiling of 1,800.
+    //
+    // This test asserted the OPPOSITE — that the control was disabled — and the inversion is the
+    // ticket. Hiding the only way to send a message because the message is long was the behaviour
+    // being removed.
     mockUseMessageDetail.mockReturnValue(
       state(detail({ is_editable: true, status: "draft", mailto_available: false })),
     );
     render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
-    expect(screen.queryByRole("link", { name: /open in mail client/i })).toBeNull();
-    const disabled = screen.getByRole("button", { name: /open in mail client/i });
-    expect((disabled as HTMLButtonElement).disabled).toBe(true);
+    const open = screen.getByRole("button", { name: /Copy & open/ });
+    expect((open as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+/**
+ * LP-855 — Screen 2's button bar.
+ *
+ * `Copy & open <client>` · `Copy message` · `Mark as sent` … `Delete`, and NO SEND BUTTON.
+ */
+describe("the button bar", () => {
+  function draftOpen() {
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+  }
+
+  it("has NO Send button, not even disabled", () => {
+    // `mail_transport` is an interface with no provider behind it, so a greyed-out Send would be a
+    // promise this version cannot keep and the first thing a processor would click.
+    draftOpen();
+
+    for (const name of [/^Send$/, /^Send message$/, /^Send email$/, /^Send now$/]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
+  });
+
+  it("and the buttons that ARE here are here", () => {
+    // THE POSITIVE CONTROL for the absence above, and it is not ceremony: a not-assertion over a
+    // whole screen passes on a screen that failed to render, which is exactly what a broken import
+    // or a thrown hook produces.
+    draftOpen();
+
+    expect(screen.getByRole("button", { name: /Copy & open/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Copy message/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Mark as sent/ })).toBeTruthy();
+  });
+
+  it("the primary names the client, so it says what will happen before it happens", () => {
+    draftOpen();
+    expect(screen.getByRole("button", { name: "Copy & open Gmail" })).toBeTruthy();
+  });
+
+  it("copies AND opens, with the body left empty", async () => {
+    // THE WHOLE SEND PATH IN ONE CLICK. Every compose route takes the body as plain text, so
+    // filling it would hand the processor a message that LOOKS finished and has quietly lost its
+    // structure. An empty body is obviously unfinished, which is the point.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    const open = vi.fn().mockReturnValue({});
+    Object.defineProperty(window, "open", { configurable: true, value: open });
+    draftOpen();
+
+    fireEvent.click(screen.getByRole("button", { name: /Copy & open/ }));
+    await vi.waitFor(() => expect(open).toHaveBeenCalled());
+
+    // The clipboard has the message...
+    expect(writeText.mock.calls[0]?.[0]).toContain("Please send the bank statements.");
+    // ...and the URL does not.
+    const url = new URL(open.mock.calls[0]?.[0] as string);
+    expect(url.origin + url.pathname).toBe("https://mail.google.com/mail/");
+    expect(url.searchParams.get("body")).toBe("");
+    expect(url.searchParams.get("to")).toBe("sarah@example.com");
+    expect(url.searchParams.get("su")).toBe("Documents we need");
+  });
+
+  it("tells the processor to paste, once the window is open", () => {
+    draftOpen();
+    expect(screen.getByText(/Records that you sent it/)).toBeTruthy();
+    expect(screen.queryByText(/Paste into the message/)).toBeNull();
+  });
+
+  it("a blocked popup still leaves the message on the clipboard, and says so", async () => {
+    // ACCEPTANCE 3. The clipboard is written FIRST, so a refusal leaves the processor with the
+    // message rather than with neither a window nor a copy — and the sentence says which.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    Object.defineProperty(window, "open", { configurable: true, value: () => null });
+    draftOpen();
+
+    fireEvent.click(screen.getByRole("button", { name: /Copy & open/ }));
+
+    await vi.waitFor(() => expect(screen.getByText(/blocked the compose window/)).toBeTruthy());
+    expect(screen.getByText(/on your clipboard/)).toBeTruthy();
+    expect(writeText).toHaveBeenCalled();
   });
 });
 
@@ -523,5 +623,109 @@ describe("the rendered body", () => {
     expect(document.querySelector("script")).toBeNull();
     // The control: the text really did arrive, so this is not passing on an empty dialog.
     expect(document.querySelector(".message-body")?.textContent).toContain("<script>");
+  });
+});
+
+/**
+ * LP-855 — the picker, wired.
+ *
+ * `mail-client-dialog.test.tsx` covers the dialog itself. These are about WHEN it appears, which is
+ * the half that lives here: once, on the first editable draft, and never again after an answer.
+ */
+describe("the mail-client picker", () => {
+  function unanswered() {
+    mockPreferences.mockReturnValue({
+      data: {
+        mail_client: null,
+        suggested_mail_client: "gmail",
+        mail_client_suggestion_reason: "you sign in as priya@gmail.com",
+      },
+    } as never);
+  }
+
+  it("ACCEPTANCE 5 — asks on the first draft, and the button meanwhile says 'mail app'", () => {
+    unanswered();
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    // ONE DIALOG AT A TIME. Two open Radix modals mark each other `aria-hidden`, so both vanish
+    // from the accessibility tree — measured at zero reachable buttons. The picker is one question
+    // and one click; the draft opens behind it the moment it is answered.
+    expect(screen.getByRole("heading", { name: "Where do you write your email?" })).toBeTruthy();
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Use Gmail" })).toBeTruthy();
+    // The message's own buttons are not competing with it.
+    expect(screen.queryByRole("button", { name: /Copy & open/ })).toBeNull();
+  });
+
+  it("ACCEPTANCE 5 — a processor who takes the safe answer gets 'mail app'", () => {
+    // "Not now" stores `mailto`, so "never answered" in the ticket's sense is a processor who took
+    // the safe option. The button does not claim to know more than they told it.
+    mockPreferences.mockReturnValue({
+      data: {
+        mail_client: "mailto",
+        suggested_mail_client: "gmail",
+        mail_client_suggestion_reason: "you sign in as priya@gmail.com",
+      },
+    } as never);
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    expect(screen.queryByRole("heading", { name: "Where do you write your email?" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Copy & open mail app" })).toBeTruthy();
+  });
+
+  it("does not ask again once it is answered", () => {
+    // THE CONTROL. A picker that opened on every draft would satisfy the case above and be the
+    // thing a processor complains about by the third file.
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    expect(screen.queryByText("Where do you write your email?")).toBeNull();
+  });
+
+  it("ACCEPTANCE 4 — the answer is saved as a preference, not held in the page", () => {
+    unanswered();
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Use Gmail" }));
+
+    // Persisted per USER, through the preferences API — so it survives a reload, a different file
+    // and a different machine, which page state would not.
+    expect(mockSavePreferences.mutate).toHaveBeenCalledWith({ mail_client: "gmail" });
+  });
+
+  it("does not ask on a message that cannot be edited", () => {
+    // A sent message has no send path to configure, and asking there would be a question about
+    // nothing.
+    unanswered();
+    mockUseMessageDetail.mockReturnValue(state(detail({ is_editable: false, status: "sent" })));
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    expect(screen.queryByText("Where do you write your email?")).toBeNull();
+  });
+
+  it("does not ask before the preferences have loaded", () => {
+    // A picker that flashed open on an undefined preference and closed again would ask a question
+    // nobody had time to read, and `mail_client === null` would be indistinguishable from "not
+    // fetched yet".
+    mockPreferences.mockReturnValue({ data: undefined } as never);
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    expect(screen.queryByText("Where do you write your email?")).toBeNull();
+    // And the button still works, on the safe answer.
+    expect(screen.getByRole("button", { name: "Copy & open mail app" })).toBeTruthy();
   });
 });

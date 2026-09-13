@@ -20,6 +20,24 @@ const mockUseMessageDetail = vi.fn();
 const mockSave = vi.fn();
 const mockSend = vi.fn();
 
+// LP-855 — the mail-client preference. Mocked like the rest of the data layer: these cases are
+// about the DIALOG, and `usePreferences` is a query that would otherwise need a provider.
+// `mail_client: "gmail"` means the picker has been answered, so it does not open over the cases
+// below; `the mail-client picker` describes the unanswered state explicitly.
+const mockPreferences = vi.fn(() => ({
+  data: {
+    mail_client: "gmail",
+    suggested_mail_client: "gmail",
+    mail_client_suggestion_reason: "you sign in as priya@gmail.com",
+  },
+}));
+const mockSavePreferences = { mutate: vi.fn(), isPending: false };
+vi.mock("@/lib/api/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/preferences")>()),
+  usePreferences: () => mockPreferences(),
+  useUpdatePreferences: () => mockSavePreferences,
+}));
+
 vi.mock("@/lib/api/communications", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/communications")>()),
   useMessageDetail: (...args: unknown[]) => mockUseMessageDetail(...args),

@@ -383,8 +383,19 @@ EXCLUDED: dict[str, frozenset[str]] = {
     "companies": frozenset({"settings"}),
     # `reviewer_pane_split` is a UI preference, not data anyone queries staging for
     # (LP-UI-030) — kept out for noise, not for privacy. Reason in that migration.
+    # LP-855 adds `mail_client`, on LP-UI-030's reasoning for `reviewer_pane_split`: the readonly
+    # surface exists to answer questions about loan data from staging, and which mail client a
+    # processor prefers answers none of them. Not sensitive — one of four fixed words — so this is a
+    # noise decision rather than a privacy one.
     "users": frozenset(
-        {"hashed_password", "email", "first_name", "last_name", "reviewer_pane_split"}
+        {
+            "hashed_password",
+            "email",
+            "first_name",
+            "last_name",
+            "reviewer_pane_split",
+            "mail_client",
+        }
     ),
     "lenders": frozenset({"contact_email", "contact_phone"}),
     # LP-821 — the evidence table holds a SECOND COPY of exactly the four columns

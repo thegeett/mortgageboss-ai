@@ -35,6 +35,38 @@ class RowDensity(StrEnum):
 
 DEFAULT_DENSITY = RowDensity.COMPACT
 
+
+class MailClient(StrEnum):
+    """Where this processor writes their email (LP-855).
+
+    NOTHING IN A BROWSER CAN DETECT THIS. There is no API that reports which mail client a person
+    uses, so it is asked rather than guessed — once, on the first draft.
+
+    `MAILTO` IS THE SAFE ANSWER AND THE DEFAULT. It hands the message to whatever the computer
+    already opens, which is the right answer for Apple Mail, Thunderbird and a locally installed
+    Outlook, and the only one that cannot be wrong. The two web routes are better when they are
+    right and useless when they are not: opening Gmail for somebody who does not use Gmail puts
+    them in a sign-in page holding a message they cannot send.
+    """
+
+    GMAIL = "gmail"
+    #: `outlook.office.com` — a work or school account on Microsoft 365.
+    OUTLOOK_WORK = "outlook_work"
+    #: `outlook.live.com` — a personal outlook.com or hotmail.com account.
+    OUTLOOK_PERSONAL = "outlook_personal"
+    #: Whatever this computer opens. The fallback, and what "Not now" selects.
+    MAILTO = "mailto"
+
+
+#: Not `MAILTO`, and the distinction is the whole of LP-855's picker.
+#:
+#: NULL MEANS "NOBODY HAS BEEN ASKED", which is different from "they chose the desktop default".
+#: The picker is shown once on the first draft and never again after an answer; storing `mailto`
+#: on load would mean it was never shown, and storing it on dismissal would mean a processor who
+#: closed the dialog by accident is never offered the choice again. Until they answer, the button
+#: reads "Copy & open mail app" and behaves as `MAILTO`.
+DEFAULT_MAIL_CLIENT: MailClient | None = None
+
 if TYPE_CHECKING:
     from app.models.company import Company
 
@@ -93,6 +125,15 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # never adjusted, which is deliberately different from "adjusted back to the
     # default" — the UI shows its own default rather than writing one on load.
     reviewer_pane_split: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
+
+    #: Where this processor writes their email (LP-855). NULL until they answer the picker.
+    #:
+    #: NULLABLE ON PURPOSE — see `DEFAULT_MAIL_CLIENT`. "Nobody has asked" and "they chose the
+    #: desktop default" are different facts, and a column that could not tell them apart would
+    #: either show the picker forever or never show it at all.
+    mail_client: Mapped[MailClient | None] = mapped_column(
+        str_enum(MailClient), nullable=True, default=None
+    )
 
     # Relationships
     company: Mapped["Company"] = relationship(back_populates="users")

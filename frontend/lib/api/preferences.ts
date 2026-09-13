@@ -30,9 +30,39 @@ export const DENSITY_LABEL: Record<RowDensity, string> = {
 /** The cookie the server reads to stamp `data-density` before first paint. */
 export const DENSITY_COOKIE = "ledger-density";
 
+/**
+ * Where this processor writes their email (LP-855). Mirrors the backend `MailClient`.
+ *
+ * NOTHING IN A BROWSER CAN DETECT THIS — there is no API that reports it — so it is asked once, on
+ * the first draft, rather than guessed. `mailto` is the safe answer and the fallback: it hands the
+ * message to whatever the computer already opens, which is right for Apple Mail, Thunderbird and a
+ * locally installed Outlook, and is the only choice that cannot be wrong.
+ */
+export type MailClient = "gmail" | "outlook_work" | "outlook_personal" | "mailto";
+
+export const MAIL_CLIENTS: MailClient[] = ["gmail", "outlook_work", "outlook_personal", "mailto"];
+
+/** What the button says it will do, before it does it. */
+export const MAIL_CLIENT_LABEL: Record<MailClient, string> = {
+  gmail: "Gmail",
+  outlook_work: "Outlook",
+  outlook_personal: "Outlook",
+  mailto: "mail app",
+};
+
 export interface UserPreferences {
   default_aggression_level: AggressionLevel;
   density: RowDensity;
+  /**
+   * LP-855 — `null` means NOBODY HAS BEEN ASKED, which is not the same as choosing the desktop
+   * default. The picker is shown once on the first draft; a value that could not tell the two
+   * apart would show it forever or never.
+   */
+  mail_client: MailClient | null;
+  /** Which option the picker pre-selects, from the caller's own sign-in domain. Never applied. */
+  suggested_mail_client: MailClient;
+  /** Why, in the picker's own words. Empty when the domain says nothing. */
+  mail_client_suggestion_reason: string;
   /**
    * Where this user put the reviewer's two dividers (LP-UI-030), as
    * `[list %, canvas %]`. `null` means never adjusted — the reviewer shows its
@@ -45,6 +75,7 @@ export interface UserPreferencesUpdate {
   default_aggression_level?: AggressionLevel;
   density?: RowDensity;
   reviewer_pane_split?: [number, number];
+  mail_client?: MailClient;
 }
 
 export const preferencesQueryKey = ["preferences", "me"] as const;

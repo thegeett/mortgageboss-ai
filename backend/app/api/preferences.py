@@ -11,15 +11,31 @@ from fastapi import APIRouter
 
 from app.api.dependencies import CurrentUser
 from app.core.database import DbSession
+from app.models.user import User
 from app.schemas.preferences import UserPreferences, UserPreferencesUpdate
+from app.services.mail_clients import suggest_mail_client
 
 router = APIRouter(prefix="/users/me", tags=["preferences"])
+
+
+def _with_suggestion(user: User) -> UserPreferences:
+    """The caller's preferences, plus LP-855's guess at their mail client.
+
+    SERVED ALONGSIDE THE STORED VALUE, never instead of it. The picker shows the suggestion as a
+    pre-selected radio and a sentence; the settings screen shows the same sentence to somebody
+    changing their mind. Nothing here writes it.
+    """
+    client, reason = suggest_mail_client(user.email)
+    preferences = UserPreferences.model_validate(user)
+    return preferences.model_copy(
+        update={"suggested_mail_client": client, "mail_client_suggestion_reason": reason}
+    )
 
 
 @router.get("/preferences", response_model=UserPreferences)
 async def get_preferences(current_user: CurrentUser) -> UserPreferences:
     """The caller's preferences (the default verification thoroughness)."""
-    return UserPreferences.model_validate(current_user)
+    return _with_suggestion(current_user)
 
 
 @router.put("/preferences", response_model=UserPreferences)
@@ -39,6 +55,11 @@ async def update_preferences(
         current_user.density = payload.density
     if payload.reviewer_pane_split is not None:
         current_user.reviewer_pane_split = payload.reviewer_pane_split
+    # LP-855 — the answer to the mail-client picker. There is no way to go BACK to unanswered, and
+    # that is deliberate: "nobody has asked" is a state the product creates, not one a processor
+    # chooses, and a client that could clear it could make the picker reappear forever.
+    if payload.mail_client is not None:
+        current_user.mail_client = payload.mail_client
     await db.commit()
     await db.refresh(current_user)
-    return UserPreferences.model_validate(current_user)
+    return _with_suggestion(current_user)

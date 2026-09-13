@@ -399,3 +399,39 @@ def test_every_href_the_corpus_calls_refused_is_refused() -> None:
     """
     for href in _href_cases()["refused"]:
         assert href_is_safe(href) is False, f"{href!r} should be refused"
+
+
+def test_no_single_injected_character_makes_a_dangerous_scheme_pass() -> None:
+    """THE SECURITY DIRECTION, AS A PROPERTY OVER A CLASS rather than a list of representatives.
+
+    The shared corpus pins 33 hrefs, which is the right shape for the agreement between the two
+    implementations: thirty-one of the divergences found in the LP-854 review were one class, and a
+    corpus needs a member of each class rather than every member.
+
+    THIS IS THE OTHER INVARIANT, and it is stronger than any corpus can be: no single character,
+    injected at any position in a dangerous scheme, makes it pass. Deleting characters from
+    `javascript:` still spells `javascript`, which is why over-stripping never opened a hole — but
+    "still spells it" is an argument, and this is the measurement. It also survives somebody adding
+    a scheme to `ALLOWED_SCHEMES` later, which a list of examples would not.
+
+    Suggested by the LP-854 reviewer after it swept the same space; written here rather than
+    deferred, because the assertion that cannot be weakened by a later edit is the one worth having
+    before the later edit.
+    """
+    dangerous = ["javascript:alert(1)", "vbscript:msgbox(1)", "data:text/html,x"]
+    leaked: list[str] = []
+    for scheme in dangerous:
+        for code in range(0x100):
+            character = chr(code)
+            for position in range(len(scheme) + 1):
+                candidate = scheme[:position] + character + scheme[position:]
+                if href_is_safe(candidate):
+                    leaked.append(f"{candidate!r} (U+{code:04X} at {position})")
+    assert not leaked, f"a dangerous scheme passed: {leaked[:5]}"
+
+
+def test_that_property_can_fail() -> None:
+    """THE POSITIVE CONTROL. The sweep above is `assert not leaked` over a function that could
+    reject everything and satisfy it — including the ordinary https URL a processor actually uses."""
+    assert href_is_safe("https://example.com") is True
+    assert href_is_safe("mailto:a@b.example") is True

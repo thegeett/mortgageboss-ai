@@ -138,6 +138,12 @@ async def test_both_fields_together_still_work(client: AsyncClient, db: AsyncSes
         "default_aggression_level": "thorough",
         "density": "relaxed",
         "reviewer_pane_split": None,
+        # LP-855 adds three: the stored answer, and the suggestion served beside it. Extended
+        # deliberately rather than loosened to a subset check — this assertion exists to notice
+        # exactly this, and it did.
+        "mail_client": None,
+        "suggested_mail_client": "mailto",
+        "mail_client_suggestion_reason": "",
     }
 
 
@@ -229,3 +235,110 @@ async def test_setting_the_split_leaves_other_preferences_alone(
     got = await client.get(PREFS, headers=_auth(token))
     assert got.json()["density"] == "relaxed"
     assert got.json()["reviewer_pane_split"] == [25, 50]
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-855 — where this processor writes their email
+# --------------------------------------------------------------------------------------------- #
+async def test_nobody_has_been_asked_reads_back_as_null(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """NULL IS A REAL ANSWER HERE, unlike every other preference on this table.
+
+    The others default to the value the product would use anyway, because "never chosen" and "chose
+    the default" are the same thing for them. They are not the same thing for this one: `mailto` is
+    both the safe answer AND what "Not now" selects, so a default would make "nobody has been asked"
+    indistinguishable from "they picked the desktop default" — and the picker would then either
+    never appear or appear forever.
+    """
+    _user, token = await _user_and_token(db)
+
+    body = (await client.get(PREFS, headers=_auth(token))).json()
+
+    assert body["mail_client"] is None
+
+
+async def test_the_suggestion_is_served_and_never_applied(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """IT MOVES A RADIO BUTTON AND SAYS WHY. IT NEVER DECIDES.
+
+    A guess that applied itself would open the wrong compose window with nothing on screen
+    explaining it, and the processor would have to work out that we had chosen for them. So the
+    suggestion travels BESIDE the stored value, and the stored value is still null.
+    """
+    _user, token = await _user_and_token(db, email="priya@gmail.com")
+
+    body = (await client.get(PREFS, headers=_auth(token))).json()
+
+    assert body["suggested_mail_client"] == "gmail"
+    assert body["mail_client_suggestion_reason"] == "you sign in as priya@gmail.com"
+    assert body["mail_client"] is None, "the suggestion was applied"
+
+
+async def test_a_domain_that_says_nothing_suggests_the_safe_answer_and_no_reason(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """THE COMMON CASE. A processor at a mortgage company signs in as `@theirfirm.com`, which is
+    consistent with Gmail, Outlook, Apple Mail and a locally installed Outlook alike. Suggesting one
+    of them on no evidence would be a coin flip wearing a recommendation's clothes — and
+    "suggested because we could not tell" is not a reason anybody benefits from reading.
+    """
+    _user, token = await _user_and_token(db, email="priya@acmemortgage.com")
+
+    body = (await client.get(PREFS, headers=_auth(token))).json()
+
+    assert body["suggested_mail_client"] == "mailto"
+    assert body["mail_client_suggestion_reason"] == ""
+
+
+async def test_a_lookalike_domain_is_not_mistaken_for_a_tenant(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """EXACT DOMAINS, NOT SUBSTRINGS. An `"outlook" in domain` test matches
+    `outlook-consulting.com`, which is a brokerage rather than a Microsoft tenant — and the
+    suggestion would then be wrong in a way that looks authoritative."""
+    _user, token = await _user_and_token(db, email="p@outlook-consulting.com")
+
+    body = (await client.get(PREFS, headers=_auth(token))).json()
+
+    assert body["suggested_mail_client"] == "mailto"
+
+
+async def test_the_answer_persists_and_is_changeable(client: AsyncClient, db: AsyncSession) -> None:
+    """ACCEPTANCE 4. Per USER, so it survives a reload, a different file and a different machine."""
+    _user, token = await _user_and_token(db)
+
+    saved = await client.put(PREFS, headers=_auth(token), json={"mail_client": "gmail"})
+    assert saved.status_code == 200
+    assert saved.json()["mail_client"] == "gmail"
+    assert (await client.get(PREFS, headers=_auth(token))).json()["mail_client"] == "gmail"
+
+    # CHANGEABLE — "you can change this any time in settings" is the picker's own promise.
+    changed = await client.put(PREFS, headers=_auth(token), json={"mail_client": "outlook_work"})
+    assert changed.json()["mail_client"] == "outlook_work"
+
+
+async def test_setting_the_mail_client_leaves_the_other_preferences_alone(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """The partial-update property this file exists for, extended to the new field."""
+    _user, token = await _user_and_token(db)
+    await client.put(PREFS, headers=_auth(token), json={"density": "relaxed"})
+
+    await client.put(PREFS, headers=_auth(token), json={"mail_client": "gmail"})
+
+    body = (await client.get(PREFS, headers=_auth(token))).json()
+    assert body["density"] == "relaxed"
+    assert body["mail_client"] == "gmail"
+
+
+async def test_an_unknown_mail_client_is_rejected(client: AsyncClient, db: AsyncSession) -> None:
+    """A value outside the enum would be stored and then read back by a client that has no route
+    for it — the button would say "Copy & open undefined"."""
+    _user, token = await _user_and_token(db)
+
+    refused = await client.put(PREFS, headers=_auth(token), json={"mail_client": "carrier_pigeon"})
+
+    assert refused.status_code == 422
+    assert (await client.get(PREFS, headers=_auth(token))).json()["mail_client"] is None
