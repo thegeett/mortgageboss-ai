@@ -78,10 +78,11 @@ lives under `backend/app/` (`core`, `models`, `schemas`, `api`, `ai`, `services`
   needed.
 - **Biome** for lint + format (2-space, double quotes; config in
   `frontend/biome.json`).
-- **Design tokens** from LP-5: primary blue (`#2563EB`), cool-gray neutrals,
-  semantic success/warning/danger/info, system font stack. Defined as CSS
-  variables in `app/globals.css` and `tailwind.config.ts` — use the tokens, never
-  ad-hoc colors.
+- **Design tokens** live in `frontend/app/globals.css` and that file is the source of truth.
+  Primary is a deep teal (`--primary: 187.9 67.9% 22.0%`), neutrals are cool with a slight green
+  bias, and the radius is split — 5px controls, 8px containers. (LP-5's original blue `#2563EB` is
+  long gone; this line said otherwise until 2026-09-13.) Semantic success/warning/danger/info and a
+  system font stack are defined there too — use the tokens, never ad-hoc colors.
 
 **Data model principles** (apply as Epic 2+ lands)
 

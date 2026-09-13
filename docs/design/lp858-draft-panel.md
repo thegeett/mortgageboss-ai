@@ -264,7 +264,8 @@ rg -n "_clear_finding_markers" backend/app/services/email_draft.py              
 "Copy & open {Gmail|Outlook}" button, client saved
 "Copy message" / "Mark as sent" / "Delete"
 "Paste into the message — ⌘V."          after Copy & open succeeds
-"This cannot be sent yet. Nobody has recorded an address for the {party} on this file."
+"No address on file for the {party}"     heading of the inline address block
+"Who are they, and where do we write?"  the line under it
 "Which mail app should this open?"      picker title
 "Asked once. You can change it in preferences."
 "Delete this draft?" / "You edited it. Your first change was:"
