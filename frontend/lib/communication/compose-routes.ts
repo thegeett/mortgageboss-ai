@@ -45,9 +45,16 @@ export function composeUrl(
     }
     default: {
       // RFC 6068: the address is in the path and the headers are a query string, both
-      // percent-encoded. `encodeURIComponent` leaves `@` alone, which is what the grammar wants.
+      // percent-encoded.
+      //
+      // LP-855 REVIEW — `encodeURIComponent` DOES NOT LEAVE `@` ALONE. This comment said it did;
+      // it encodes it to `%40`, so the URL built here was `mailto:p%40x.com?...`. Most clients
+      // decode that and some do not, and the ones that do not open a compose window with an empty
+      // To — which looks like the button half-worked rather than like an encoding problem. The
+      // literal `@` is what every client handles and what every example in the RFC shows, so it is
+      // put back after encoding rather than the claim being left standing.
       const headers = `subject=${rfc6068(subject)}&body=`;
-      return `mailto:${encodeURIComponent(to)}?${headers}`;
+      return `mailto:${encodeURIComponent(to).replace(/%40/g, "@")}?${headers}`;
     }
   }
 }

@@ -35,8 +35,10 @@ describe("every route", () => {
   it.each(CLIENTS)("%s carries the address", (client) => {
     const url = composeUrl(client, { to: "sarah@example.com", subject: "s" });
     if (client === "mailto") {
-      // RFC 6068 puts the address in the PATH, percent-encoded.
-      expect(url.slice(0, url.indexOf("?"))).toBe("mailto:sarah%40example.com");
+      // RFC 6068 puts the address in the PATH, percent-encoded — except the `@`, which every
+      // example in the RFC shows literal and every client handles. This asserted `%40`, which is
+      // what `encodeURIComponent` produces and the opposite of what the code's own comment claimed.
+      expect(url.slice(0, url.indexOf("?"))).toBe("mailto:sarah@example.com");
     } else {
       const query = new URLSearchParams(url.slice(url.indexOf("?") + 1));
       expect(query.get("to")).toBe("sarah@example.com");
@@ -78,6 +80,21 @@ describe("ACCEPTANCE 6 — encoding", () => {
     const url = composeUrl("mailto", { to: "josé@example.com", subject: "s" });
     const address = decodeURIComponent(url.slice("mailto:".length, url.indexOf("?")));
     expect(address).toBe("josé@example.com");
+  });
+
+  it("the address keeps a literal @, and still encodes what must be encoded", () => {
+    // LP-855 REVIEW — the comment here said `encodeURIComponent` leaves `@` alone. It does not: it
+    // encodes it to `%40`, so this built `mailto:p%40x.com`. Most clients decode that and some do
+    // not, and the ones that do not open a compose window with an EMPTY To — which reads as the
+    // button half-working rather than as an encoding problem.
+    expect(composeUrl("mailto", { to: "p@x.com", subject: "s" })).toContain("mailto:p@x.com?");
+
+    // THE OTHER HALF, and the reason this is not just "stop encoding". A plus-addressed mailbox
+    // must keep its `+` encoded — a literal one is read as a space by some parsers, which silently
+    // delivers to the wrong mailbox.
+    expect(composeUrl("mailto", { to: "p+tag@x.com", subject: "s" })).toContain(
+      "mailto:p%2Btag@x.com?",
+    );
   });
 });
 

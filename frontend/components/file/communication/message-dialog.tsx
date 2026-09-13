@@ -15,6 +15,7 @@ import {
   useSaveDraftBody,
   useSendDraft,
 } from "@/lib/api/communications";
+import type { MailClient } from "@/lib/api/preferences";
 import { usePreferences, useUpdatePreferences } from "@/lib/api/preferences";
 import {
   composeButtonLabel,
@@ -160,6 +161,25 @@ export function MessageDialog({
   const preferences = usePreferences();
   const savePreferences = useUpdatePreferences();
   const [askedThisSession, setAskedThisSession] = useState(false);
+  // LP-855 REVIEW — WHAT THEY JUST PICKED, HELD HERE UNTIL THE SERVER AGREES.
+  //
+  // `onChoose` closes the picker and fires the save, and the compose route read
+  // `preferences.data.mail_client` — which is still `null` until the round trip lands. So between
+  // choosing Gmail and the response arriving, the button read "Copy & open mail app" and opened
+  // `mailto:`. A processor who clicks straight through, which is the whole shape of this dialog,
+  // gets the route they just said they did not want.
+  //
+  // AND IF THE SAVE FAILS IT NEVER RESOLVES. `useUpdatePreferences` has no `onError`, so a failed
+  // PUT is silent; `askedThisSession` is already true, so the picker cannot come back; and
+  // `mail_client` stays `null` for the rest of the session. Every compose then goes to `mailto:`
+  // with nothing on screen saying why.
+  //
+  // Held locally rather than written optimistically into the query cache, because a rollback on
+  // error would put it back to `null` and reintroduce exactly the bug. Their answer stands for this
+  // session whatever the network did; the server not having it means they are asked again next
+  // time, which is true and is the right thing to happen.
+  const [chosenClient, setChosenClient] = useState<MailClient | null>(null);
+  const activeClient = chosenClient ?? preferences.data?.mail_client ?? null;
   const needsClient =
     data?.is_editable === true &&
     preferences.data !== undefined &&
@@ -183,7 +203,7 @@ export function MessageDialog({
     setCopied(true);
     window.setTimeout(() => setCopied(false), 2000);
 
-    const url = composeUrl(effectiveClient(preferences.data?.mail_client ?? null), {
+    const url = composeUrl(effectiveClient(activeClient), {
       to: recipient.trim(),
       subject,
     });
@@ -445,7 +465,7 @@ export function MessageDialog({
                       onClick={() => void copyAndOpen()}
                     >
                       <ExternalLink className="h-4 w-4" />
-                      {composeButtonLabel(preferences.data?.mail_client ?? null)}
+                      {composeButtonLabel(activeClient)}
                     </Button>
 
                     {/* KEPT FOR ANYBODY DOING IT THEIR OWN WAY — and it is the fallback when a popup
@@ -549,6 +569,8 @@ export function MessageDialog({
         reason={preferences.data?.mail_client_suggestion_reason ?? ""}
         pending={savePreferences.isPending}
         onChoose={(client) => {
+          // THE ANSWER TAKES EFFECT NOW, not when the PUT returns. See `chosenClient`.
+          setChosenClient(client);
           setAskedThisSession(true);
           savePreferences.mutate({ mail_client: client });
         }}

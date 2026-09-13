@@ -643,6 +643,38 @@ describe("the mail-client picker", () => {
     } as never);
   }
 
+  it("the answer takes effect before the server confirms it", async () => {
+    // LP-855 REVIEW — IT DID NOT. `onChoose` closed the picker and fired the save, and the compose
+    // route read `preferences.data.mail_client` — still `null` until the PUT returned. So a
+    // processor who chose Gmail and clicked straight through, which is the shape of this dialog,
+    // got "Copy & open mail app" and a `mailto:` window.
+    //
+    // The same gap is what a FAILED save leaves permanently: `useUpdatePreferences` has no
+    // `onError`, `askedThisSession` is already true so the picker cannot return, and every compose
+    // for the rest of the session goes to `mailto:` with nothing saying why.
+    //
+    // `mutate` here never calls back, which is exactly the in-flight window and exactly a save that
+    // failed — one fixture for both.
+    unanswered();
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
+    );
+    const open = vi.fn().mockReturnValue({});
+    Object.defineProperty(window, "open", { configurable: true, value: open });
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Use Gmail" }));
+
+    // The server still says null — the mock never resolved — and the button has moved anyway.
+    expect(mockSavePreferences.mutate).toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Copy & open Gmail" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy & open Gmail" }));
+    await vi.waitFor(() => expect(open).toHaveBeenCalled());
+    expect(open.mock.calls[0]?.[0] as string).toContain("mail.google.com");
+  });
+
   it("ACCEPTANCE 5 — asks on the first draft, and the button meanwhile says 'mail app'", () => {
     unanswered();
     mockUseMessageDetail.mockReturnValue(
