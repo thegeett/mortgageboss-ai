@@ -26,6 +26,7 @@ from app.models import Company, LoanProgram
 from app.models.activity_log import ActivityLog, ActivityType
 from app.models.finding import Finding, FindingCategory, FindingStatus
 from app.models.needs_item import NeedsItem
+from app.services.email_draft import OnConflict
 from app.services.finding_requests import (
     NotRequestable,
     requestable,
@@ -159,6 +160,10 @@ async def test_both_paths_write_the_same_marker_keys(db_session: AsyncSession) -
             loan_file=loan_file,
             by_document={"bank statement": [bulk]},
             actor_user_id=actor,
+            # LP-850 — the single-finding request above left a draft open for the borrower, so this
+            # one answers for it rather than being refused. The marker is written either way; what
+            # `append` decides is which draft carries the document.
+            on_conflict=OnConflict.APPEND,
         )
     ).needs
 

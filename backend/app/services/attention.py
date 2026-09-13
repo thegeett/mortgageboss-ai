@@ -40,6 +40,7 @@ from app.models.loan_file import LoanFile, LoanFileStatus
 from app.models.needs_item import NeedsItem, NeedsItemStatus
 from app.models.user import User
 from app.services.aggression import active_cutoff
+from app.services.needs_items import AWAITING_COLLECTION
 
 
 class AttentionTone(StrEnum):
@@ -81,11 +82,12 @@ _SATISFIED_NEEDS = {NeedsItemStatus.VERIFIED, NeedsItemStatus.WAIVED}
 # what is outstanding is the reading of it, not the collecting. Counting
 # `total - satisfied` instead put `received` in the waiting set, so the dashboard
 # and the file screen reported different numbers for the same idea.
-_AWAITING_NEEDS = {
-    NeedsItemStatus.PENDING,
-    NeedsItemStatus.REQUESTED,
-    NeedsItemStatus.REJECTED,
-}
+#
+# LP-850 — IMPORTED NOW, NOT RESTATED. The document-request draft became a third
+# reader of this same set, and three copies that agree today is the shape A22
+# names. The set moved to `needs_items.py`, which owns the lifecycle the statuses
+# belong to; this name is kept so the readers below still say what they mean.
+_AWAITING_NEEDS = AWAITING_COLLECTION
 
 # Arrived, not yet verified. Outstanding work, but not outstanding COLLECTION.
 _IN_REVIEW_NEEDS = {NeedsItemStatus.RECEIVED}

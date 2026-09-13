@@ -7,6 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.services.email_draft import DraftDecisionRequired
 from app.services.email_send import MAILTO_MAX_CHARS
 
 
@@ -77,3 +78,89 @@ class SentCommunicationPublic(BaseModel):
     status: str
     sent_at: datetime | None
     needs_items_requested: int
+
+
+# --------------------------------------------------------------------------------------------- #
+# The open-draft refusal (LP-850)
+# --------------------------------------------------------------------------------------------- #
+class NeedSummaryPublic(BaseModel):
+    """One document, named as the processor asked for it."""
+
+    id: UUID
+    title: str
+
+
+class OpenDraftPublic(BaseModel):
+    """The draft that is already open, described well enough to decide about.
+
+    CONTENTS AND AGE, NOT AN ID. "There is an open draft" is not something anybody can act on;
+    "created Tue 14:02, asking for a bank statement and a pay stub" is, and it is what a processor
+    remembers. Carried on the refusal itself so the dialog renders without a second round trip —
+    which is also a second chance for the answer to have changed underneath it.
+    """
+
+    id: UUID
+    created_at: datetime
+    needs: list[NeedSummaryPublic]
+    #: Whether a person has written their own words into it, which an append would overwrite.
+    body_edited: bool
+
+
+class DraftDecisionPublic(BaseModel):
+    """One party the caller has to answer for."""
+
+    party: str
+    open_draft: OpenDraftPublic
+    #: What this request would add to that draft.
+    adding: list[NeedSummaryPublic]
+
+
+class WouldCreatePublic(BaseModel):
+    """One party with nothing open — no decision needed, and the processor must still be told.
+
+    LP-852's rule, at the point a request is refused: a draft to somebody the processor did not
+    expect, created without their noticing, is a message that never gets sent.
+    """
+
+    party: str
+    address: str | None
+    needs: list[NeedSummaryPublic]
+
+
+class DraftConflictPublic(BaseModel):
+    """The 409 body — every party at once, because the UI must not have to ask twice.
+
+    A processor who has just confirmed five documents and is then asked a second question clicks
+    the primary without reading it. One refusal, one dialog, one answer.
+    """
+
+    decisions_required: list[DraftDecisionPublic]
+    would_create: list[WouldCreatePublic]
+
+    @classmethod
+    def of(cls, exc: DraftDecisionRequired) -> DraftConflictPublic:
+        return cls(
+            decisions_required=[
+                DraftDecisionPublic(
+                    party=conflict.party.value,
+                    open_draft=OpenDraftPublic(
+                        id=conflict.draft_id,
+                        created_at=conflict.created_at,
+                        needs=[
+                            NeedSummaryPublic(id=n.id, title=n.title) for n in conflict.carrying
+                        ],
+                        body_edited=conflict.body_edited,
+                    ),
+                    adding=[NeedSummaryPublic(id=n.id, title=n.title) for n in conflict.adding],
+                )
+                for conflict in exc.decisions_required
+            ],
+            would_create=[
+                WouldCreatePublic(
+                    party=planned.party.value,
+                    address=planned.address,
+                    needs=[NeedSummaryPublic(id=n.id, title=n.title) for n in planned.adding],
+                )
+                for planned in exc.would_create
+            ],
+        )

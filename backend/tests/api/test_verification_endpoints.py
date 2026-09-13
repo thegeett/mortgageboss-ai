@@ -1028,14 +1028,17 @@ async def test_request_docs_on_ONE_finding_starts_the_draft(
 async def test_both_request_routes_accumulate_into_ONE_LIST(
     client: AsyncClient, db: AsyncSession
 ) -> None:
-    """Two buttons, one outstanding set — the property LP-809 exists for, restated for LP-832.
+    """Two buttons, one outstanding set — the property LP-809 exists for, restated for LP-850.
 
-    THIS ASSERTED ONE DRAFT AND NOW ASSERTS TWO, and the change is the model rather than a
-    weakening. LP-832 makes a request create a NEW draft carrying everything requested since the last
-    send, so two buttons give two drafts — and the thing that must remain true is that the NEWEST
-    carries both documents. A route that gave its request a draft of its own, listing only its own
-    document, would still produce two rows here and would mail the borrower twice; that is what the
-    membership count below separates from the correct behaviour.
+    THE DRAFT COUNT HAS BEEN 1, THEN 2, AND IS 1 AGAIN. LP-809 accumulated into one draft; LP-832
+    made each request mint a new one; LP-850 restores one open draft per party, because LP-832's
+    version left several live and sendable with overlapping contents and nothing marking the earlier
+    ones obsolete.
+
+    What has never changed is the assertion underneath: the open draft carries BOTH documents. A
+    route that gave its request a draft of its own, listing only its own document, would satisfy any
+    of the three counts and would mail the borrower twice; the membership count below is what
+    separates that from the correct behaviour.
     """
     from app.services.email_draft import get_open_draft
     from sqlalchemy import func, select
@@ -1063,7 +1066,9 @@ async def test_both_request_routes_accumulate_into_ONE_LIST(
         await client.post(
             f"{API}/{loan_file.display_id}/findings/request-docs",
             headers=_auth(token),
-            json={"finding_ids": [str(two.id)], "note": None},
+            # LP-850 — the first request left a draft open, so the second answers for it. Without
+            # `on_conflict` this is a 409 that writes nothing; that path has its own tests.
+            json={"finding_ids": [str(two.id)], "note": None, "on_conflict": "append"},
         )
     ).status_code == 200
 
@@ -1076,10 +1081,10 @@ async def test_both_request_routes_accumulate_into_ONE_LIST(
             Communication.deleted_at.is_(None),
         )
     )
-    assert drafts == 2, f"{drafts} drafts — one per request is the LP-832 model"
+    assert drafts == 1, f"{drafts} drafts — one open draft per party is the LP-850 model"
 
-    # THE NEWEST CARRIES BOTH. This is the assertion that survived the model change: it is what
-    # stops each route drafting only its own document and the borrower getting two emails.
+    # IT CARRIES BOTH. This is the assertion that survived two model changes: it is what stops each
+    # route drafting only its own document and the borrower getting two emails.
     draft = await get_open_draft(db, loan_file_id=loan_file.id)
     assert draft is not None
     linked = await db.scalar(
@@ -1087,7 +1092,7 @@ async def test_both_request_routes_accumulate_into_ONE_LIST(
         .select_from(CommunicationNeedsItem)
         .where(CommunicationNeedsItem.communication_id == draft.id)
     )
-    assert linked == 2, "the newest draft does not carry both requests"
+    assert linked == 2, "the open draft does not carry both requests"
 
 
 async def test_request_docs_on_the_unidentified_documents_row_is_refused(
@@ -1997,9 +2002,11 @@ async def test_two_findings_that_name_no_document_get_their_own_asks(
         resp = await client.post(
             f"{API}/{loan_file.display_id}/findings/{finding.id}/request-docs",
             headers=_auth(token),
-            json={"note": None},
+            # LP-850 — ID-2 leaves a draft open, so ID-3 has to answer for it. `append` is what
+            # keeps both asks in one email, which is what the assertions below are about.
+            json={"note": None, "on_conflict": "append"},
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.text
 
     needs = (
         (await db.execute(select(NeedsItem).where(NeedsItem.loan_file_id == loan_file.id)))

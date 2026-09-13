@@ -26,6 +26,25 @@ from app.models.needs_item import (
     NeedsItemStatus,
 )
 
+#: The three statuses that mean "somebody still has to collect this" (LP-850).
+#:
+#: ONE DEFINITION, because three surfaces were each answering it. `attention._AWAITING_NEEDS` had
+#: it for the dashboard and `NEEDS_GROUP`'s `needs_action` bucket has it on the file's own needs
+#: screen; LP-850 makes the document-request draft read it too, and a third restatement is how
+#: A22's "one file, two screens, different numbers" keeps happening.
+#:
+#: `RECEIVED` IS NOT HERE, and that is the distinction the set exists for: the document arrived, so
+#: what is outstanding is the READING of it, not the collecting. Asking a borrower again for
+#: something already sitting in the file is the defect LP-850 was written for. `VERIFIED` and
+#: `WAIVED` are finished in the other two ways.
+AWAITING_COLLECTION = frozenset(
+    {
+        NeedsItemStatus.PENDING,
+        NeedsItemStatus.REQUESTED,
+        NeedsItemStatus.REJECTED,
+    }
+)
+
 
 async def create_needs_item(
     db: AsyncSession,

@@ -27,6 +27,8 @@ from app.models.communication_needs_item import CommunicationNeedsItem
 from app.models.needs_item import NeedsItem, NeedsItemOrigin
 from app.services.email_draft import (
     DRAFT_TEMPLATE,
+    OnConflict,
+    _regenerate,
     add_needs_to_draft,
     finalise_draft_body,
     get_open_draft,
@@ -75,20 +77,20 @@ async def _need(db: AsyncSession, loan_file, *, title: str, needs_type: str | No
 # --------------------------------------------------------------------------------------------- #
 # Accumulation
 # --------------------------------------------------------------------------------------------- #
-async def test_a_second_request_makes_a_second_draft_carrying_both(
+async def test_a_second_request_appends_to_the_draft_that_is_already_open(
     db_session: AsyncSession,
 ) -> None:
-    """LP-832 — THE MODEL CHANGED, AND THIS TEST ASSERTED THE OLD ONE.
+    """LP-850 — THE MODEL CHANGED AGAIN, AND THIS IS THE THIRD SHAPE THIS TEST HAS HELD.
 
-    It read "a second request JOINS the first draft" and pinned `one.draft.id == two.draft.id` with a
-    row count of 1. That was LP-809's design — four requests over two days are one email — and the
-    user asked for the other one directly, with the alternative shown beside it: a new draft each
-    time, the older ones left in the list.
+    LP-809: a second request JOINS the first draft. LP-832: a second request MINTS a draft carrying
+    everything outstanding, and the older ones stay. LP-850: back to one draft, because LP-832's
+    version left N live, sendable drafts with overlapping contents and nothing marking the earlier
+    ones obsolete — send the first and then the third and the borrower is asked for the same bank
+    statement twice.
 
-    What LP-809 was protecting has not been dropped. The borrower still reads ONE list containing
-    both documents; it is simply the newest draft's list rather than the only draft's. That is the
-    half worth keeping and it is asserted below, because a model where each request produced a draft
-    containing ONLY its own document would satisfy the row count and mail the borrower twice.
+    What LP-809 was protecting is unchanged throughout: the borrower reads ONE list containing both
+    documents. What changed is that there is now exactly one row it could be read from, and getting
+    there needs an answer from the processor — `on_conflict` — rather than happening silently.
     """
     loan_file, actor = await _file_and_actor(db_session)
     first = await _need(db_session, loan_file, title="Bank statements", needs_type="bank_statement")
@@ -98,25 +100,27 @@ async def test_a_second_request_makes_a_second_draft_carrying_both(
         db_session, loan_file=loan_file, needs=[first], actor_user_id=actor
     )
     two = await add_needs_to_draft(
-        db_session, loan_file=loan_file, needs=[second], actor_user_id=actor
+        db_session,
+        loan_file=loan_file,
+        needs=[second],
+        actor_user_id=actor,
+        on_conflict=OnConflict.APPEND,
     )
 
     assert one.draft is not None and two.draft is not None
-    assert one.draft.id != two.draft.id
+    assert one.draft.id == two.draft.id
     count = await db_session.scalar(
         select(func.count())
         .select_from(Communication)
         .where(Communication.loan_file_id == loan_file.id)
     )
-    assert count == 2
+    assert count == 1
 
-    # THE NEWEST CARRIES EVERYTHING OUTSTANDING — the property LP-809 existed for, kept.
+    # ONE DRAFT CARRYING BOTH — the property LP-809 existed for, kept through two model changes. A
+    # model where the append replaced the contents rather than adding to them would satisfy the row
+    # count and mail the borrower half the list.
     assert "Bank statements" in two.draft.body
     assert "Pay stubs" in two.draft.body
-    # AND THE FIRST IS UNCHANGED. It is a draft a processor may still send; silently rewriting it to
-    # match the newest would mail a borrower a list they were never shown.
-    await db_session.refresh(one.draft)
-    assert "Pay stubs" not in (one.draft.body or "")
 
 
 async def test_adding_the_same_need_twice_is_a_no_op(db_session: AsyncSession) -> None:
@@ -174,7 +178,11 @@ async def test_order_follows_when_each_need_was_added(db_session: AsyncSession) 
     second = await _need(db_session, loan_file, title="Alpha document", needs_type=None)
     await add_needs_to_draft(db_session, loan_file=loan_file, needs=[first], actor_user_id=actor)
     result = await add_needs_to_draft(
-        db_session, loan_file=loan_file, needs=[second], actor_user_id=actor
+        db_session,
+        loan_file=loan_file,
+        needs=[second],
+        actor_user_id=actor,
+        on_conflict=OnConflict.APPEND,
     )
 
     body = result.draft.body
@@ -451,14 +459,25 @@ async def test_a_request_after_a_send_starts_fresh(db_session: AsyncSession) -> 
     )
 
 
-async def test_a_deleted_draft_does_not_take_its_documents_with_it(
+async def test_a_deleted_draft_does_not_take_its_documents_into_the_next_one(
     db_session: AsyncSession,
 ) -> None:
-    """WHY THE OUTSTANDING SET IS A UNION AND NOT A READ OF THE NEWEST.
+    """LP-850 — RESHAPED, BECAUSE THE FIXTURE IT USED CANNOT OCCUR ANY MORE.
 
-    While each draft is a superset of the last the two answers are identical, so this is the only
-    fixture that separates them — and deleting a superseded draft is an action this model invites,
-    because it leaves them in the list on purpose.
+    LP-832 left several drafts open at once, so this test built two and deleted the newest to
+    separate "a union over the open drafts" from "a read of the newest". LP-850 allows exactly one
+    open draft per party, so the two readings coincide by construction and that distinction has
+    nothing left to protect.
+
+    What still needs a test is the OTHER predicate in the same query, `deleted_at IS NULL`, and the
+    property LP-832 stated for it: deleting a draft means its documents stop being asked for. The
+    needs themselves stay on the needs list — that is where a processor tracks them — and the next
+    request does not silently put them back in an email.
+
+    IT FAILS IN BOTH DIRECTIONS IF THE PREDICATE GOES. Drop `deleted_at IS NULL` from the open-draft
+    statement and the deleted row is found again, so the third request raises
+    `DraftDecisionRequired` instead of creating anything; drop it from the outstanding-set query
+    alone and the two documents come back into the body.
     """
     loan_file, actor = await _file_and_actor(db_session)
     first = await _need(db_session, loan_file, title="Bank statements", needs_type="bank_statement")
@@ -466,11 +485,16 @@ async def test_a_deleted_draft_does_not_take_its_documents_with_it(
     third = await _need(db_session, loan_file, title="W-2", needs_type="w2")
 
     await add_needs_to_draft(db_session, loan_file=loan_file, needs=[first], actor_user_id=actor)
-    newest = await add_needs_to_draft(
-        db_session, loan_file=loan_file, needs=[second], actor_user_id=actor
+    open_draft = await add_needs_to_draft(
+        db_session,
+        loan_file=loan_file,
+        needs=[second],
+        actor_user_id=actor,
+        on_conflict=OnConflict.APPEND,
     )
-    assert newest.draft is not None
-    newest.draft.deleted_at = utcnow()
+    assert open_draft.draft is not None
+    assert "Bank statements" in (open_draft.draft.body or "")  # the control
+    open_draft.draft.deleted_at = utcnow()
     await db_session.flush()
 
     after = await add_needs_to_draft(
@@ -478,14 +502,9 @@ async def test_a_deleted_draft_does_not_take_its_documents_with_it(
     )
 
     assert after.draft is not None
-    # The one still carried by the FIRST draft survives.
-    assert "Bank statements" in after.draft.body
+    assert after.draft.id != open_draft.draft.id
     assert "W-2" in after.draft.body
-    # AND THE DELETED DRAFT'S OWN DOCUMENT IS GONE WITH IT — nothing carries it any more, which is
-    # what deleting a draft means. This assertion is the only thing in the file that reads
-    # `deleted_at` on the outstanding-set query: without it, dropping that predicate passes every
-    # test here, which is exactly what a mutation run found. The comment described the property and
-    # the fixture happened to satisfy it either way.
+    assert "Bank statements" not in (after.draft.body or "")
     assert "Pay stubs" not in (after.draft.body or "")
 
 
@@ -594,12 +613,30 @@ async def test_removing_a_line_edits_the_draft_it_was_asked_about(db_session: As
             db_session, loan_file=loan_file, needs=[first], actor_user_id=actor
         )
     ).draft
-    newer = (
-        await add_needs_to_draft(
-            db_session, loan_file=loan_file, needs=[second], actor_user_id=actor
-        )
-    ).draft
-    assert older is not None and newer is not None and older.id != newer.id
+    assert older is not None
+    # LP-850 — THE SECOND DRAFT IS BUILT BY HAND, because the service will no longer make one: a
+    # request against an open draft appends to it or marks it sent. That does not retire this
+    # function's guard, it is the state the guard exists for — every draft written before LP-850 is
+    # still on its file, and `get_open_draft` still returns the newest of however many it finds.
+    newer = Communication(
+        loan_file_id=loan_file.id,
+        direction=CommunicationDirection.OUTBOUND,
+        status=CommunicationStatus.DRAFT,
+        template_key=DRAFT_TEMPLATE.value,
+        party=ResponsibleParty.BORROWER.value,
+        initiated_by_user_id=actor,
+    )
+    db_session.add(newer)
+    await db_session.flush()
+    db_session.add_all(
+        [
+            CommunicationNeedsItem(communication_id=newer.id, needs_item_id=first.id),
+            CommunicationNeedsItem(communication_id=newer.id, needs_item_id=second.id),
+        ]
+    )
+    await db_session.flush()
+    await _regenerate(db_session, draft=newer, loan_file=loan_file)
+    assert older.id != newer.id
     assert "Bank statements" in (older.body or "")  # the control: it is there to begin with
     assert "Bank statements" in (newer.body or "")
 
@@ -682,7 +719,11 @@ async def test_a_note_survives_the_next_request(db_session: AsyncSession) -> Non
 
     await add_needs_to_draft(db_session, loan_file=loan_file, needs=[first], actor_user_id=actor)
     after = await add_needs_to_draft(
-        db_session, loan_file=loan_file, needs=[second], actor_user_id=actor
+        db_session,
+        loan_file=loan_file,
+        needs=[second],
+        actor_user_id=actor,
+        on_conflict=OnConflict.APPEND,
     )
 
     assert after.draft is not None

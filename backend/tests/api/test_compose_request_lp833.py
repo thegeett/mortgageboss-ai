@@ -165,9 +165,13 @@ async def test_a_type_already_outstanding_is_not_asked_for_twice(
     second = await client.post(
         f"{API}/{loan_file.display_id}/outbound/compose",
         headers=_auth(token),
-        json={"document_types": ["bank_statement", "pay_stub"]},
+        # LP-850 — the first compose left a draft open, so the second needs an answer about it.
+        # `append` is what the processor picks in the dialog; without it this is a 409 that writes
+        # nothing, which is asserted in `test_draft_lifecycle_lp850.py`.
+        json={"document_types": ["bank_statement", "pay_stub"], "on_conflict": "append"},
     )
 
+    assert second.status_code == 201, second.text
     assert second.json()["needs_added"] == 1, "the bank statement was asked for twice"
     needs = (
         (await db.execute(select(NeedsItem).where(NeedsItem.loan_file_id == loan_file.id)))

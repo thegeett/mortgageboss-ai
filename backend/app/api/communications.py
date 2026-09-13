@@ -21,11 +21,14 @@ from app.core.database import DbSession
 from app.documents.catalog import CATALOG
 from app.models.communication import Communication
 from app.schemas.communication import (
+    DraftConflictPublic,
     OutboundDraftPublic,
     SendDraftRequest,
     SentCommunicationPublic,
 )
 from app.services.email_draft import (
+    DraftDecisionRequired,
+    OnConflict,
     _needs_in_draft,
     attach_upload_link,
     compose_request,
@@ -86,6 +89,9 @@ class ComposeRequestPayload(BaseModel):
     #: At least one, and a bounded list. An empty selection is a click that meant nothing, and an
     #: unbounded one is a way to put 166 documents in a borrower's inbox with one request.
     document_types: list[str] = Field(min_length=1, max_length=40)
+    #: LP-850 — what to do about an open draft. `None` is "I have not asked the processor yet", and
+    #: the endpoint answers with a 409 describing every draft it found instead of writing anything.
+    on_conflict: OnConflict | None = None
 
 
 class ComposedRequestPublic(BaseModel):
@@ -120,12 +126,23 @@ async def compose_request_endpoint(
             detail=f"Not document types in the catalog: {unknown}",
         )
 
-    composed = await compose_request(
-        db,
-        loan_file=loan_file,
-        document_types=payload.document_types,
-        actor_user_id=current_user.id,
-    )
+    try:
+        composed = await compose_request(
+            db,
+            loan_file=loan_file,
+            document_types=payload.document_types,
+            actor_user_id=current_user.id,
+            on_conflict=payload.on_conflict,
+        )
+    except DraftDecisionRequired as exc:
+        # LP-850 — A REFUSAL WRITES NOTHING, and here that includes the needs items `compose_request`
+        # creates before it reaches the draft: the exception leaves the transaction unfinished and
+        # `get_db` rolls it back. Documents on the needs list that no draft asks for would be worse
+        # than the refusal.
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail=DraftConflictPublic.of(exc).model_dump(mode="json"),
+        ) from exc
     await db.commit()
     return ComposedRequestPublic(
         draft_id=composed.update.draft.id if composed.update.draft else None,

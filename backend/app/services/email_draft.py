@@ -20,6 +20,8 @@ list is the record and the draft is not.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+from enum import StrEnum
 from string import Template
 from uuid import UUID
 
@@ -58,7 +60,7 @@ from app.models.loan_file import LoanFile
 from app.models.needs_item import NeedsItem, NeedsItemDisposition, NeedsItemOrigin
 from app.models.upload_link import UploadLink, hash_token
 from app.models.user import User
-from app.services.needs_items import create_needs_item
+from app.services.needs_items import AWAITING_COLLECTION, create_needs_item
 from app.services.party_requests import (
     PARTY_ROLE,
     party_addresses,
@@ -72,6 +74,106 @@ logger = get_logger(__name__)
 
 #: The template a document-request draft is rendered from, and the key its uniqueness is scoped to.
 DRAFT_TEMPLATE = TemplateKey.INITIAL_DOCUMENTATION_REQUEST
+
+
+class OnConflict(StrEnum):
+    """What to do when this party already has an open draft (LP-850).
+
+    TWO DOORS, AND DELIBERATELY NOT THREE. "Create a second open draft" is the option that is
+    missing, and its absence is the ticket: LP-832 removed the partial unique index, so every
+    request minted a new draft and nothing retired the one it replaced. N clicks left N live,
+    sendable drafts with overlapping contents — send the first and then the third and the borrower
+    is asked for the same bank statement twice.
+    """
+
+    #: Add the new documents to the draft that is already open.
+    APPEND = "append"
+    #: The processor says they have already sent it from their own mail client. The open draft takes
+    #: the existing `mark_sent` transition and a fresh one carries whatever is still outstanding.
+    MARK_SENT_AND_NEW = "mark_sent_and_new"
+
+
+@dataclass(frozen=True)
+class NeedSummary:
+    """One document, named as the processor asked for it — enough to decide with."""
+
+    id: UUID
+    title: str
+
+    @classmethod
+    def of(cls, need: NeedsItem) -> NeedSummary:
+        return cls(id=need.id, title=need.title)
+
+
+@dataclass(frozen=True)
+class OpenDraftConflict:
+    """One party whose open draft the caller has to decide about (LP-850).
+
+    NAMED BY ITS CONTENTS, NOT BY AN ID. "There is an open draft" is not something a processor can
+    decide with; three document names and a timestamp are, and they are what they remember. So
+    `carrying` and `created_at` are part of the refusal rather than something the UI has to fetch
+    afterwards — a second round trip is a second chance for the answer to have changed.
+    """
+
+    party: ResponsibleParty
+    draft_id: UUID
+    created_at: datetime
+    #: What the open draft already asks for.
+    carrying: tuple[NeedSummary, ...]
+    #: What this request would add to it.
+    adding: tuple[NeedSummary, ...]
+    #: Whether a processor has written their own words into this draft, which an append would
+    #: overwrite. LP-853 owns the column that answers this; see `draft_body_edited`.
+    body_edited: bool
+
+
+@dataclass(frozen=True)
+class PlannedDraft:
+    """A party with nothing open — no decision to make, and the processor must still be told.
+
+    LP-852's rule, appearing at the point a request is refused: a draft to somebody the processor
+    did not expect, created without their noticing, is a message that never gets sent.
+    """
+
+    party: ResponsibleParty
+    address: str | None
+    adding: tuple[NeedSummary, ...]
+
+
+class DraftDecisionRequired(Exception):
+    """Raised instead of writing, when at least one party already has an open draft (LP-850).
+
+    NOTHING IS WRITTEN. The whole request is planned before any of it is applied, so a refusal
+    leaves the database exactly as it was — including the needs items a caller created on the way
+    in, which roll back with the transaction. A partial write here would be the worst outcome
+    available: documents on the needs list that no draft asks for.
+    """
+
+    def __init__(
+        self,
+        *,
+        decisions_required: tuple[OpenDraftConflict, ...],
+        would_create: tuple[PlannedDraft, ...],
+    ) -> None:
+        self.decisions_required = decisions_required
+        self.would_create = would_create
+        parties = ", ".join(d.party.value for d in decisions_required)
+        super().__init__(f"an open draft already exists for: {parties}")
+
+
+def draft_body_edited(draft: Communication) -> bool:
+    """Whether a person has written their own words into this draft's body.
+
+    LP-853 IS WHERE THIS BECOMES TRUE. It adds `Communication.body_format`, and the decision there
+    is that `body_format == 'html'` IS this flag — "a machine wrote this" and "it is still plain"
+    are the same statement, and storing them twice is the pattern A22 names.
+
+    Until that column exists there is NO RECORD OF AN EDIT, so the honest answer is False. Deriving
+    one by re-rendering the template and comparing would be worse than nothing: a template bump
+    would report as a processor's edit, and LP-851's warning quotes the processor's own sentence
+    back at them — quoting a line they never wrote is how a warning stops being read.
+    """
+    return False
 
 
 @dataclass(frozen=True)
@@ -583,24 +685,38 @@ def _legacy_draft_keys(party: ResponsibleParty) -> tuple[str, ...]:
     return tuple(sorted(keys))
 
 
+def _addressed_to(party: ResponsibleParty):  # type: ignore[no-untyped-def]
+    """The predicate for "this message is to this party" — ONE definition of it (LP-850).
+
+    LP-843 — MATCHES ON THE AUDIENCE, or on the key for a draft written before the column existed.
+    Filtering on the key alone would strand every draft open across the deploy in a bucket nothing
+    looks in; filtering on the column alone would find none of them. The backfill sets `party` for
+    existing rows, so the second arm covers only a draft created between the migration and the
+    deploy of this code.
+
+    LP-850 — LIFTED OUT BECAUSE `_outstanding_needs` HAD ITS OWN, AND THEY DISAGREED. That query
+    matched `template_key == draft_template_key(party)`, and since LP-843 five parties share
+    `document_request_third_party` — so "the title company's outstanding documents" also returned
+    the lender's, the agent's, the CPA's and the insurer's, while `_open_drafts_stmt` (which decides
+    whether a draft is open for this party at all) read the `party` column. Two definitions of one
+    audience, which is A22 in the one module this ticket is about. They are the same expression now.
+    """
+    return or_(
+        Communication.party == party.value,
+        and_(
+            Communication.party.is_(None),
+            Communication.template_key.in_(_legacy_draft_keys(party)),
+        ),
+    )
+
+
 def _open_drafts_stmt(loan_file_id: UUID, party: ResponsibleParty):  # type: ignore[no-untyped-def]
     """This party's unsent drafts on the file, newest first."""
     return only_active(
         select(Communication).where(
             Communication.loan_file_id == loan_file_id,
             Communication.status == CommunicationStatus.DRAFT,
-            # LP-843 — MATCHES ON THE AUDIENCE, or on the key for a draft written before the
-            # column existed. Filtering on the key alone would strand every draft open across the
-            # deploy in a bucket nothing looks in; filtering on the column alone would find none of
-            # them. The backfill sets `party` for existing rows, so the second arm covers only a
-            # draft created between the migration and the deploy of this code.
-            or_(
-                Communication.party == party.value,
-                and_(
-                    Communication.party.is_(None),
-                    Communication.template_key.in_(_legacy_draft_keys(party)),
-                ),
-            ),
+            _addressed_to(party),
         ),
         Communication,
     ).order_by(Communication.created_at.desc(), Communication.id.desc())
@@ -866,7 +982,28 @@ async def _regenerate(db: AsyncSession, *, draft: Communication, loan_file: Loan
 async def _outstanding_needs(
     db: AsyncSession, *, loan_file_id: UUID, party: ResponsibleParty
 ) -> list[NeedsItem]:
-    """Every need carried by an unsent draft on this file, oldest membership first (LP-832).
+    """Every need an unsent draft asks for that somebody still has to collect (LP-832, LP-850).
+
+    LP-850 — THE NEED'S OWN STATUS DECIDES WHETHER IT IS OUTSTANDING, and until this ticket nothing
+    here looked at it. A need that was `received` or `verified` stayed in this set for as long as
+    some unsent draft carried it, so the next request asked the borrower for a document already
+    sitting in the file.
+
+    IT ONLY LOOKED CORRECT BECAUSE A SEND ALSO CLEARS THE SET — the needs drop out because the draft
+    leaves `DRAFT`, not because the document arrived. The two causes coincide on a demo and diverge
+    in real use, and they diverge hardest here: with no live inbound mail, documents arrive by
+    manual upload or by the secure link, and a borrower who sends something unprompted or after a
+    phone call makes "arrived before its request went out" ordinary rather than rare.
+
+    So the set is now the intersection of two facts: the draft says what was ASKED, and
+    `AWAITING_COLLECTION` says what is still OUTSTANDING. The status half is imported rather than
+    restated — it is the same `needs_action` bucket the file's own needs screen groups by, which is
+    what "one fact, one place" has to mean to be worth anything.
+
+    THE DRAFT JOIN STAYS. Reading status alone would return every pending need on the file,
+    including ones nobody has asked for yet; and after a send every need moves to `REQUESTED`, which
+    is in `AWAITING_COLLECTION` — so status alone would put a just-sent document straight back into
+    the next email. The join is what makes "since the last send" true.
 
     "EVERYTHING REQUESTED SINCE THE LAST SEND", expressed as the thing that is actually true rather
     than as a time comparison. A send closes its draft — the row leaves `DRAFT` — so the needs it
@@ -895,9 +1032,11 @@ async def _outstanding_needs(
             .where(
                 Communication.loan_file_id == loan_file_id,
                 Communication.status == CommunicationStatus.DRAFT,
-                Communication.template_key == draft_template_key(party),
+                _addressed_to(party),
                 Communication.deleted_at.is_(None),
                 NeedsItem.deleted_at.is_(None),
+                # LP-850 — the filter this query never had. See the docstring.
+                NeedsItem.status.in_(AWAITING_COLLECTION),
             )
             .group_by(NeedsItem.id)
             .order_by("first_added", NeedsItem.id)
@@ -912,8 +1051,23 @@ async def add_needs_to_draft(
     loan_file: LoanFile,
     needs: list[NeedsItem],
     actor_user_id: UUID,
+    on_conflict: OnConflict | None = None,
 ) -> DraftUpdate:
-    """Create a NEW draft carrying everything outstanding, plus ``needs``. ``flush`` only.
+    """Put ``needs`` in front of whoever holds them. ``flush`` only.
+
+    LP-850 — ONE OPEN DRAFT PER PARTY, ENFORCED HERE. Not in the UI, and not by an index: LP-832's
+    `uq_communications_open_draft` keyed on the FILE, and a title company's draft and a borrower's
+    draft are both legitimately open at once. The constraint is
+    `(loan_file_id, party, status=DRAFT, deleted_at IS NULL)`, and the way it is held is that a
+    request against an open draft has exactly two outcomes — append to it, or mark it sent and start
+    a fresh one. There is no third door, which is what removes the duplicate-drafts defect by
+    construction rather than by asking a processor to be careful.
+
+    ``on_conflict`` is that answer, and ``None`` means "I have not asked yet": the call plans the
+    whole request, writes nothing, and raises :class:`DraftDecisionRequired` naming every open draft
+    it found AND every party it would have created one for. One refusal carries everything a dialog
+    needs, because a processor asked a second question after confirming the first clicks the primary
+    without reading it.
 
     LP-832 — A REQUEST MAKES A DRAFT; IT DOES NOT GROW ONE. Confirmed directly with the user, because
     the sentence admitted both readings and the other one is what this function used to do:
@@ -960,20 +1114,84 @@ async def add_needs_to_draft(
     # on the same file waits here and then computes the outstanding set including this one's drafts.
     await db.execute(select(LoanFile.id).where(LoanFile.id == loan_file.id).with_for_update())
 
-    results: list[PartyDraft] = []
+    # PASS ONE — PLAN, AND WRITE NOTHING. Every party is resolved before any of them is applied,
+    # because a refusal has to leave the database untouched and because the dialog has to be able to
+    # name the OTHER parties in the same breath as the one it is asking about.
+    plans: list[_PartyPlan] = []
     for party, party_needs in by_party.items():
         if party is NO_RECIPIENT:
             # NOBODY TO EMAIL. "We order it ourselves" is not a message, so these never become a
             # draft — they are real work and the needs list is where a processor tracks them.
-            results.append(PartyDraft(party=party, draft=None, added=(), already_present=()))
+            plans.append(_PartyPlan(party=party, open_draft=None, fresh=(), already=()))
+            continue
+        open_draft = await get_open_draft(db, loan_file_id=loan_file.id, party=party)
+        # ALREADY PRESENT MEANS "IN THAT DRAFT", not "still outstanding". A need this draft already
+        # asks for is not added a second time whatever its status has since become — a duplicate
+        # membership row would put one document in the email twice, which is the failure the
+        # second-click guard has existed for since LP-801.
+        in_draft = (
+            {need.id for need in await _needs_in_draft(db, draft=open_draft)}
+            if open_draft is not None
+            else set()
+        )
+        plans.append(
+            _PartyPlan(
+                party=party,
+                open_draft=open_draft,
+                fresh=tuple(need for need in party_needs if need.id not in in_draft),
+                already=tuple(need.id for need in party_needs if need.id in in_draft),
+            )
+        )
+
+    # A PARTY WITH NOTHING NEW TO ADD IS NOT A CONFLICT. A second click on the same finding adds
+    # nothing; asking a processor to choose between appending nothing and sending a draft they did
+    # not mean to send would be a dialog about a click that did not happen.
+    conflicts = [plan for plan in plans if plan.open_draft is not None and plan.fresh]
+    if conflicts and on_conflict is None:
+        decisions: list[OpenDraftConflict] = []
+        for plan in conflicts:
+            assert plan.open_draft is not None  # narrowed by the filter above
+            decisions.append(
+                OpenDraftConflict(
+                    party=plan.party,
+                    draft_id=plan.open_draft.id,
+                    created_at=plan.open_draft.created_at,
+                    carrying=tuple(
+                        NeedSummary.of(need)
+                        for need in await _needs_in_draft(db, draft=plan.open_draft)
+                    ),
+                    adding=tuple(NeedSummary.of(need) for need in plan.fresh),
+                    body_edited=draft_body_edited(plan.open_draft),
+                )
+            )
+        planned: list[PlannedDraft] = []
+        for plan in plans:
+            if plan.open_draft is not None or not plan.fresh or plan.party is NO_RECIPIENT:
+                continue
+            planned.append(
+                PlannedDraft(
+                    party=plan.party,
+                    address=await _party_address(db, loan_file=loan_file, party=plan.party),
+                    adding=tuple(NeedSummary.of(need) for need in plan.fresh),
+                )
+            )
+        raise DraftDecisionRequired(
+            decisions_required=tuple(decisions), would_create=tuple(planned)
+        )
+
+    # PASS TWO — APPLY.
+    results: list[PartyDraft] = []
+    for plan in plans:
+        if plan.party is NO_RECIPIENT:
+            results.append(PartyDraft(party=plan.party, draft=None, added=(), already_present=()))
             continue
         results.append(
-            await _add_to_party_draft(
+            await _apply_party_plan(
                 db,
                 loan_file=loan_file,
-                party=party,
-                needs=party_needs,
+                plan=plan,
                 actor_user_id=actor_user_id,
+                on_conflict=on_conflict,
             )
         )
     return DraftUpdate(parties=tuple(results))
@@ -1002,40 +1220,88 @@ async def _party_address(
     return found[0] if found else None
 
 
-async def _add_to_party_draft(
+@dataclass(frozen=True)
+class _PartyPlan:
+    """What one party's share of a request would do, worked out before anything is written."""
+
+    party: ResponsibleParty
+    #: This party's open draft, if they have one. At most one exists — that is LP-850's rule.
+    open_draft: Communication | None
+    #: The needs this request adds that the open draft (if any) does not already carry.
+    fresh: tuple[NeedsItem, ...]
+    #: The needs it already carries, which are not added again.
+    already: tuple[UUID, ...]
+
+
+async def _apply_party_plan(
     db: AsyncSession,
     *,
     loan_file: LoanFile,
-    party: ResponsibleParty,
-    needs: list[NeedsItem],
+    plan: _PartyPlan,
     actor_user_id: UUID,
+    on_conflict: OnConflict | None,
 ) -> PartyDraft:
-    """One party's share of a request, in one new draft (LP-841).
+    """One party's share of a request, applied (LP-841, LP-850).
 
-    THE SAME RULE PER BUCKET, which is what the processor asked for: an open draft for this party
-    means the next request creates a NEW one carrying that party's outstanding documents plus
-    whatever is new; a draft that has been marked sent takes its documents out of the set, so the
-    next request starts fresh.
+    THREE SHAPES, AND ONLY THREE:
+
+    * nothing open — create a draft carrying what is still outstanding plus what is new;
+    * open, and the processor said **append** — the new documents join the draft they are looking
+      at, and the body is regenerated from the whole set;
+    * open, and the processor said **I've sent it** — the open draft takes the existing `mark_sent`
+      transition and a fresh one carries whatever is still outstanding plus what is new.
 
     NO ADDRESS IS NOT A REFUSAL. `build_party_draft` raised when a party had none — "a draft
     addressed to nobody is a message that will never be sent" — and the processor's answer is the
-    opposite: keep it empty, because the message is the part they want. A recipient can be typed in
-    the modal; a message that was never written cannot be recovered.
+    opposite: keep it empty, because the message is the part they want. LP-820 measured 13 of 166
+    document types with no address anywhere in the schema; refusing means those documents never
+    produce a message at all. A recipient can be typed in the modal; a message that was never
+    written cannot be recovered.
     """
-    outstanding = await _outstanding_needs(db, loan_file_id=loan_file.id, party=party)
-    carried = {need.id for need in outstanding}
-    fresh = [need for need in needs if need.id not in carried]
-    already = tuple(need.id for need in needs if need.id in carried)
+    party = plan.party
 
-    if not fresh:
+    if not plan.fresh:
         # NOTHING NEW MEANS NO DRAFT. A second click on the same finding adds nothing, and minting a
         # duplicate with identical contents would put a second identical email in the list for a
         # request that did not happen.
         return PartyDraft(
             party=party,
-            draft=await get_open_draft(db, loan_file_id=loan_file.id, party=party),
+            draft=plan.open_draft
+            or await get_open_draft(db, loan_file_id=loan_file.id, party=party),
             added=(),
-            already_present=already,
+            already_present=plan.already,
+        )
+
+    if plan.open_draft is not None and on_conflict is OnConflict.APPEND:
+        # LP-850 — THE DRAFT THE PROCESSOR IS LOOKING AT GROWS. Before this ticket every request
+        # minted a new draft and left the old one in the list, valid and sendable; appending is what
+        # makes "there is one open draft to the borrower" a sentence the screen can keep true.
+        for need in plan.fresh:
+            db.add(
+                CommunicationNeedsItem(communication_id=plan.open_draft.id, needs_item_id=need.id)
+            )
+        await db.flush()
+        await _regenerate(db, draft=plan.open_draft, loan_file=loan_file)
+        return PartyDraft(
+            party=party,
+            draft=plan.open_draft,
+            added=tuple(need.id for need in plan.fresh),
+            already_present=plan.already,
+        )
+
+    # COMPUTED BEFORE THE SEND, AND THAT ORDER IS LOAD-BEARING. `_outstanding_needs` reads draft
+    # membership, so once the open draft leaves `DRAFT` its documents are no longer outstanding by
+    # that query's own definition — and the new draft would carry nothing forward at all. Read it
+    # here and the needs list decides: what the old draft asked for and nobody has since collected
+    # is what the new one asks for again.
+    outstanding = await _outstanding_needs(db, loan_file_id=loan_file.id, party=party)
+    carried = {need.id for need in outstanding}
+    fresh = [need for need in plan.fresh if need.id not in carried]
+
+    if plan.open_draft is not None:
+        assert on_conflict is OnConflict.MARK_SENT_AND_NEW
+        await _mark_sent(
+            db, loan_file=loan_file, draft=plan.open_draft, actor_user_id=actor_user_id
         )
 
     draft = Communication(
@@ -1065,8 +1331,40 @@ async def _add_to_party_draft(
     return PartyDraft(
         party=party,
         draft=draft,
-        added=tuple(need.id for need in fresh),
-        already_present=already,
+        added=tuple(need.id for need in plan.fresh),
+        already_present=plan.already,
+    )
+
+
+async def _mark_sent(
+    db: AsyncSession, *, loan_file: LoanFile, draft: Communication, actor_user_id: UUID
+) -> None:
+    """Record that the processor sent this draft from their own mail client (LP-850).
+
+    THE EXISTING TRANSITION, NOT A NEW ONE. `send_draft` is what stamps `sent_at`, moves the needs
+    to `REQUESTED` with their `requested_at`, writes the activity row and writes LP-821's evidence
+    record. A second path that set `status = SENT` and skipped those would produce a message the
+    audit trail has no record of — which is the one thing LP-821 exists to make impossible.
+
+    IT IS A CLAIM, NOT AN EVENT. Nothing here observed a send; the processor is telling us they did
+    it. That is why the dialog says "I've sent it" rather than "Mark as sent", and why what is
+    written afterwards is attributed to them.
+
+    IMPORTED INSIDE THE FUNCTION because `email_send` imports this module.
+    """
+    from app.services.email_send import send_draft
+
+    await send_draft(
+        db,
+        loan_file=loan_file,
+        draft_id=draft.id,
+        recipient=draft.recipient or "",
+        # WHAT IS ON THE DRAFT, because that is what the processor copied out of it. `send_draft`
+        # requires a non-empty body and refuses otherwise, which is the right refusal: a draft with
+        # no words in it was never sent to anybody.
+        body=draft.body or "",
+        subject=draft.subject,
+        approver_user_id=actor_user_id,
     )
 
 
@@ -1115,6 +1413,7 @@ async def compose_request(
     loan_file: LoanFile,
     document_types: list[str],
     actor_user_id: UUID,
+    on_conflict: OnConflict | None = None,
 ) -> ComposedRequest:
     """Turn a processor's document selection into needs and a draft. ``flush`` only.
 
@@ -1165,7 +1464,11 @@ async def compose_request(
         )
 
     update = await add_needs_to_draft(
-        db, loan_file=loan_file, needs=created, actor_user_id=actor_user_id
+        db,
+        loan_file=loan_file,
+        needs=created,
+        actor_user_id=actor_user_id,
+        on_conflict=on_conflict,
     )
 
     # ON THE REQUEST, NOT ENQUEUED. Everything else in this codebase puts model work on a worker, and

@@ -53,7 +53,7 @@ from app.models.needs_item import (
 from app.models.property import Property
 from app.models.stated_financials import StatedIncomeItem, StatedLiability
 from app.services.activity_log import log_activity
-from app.services.email_draft import DraftUpdate, add_needs_to_draft
+from app.services.email_draft import DraftUpdate, OnConflict, add_needs_to_draft
 from app.services.finding_requests import (
     NotRequestable,
     docs_requested_marker,
@@ -573,6 +573,7 @@ async def _create_document_needs(
     by_document: dict[str, list[Finding]],
     actor_user_id: UUID,
     note: str | None = None,
+    on_conflict: OnConflict | None = None,
 ) -> tuple[list[NeedsItem], list[DraftUpdate]]:
     """Create ONE needs item per DOCUMENT, and put the borrower's share in the open draft.
 
@@ -694,7 +695,11 @@ async def _create_document_needs(
         # claiming a request was made should not precede the draft that will carry it.
         updates.append(
             await add_needs_to_draft(
-                db, loan_file=loan_file, needs=created, actor_user_id=actor_user_id
+                db,
+                loan_file=loan_file,
+                needs=created,
+                actor_user_id=actor_user_id,
+                on_conflict=on_conflict,
             )
         )
     return created, updates
@@ -753,6 +758,7 @@ async def request_documents_in_bulk(
     by_document: dict[str, list[Finding]],
     actor_user_id: UUID,
     note: str | None = None,
+    on_conflict: OnConflict | None = None,
 ) -> RequestOutcome:
     """ "Request all N" — the collection route, over many findings at once (LP-562).
 
@@ -765,7 +771,12 @@ async def request_documents_in_bulk(
     The creation is `_create_document_needs`; what is left here is this route's own activity line.
     """
     created, updates = await _create_document_needs(
-        db, loan_file=loan_file, by_document=by_document, actor_user_id=actor_user_id, note=note
+        db,
+        loan_file=loan_file,
+        by_document=by_document,
+        actor_user_id=actor_user_id,
+        note=note,
+        on_conflict=on_conflict,
     )
     if created:
         await log_activity(
@@ -794,6 +805,7 @@ async def request_docs_for_finding(
     documents: Sequence[str] = (),
     actor_user_id: UUID,
     note: str | None = None,
+    on_conflict: OnConflict | None = None,
 ) -> RequestOutcome:
     """Request documents FROM ONE finding (LP-88) — the row-level button.
 
@@ -845,10 +857,16 @@ async def request_docs_for_finding(
             by_document={document: [finding] for document in documents},
             actor_user_id=actor_user_id,
             note=note,
+            on_conflict=on_conflict,
         )
     else:
         item, update = await _create_needs_item_from_message(
-            db, loan_file=loan_file, finding=finding, actor_user_id=actor_user_id, note=note
+            db,
+            loan_file=loan_file,
+            finding=finding,
+            actor_user_id=actor_user_id,
+            note=note,
+            on_conflict=on_conflict,
         )
         created, updates = [item], [update]
 
@@ -901,6 +919,7 @@ async def _create_needs_item_from_message(
     finding: Finding,
     actor_user_id: UUID,
     note: str | None,
+    on_conflict: OnConflict | None = None,
 ) -> tuple[NeedsItem, DraftUpdate]:
     """The one need a finding that names NO document produces — titled from the finding itself.
 
@@ -932,7 +951,11 @@ async def _create_needs_item_from_message(
                 ),
             }
             return existing_item, await add_needs_to_draft(
-                db, loan_file=loan_file, needs=[existing_item], actor_user_id=actor_user_id
+                db,
+                loan_file=loan_file,
+                needs=[existing_item],
+                actor_user_id=actor_user_id,
+                on_conflict=on_conflict,
             )
 
     item = await create_needs_item(
@@ -953,7 +976,11 @@ async def _create_needs_item_from_message(
         "docs_requested": docs_requested_marker(actor_user_id=actor_user_id, needs_item_id=item.id),
     }
     update = await add_needs_to_draft(
-        db, loan_file=loan_file, needs=[item], actor_user_id=actor_user_id
+        db,
+        loan_file=loan_file,
+        needs=[item],
+        actor_user_id=actor_user_id,
+        on_conflict=on_conflict,
     )
     return item, update
 

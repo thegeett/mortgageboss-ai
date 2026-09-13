@@ -40,7 +40,7 @@ from app.services.email_draft import (
     get_open_draft,
     greeting_name_for,
 )
-from app.services.needs_items import request_needs_item
+from app.services.needs_items import AWAITING_COLLECTION, request_needs_item
 
 #: `mailto:` is truncated somewhere around 2,000 characters in several mail clients, and a truncated
 #: `mailto:` does not fail — it opens a compose window containing HALF AN EMAIL, which a processor may
@@ -323,8 +323,16 @@ async def send_draft(
     # is what LP-814's reminders read. Before this line, that column was NULL on every row that has
     # ever existed, so every reminder rule was a query over an empty set — green, silent, and unable
     # to fire.
+    #
+    # LP-850 — EXCEPT THE ONES THAT HAVE ALREADY ARRIVED. `request_needs_item` sets the status
+    # unconditionally, so a need that was `received` or `verified` while its draft sat unsent was
+    # pushed BACK to `requested` by the send — and LP-850 makes the need's own status the source of
+    # truth for what is outstanding, so that one line put a document already in the file back into
+    # the next email. A message asking for something that has arrived is not a reason to un-arrive
+    # it; the record of the ask is the draft, and it is intact either way.
     for need in needs:
-        await request_needs_item(db, needs_item=need)
+        if need.status in AWAITING_COLLECTION:
+            await request_needs_item(db, needs_item=need)
 
     await log_activity(
         db,

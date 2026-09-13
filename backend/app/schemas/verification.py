@@ -20,6 +20,7 @@ from app.documents.catalog import CATALOG, ResponsibleParty, get_guidance
 from app.models.finding import EvaluationOutcome, Finding
 from app.models.verification import Verification
 from app.models.verification_progress import VerificationProgress
+from app.services.email_draft import OnConflict
 from app.verification.confidence import AggressionLevel
 from app.verification.finding_guidance import resolve_guidance
 from app.verification.rule_engine.reasons import document_label
@@ -120,6 +121,9 @@ class BulkRequestDocsRequest(BaseModel):
 
     finding_ids: list[UUID]
     note: str | None = None
+    #: LP-850 — what to do about an open draft. `None` is "I have not asked the processor yet", and
+    #: the endpoint answers with a 409 describing every draft it found instead of writing anything.
+    on_conflict: OnConflict | None = None
 
 
 class RatifyRequest(BaseModel):
@@ -147,6 +151,8 @@ class RequestDocsRequest(BaseModel):
     """Request documents from a finding (LP-88) — create a needs item; optional note."""
 
     note: str | None = None
+    #: LP-850 — see `BulkRequestDocsRequest.on_conflict`.
+    on_conflict: OnConflict | None = None
 
 
 class AggressionUpdate(BaseModel):

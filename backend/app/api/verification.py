@@ -30,6 +30,7 @@ from app.models.snapshot_finding import SnapshotFinding
 from app.models.user import User
 from app.models.verification import Verification, VerificationStatus, VerificationTrigger
 from app.models.verification_progress import VerificationProgress
+from app.schemas.communication import DraftConflictPublic
 from app.schemas.finding_impact import ApplyRequest, FindingImpactPreview
 from app.schemas.snapshot_findings import (
     SnapshotFindingDisposition,
@@ -64,6 +65,7 @@ from app.services.cross_source import (
     latest_completed_run,
 )
 from app.services.dti import build_dti_calculation
+from app.services.email_draft import DraftDecisionRequired
 from app.services.finding_blocking import open_in_scope_findings
 from app.services.finding_impact import (
     apply_fingerprint,
@@ -102,6 +104,24 @@ _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan f
 _FINDING_NOT_FOUND = HTTPException(
     status_code=status.HTTP_404_NOT_FOUND, detail="Finding not found"
 )
+
+
+def _draft_conflict(exc: DraftDecisionRequired) -> HTTPException:
+    """LP-850's refusal, as a 409 the dialog can render without asking again.
+
+    409 RATHER THAN 422: nothing about the request is malformed. The file is in a state that has
+    two legitimate answers and only the processor can pick one, which is what a conflict is.
+
+    THE WHOLE PLAN TRAVELS, not just the party that blocked. `would_create` names the parties this
+    request WOULD have written to, so one dialog can say "the borrower has a draft open — and this
+    also creates one to the title company" instead of a second dialog appearing after the first is
+    dismissed. A processor asked a second question clicks the primary without reading it.
+    """
+    return HTTPException(
+        status.HTTP_409_CONFLICT,
+        detail=DraftConflictPublic.of(exc).model_dump(mode="json"),
+    )
+
 
 # Findings surfaced in the tab: cross-source (AI) + deterministic-rule, handled
 # uniformly (the origin distinguishes provenance). Green passes are not findings.
@@ -886,13 +906,21 @@ async def bulk_request_docs_endpoint(
         for document in _documents_a_finding_wants(finding, on_file=on_file, loan_purpose=purpose):
             by_document.setdefault(document, []).append(finding)
 
-    outcome = await request_documents_in_bulk(
-        db,
-        loan_file=loan_file,
-        by_document=by_document,
-        actor_user_id=current_user.id,
-        note=payload.note,
-    )
+    try:
+        outcome = await request_documents_in_bulk(
+            db,
+            loan_file=loan_file,
+            by_document=by_document,
+            actor_user_id=current_user.id,
+            note=payload.note,
+            on_conflict=payload.on_conflict,
+        )
+    except DraftDecisionRequired as exc:
+        # LP-850 — NOTHING WAS WRITTEN, including the needs items created on the way in: the
+        # exception leaves the transaction unfinished and `get_db` rolls it back. A partial write
+        # here would be the worst outcome available — documents on the needs list that no draft
+        # asks for and no dialog mentioned.
+        raise _draft_conflict(exc) from exc
     await db.commit()
     if outcome.needs:
         _enqueue_draft_composition(loan_file.id)
@@ -1144,9 +1172,13 @@ async def request_docs_endpoint(
             documents=documents,
             actor_user_id=current_user.id,
             note=payload.note,
+            on_conflict=payload.on_conflict,
         )
     except NotRequestable as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except DraftDecisionRequired as exc:
+        # LP-850 — see the bulk route: a refusal writes nothing.
+        raise _draft_conflict(exc) from exc
     await db.commit()
     if outcome.needs:
         _enqueue_draft_composition(loan_file.id)
