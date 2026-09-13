@@ -29,7 +29,7 @@ from app.models.communication import (
 )
 from app.models.communication_needs_item import CommunicationNeedsItem
 from app.models.needs_item import NeedsItem, NeedsItemOrigin, NeedsItemStatus
-from app.services.email_draft import compose_request
+from app.services.email_draft import _needs_in_draft, compose_request
 from app.services.email_reply import create_compose_draft
 from app.services.loan_files import create_loan_file
 from httpx import ASGITransport, AsyncClient
@@ -233,6 +233,40 @@ async def test_another_files_draft_cannot_be_deleted(client: AsyncClient, db: As
     assert resp.status_code == 404
     row = await db.get(Communication, their_draft.id)
     assert row is not None and row.deleted_at is None
+
+
+async def test_the_processor_is_not_blocked_after_deleting(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """THE CLAIM THE "do not un-request" DECISION RESTS ON, and it was asserted in prose and never
+    run — by either of us.
+
+    Delete leaves the needs items and the finding marker alone, which means the originating
+    finding's button stays greyed. The reason that is acceptable is that **requesting again still
+    works**: the catalog path is a different route and does not consult the marker. If that were
+    false, deleting a draft would strand the document — asked for, no message, and no way to ask
+    again — and the decision would have been wrong rather than simple.
+
+    IT COMPOSES BECAUSE `get_open_draft` READS THROUGH `only_active`. The deleted draft is invisible
+    to it, so its needs are not counted as "already in a draft" and the new request carries them.
+    """
+    loan_file, user, token, draft = await _file_with_a_generated_draft(db, slug="notblocked")
+    assert (await _delete(client, loan_file, draft.id, token)).status_code == 204
+
+    # THE SAME DOCUMENT, REQUESTED AGAIN, through the path the catalog dialog uses.
+    composed = await compose_request(
+        db, loan_file=loan_file, document_types=["pay_stub"], actor_user_id=user.id
+    )
+    borrower = next(p for p in composed.update.parties if p.party is ResponsibleParty.BORROWER)
+    fresh = borrower.draft
+
+    assert fresh is not None, "requesting again after a delete produced no draft"
+    assert fresh.id != draft.id, "it reused the deleted draft rather than making a new one"
+    assert fresh.deleted_at is None
+    # AND IT CARRIES THE DOCUMENT, which is the whole point — a new draft with nothing in it would
+    # satisfy every assertion above and leave the processor exactly as stranded.
+    titles = [n.title for n in await _needs_in_draft(db, draft=fresh)]
+    assert titles, "the new draft asks for nothing"
 
 
 # --- §8 — the untouched compose draft -------------------------------------------------------- #
