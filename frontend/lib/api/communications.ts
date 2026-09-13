@@ -174,6 +174,35 @@ export function useSaveDraftBody(fileId: string) {
   });
 }
 
+/** A ✦ polish proposal, or the reason there is none (LP-856). */
+export interface PolishResult {
+  polished: string | null;
+  refusal: string | null;
+}
+
+/**
+ * Ask the model to tidy the processor's own words.
+ *
+ * IT PROPOSES; IT DOES NOT REPLACE. Nothing is written — this returns text the dialog shows beside
+ * the original, and accepting it is a separate save. A rewrite that landed on save would be a
+ * message going out in words nobody read, and the processor is the one who will be asked about
+ * those words later.
+ *
+ * A REFUSAL IS AN ORDINARY OUTCOME, not an error: `email_draft_enabled` is off in every environment,
+ * so `refusal: "unavailable"` is what a processor gets today and the button has to say so.
+ */
+export function usePolishDraft(fileId: string) {
+  return useMutation({
+    mutationFn: async (input: { draftId: string; body: string }) =>
+      (
+        await apiClient.post<PolishResult>(
+          `${outboundPath(fileId)}/draft/${input.draftId}/polish`,
+          { body: input.body },
+        )
+      ).data,
+  });
+}
+
 export interface SendDraftInput {
   draftId: string;
   recipient: string;

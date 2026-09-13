@@ -1,5 +1,6 @@
 "use client";
 
+import { ComposeDraftButton } from "@/components/file/communication/compose-draft-dialog";
 import { ComposeRequestButton } from "@/components/file/communication/compose-request-button";
 import { InboundMessagesPanel } from "@/components/file/communication/inbound-messages-panel";
 import { PartyRequestButton } from "@/components/file/communication/party-request-button";
@@ -41,6 +42,10 @@ export default function CommunicationPage() {
         {/* LP-833 — asking for a document no rule flagged. Until this, a draft could come only
             from a FINDING: a processor who knew what they needed could add a needs item by hand and
             nothing drafted from it. */}
+        {/* LP-856 — A THIRD BUTTON: a draft with no documents behind it. Outline to "Request
+            documents"' primary, which is Screen 1's order — requesting is the common act and
+            writing a free message is the occasional one. */}
+        <ComposeDraftButton fileId={id} />
         <ComposeRequestButton fileId={id} />
         <PartyRequestButton fileId={id} />
       </div>

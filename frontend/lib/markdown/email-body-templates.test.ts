@@ -171,6 +171,12 @@ describe("the only way HTML reaches the DOM", () => {
    *     allowlist on the way in (`app/communications/sanitise.py`). The column cannot hold a tag
    *     that was not permitted, so the guarantee belongs to the row rather than to this renderer.
    *
+   * LP-856 adds a third entry resting on the FIRST argument, not a third one: `emailBodyToHtml(
+   * proposal)` renders the model's rewrite, and model output is the least trusted string on this
+   * screen — it has been nowhere near the server's allowlist, because polish writes nothing. It
+   * reaches the DOM the same way a plain body does, through the escape-first renderer, which is
+   * exactly why that renderer is the argument and not the provenance of the text.
+   *
    * WRITTEN OUT IN FULL rather than pattern-matched, because "the body came from a sanitised
    * column" is a claim about the backend that no regex over this file can check. Listing it forces
    * the next person adding a sink to say which of the two arguments theirs rests on.
@@ -178,6 +184,7 @@ describe("the only way HTML reaches the DOM", () => {
   const ALLOWED = new Set([
     "emailBodyToHtml(data.body)",
     'data.body_format === "html" ? data.body : emailBodyToHtml(data.body)',
+    "emailBodyToHtml(proposal)",
   ]);
 
   it("feeds every dangerouslySetInnerHTML from a renderer or a sanitised column, and nothing else", () => {

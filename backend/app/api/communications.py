@@ -16,13 +16,16 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
 
+from app.ai.polish import polish
 from app.api.dependencies import CurrentUser, ScopedLoanFile
 from app.core.database import DbSession
 from app.documents.catalog import CATALOG
-from app.models.communication import Communication
+from app.models.communication import Communication, CommunicationStatus
 from app.schemas.communication import (
     DraftConflictPublic,
     OutboundDraftPublic,
+    PolishPublic,
+    PolishRequest,
     SavedDraftPublic,
     SaveDraftBodyRequest,
     SendDraftRequest,
@@ -216,6 +219,44 @@ async def save_draft_body_endpoint(
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await db.commit()
     return SavedDraftPublic(id=draft.id, body_format=draft.body_format.value, subject=draft.subject)
+
+
+@router.post("/draft/{draft_id}/polish", response_model=PolishPublic)
+async def polish_draft_endpoint(
+    draft_id: UUID,
+    payload: PolishRequest,
+    loan_file: ScopedLoanFile,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> PolishPublic:
+    """Rewrite the processor's words so they read professionally (LP-856).
+
+    IT PROPOSES; IT DOES NOT REPLACE. Nothing is written here — the response is text the UI shows
+    beside the original, and accepting it is a separate `PUT /draft/{id}/body`. A rewrite that
+    landed on save would be a message going out in words nobody read, and the processor is the one
+    who will be asked about those words later.
+
+    IT FAILS VISIBLY OR NOT AT ALL. `email_draft_enabled` is off in every environment, so `refusal`
+    is the ordinary answer and the button says so. It never returns the text subtly altered and
+    calls it polish: a silent degradation is worse than an error, because the processor cannot tell
+    which version they are looking at.
+
+    THE DRAFT IS RESOLVED EVEN THOUGH THE TEXT COMES FROM THE CLIENT. Not to read the body — the
+    unsaved edit is the point — but because this is an action on a specific draft on a specific
+    file, and a route that rewrote arbitrary text for anybody authenticated would be an open model
+    endpoint wearing a loan file's URL.
+    """
+    draft = await db.get(Communication, draft_id)
+    if draft is None or draft.loan_file_id != loan_file.id or draft.deleted_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No such draft on this loan file")
+    if draft.status is not CommunicationStatus.DRAFT:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="This message has already been sent and cannot be changed.",
+        )
+
+    outcome = await polish(payload.body)
+    return PolishPublic(polished=outcome.text, refusal=outcome.refusal)
 
 
 @router.post("/draft/{draft_id}/send", response_model=SentCommunicationPublic)

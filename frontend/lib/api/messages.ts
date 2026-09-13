@@ -62,6 +62,26 @@ export function useReply(fileId: string) {
   });
 }
 
+/**
+ * A free draft — a message with no needs behind it (LP-856).
+ *
+ * NOT A SECOND KIND OF OBJECT. `create_compose_draft` has existed since LP-818 and produces an
+ * ordinary `Communication`: same list row, same modal, same buttons, an empty "What it asks for"
+ * block. A free draft that needed its own list, its own modal or its own send path would double
+ * every future change to drafts.
+ *
+ * THE RECIPIENT IS TYPED, NOT DERIVED, and nothing is written back to the file's party addresses
+ * from here — an address typed for one message is not a fact about the file.
+ */
+export function useComposeDraft(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { recipient: string; subject: string; body: string }) =>
+      (await apiClient.post<MessageSummary>(messagesPath(fileId), input)).data,
+    onSuccess: () => invalidateTimeline(queryClient, fileId),
+  });
+}
+
 export function useSetImportant(fileId: string) {
   const queryClient = useQueryClient();
   return useMutation({

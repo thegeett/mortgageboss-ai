@@ -206,3 +206,36 @@ class DraftConflictPublic(BaseModel):
                 for planned in exc.would_create
             ],
         )
+
+
+# --------------------------------------------------------------------------------------------- #
+# ✦ polish (LP-856)
+# --------------------------------------------------------------------------------------------- #
+class PolishRequest(BaseModel):
+    """The text to rewrite — what is ON SCREEN, not what is stored.
+
+    THE UNSAVED EDIT IS THE POINT. A processor presses polish having just typed something; reading
+    the stored body would rewrite the version before their last sentence, and the proposal would
+    differ from what they are looking at in a way nothing on screen explains.
+
+    NAMED `body` DELIBERATELY, so `test_no_draft_save_route.py` sees it. That guard's property is
+    "a route that takes body text from the client", and this one does — it simply does not WRITE it.
+    The route is allow-listed there with that reason, which keeps the exception visible rather than
+    hiding it behind a field called something else.
+    """
+
+    body: str = Field(min_length=1, max_length=200_000)
+
+
+class PolishPublic(BaseModel):
+    """A proposal, or the reason there is none.
+
+    BOTH SHAPES IN ONE RESPONSE rather than an error status, because a refusal here is an ordinary
+    outcome: `email_draft_enabled` is off in every environment, so "unavailable" is what a processor
+    gets today and it is not a failure of the request.
+    """
+
+    #: The rewritten message. None when `refusal` says why not.
+    polished: str | None
+    #: A word the UI turns into a sentence, and the log groups by. None on success.
+    refusal: str | None

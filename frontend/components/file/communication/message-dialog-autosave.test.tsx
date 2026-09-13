@@ -43,6 +43,10 @@ vi.mock("@/lib/api/communications", async (importOriginal) => ({
   useMessageDetail: (...args: unknown[]) => mockUseMessageDetail(...args),
   useSendDraft: () => ({ mutate: mockSend, isPending: false, isError: false }),
   useAttachUploadLink: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+  // LP-856 — the dialog now holds a polish mutation, and an unmocked one reaches for a
+  // QueryClient this tree does not have. `isPending: false` keeps the ✦ button in its resting
+  // state; what the button DOES is asserted in `message-dialog-polish.test.tsx`.
+  usePolishDraft: () => ({ mutate: vi.fn(), isPending: false }),
   useSaveDraftBody: () => ({ mutate: mockSave, isPending: false, isError: false }),
 }));
 

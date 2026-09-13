@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from app.ai.client import AIClientError, complete
@@ -212,6 +213,60 @@ def states_a_requirement(composition: DraftComposition) -> bool:
     return bool(_REQUIREMENT.search(composition.message))
 
 
+#: Every regulatory ground, in the order `regulatory_refusal` reports them.
+#:
+#: ONE ORDERED LIST, so the "first reason" and the "all reasons" answers cannot disagree about which
+#: grounds exist. The order is deliberate and unchanged: the regulatory refusals come before the
+#: stylistic ones, so a message that is both reports the reason that matters.
+_REGULATORY_GROUNDS: tuple[tuple[str, Callable[[DraftComposition], bool]], ...] = (
+    ("rate", states_a_rate),
+    ("money_amount", states_a_money_amount),
+    ("triggering_term", states_a_triggering_term),
+    ("commitment", states_a_commitment),
+    ("settlement_service", recommends_a_settlement_service),
+    ("payment_routing", states_payment_routing),
+    ("invented_instruction", states_a_requirement),
+)
+
+
+def regulatory_grounds(text: str) -> set[str]:
+    """EVERY regulatory ground this text trips, not just the first.
+
+    LP-856 NEEDS THE SET RATHER THAN THE HEAD, and the reason is a hole its own test found. Polish
+    refuses a ground the rewrite trips and the original did not — comparing the FIRST ground made a
+    message that already mentioned an amount able to acquire a commitment silently, because
+    `money_amount` is reported before `commitment` and both sides then read `money_amount`.
+
+    `regulatory_refusal` is this, narrowed to the first, so the two cannot disagree about which
+    grounds exist.
+    """
+    composition = DraftComposition(opening=text, bridge="", closing="")
+    found = {name for name, trips in _REGULATORY_GROUNDS if trips(composition)}
+    if leaked_identifiers_in(text):
+        found.add("identifier")
+    return found
+
+
+def regulatory_refusal(text: str) -> str | None:
+    """Why this text must not reach a borrower, on the grounds that do not depend on the facts.
+
+    LIFTED OUT FOR LP-856, which needs exactly these and none of the composition-shaped ones. The
+    polish button rewrites a processor's own words and has to be held to the same regulatory floor
+    as a composed framing — a model that turns "we need your statements" into "we can close by
+    Friday" has made a commitment the file did not make, and it does not matter which button
+    produced it.
+
+    ONE LIST, IMPORTED. A second copy of the regulatory checks would be the thing that drifts, and
+    the drift would be silent: the tests for each would pass over its own copy. `rejection_reason`
+    calls this rather than restating it.
+    """
+    grounds = regulatory_grounds(text)
+    for name, _ in _REGULATORY_GROUNDS:
+        if name in grounds:
+            return name
+    return "identifier" if "identifier" in grounds else None
+
+
 def rejection_reason(facts: DraftFacts, composition: DraftComposition) -> str | None:
     """Why this composition must not reach a borrower, or None if it may.
 
@@ -223,22 +278,12 @@ def rejection_reason(facts: DraftFacts, composition: DraftComposition) -> str | 
     Order is deliberate: the regulatory refusals come before the stylistic ones, so a message that is
     both reports the reason that matters.
     """
-    if states_a_rate(composition):
-        return "rate"
-    if states_a_money_amount(composition):
-        return "money_amount"
-    if states_a_triggering_term(composition):
-        return "triggering_term"
-    if states_a_commitment(composition):
-        return "commitment"
-    if recommends_a_settlement_service(composition):
-        return "settlement_service"
-    if states_payment_routing(composition):
-        return "payment_routing"
-    if states_a_requirement(composition):
-        return "invented_instruction"
-    if leaked_identifiers_in(composition.message):
-        return "identifier"
+    # LP-856 — THE REGULATORY FLOOR, IMPORTED RATHER THAN RESTATED. These eight were inline here
+    # and are now `regulatory_refusal`, so the polish button is held to the same list by
+    # construction. The order is unchanged and still deliberate: the regulatory refusals come
+    # before the stylistic ones, so a message that is both reports the reason that matters.
+    if refusal := regulatory_refusal(composition.message):
+        return refusal
     # The hallucination check, shared with `finding_prose` rather than re-derived — the number grammar
     # is a decision, and a second copy of it drifts (bug-006). `requested_labels` is unlicensed: a
     # label like "W-2s — the last two years" would otherwise license "2" anywhere in the output, the

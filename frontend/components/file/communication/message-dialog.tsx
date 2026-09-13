@@ -12,6 +12,7 @@ import {
 import {
   useAttachUploadLink,
   useMessageDetail,
+  usePolishDraft,
   useSaveDraftBody,
   useSendDraft,
 } from "@/lib/api/communications";
@@ -22,6 +23,7 @@ import {
   composeUrl,
   effectiveClient,
 } from "@/lib/communication/compose-routes";
+import { polishMessage } from "@/lib/communication/polish-messages";
 import { copyMessage } from "@/lib/markdown/copy-rich";
 import { emailBodyToHtml } from "@/lib/markdown/email-body";
 import { htmlToEmailBody } from "@/lib/markdown/from-html";
@@ -65,7 +67,7 @@ const MessageEditor = dynamic(
 const BODY_PROSE =
   "[&_p]:mb-3 [&_p:last-child]:mb-0 [&_ul]:mb-3 [&_ul]:ml-5 [&_ul]:list-disc [&_li]:mb-1.5 [&_strong]:font-semibold";
 import { messageInstant, messageTimeFull, messageTimeLabel } from "@/lib/message-time";
-import { Check, Copy, ExternalLink, Link as LinkIcon } from "lucide-react";
+import { Check, Copy, ExternalLink, Link as LinkIcon, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
@@ -185,6 +187,36 @@ export function MessageDialog({
     preferences.data !== undefined &&
     preferences.data.mail_client === null &&
     !askedThisSession;
+
+  // LP-856 — ✦ polish. THE PROPOSAL IS HELD, NOT APPLIED.
+  //
+  // A rewrite that landed silently on save is a message going out in words nobody read — and the
+  // processor is the one who will be asked about those words later. One click to accept, one to
+  // discard, and the original recoverable until they choose.
+  const polishDraft = usePolishDraft(fileId);
+  const [proposal, setProposal] = useState<string | null>(null);
+  const [polishRefusal, setPolishRefusal] = useState<string | null>(null);
+
+  function askForPolish() {
+    if (!data) return;
+    setPolishRefusal(null);
+    polishDraft.mutate(
+      { draftId: data.id, body: bodyForSend },
+      {
+        onSuccess: (result) => {
+          // IT FAILS VISIBLY OR NOT AT ALL. `email_draft_enabled` is off in every environment, so a
+          // refusal is the ordinary answer — and returning the text unchanged would look like a
+          // polish that decided nothing needed changing, which the processor could not tell apart.
+          if (result.polished === null) {
+            setPolishRefusal(result.refusal ?? "unavailable");
+            return;
+          }
+          setProposal(result.polished);
+        },
+        onError: () => setPolishRefusal("unavailable"),
+      },
+    );
+  }
 
   /** What just happened to the compose window — see the sentence under the buttons. */
   const [opened, setOpened] = useState<"idle" | "opened" | "blocked" | "copy-failed">("idle");
@@ -370,11 +402,90 @@ export function MessageDialog({
                       processor types. `data.body_format` says which language the body arrived in;
                       everything below derives the plain form on demand rather than holding a
                       second copy of the message. */}
-                    <MessageEditor
-                      value={data.body_format === "html" ? data.body : emailBodyToHtml(data.body)}
-                      format={data.body_format}
-                      onChange={onEdit}
-                    />
+                    {proposal === null ? (
+                      <>
+                        <MessageEditor
+                          value={
+                            data.body_format === "html" ? data.body : emailBodyToHtml(data.body)
+                          }
+                          format={data.body_format}
+                          onChange={onEdit}
+                        />
+                        {/* LP-856 — ✦ polish. VIOLET, because violet in the Ledger marks
+                            PROVENANCE — a model touched this — and never status. It is the one AI
+                            control on this screen and it is the only violet thing on it.
+
+                            AVAILABLE ON ANY DRAFT, not only a free one: a generated request a
+                            processor has rewritten by hand is exactly where it is wanted. */}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="gap-1.5 border-ai text-ai hover:bg-ai/5 hover:text-ai"
+                            disabled={polishDraft.isPending || bodyPlain.trim() === ""}
+                            onClick={askForPolish}
+                          >
+                            <Sparkles className="h-3.5 w-3.5" aria-hidden />
+                            {polishDraft.isPending ? "Polishing…" : "polish"}
+                          </Button>
+                          {polishRefusal ? (
+                            // IT FAILS VISIBLY OR NOT AT ALL. Each reason is a sentence rather than
+                            // a code, and none of them claims the text was changed.
+                            <span className="text-xs text-warning">
+                              {polishMessage(polishRefusal)}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              Rewrites how it reads. It cannot add a date, an amount or a document.
+                            </span>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      /* THE PROPOSAL REPLACES THE EDITOR IN PLACE, under a violet header — Screen 8.
+                         The original is held in `data.body` until one of the two actions is taken,
+                         so "Undo" is a restore rather than a second rewrite. */
+                      <div className="flex flex-col gap-2 border border-ai/40">
+                        <p className="border-b border-ai/40 bg-ai/5 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-ai">
+                          After ✦ polish — not saved yet
+                        </p>
+                        <div
+                          className={`message-body break-words px-3 py-2 text-sm text-foreground ${BODY_PROSE}`}
+                          // biome-ignore lint/security/noDangerouslySetInnerHtml: the proposal is model output rendered through the same escape-first renderer as a plain body — see below
+                          dangerouslySetInnerHTML={{ __html: emailBodyToHtml(proposal) }}
+                        />
+                        <div className="flex flex-wrap justify-end gap-2 border-t border-ai/40 px-3 py-2">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setProposal(null)}
+                          >
+                            Undo — put mine back
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => {
+                              // ACCEPTING IS A SAVE, which is what makes it authored content:
+                              // LP-853's rule says the body becomes `html` the moment a person
+                              // decides on it, and `_regenerate` then refuses it — correctly, since
+                              // there is nothing to regenerate on a message somebody chose.
+                              const html = emailBodyToHtml(proposal);
+                              setBodyHtml(html);
+                              setProposal(null);
+                              save.mutate(
+                                { draftId: data.id, body: html, subject },
+                                { onSuccess: () => setFormat("html") },
+                              );
+                            }}
+                          >
+                            Keep this
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                     <p className="text-xs text-muted-foreground">
                       {/* WHICH ROUTE KEEPS THE FORMATTING. `mailto:` bodies are plain text by RFC
                         6068 — no client renders markup in one — so the two buttons below are not

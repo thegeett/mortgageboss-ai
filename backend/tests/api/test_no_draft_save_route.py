@@ -64,6 +64,14 @@ _ALLOWED_ROUTES = frozenset(
         # LP-853 — the save. Safe only because `body_format` makes the row refuse the three
         # rewrites; see the module docstring and the behavioural tests it names.
         ("communications.py", "/draft/{draft_id}/body"),
+        # LP-856 — ✦ polish. It TAKES body text and WRITES nothing: the response is a proposal the
+        # UI shows beside the original, and accepting it is a separate PUT to the route above.
+        #
+        # ALLOW-LISTED RATHER THAN RENAMED. The payload field is called `body` on purpose, so this
+        # scan sees it and the exception is visible here — naming it `text` would have walked past
+        # the guard, which is the move this file's own history is a record of. If this route ever
+        # assigns to `draft.body`, that is the day the entry has to come out.
+        ("communications.py", "/draft/{draft_id}/polish"),
         # LP-818 — compose and reply CREATE a message from words a processor typed. They are not
         # this guard's hazard, which is overwriting a body somebody else generated: there is no
         # prior body, no template, and nothing for `_regenerate` to have produced. Listed rather

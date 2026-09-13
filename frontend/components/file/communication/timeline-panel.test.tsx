@@ -64,6 +64,9 @@ vi.mock("@/lib/api/communications", () => ({
   useAttachUploadLink: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
   // LP-853 — the dialog autosaves the processor's edit. Same reasoning as the line above: these
   // cases are about the LIST.
+  // LP-856 — the modal this panel opens now holds a polish mutation. Resting state only; the ✦
+  // button's behaviour is asserted in `message-dialog-polish.test.tsx`.
+  usePolishDraft: () => ({ mutate: vi.fn(), isPending: false }),
   useSaveDraftBody: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
   messageMailtoUrl: () => "mailto:someone@example.com",
 }));
