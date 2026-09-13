@@ -290,13 +290,13 @@ function MissingVsPresent({
               // LP-851 — THE ERROR COMES BACK HERE. "Request all" answers the open-draft decision
               // inside its own confirm rather than handing off to a second dialog, so it needs the
               // refusal rather than a toast about it.
-              onConfirm={(onConflict, onError) =>
+              onConfirm={(onConflict, onError, onSuccess) =>
                 onAct(
                   {
                     kind: "request-docs-bulk",
                     findingIds: missing.map((finding) => finding.id),
                   },
-                  { onConflict, onError },
+                  { onConflict, onError, onSuccess },
                 )
               }
             />

@@ -129,21 +129,17 @@ function DecisionBlock({
         </div>
       ) : null}
 
-      {multiple ? (
-        <div className="mt-3 flex flex-wrap justify-end gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={pending}
-            onClick={() => onChoose("mark_sent_and_new")}
-          >
-            Mark sent, start new
-          </Button>
-          <Button size="sm" disabled={pending} onClick={() => onChoose("append")}>
-            {bodyEdited ? "Add anyway" : "Add to it"}
-          </Button>
-        </div>
-      ) : null}
+      {/* LP-851 REVIEW — NO BUTTONS ON A PARTY ROW, because a party row cannot be answered on its
+          own. `on_conflict` is ONE value for the whole request: LP-850 plans every party and
+          applies the single answer to all of them. These buttons called the same global `onChoose`
+          as the footer, so pressing "Mark sent, start new" inside the BORROWER's block marked the
+          LENDER's draft sent too — stamping `requested_at`, writing an evidence row and moving its
+          needs to REQUESTED for a draft the processor never looked at.
+
+          The comment on the footer said "the per-party buttons above answer for one party each",
+          which is what made this invisible: the belief was in the file and the behaviour was not.
+          A row is now informational in the multi-party case, which is the same shape a
+          `would_create` row already has, and the whole request is answered once at the bottom. */}
     </div>
   );
 }
@@ -288,11 +284,22 @@ export function OpenDraftDialog({
             Cancel
           </Button>
           {multiple ? (
-            // ONE PRIMARY FOR THE WHOLE REQUEST. The per-party buttons above answer for one party
-            // each; this answers for all of them at once, which is the common case.
-            <Button disabled={pending} onClick={() => onChoose("append")}>
-              Do both
-            </Button>
+            // ONE ANSWER FOR THE WHOLE REQUEST, and both readings of it. `on_conflict` travels once
+            // per request, so this is the only place either choice can be made — and a multi-party
+            // refusal that offered only `append` would leave a processor who HAS sent those drafts
+            // with no way to say so except cancelling.
+            <>
+              <Button
+                variant="outline"
+                disabled={pending}
+                onClick={() => onChoose("mark_sent_and_new")}
+              >
+                I&apos;ve sent them — mark all sent, start new
+              </Button>
+              <Button disabled={pending} onClick={() => onChoose("append")}>
+                Do both
+              </Button>
+            </>
           ) : (
             <>
               <Button

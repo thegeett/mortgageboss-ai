@@ -41,6 +41,15 @@ export type RuleFindingAction =
 export interface RuleActionOptions {
   onConflict?: ConflictChoice;
   onError?: (error: unknown) => void;
+  /**
+   * LP-851 REVIEW — a caller that owns its own dialog has to be told the request WORKED.
+   *
+   * "Request all N" stopped closing its confirm on click, deliberately: the confirm grows the
+   * party blocks rather than being replaced. Nothing then closed it on the way out, so a
+   * successful request left the processor looking at "Request N documents?" with a live primary
+   * button — and clicking it again fired the request a second time.
+   */
+  onSuccess?: () => void;
 }
 
 type FormKind = "override" | "accept-risk" | "note";

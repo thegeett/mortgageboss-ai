@@ -127,12 +127,40 @@ describe("Screen 4 — one request, two parties", () => {
     expect(screen.getByText(/this creates a draft to closings@acmetitle.example/)).toBeTruthy();
   });
 
-  it("gives the party that DOES need a decision its own two buttons", () => {
+  it("answers the whole request once, because that is all `on_conflict` can carry", () => {
+    // LP-851 REVIEW — THIS ASSERTED PER-PARTY BUTTONS, WHICH DID NOT EXIST.
+    //
+    // Each party block rendered its own pair, and all of them called the SAME global `onChoose`.
+    // `on_conflict` is one value per request — LP-850 plans every party and applies the single
+    // answer to all of them — so pressing "Mark sent, start new" inside the borrower's block
+    // marked the LENDER's draft sent as well, stamping `requested_at` and writing an evidence row
+    // for a draft the processor never opened. The buttons were per-row on screen and global in
+    // effect, and the footer's own comment asserted the opposite.
+    //
+    // The answer is given once now, at the bottom, in both readings.
     render(<OpenDraftDialog conflict={twoParties} onCancel={vi.fn()} onChoose={vi.fn()} />);
 
-    expect(screen.getByRole("button", { name: "Mark sent, start new" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Add to it" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Mark sent, start new" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add to it" })).toBeNull();
     expect(screen.getByRole("button", { name: "Do both" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "I've sent them — mark all sent, start new" }),
+    ).toBeTruthy();
+  });
+
+  it("still lets a processor say they have already sent them", () => {
+    // THE CAPABILITY THE REMOVAL MUST NOT COST. Before this the multi-party footer offered only
+    // `append`, and the only route to `mark_sent_and_new` was the per-party buttons that answered
+    // for everybody. Removing those without adding this would leave a processor who HAS sent those
+    // drafts no way to say so except cancelling the request.
+    const onChoose = vi.fn();
+    render(<OpenDraftDialog conflict={twoParties} onCancel={vi.fn()} onChoose={onChoose} />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "I've sent them — mark all sent, start new" }),
+    );
+
+    expect(onChoose.mock.calls).toEqual([["mark_sent_and_new"]]);
   });
 
   it("says a party has no address rather than pretending it has one", () => {

@@ -131,3 +131,67 @@ describe("BulkRequestButton", () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("the confirm after a request that worked", () => {
+  /**
+   * LP-851 REVIEW — THE HALF THAT HAD NO PATH BACK.
+   *
+   * Before LP-851 this confirm closed on click (`setOpen(false); onConfirm()`). It now stays open
+   * on purpose, so the party blocks can GROW into it rather than a second dialog replacing it —
+   * and nothing closed it again when the request settled. A processor was left looking at
+   * "Request N documents?" with a live primary AFTER the documents had been requested, and
+   * clicking it asked for them a second time.
+   *
+   * Delivered the way the real caller delivers it: `verification-panel` calls the success handler
+   * from the mutation's own `onSuccess`, which is the only place that knows the request landed.
+   */
+  function settle(onSuccess: () => void) {
+    act(() => onSuccess());
+  }
+
+  it("closes when an ordinary confirm succeeds", () => {
+    const onConfirm = vi.fn();
+    render(<BulkRequestButton documents={DOCUMENTS} onConfirm={onConfirm} />);
+    fireEvent.click(screen.getByRole("button", { name: `Request all ${DOCUMENTS.length}` }));
+    fireEvent.click(screen.getByRole("button", { name: "Looks good" }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+
+    settle(onConfirm.mock.calls[0]?.[2] as () => void);
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("closes after the processor answers the conflict and the retry succeeds", () => {
+    const onConfirm = vi.fn();
+    render(<BulkRequestButton documents={DOCUMENTS} onConfirm={onConfirm} />);
+    fireEvent.click(screen.getByRole("button", { name: `Request all ${DOCUMENTS.length}` }));
+    fireEvent.click(screen.getByRole("button", { name: "Looks good" }));
+
+    deliver(onConfirm.mock.calls[0]?.[1] as (e: unknown) => void, refusal());
+    fireEvent.click(screen.getByRole("button", { name: "Add to the open draft" }));
+    // The answered request is a SECOND call to `onConfirm`, carrying the choice.
+    expect(onConfirm.mock.calls[1]?.[0]).toBe("append");
+
+    settle(onConfirm.mock.calls[1]?.[2] as () => void);
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("leaves nothing held, so the next request starts clean", () => {
+    // THE POSITIVE CONTROL FOR THE CLOSE. A dialog that closed while still holding the refusal
+    // would reopen showing the previous conflict the next time a processor pressed the button —
+    // the "Looks good" primary is what proves it came back in its unanswered state.
+    const onConfirm = vi.fn();
+    render(<BulkRequestButton documents={DOCUMENTS} onConfirm={onConfirm} />);
+    fireEvent.click(screen.getByRole("button", { name: `Request all ${DOCUMENTS.length}` }));
+    fireEvent.click(screen.getByRole("button", { name: "Looks good" }));
+    deliver(onConfirm.mock.calls[0]?.[1] as (e: unknown) => void, refusal());
+    fireEvent.click(screen.getByRole("button", { name: "Add to the open draft" }));
+    settle(onConfirm.mock.calls[1]?.[2] as () => void);
+
+    fireEvent.click(screen.getByRole("button", { name: `Request all ${DOCUMENTS.length}` }));
+
+    expect(screen.getByRole("button", { name: "Looks good" })).toBeTruthy();
+    expect(screen.queryByText("Bank statement — March")).toBeNull();
+  });
+});

@@ -45,18 +45,35 @@ export function BulkRequestButton({
    * THE CALLER KEEPS ITS OWN PAYLOAD. A shape that could carry every door's arguments would be a
    * second definition of "a request" for this button to get wrong.
    */
-  onConfirm: (onConflict: ConflictChoice | undefined, onError: (error: unknown) => void) => void;
+  onConfirm: (
+    onConflict: ConflictChoice | undefined,
+    onError: (error: unknown) => void,
+    onSuccess: () => void,
+  ) => void;
 }) {
   const [open, setOpen] = useState(false);
   const conflict = useDraftConflict();
 
   function fire(choice?: ConflictChoice) {
-    onConfirm(choice, (error) => {
-      // Held HERE rather than in a dialog of its own — see the header.
-      if (conflict.capture(error, (next) => fire(next))) return;
-      // An ordinary failure closes the confirm; the caller's toast says what went wrong.
-      setOpen(false);
-    });
+    onConfirm(
+      choice,
+      (error) => {
+        // Held HERE rather than in a dialog of its own — see the header.
+        if (conflict.capture(error, (next) => fire(next))) return;
+        // An ordinary failure closes the confirm; the caller's toast says what went wrong.
+        setOpen(false);
+      },
+      // LP-851 REVIEW — AND SO DOES A REQUEST THAT WORKED. Before LP-851 the confirm closed on
+      // click (`setOpen(false); onConfirm()`); it now stays open so it can GROW the party blocks
+      // instead of handing off to a second dialog, and nothing closed it again on the way out.
+      // Both paths were affected — an ordinary "Looks good" and an answered conflict — so a
+      // processor was left looking at "Request N documents?" with a live primary after the
+      // documents had already been requested, and clicking it asked for them twice.
+      () => {
+        conflict.cancel();
+        setOpen(false);
+      },
+    );
   }
 
   const found = conflict.conflict;
@@ -123,9 +140,22 @@ export function BulkRequestButton({
             </Button>
             {found ? (
               multiple ? (
-                <Button disabled={conflict.pending} onClick={() => conflict.choose("append")}>
-                  Do both
-                </Button>
+                // LP-851 REVIEW — BOTH READINGS, in the one place the answer can be given. See
+                // `open-draft-dialog.tsx`: `on_conflict` is one value for the whole request, so a
+                // multi-party refusal offering only `append` left a processor who HAS sent those
+                // drafts no way to say so except cancelling the request entirely.
+                <>
+                  <Button
+                    variant="outline"
+                    disabled={conflict.pending}
+                    onClick={() => conflict.choose("mark_sent_and_new")}
+                  >
+                    Mark all sent, start new
+                  </Button>
+                  <Button disabled={conflict.pending} onClick={() => conflict.choose("append")}>
+                    Do both
+                  </Button>
+                </>
               ) : (
                 <>
                   <Button

@@ -472,6 +472,9 @@ function VerificationBody({
       // LP-826 built `requestConsequence` and wired it into `findings-list` only; this is the
       // half where a processor clicks.
       onSuccess: (status) => {
+        // LP-851 REVIEW — THE CALLER'S OWN DIALOG CLOSES HERE. It is the only thing that knows the
+        // request settled, and "Request all N" deliberately no longer closes on click.
+        options?.onSuccess?.();
         if (action.kind !== "request-docs" && action.kind !== "request-docs-bulk") return;
         notifySuccess({
           title: "Documents requested",
