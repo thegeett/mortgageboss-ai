@@ -660,10 +660,12 @@ describe("the rendered body", () => {
 });
 
 /**
- * LP-855 — the picker, wired.
+ * LP-858 §1 — the picker, wired to the BUTTON.
  *
  * `mail-client-dialog.test.tsx` covers the dialog itself. These are about WHEN it appears, which is
- * the half that lives here: once, on the first editable draft, and never again after an answer.
+ * the half that lives here — and it is the half the ticket was filed about. It used to open on the
+ * first editable draft of a session, so a processor who clicked a draft was asked which mail client
+ * they use about a message they had not read. It opens on `Copy & open …` now, and on nothing else.
  */
 describe("the mail-client picker", () => {
   function unanswered() {
@@ -697,32 +699,96 @@ describe("the mail-client picker", () => {
     Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
     render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
+    // LP-858 §1 — the picker is raised by the button now, so the gesture starts here.
+    fireEvent.click(screen.getByRole("button", { name: "Copy & open mail app" }));
     fireEvent.click(screen.getByRole("button", { name: "Use Gmail" }));
 
-    // The server still says null — the mock never resolved — and the button has moved anyway.
+    // The server still says null — the mock never resolved — and the route has moved anyway.
     expect(mockSavePreferences.mutate).toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Copy & open Gmail" })).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: "Copy & open Gmail" }));
     await vi.waitFor(() => expect(open).toHaveBeenCalled());
     expect(open.mock.calls[0]?.[0] as string).toContain("mail.google.com");
+    // AND THE LABEL FOLLOWS, so the next press says where it goes rather than reverting to "mail
+    // app" for the rest of a session in which the PUT never landed.
+    expect(screen.getByRole("button", { name: "Copy & open Gmail" })).toBeTruthy();
   });
 
-  it("ACCEPTANCE 5 — asks on the first draft, and the button meanwhile says 'mail app'", () => {
+  it("opening a draft does not ask which mail client", () => {
+    // THE REPORTED DEFECT, INVERTED. *"on clicking draft, it suddenly asked me to choose what email
+    // client you want to open. Basically it should display the email first and later on clicking
+    // action button I should get that pop up."*
+    //
+    // The old shape was `open={open && !needsClient}` — so the picker was not merely ON TOP of the
+    // draft, the draft was SUPPRESSED behind it. Both halves are asserted: no question, and the
+    // message is on screen.
     unanswered();
     mockUseMessageDetail.mockReturnValue(
       state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
     );
     render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
-    // ONE DIALOG AT A TIME. Two open Radix modals mark each other `aria-hidden`, so both vanish
-    // from the accessibility tree — measured at zero reachable buttons. The picker is one question
-    // and one click; the draft opens behind it the moment it is answered.
-    expect(screen.getByRole("heading", { name: "Where do you write your email?" })).toBeTruthy();
-    expect(screen.getAllByRole("dialog")).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "Use Gmail" })).toBeTruthy();
-    // The message's own buttons are not competing with it.
-    expect(screen.queryByRole("button", { name: /Copy & open/ })).toBeNull();
+    expect(screen.queryByRole("heading", { name: /Which mail app/ })).toBeNull();
+    // THE DRAFT IS THE THING ON SCREEN, which is what the processor clicked for. Without this the
+    // assertion above also passes on a dialog that rendered nothing at all.
+    expect(screen.getByRole("button", { name: "Copy & open mail app" })).toBeTruthy();
+    expect(screen.getByLabelText("Send to")).toBeTruthy();
+  });
+
+  it("Copy & open asks once, then completes the action", async () => {
+    // ANSWERING COMPLETES THE ORIGINAL GESTURE. A picker that asked and then made the processor
+    // press the same button a second time would satisfy "ask on the button" and still be the wrong
+    // product — they already said what they wanted.
+    unanswered();
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
+    );
+    const open = vi.fn().mockReturnValue({});
+    Object.defineProperty(window, "open", { configurable: true, value: open });
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    // Nothing has opened yet: the button has not been pressed.
+    expect(open).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy & open mail app" }));
+
+    // NOW it asks — and still has not opened anything, because it does not know where to.
+    expect(screen.getByRole("heading", { name: "Which mail app should this open?" })).toBeTruthy();
+    expect(open).not.toHaveBeenCalled();
+
+    // §5 — THE DRAFT STAYS VISIBLE BEHIND THE DIALOG. The shape being replaced did not merely
+    // layer the picker on top, it unmounted the message: `open={open && !needsClient}`. Asserted
+    // by TEXT rather than by role, deliberately — Radix marks the pane behind the topmost modal
+    // `aria-hidden`, which is correct for something that cannot be interacted with, and a role
+    // query would fail on a draft that is on screen and readable.
+    expect(screen.getByText(/Please send/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Use Gmail" }));
+
+    // ONE gesture: the answer lands, the question goes, and the compose window opens on the client
+    // just chosen — not on `mailto:`, which is what reading the unrefreshed preference would give.
+    await vi.waitFor(() => expect(open).toHaveBeenCalled());
+    expect(open.mock.calls[0]?.[0] as string).toContain("mail.google.com");
+    expect(screen.queryByRole("heading", { name: /Which mail app/ })).toBeNull();
+  });
+
+  it("Copy message and Mark as sent never raise it", () => {
+    // §5: "Never on opening a draft, never on `Copy message`, never on `Mark as sent`, never on
+    // mount." The first and last are above; these are the two buttons that share the row with the
+    // one that DOES ask, which is where a broad trigger would hide.
+    unanswered();
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
+    );
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy message" }));
+    expect(screen.queryByRole("heading", { name: /Which mail app/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Mark as sent/ }));
+    expect(screen.queryByRole("heading", { name: /Which mail app/ })).toBeNull();
+    // The control: `Mark as sent` did its own job, so this is not passing on a dead button.
+    expect(mockSend).toHaveBeenCalled();
   });
 
   it("ACCEPTANCE 5 — a processor who takes the safe answer gets 'mail app'", () => {
@@ -740,19 +806,25 @@ describe("the mail-client picker", () => {
     );
     render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
-    expect(screen.queryByRole("heading", { name: "Where do you write your email?" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Which mail app should this open?" })).toBeNull();
     expect(screen.getByRole("button", { name: "Copy & open mail app" })).toBeTruthy();
   });
 
   it("does not ask again once it is answered", () => {
-    // THE CONTROL. A picker that opened on every draft would satisfy the case above and be the
-    // thing a processor complains about by the third file.
+    // THE CONTROL on the case above. `mail_client` is "gmail" in the default fixture, so a press
+    // goes straight through — asserted by the compose window opening with no question in between.
     mockUseMessageDetail.mockReturnValue(
       state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
     );
+    const open = vi.fn().mockReturnValue({});
+    Object.defineProperty(window, "open", { configurable: true, value: open });
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
     render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
-    expect(screen.queryByText("Where do you write your email?")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Copy & open Gmail" }));
+
+    expect(screen.queryByText("Which mail app should this open?")).toBeNull();
+    return vi.waitFor(() => expect(open).toHaveBeenCalled());
   });
 
   it("ACCEPTANCE 4 — the answer is saved as a preference, not held in the page", () => {
@@ -762,6 +834,7 @@ describe("the mail-client picker", () => {
     );
     render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
+    fireEvent.click(screen.getByRole("button", { name: "Copy & open mail app" }));
     fireEvent.click(screen.getByRole("button", { name: "Use Gmail" }));
 
     // Persisted per USER, through the preferences API — so it survives a reload, a different file
@@ -776,7 +849,7 @@ describe("the mail-client picker", () => {
     mockUseMessageDetail.mockReturnValue(state(detail({ is_editable: false, status: "sent" })));
     render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
-    expect(screen.queryByText("Where do you write your email?")).toBeNull();
+    expect(screen.queryByText("Which mail app should this open?")).toBeNull();
   });
 
   it("does not ask before the preferences have loaded", () => {
@@ -789,7 +862,7 @@ describe("the mail-client picker", () => {
     );
     render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
-    expect(screen.queryByText("Where do you write your email?")).toBeNull();
+    expect(screen.queryByText("Which mail app should this open?")).toBeNull();
     // And the button still works, on the safe answer.
     expect(screen.getByRole("button", { name: "Copy & open mail app" })).toBeTruthy();
   });

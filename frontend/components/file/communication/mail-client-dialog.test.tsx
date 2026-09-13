@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * LP-855 Screen 10 — "Where do you write your email?"
+ * LP-855 Screen 10 — "Which mail app should this open?"
  *
  * THE SEED MOVES A RADIO BUTTON AND SAYS WHY. IT NEVER DECIDES. That is the property these are
  * about: a guess that applied itself would open the wrong compose window with nothing on screen

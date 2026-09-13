@@ -1,11 +1,13 @@
 "use client";
 
 /**
- * "Where do you write your email?" — Screen 10 (LP-855).
+ * "Which mail app should this open?" — Screen 10 (LP-855).
  *
- * SHOWN ONCE, ON THE FIRST DRAFT. Nothing in a browser reports which mail client somebody uses, so
- * it is asked rather than detected. Asking on the first draft is asking at the moment it is about
- * to matter, which is the only moment the question makes sense.
+ * SHOWN ONCE, ON PRESSING `Copy & open …`. Nothing in a browser reports which mail client somebody
+ * uses, so it is asked rather than detected — and LP-858 §1 moved WHEN. It used to open on the
+ * first editable draft of a session, which asked about a message the processor had not read yet;
+ * the button press is the moment the answer is about to matter, and the only moment the question
+ * makes sense. The caller completes the action with the answer in the same gesture.
  *
  * THE SEED MOVES A RADIO BUTTON AND SAYS WHY. IT NEVER DECIDES. A guess that applied itself would
  * open the wrong compose window with nothing on screen explaining it, and the processor would have
@@ -72,10 +74,12 @@ export function MailClientDialog({
     <Dialog open={open} onOpenChange={() => undefined}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-base">Where do you write your email?</DialogTitle>
+          {/* LP-858 §10 — THE LITERAL STRINGS, from the design contract. The title names the
+              decision being made rather than asking about a habit, because this is raised by a
+              button press now (§1) and the processor is mid-action. */}
+          <DialogTitle className="text-base">Which mail app should this open?</DialogTitle>
           <DialogDescription className="text-xs">
-            We&apos;ll copy the message and open the right compose window for you. You can change
-            this any time in settings.
+            Asked once. You can change it in preferences.
           </DialogDescription>
         </DialogHeader>
 

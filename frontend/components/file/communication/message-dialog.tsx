@@ -168,7 +168,8 @@ export function MessageDialog({
   // the answer is about to matter, and never again once answered.
   const preferences = usePreferences();
   const savePreferences = useUpdatePreferences();
-  const [askedThisSession, setAskedThisSession] = useState(false);
+  // LP-858 §1 — WHETHER THE PICKER IS UP. Driven by a button press and nothing else.
+  const [pickerOpen, setPickerOpen] = useState(false);
   // LP-855 REVIEW — WHAT THEY JUST PICKED, HELD HERE UNTIL THE SERVER AGREES.
   //
   // `onChoose` closes the picker and fires the save, and the compose route read
@@ -188,11 +189,20 @@ export function MessageDialog({
   // time, which is true and is the right thing to happen.
   const [chosenClient, setChosenClient] = useState<MailClient | null>(null);
   const activeClient = chosenClient ?? preferences.data?.mail_client ?? null;
-  const needsClient =
-    data?.is_editable === true &&
-    preferences.data !== undefined &&
-    preferences.data.mail_client === null &&
-    !askedThisSession;
+  // LP-858 §1 — A CAPABILITY QUESTION, NOT A TRIGGER.
+  //
+  // This used to drive the picker's `open` prop AND suppress the draft behind it
+  // (`open={open && !needsClient}`), so the first editable draft of a session opened onto a
+  // question about a message the processor had not read yet. Reported from use: *"on clicking
+  // draft, it suddenly asked me to choose what email client you want to open."*
+  //
+  // It is now read by `copyAndOpen` and by nothing else. Pressing `Copy & open …` is the only
+  // moment the answer matters, which is the only moment worth asking it.
+  //
+  // NO `is_editable` HERE. The only caller is the handler behind a button that renders inside the
+  // editable branch, so a condition for it on this line is one no mutation could find — the same
+  // decoration LP-857 removed from `needsAnAddress`. A sent message has no button to press.
+  const needsClient = preferences.data !== undefined && preferences.data.mail_client === null;
 
   // LP-856 — ✦ polish. THE PROPOSAL IS HELD, NOT APPLIED.
   //
@@ -266,8 +276,21 @@ export function MessageDialog({
    * means the worst case is "the message is on your clipboard, open your mail app yourself" —
    * which is exactly what the sentence under the buttons then says.
    */
-  async function copyAndOpen() {
+  async function copyAndOpen(chosen?: MailClient) {
     if (!data) return;
+
+    // LP-858 §1 — ASK HERE, AND ONLY HERE. `Copy message`, `Mark as sent` and simply reading the
+    // draft need no client and must not raise this.
+    //
+    // `chosen` is the answer arriving from the picker, passed in rather than read from state
+    // because `setChosenClient` has not re-rendered yet when `onChoose` calls back. That is what
+    // makes answering COMPLETE the action in the same gesture instead of arming it for a second
+    // press — the failure this section of the ticket is about, one step later.
+    const client = chosen ?? activeClient;
+    if (client === null && needsClient) {
+      setPickerOpen(true);
+      return;
+    }
 
     // LP-855 REVIEW — A REJECTED CLIPBOARD MUST NOT MAKE THE BUTTON DO NOTHING.
     //
@@ -287,7 +310,7 @@ export function MessageDialog({
       copyFailed = true;
     }
 
-    const url = composeUrl(effectiveClient(activeClient), {
+    const url = composeUrl(effectiveClient(client), {
       to: recipient.trim(),
       subject,
     });
@@ -373,7 +396,7 @@ export function MessageDialog({
 
           So there is one at a time. The picker is one question that takes one click, and the draft
           opens behind it the moment it is answered. */}
-      <Dialog open={open && !needsClient} onOpenChange={(next) => !next && close()}>
+      <Dialog open={open} onOpenChange={(next) => !next && close()}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="text-base">
@@ -749,26 +772,34 @@ export function MessageDialog({
           ) : null}
         </DialogContent>
       </Dialog>
-      {/* LP-855 — ASKED ONCE, ON THE FIRST DRAFT, AND RENDERED LAST.
+      {/* LP-858 §1 — ASKED ON THE BUTTON, AND RENDERED LAST.
 
-          The order is load-bearing rather than stylistic. Two modals are open at once here, and
-          Radix marks everything outside the TOPMOST one `aria-hidden` — so with the picker first it
-          was rendered, visible to `getByText`, and absent from the accessibility tree: a question a
-          screen reader never announced and a keyboard user could not reach, sitting in front of the
-          button it configures. Caught by the picker's own test failing to find its primary.
+          LAST MEANS TOPMOST, and that half is still load-bearing. Radix marks everything outside
+          the topmost modal `aria-hidden`, so with the picker rendered FIRST it was visible to
+          `getByText` and absent from the accessibility tree: a question a screen reader never
+          announced, sitting in front of the button it configures. Caught by the picker's own test
+          failing to find its primary.
 
-          Last means topmost, which is also the right order for the person: answer where you write
-          your email, then send the message. */}
+          WHAT CHANGED IS THE TRIGGER, NOT THE ORDER. The previous fix for that collision also
+          suppressed the draft underneath (`open={open && !needsClient}`), which solved the
+          accessibility bug by creating the one this ticket is about. Opening on a button press
+          means there is never a second modal to collide with on mount — the draft is a pane now,
+          not a competing dialog — so both fixes hold and neither is re-solved. */}
       <MailClientDialog
-        open={needsClient}
+        open={pickerOpen}
         suggested={preferences.data?.suggested_mail_client ?? "mailto"}
         reason={preferences.data?.mail_client_suggestion_reason ?? ""}
         pending={savePreferences.isPending}
         onChoose={(client) => {
           // THE ANSWER TAKES EFFECT NOW, not when the PUT returns. See `chosenClient`.
           setChosenClient(client);
-          setAskedThisSession(true);
+          setPickerOpen(false);
           savePreferences.mutate({ mail_client: client });
+          // AND THE ORIGINAL ACTION COMPLETES IN THE SAME GESTURE. The processor pressed
+          // `Copy & open`; answering a question we interrupted them with is not a reason to make
+          // them press it again. `client` is passed rather than read back from state, which has
+          // not re-rendered yet.
+          void copyAndOpen(client);
         }}
       />
     </>
