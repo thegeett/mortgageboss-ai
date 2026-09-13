@@ -17,7 +17,16 @@ export function polishMessage(refusal: string): string {
     // page already open, or the request failed. The old wording named the ENVIRONMENT as the
     // reason, which is a permanent state a processor can do nothing about and reads as breakage;
     // what is true in the case that survives is that it did not run and nothing moved.
-    return "Polish didn’t run — your message is unchanged. Try again in a moment.";
+    //
+    // LP-858 REVIEW — AND IT PROMISES NO RETRY, because this string has THREE producers and they
+    // do not agree about whether one would help. `polish()` returns `unavailable` when
+    // `email_draft_enabled` is off, which is permanent; it returns the same word on a transport
+    // failure, and the client uses it again for a failed request, both of which are transient.
+    // "Try again in a moment" was true of the last two and false of the first — the same shape as
+    // the wording it replaced, inverted: that one asserted a permanent state, this one asserted a
+    // passing one. What every producer agrees on is that it did not run and the text did not move,
+    // so that is all this says. The processor can retry or leave it; neither is promised.
+    return "Polish didn’t run — your message is unchanged.";
   }
   if (refusal === "empty") {
     return "There is nothing to polish yet.";
