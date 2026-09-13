@@ -570,3 +570,98 @@ async def test_one_partys_outstanding_documents_stay_out_of_anothers_draft(
     assert title.draft is not None
     assert "Title commitment" in (title.draft.body or "")
     assert "Closing disclosure" not in (title.draft.body or "")
+
+
+async def test_one_answer_applies_to_every_conflicted_party(db_session: AsyncSession) -> None:
+    """ONE `on_conflict` PER REQUEST, AND IT ANSWERS FOR ALL OF THEM (LP-851 review).
+
+    `add_needs_to_draft` takes a single `on_conflict` and applies it to every party it planned. That
+    is the contract LP-850's endpoint sketch describes — one value, not a value per party — and it
+    is the reason LP-851's multi-party dialog answers once at the bottom rather than per row.
+
+    IT WENT UNTESTED AND THE UI BELIEVED OTHERWISE. Screen 4 gives each party block its own "Mark
+    sent, start new", and the first implementation wired every one of them to the same global
+    answer — so pressing it inside the BORROWER's block marked the LENDER's draft sent too:
+    `requested_at` stamped, an evidence row written, its needs moved to `REQUESTED`, for a draft the
+    processor never opened. Nothing here contradicted that belief, because nothing here asserted
+    what a multi-party answer does.
+
+    So this pins the behaviour rather than the screen. If per-party answers are ever wanted, THIS is
+    the test that has to change first, and the endpoint with it.
+    """
+    loan_file, actor = await _file_and_actor(db_session)
+
+    borrower_need = await _need(
+        db_session, loan_file, title="Bank statements", needs_type="bank_statement"
+    )
+    title_need = await _need(
+        db_session, loan_file, title="Title commitment", needs_type="title_commitment"
+    )
+    opened = await add_needs_to_draft(
+        db_session,
+        loan_file=loan_file,
+        needs=[borrower_need, title_need],
+        actor_user_id=actor,
+    )
+    open_ids = {p.party: p.draft.id for p in opened.parties if p.draft is not None}
+    assert set(open_ids) == {ResponsibleParty.BORROWER, ResponsibleParty.TITLE}
+
+    more_borrower = await _need(db_session, loan_file, title="Pay stubs", needs_type="pay_stub")
+    # A SECOND TITLE-COMPANY DOCUMENT. `payoff_statement` was the first choice and routes to the
+    # PROCESSOR — `NO_RECIPIENT`, so it never becomes a draft at all and the test asserted about a
+    # party that was never in the request. The catalog decides this, not the name.
+    more_title = await _need(db_session, loan_file, title="Survey", needs_type="survey")
+    await add_needs_to_draft(
+        db_session,
+        loan_file=loan_file,
+        needs=[more_borrower, more_title],
+        actor_user_id=actor,
+        on_conflict=OnConflict.MARK_SENT_AND_NEW,
+    )
+
+    # BOTH of the drafts that were open are now sent — not just the one whose row was pressed.
+    for party, draft_id in open_ids.items():
+        row = await db_session.get(Communication, draft_id)
+        assert row is not None
+        assert row.status is CommunicationStatus.SENT, f"{party.value}'s draft was not marked sent"
+
+
+async def test_append_also_answers_for_every_conflicted_party(
+    db_session: AsyncSession,
+) -> None:
+    """THE CONTROL, in the other direction. A single answer that only ever reached ONE party would
+    satisfy the test above by leaving the second draft open — and would silently drop the second
+    party's new document, which is this epic's own worst failure."""
+    loan_file, actor = await _file_and_actor(db_session)
+
+    borrower_need = await _need(
+        db_session, loan_file, title="Bank statements", needs_type="bank_statement"
+    )
+    title_need = await _need(
+        db_session, loan_file, title="Title commitment", needs_type="title_commitment"
+    )
+    opened = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=[borrower_need, title_need], actor_user_id=actor
+    )
+    open_ids = {p.party: p.draft.id for p in opened.parties if p.draft is not None}
+
+    more_borrower = await _need(db_session, loan_file, title="Pay stubs", needs_type="pay_stub")
+    # A SECOND TITLE-COMPANY DOCUMENT. `payoff_statement` was the first choice and routes to the
+    # PROCESSOR — `NO_RECIPIENT`, so it never becomes a draft at all and the test asserted about a
+    # party that was never in the request. The catalog decides this, not the name.
+    more_title = await _need(db_session, loan_file, title="Survey", needs_type="survey")
+    await add_needs_to_draft(
+        db_session,
+        loan_file=loan_file,
+        needs=[more_borrower, more_title],
+        actor_user_id=actor,
+        on_conflict=OnConflict.APPEND,
+    )
+
+    borrower_draft = await db_session.get(Communication, open_ids[ResponsibleParty.BORROWER])
+    title_draft = await db_session.get(Communication, open_ids[ResponsibleParty.TITLE])
+    assert borrower_draft is not None and title_draft is not None
+    assert "Pay stubs" in (borrower_draft.body or "")
+    assert "Survey" in (title_draft.body or "")
+    assert borrower_draft.status is CommunicationStatus.DRAFT
+    assert title_draft.status is CommunicationStatus.DRAFT
