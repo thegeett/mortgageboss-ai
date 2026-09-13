@@ -13,7 +13,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { EXTENSIONS } from "@/components/file/communication/message-editor";
+import { EXTENSIONS, isSafeHref } from "@/components/file/communication/message-editor";
 import { describe, expect, it } from "vitest";
 import { emailBodyToHtml } from "./email-body";
 import { ALLOWED_SCHEMES, AT_RISK_IN_WORD, EMAIL_SCHEMA, EMAIL_TAGS } from "./schema";
@@ -167,5 +167,41 @@ describe("the check can fail", () => {
       expect(EMAIL_TAGS).toContain(tag);
     }
     expect(AT_RISK_IN_WORD.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * LP-854 review, round two — the href rule, from the corpus BOTH sides read.
+ *
+ * `isSafeHref` and `href_is_safe` are one rule in two languages. They were checked once by running
+ * a set of hrefs through both and found to agree, which was true and did not mean they implemented
+ * the same rule: four more cases separated them, every one in the direction where the editor said
+ * safe and the sanitiser said no — the editor accepting a link the server then strips, which is a
+ * link vanishing on save.
+ *
+ * So the corpus is shared rather than the comparison repeated. `href-cases.json` is the one list;
+ * `tests/communications/test_sanitise_lp853.py` reads the same file.
+ */
+describe("the href rule, against the shared corpus", () => {
+  const CASES = JSON.parse(
+    readFileSync(join(process.cwd(), "lib", "markdown", "href-cases.json"), "utf8"),
+  ) as { safe: string[]; refused: string[] };
+
+  it("has a corpus to read", () => {
+    // The positive control. Two empty lists satisfy every assertion below.
+    expect(CASES.safe.length).toBeGreaterThanOrEqual(10);
+    expect(CASES.refused.length).toBeGreaterThanOrEqual(20);
+  });
+
+  it("accepts every href the corpus calls safe", () => {
+    for (const href of CASES.safe) {
+      expect(isSafeHref(href), `${JSON.stringify(href)} should be safe`).toBe(true);
+    }
+  });
+
+  it("refuses every href the corpus calls refused", () => {
+    for (const href of CASES.refused) {
+      expect(isSafeHref(href), `${JSON.stringify(href)} should be refused`).toBe(false);
+    }
   });
 });

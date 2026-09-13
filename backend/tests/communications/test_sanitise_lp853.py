@@ -354,3 +354,48 @@ def test_dropping_a_refused_link_neither_duplicates_nor_loses_its_text(
     closing tag, a nested anchor, and an empty one.
     """
     assert sanitise_html(source) == expected
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-854 review, round two — the href rule, from the corpus BOTH sides read
+# --------------------------------------------------------------------------------------------- #
+def _href_cases() -> dict[str, list[str]]:
+    """The shared corpus. See `frontend/lib/markdown/href-cases.json` for why it is shared."""
+    import json
+    from pathlib import Path
+
+    path = (
+        Path(__file__).resolve().parents[2].parent
+        / "frontend"
+        / "lib"
+        / "markdown"
+        / "href-cases.json"
+    )
+    with path.open(encoding="utf-8") as handle:
+        return dict(json.load(handle))
+
+
+def test_the_shared_corpus_is_readable_and_not_empty() -> None:
+    """THE POSITIVE CONTROL. Both assertions below are satisfied by two empty lists, and a path that
+    stopped resolving — a moved file, a renamed directory — would produce exactly that."""
+    cases = _href_cases()
+    assert len(cases["safe"]) >= 10
+    assert len(cases["refused"]) >= 20
+
+
+def test_every_href_the_corpus_calls_safe_is_safe() -> None:
+    for href in _href_cases()["safe"]:
+        assert href_is_safe(href) is True, f"{href!r} should be safe"
+
+
+def test_every_href_the_corpus_calls_refused_is_refused() -> None:
+    """THE FOUR THAT SEPARATED THE TWO IMPLEMENTATIONS ARE IN HERE.
+
+    `isSafeHref` and this function are one rule in two languages. They were compared once by running
+    a set of hrefs through both and found to agree — true, and not the same thing as implementing
+    the same rule. A vertical tab, a form feed, a DEL and an SOH in the middle of a scheme were each
+    stripped by the editor and kept here, so the editor called them safe and this refused them: an
+    editor accepting a link the server then strips, which is a link vanishing on save.
+    """
+    for href in _href_cases()["refused"]:
+        assert href_is_safe(href) is False, f"{href!r} should be refused"

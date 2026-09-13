@@ -350,15 +350,29 @@ function promptForLink(editor: Editor): void {
  * rather than against what the string looks like.
  */
 export function isSafeHref(value: string): boolean {
-  // BY CODE POINT, NOT BY A REGEX, for two reasons. Biome forbids control characters in a regex
-  // literal — reasonably, since they are usually a mistake — and this is one of the few places they
-  // are the point. It also mirrors `href_is_safe` in `sanitise.py`, which filters on
-  // `isprintable() and not isspace()`: one rule, written the same way on both sides.
-  const cleaned = [...value]
-    .filter((character) => {
-      const code = character.codePointAt(0) ?? 0;
-      return code > 0x20 && code !== 0x7f;
-    })
+  // EXACTLY WHAT A BROWSER STRIPS, AND NOTHING MORE — the same rule as `href_is_safe` in
+  // `sanitise.py`, because two rules that merely agree on the cases somebody tried are two rules.
+  //
+  // THIS OVER-STRIPPED, AND IN THE DIRECTION THAT MATTERS. It removed every character below 0x21
+  // and DEL from ANYWHERE in the string, which is wider than WHATWG's rule: `htt\x0bp://x.com`
+  // cleaned to `http` and was called safe, while the server — correctly — refused it. Measured
+  // across a shared corpus: four hrefs where the editor said yes and the sanitiser said no, so the
+  // editor would accept a link the server then strips. A link vanishing on save is the precise
+  // failure LP-854 exists to prevent, arrived at from the security check rather than the schema.
+  //
+  // WHATWG's URL parser strips leading and trailing C0 controls and space, and removes tab, CR and
+  // LF anywhere. That is the whole list, and it is what makes `java<TAB>script:` run.
+  // Written by code point rather than as a regex literal: Biome forbids control characters in one,
+  // reasonably, and this is one of the few places they are the subject rather than a mistake.
+  const isC0OrSpace = (character: string) => (character.codePointAt(0) ?? 0) <= 0x20;
+  const characters = [...value];
+  let start = 0;
+  let end = characters.length;
+  while (start < end && isC0OrSpace(characters[start] ?? "")) start += 1;
+  while (end > start && isC0OrSpace(characters[end - 1] ?? "")) end -= 1;
+  const cleaned = characters
+    .slice(start, end)
+    .filter((character) => character !== "\t" && character !== "\n" && character !== "\r")
     .join("")
     .toLowerCase();
   if (!cleaned.includes(":")) return false;
