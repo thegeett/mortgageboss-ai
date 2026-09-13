@@ -1,0 +1,557 @@
+<title>Draft Only Screens</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#F5F8F8;--surface:#FFFFFF;--sunk:#EEF3F3;
+  --ink:#14201F;--ink-2:#42514F;--ink-3:#6B7A78;
+  --rule:#DCE4E4;--rule-2:#EAF0F0;
+  --petrol:#12545E;--petrol-tint:#E3EDEE;
+  --block:#B23A2A;--attn:#8F5D08;--ok:#2F6B4F;
+  --block-tint:#F7E9E6;--attn-tint:#F7EFDD;--ok-tint:#E7F1EC;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --ground:#0E1616;--surface:#141F1F;--sunk:#0A1111;
+  --ink:#E6EEED;--ink-2:#A9B8B6;--ink-3:#7C8C8A;
+  --rule:#263736;--rule-2:#1C2A29;
+  --petrol:#6FBCC6;--petrol-tint:#16302F;
+  --block:#E08472;--attn:#D9A03E;--ok:#7CBE9C;
+  --block-tint:#2B1A18;--attn-tint:#2B2114;--ok-tint:#152720;
+}}
+:root[data-theme="dark"]{
+  --ground:#0E1616;--surface:#141F1F;--sunk:#0A1111;
+  --ink:#E6EEED;--ink-2:#A9B8B6;--ink-3:#7C8C8A;
+  --rule:#263736;--rule-2:#1C2A29;
+  --petrol:#6FBCC6;--petrol-tint:#16302F;
+  --block:#E08472;--attn:#D9A03E;--ok:#7CBE9C;
+  --block-tint:#2B1A18;--attn-tint:#2B2114;--ok-tint:#152720;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:14px;line-height:1.6}
+.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace}
+code{font-family:"IBM Plex Mono",monospace;font-size:.88em;background:var(--rule-2);padding:.1em .34em;border-radius:3px}
+h1,h2,h3,h4{margin:0;font-weight:600;letter-spacing:-.011em;text-wrap:balance}
+p{margin:0}
+.page{max-width:56rem;margin:0 auto;padding:3rem 1.25rem 6rem;display:flex;flex-direction:column;gap:3rem}
+
+.mast{display:flex;flex-direction:column;gap:.85rem;padding-bottom:1.3rem;border-bottom:2px solid var(--petrol)}
+.eyebrow{font-size:.6875rem;letter-spacing:.11em;text-transform:uppercase;color:var(--petrol);font-weight:600}
+.mast h1{font-size:1.9rem;line-height:1.15}
+.mast p{color:var(--ink-2);font-size:.9375rem;max-width:56ch}
+
+section{display:flex;flex-direction:column;gap:1.1rem}
+.head{display:flex;flex-direction:column;gap:.32rem}
+.head h2{font-size:1.25rem}
+.head p{color:var(--ink-3);font-size:.9375rem;max-width:66ch}
+
+figure{margin:0;display:flex;flex-direction:column;gap:.6rem;border:1px solid var(--rule);border-radius:8px;padding:1.1rem;background:var(--surface);overflow-x:auto}
+figure svg{max-width:100%;height:auto;display:block;margin:0 auto}
+figcaption{font-size:.8125rem;color:var(--ink-3);max-width:70ch}
+figcaption b{color:var(--ink-2);font-weight:500}
+
+.notes{display:flex;flex-direction:column}
+.note{display:grid;grid-template-columns:1.6rem 1fr;gap:0 .75rem;padding:.8rem 0;border-bottom:1px solid var(--rule-2)}
+.note:last-child{border-bottom:0}
+.note .k{font-family:"IBM Plex Mono",monospace;font-size:.6875rem;color:var(--ink-3);padding-top:.18rem}
+.note h4{font-size:.875rem;margin-bottom:.2rem}
+.note p{font-size:.875rem;color:var(--ink-2)}
+
+.tag{display:inline-flex;align-items:center;gap:.24rem;font-size:.6563rem;font-weight:600;text-transform:uppercase;letter-spacing:.02em;padding:.1rem .34rem;border-radius:3px}
+.t-ok{color:var(--ok);background:var(--ok-tint)}
+.t-attn{color:var(--attn);background:var(--attn-tint)}
+.t-block{color:var(--block);background:var(--block-tint)}
+.t-flat{color:var(--ink-3);background:var(--rule-2)}
+
+.bar{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;padding:.65rem .8rem;border:1px solid var(--rule);border-radius:7px;background:var(--sunk)}
+.btn{display:inline-flex;align-items:center;gap:.32rem;border-radius:5px;padding:.28rem .6rem;font-size:.8125rem;font-weight:500;border:1px solid var(--rule);background:var(--surface);color:var(--ink)}
+.btn.pri{background:var(--petrol);border-color:var(--petrol);color:#fff}
+:root[data-theme="dark"] .btn.pri{color:#0E1616}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .btn.pri{color:#0E1616}}
+.btn.ghost{border-color:transparent;color:var(--ink-3)}
+.grow{flex:1}
+.note-in{background:var(--petrol-tint);border-left:2px solid var(--petrol);padding:.85rem 1rem;font-size:.9375rem;color:var(--ink-2);border-radius:0 5px 5px 0}
+.note-in b{color:var(--ink)}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+</style><style>
+.mock{border:1px solid var(--rule);border-radius:9px;background:var(--surface);overflow:hidden}
+.mock-bar{display:flex;align-items:center;gap:.5rem;padding:.45rem .75rem;border-bottom:1px solid var(--rule);background:var(--sunk);font-size:.6563rem;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.mock-bar .dot{width:.45rem;height:.45rem;border-radius:50%;background:var(--rule)}
+.mock-body{padding:.9rem}
+.toolrow{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;padding-bottom:.7rem;border-bottom:1px solid var(--rule-2);margin-bottom:.2rem}
+.row{display:grid;grid-template-columns:auto 1fr auto;gap:.55rem;align-items:center;min-height:28px;padding:.32rem .3rem;border-bottom:1px solid var(--rule-2);font-size:.8125rem;color:var(--ink)}
+.row:last-child{border-bottom:0}
+.row .who{font-size:.6875rem;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--ink-3);width:5.6rem;flex:none}
+.row .who.b{color:var(--petrol)}
+.row .meta{font-size:.75rem;color:var(--ink-3);white-space:nowrap;font-family:"IBM Plex Mono",monospace}
+.newdot{display:inline-block;width:.4rem;height:.4rem;border-radius:50%;background:var(--petrol);margin-right:.3rem;vertical-align:.08rem}
+.empty{padding:2rem 1rem;text-align:center;color:var(--ink-3);font-size:.875rem}
+.tb{display:flex;flex-wrap:wrap;align-items:center;gap:.18rem;padding:.32rem .4rem;border:1px solid var(--rule);border-bottom:0;border-radius:6px 6px 0 0;background:var(--sunk)}
+.tb i{font-style:normal;display:inline-flex;align-items:center;justify-content:center;min-width:1.35rem;height:1.35rem;padding:0 .25rem;border-radius:3px;font-size:.6875rem;color:var(--ink-2);background:var(--surface);border:1px solid var(--rule-2);font-family:"IBM Plex Sans",sans-serif}
+.tb i.w{min-width:auto;padding:0 .4rem;font-size:.6563rem}
+.tb i.off{opacity:.35;text-decoration:line-through}
+.tb .sep{width:1px;height:1rem;background:var(--rule);margin:0 .18rem}
+.ed{border:1px solid var(--rule);border-radius:0 0 6px 6px;padding:.75rem .8rem;font-size:.8125rem;color:var(--ink);line-height:1.55}
+.ed p{margin:0 0 .6rem}
+.ed ul{margin:0 0 .6rem;padding-left:1.1rem}
+.ed li{margin-bottom:.35rem}
+.ed ul ul{margin:.25rem 0 0;padding-left:1rem;color:var(--ink-3);font-size:.78rem}
+.fld{display:grid;grid-template-columns:5rem 1fr;gap:.5rem;align-items:center;padding:.35rem 0;border-bottom:1px solid var(--rule-2);font-size:.8125rem}
+.fld span:first-child{font-size:.6563rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.dlg{border:1px solid var(--rule);border-radius:9px;background:var(--surface);max-width:32rem;padding:1rem;display:flex;flex-direction:column;gap:.6rem}
+.dlg h3{font-size:.9375rem}
+.dlg p{font-size:.8125rem;color:var(--ink-2)}
+.dlg .acts{display:flex;flex-wrap:wrap;gap:.35rem;justify-content:flex-end;border-top:1px solid var(--rule-2);padding-top:.6rem}
+.docs{display:flex;flex-wrap:wrap;gap:.25rem}
+.docs i{font-style:normal;font-size:.75rem;background:var(--rule-2);color:var(--ink-2);padding:.1rem .38rem;border-radius:3px}
+.pblock{border:1px solid var(--rule-2);border-radius:6px;padding:.6rem .7rem;display:flex;flex-direction:column;gap:.45rem}
+.pblock h5{font-size:.6875rem;letter-spacing:.06em;text-transform:uppercase;color:var(--petrol);font-weight:600;margin:0}
+.warn{background:var(--attn-tint);border-left:2px solid var(--attn);padding:.6rem .75rem;font-size:.8125rem;color:var(--ink-2);border-radius:0 4px 4px 0}
+.warn b{color:var(--ink)}
+.cap{font-size:.8125rem;color:var(--ink-3);max-width:70ch}
+.cap b{color:var(--ink-2);font-weight:500}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:1rem;align-items:start}
+@media (max-width:720px){.two{grid-template-columns:1fr}}
+.scr{display:flex;flex-direction:column;gap:.7rem}
+.scrno{font-family:"IBM Plex Mono",monospace;font-size:.6875rem;color:var(--petrol);font-weight:600;letter-spacing:.04em}
+table.t{width:100%;border-collapse:collapse;font-size:.8125rem}
+table.t th{text-align:left;font-size:.6563rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);padding:.4rem .5rem;border-bottom:1px solid var(--rule)}
+table.t td{padding:.45rem .5rem;border-bottom:1px solid var(--rule-2);color:var(--ink-2);vertical-align:top}
+table.t td:first-child{color:var(--ink);white-space:nowrap}
+.tw{overflow-x:auto;border:1px solid var(--rule);border-radius:8px;background:var(--surface)}
+</style>
+
+<div class="page">
+
+<header class="mast">
+  <div class="eyebrow">Communication · version 1 · every screen · answers to 1 and 2</div>
+  <h1>Draft only — the screens</h1>
+  <p>Ten screens and two research answers. Your five decisions are settled and built in; the two questions you asked back — the Gmail-grade toolbar, and whether we can open Gmail or Outlook directly — have answers that change the storage layer and add a settings screen.</p>
+</header>
+
+<!-- ===== SETTLED ===== -->
+<section>
+  <div class="head"><h2>Settled</h2></div>
+  <div class="notes">
+    <div class="note"><span class="k">✓</span><div><h4>One open draft per party</h4><p>“Create a second draft” does not exist. The dialog offers <i>add to it</i>, or <i>I've sent it — mark sent and start fresh</i>.</p></div></div>
+    <div class="note"><span class="k">✓</span><div><h4>The <code>body_edited</code> flag</h4><p>Set the first time a saved body differs from the generated one. The dialog warns before an append rewrites a processor's words.</p></div></div>
+    <div class="note"><span class="k">✓</span><div><h4>The per-document note is gone</h4><p>No more <i>“Anything to add for the borrower?”</i> form. The request runs on the click.</p></div></div>
+    <div class="note"><span class="k">✓</span><div><h4>A party draft is always named</h4><p>Even when no dialog is needed. A draft the processor does not know exists is the failure you flagged about the buckets.</p></div></div>
+    <div class="note"><span class="k">✓</span><div><h4>No “Write to another party” button</h4><p>Removed — which means <b>the address has to be typed somewhere else</b>, because 13 of 167 document types have nowhere to send. Screen 10.</p></div></div>
+  </div>
+</section>
+
+<!-- ===== ANSWER 1: TOOLBAR ===== -->
+<section>
+  <div class="head"><h2>Answer 1 — the toolbar, and what it costs</h2>
+    <p>Gmail's compose bar, button for button, and what I would take. Then the part that is not free.</p></div>
+
+  <div class="tw">
+    <table class="t">
+      <thead><tr><th>Gmail has</th><th>Take it?</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Undo · Redo</td><td><span class="tag t-ok">yes</span></td><td>Table stakes in any editor people type paragraphs into. TipTap ships history.</td></tr>
+        <tr><td>Font family</td><td><span class="tag t-block">no</span></td><td>A document request in Comic Sans is a real outcome, and the font does not survive a <code>mailto:</code> anyway. Your own mail client's default is the right font.</td></tr>
+        <tr><td>Text size — S/M/L/Huge</td><td><span class="tag t-attn">if you want it</span></td><td>Harmless but unused in a business letter. Cheap to add; I would not.</td></tr>
+        <tr><td>Bold · Italic · Underline</td><td><span class="tag t-ok">yes</span></td><td>Bold and italic exist; underline is new. All three survive a paste into Outlook and Gmail.</td></tr>
+        <tr><td>Text colour · highlight</td><td><span class="tag t-block">no</span></td><td>Colour in the Ledger means status. A processor colouring a sentence red inside a compliance record is a claim nobody intended.</td></tr>
+        <tr><td>Align left / centre / right</td><td><span class="tag t-attn">left only</span></td><td>Centred body text in a letter is a formatting accident. Keep the button out rather than fix the output.</td></tr>
+        <tr><td>Numbered list</td><td><span class="tag t-ok">yes</span></td><td>“Send these three, in this order” is a thing processors write. Bullets already exist.</td></tr>
+        <tr><td>Bulleted list</td><td><span class="tag t-ok">have it</span></td><td>Shipped in LP-849.</td></tr>
+        <tr><td>Indent more / less</td><td><span class="tag t-ok">yes</span></td><td>It is how the nested detail block under each document is built. Already in the output; give it a button.</td></tr>
+        <tr><td>Quote</td><td><span class="tag t-ok">yes</span></td><td>Quoting the borrower's own sentence back is common, and the Ledger already reserves Plex Serif italic for verbatim quotation.</td></tr>
+        <tr><td>Link</td><td><span class="tag t-ok">yes</span></td><td>Gmail keeps this in the footer rather than the format bar. It is the single most-wanted one and it is not in the schema today.</td></tr>
+        <tr><td>Remove formatting</td><td><span class="tag t-ok">yes</span></td><td>The repair tool for everything pasted in from elsewhere. Without it a bad paste is unfixable.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note-in"><b>The part that is not free.</b> The stored body is <b>one plain string</b> today, converted in and out by <code>emailBodyToHtml</code> / <code>htmlToEmailBody</code>. Underline, links, numbered lists, indent and quote <b>cannot round-trip through that string</b> — LP-849 chose the narrow schema precisely so the editor could not produce something the converter drops. Answering “make it like Gmail” therefore means <b>storing HTML instead of a plain string</b>, and that is the largest single item in this version.</div>
+
+  <div class="notes">
+    <div class="note"><span class="k">1</span><div><h4>Store HTML, not ProseMirror JSON</h4><p>HTML is what the clipboard needs, what a future send provider needs, and what anything outside the editor can read. JSON would make the editor the only thing that can render a draft.</p></div></div>
+    <div class="note"><span class="k">2</span><div><h4>Resolve placeholders before the HTML exists, not after</h4><p><code>finalise_draft_body</code> substitutes into a plain string. Run it at generation time and convert once — a placeholder split across <code>&lt;strong&gt;</code> tags is a bug that only shows up on the one draft where someone bolded half a name.</p></div></div>
+    <div class="note"><span class="k">3</span><div><h4>Sanitise on the way in, server side</h4><p><code>email-body.ts</code> is safe today by <b>construction</b> — it escapes everything, then emits its own tags, so there is no passthrough to leave open. Storing author HTML ends that, and an allowlist on the server replaces it. This is the security consequence of the toolbar and it must be in the same ticket.</p></div></div>
+    <div class="note"><span class="k">4</span><div><h4>Derive the plain text, never store it twice</h4><p><code>mailto:</code> and every compose deep link need plain text. Strip it from the HTML on demand. Two stored copies of one message is the “one fact, two places” pattern that has bitten this codebase seven times.</p></div></div>
+  </div>
+</section>
+
+<!-- ===== ANSWER 2: DEEP LINKS ===== -->
+<section>
+  <div class="head"><h2>Answer 2 — yes, we can open Gmail or Outlook. No, they cannot carry the formatting.</h2>
+    <p>Every web compose route exists and takes <code>to</code>, <code>subject</code> and <code>body</code>. <b>Every one of them takes the body as plain text.</b></p></div>
+
+  <div class="tw">
+    <table class="t">
+      <thead><tr><th>Route</th><th>URL</th><th>Body</th></tr></thead>
+      <tbody>
+        <tr><td>Gmail</td><td class="mono" style="font-size:.72rem">mail.google.com/mail/?view=cm&amp;fs=1&amp;to=…&amp;su=…&amp;body=…</td><td>plain</td></tr>
+        <tr><td>Outlook — work</td><td class="mono" style="font-size:.72rem">outlook.office.com/mail/deeplink/compose?to=…&amp;subject=…&amp;body=…</td><td>plain</td></tr>
+        <tr><td>Outlook — personal</td><td class="mono" style="font-size:.72rem">outlook.live.com/mail/0/deeplink/compose?to=…&amp;subject=…&amp;body=…</td><td>plain</td></tr>
+        <tr><td>Desktop default</td><td class="mono" style="font-size:.72rem">mailto:…?subject=…&amp;body=…</td><td>plain — RFC 6068</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note-in"><b>So the button does both things.</b> It copies the rich body to the clipboard <i>and</i> opens the compose window with <b>To and Subject filled and the body left empty</b>, then says <i>“Paste into the message — ⌘V”</i>. One click, formatting intact. Filling the body with the plain-text version instead would hand the processor a stripped message that looks finished, which is worse than an empty one.</div>
+
+  <div class="notes">
+    <div class="note"><span class="k">1</span><div><h4>There is no way to detect which client they use</h4><p>Nothing in the browser tells us. So it is a setting — asked once, on the first draft, and changeable afterwards. Screen 11.</p></div></div>
+    <div class="note"><span class="k">2</span><div><h4>Seed the default from their own address, never apply it silently</h4><p>A processor signed in as <span class="mono">@gmail.com</span> or a Workspace domain gets Gmail pre-selected; an <span class="mono">@outlook.com</span> or Microsoft 365 tenant gets Outlook. It is a guess, so it pre-selects a radio button rather than deciding.</p></div></div>
+    <div class="note"><span class="k">3</span><div><h4>“Desktop default” stays and stays first</h4><p><code>mailto:</code> is the only route that works for someone on Apple Mail, Thunderbird, or a locally installed Outlook. It is the safe default when they skip the question.</p></div></div>
+    <div class="note"><span class="k">4</span><div><h4>The URL length ceiling applies to all four</h4><p><code>mailto_max_chars</code> already gates the <code>mailto:</code> route. Since the body is now empty in the URL, the ceiling stops being a problem — which is a second reason to leave it empty.</p></div></div>
+  </div>
+</section>
+
+<!-- ===== S1 ===== -->
+<section class="scr">
+  <div class="head"><span class="scrno">SCREEN 1</span><h2>The list</h2>
+    <p>One list, no buckets. Party on every row, a dot on anything created since the last look, and two buttons above it instead of three.</p></div>
+
+  <div class="mock">
+    <div class="mock-bar"><span class="dot"></span>Communication · LF-ZE9N · Maria Delgado</div>
+    <div class="mock-body">
+      <div class="toolrow">
+        <span class="grow" style="font-size:.8125rem;color:var(--ink-3)">4 messages</span>
+        <span class="btn">Compose</span>
+        <span class="btn pri">Request documents</span>
+      </div>
+      <div class="row"><span class="who b">Borrower</span><span><span class="newdot"></span>Documents needed — 4 documents <span style="color:var(--ink-3)">· bank statement, pay stub, W-2, insurance dec</span></span><span class="meta">Draft · edited · 2m</span></div>
+      <div class="row"><span class="who">Title co.</span><span><span class="newdot"></span>Documents needed — 2 documents <span style="color:var(--ink-3)">· title commitment, survey</span></span><span class="meta">Draft · Tue 14:02</span></div>
+      <div class="row"><span class="who b">Borrower</span><span>Documents needed — 2 documents</span><span class="meta">Sent by Priya · Mon 16:41</span></div>
+      <div class="row"><span class="who b">Borrower</span><span>Initial documentation request</span><span class="meta">Sent by Priya · Fri 09:12</span></div>
+    </div>
+  </div>
+
+  <div class="mock" style="max-width:34rem">
+    <div class="mock-bar"><span class="dot"></span>Communication · nothing yet</div>
+    <div class="empty">Nothing has been written on this file.<br><span style="font-size:.8125rem">Request documents to start a draft, or compose one yourself.</span></div>
+  </div>
+
+  <div class="notes">
+    <div class="note"><span class="k">1</span><div><h4>The party is a column, not a heading</h4><p>This is the thing you caught about the buckets: a heading is a region that can be scrolled past, so a title-company draft ends up below the fold and the processor never learns it exists. A column is on every row and cannot be missed, and the list stays in one time order.</p></div></div>
+    <div class="note"><span class="k">2</span><div><h4>The dot means “since you last looked”, not “unread”</h4><p>Nothing is received in this version, so “unread” would be a lie. It clears when the row is opened.</p></div></div>
+    <div class="note"><span class="k">3</span><div><h4>Status is a word, never a colour alone</h4><p><span class="mono">Draft</span> / <span class="mono">Sent by Priya</span>. And it is <i>“Sent by Priya”</i>, not <i>“Sent”</i> — a person claimed it; nothing observed it.</p></div></div>
+    <div class="note"><span class="k">4</span><div><h4>The row says what is inside without opening it</h4><p>“4 documents” answers the count; the names answer “is this the one I need”. Both, because a list of four rows reading <i>“A document request is being prepared”</i> is the screenshot you sent me.</p></div></div>
+  </div>
+</section>
+
+<!-- ===== S2 ===== -->
+<section class="scr">
+  <div class="head"><span class="scrno">SCREEN 2</span><h2>The draft</h2>
+    <p>The full toolbar, the generated block, and three buttons. This is where a processor spends their time.</p></div>
+
+  <div class="mock">
+    <div class="mock-bar"><span class="dot"></span>Draft to the borrower · created Tue 14:02 · edited</div>
+    <div class="mock-body" style="display:flex;flex-direction:column;gap:.75rem">
+      <div>
+        <div class="fld"><span>To</span><span>Maria Delgado &lt;m.delgado@example.com&gt;</span></div>
+        <div class="fld"><span>Subject</span><span>Documents needed for your loan file — Delgado, 118 Alder St</span></div>
+      </div>
+
+      <div>
+        <div class="tb">
+          <i>↶</i><i>↷</i><span class="sep"></span>
+          <i><b>B</b></i><i><em>I</em></i><i><u>U</u></i><span class="sep"></span>
+          <i>≔</i><i>1.</i><i>⇤</i><i>⇥</i><span class="sep"></span>
+          <i>❝</i><i>🔗</i><span class="sep"></span>
+          <i class="w">clear</i>
+          <span class="grow"></span>
+          <i class="w" style="color:#7A5AF8;border-color:#7A5AF8">✦ polish</i>
+        </div>
+        <div class="ed">
+          <p>Hi Maria — one more push before Friday and we should be able to send this to underwriting.</p>
+          <p>Could you send over the following:</p>
+          <ul>
+            <li><b>Bank statement — March</b>
+              <ul><li>Where to get it: your online banking, Statements → March 2026. All pages, including the blank ones.</li></ul>
+            </li>
+            <li><b>Pay stub — most recent</b>
+              <ul><li>Where to get it: your employer's payroll portal, or the paper stub from your last pay date.</li></ul>
+            </li>
+          </ul>
+          <p>Thanks — <b>Priya</b></p>
+        </div>
+      </div>
+
+      <div class="pblock">
+        <h5>What it asks for · 2 documents</h5>
+        <div class="docs"><i>Bank statement — March</i><i>Pay stub</i></div>
+      </div>
+
+      <div class="bar">
+        <span class="btn pri">Copy &amp; open Gmail</span>
+        <span class="btn">Copy message</span>
+        <span class="btn">Mark as sent</span>
+        <span class="grow"></span>
+        <span class="btn ghost">Delete</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <div class="note"><span class="k">1</span><div><h4>Three buttons and a quiet fourth — that is your answer</h4><p><b>Copy &amp; open Gmail</b> is the whole send path in one click: it puts the rich body on the clipboard and opens the compose window with To and Subject filled. The label carries the chosen client — <i>Copy &amp; open Outlook</i>, <i>Copy &amp; open mail app</i>. <b>Copy message</b> stays for anyone doing it their own way. <b>Mark as sent</b> is the claim. <b>Delete</b> is quiet and on the far side, because it destroys the record.</p></div></div>
+    <div class="note"><span class="k">2</span><div><h4>No Send button, not even disabled</h4><p><code>mail_transport</code> is an interface with no provider behind it. A greyed Send is a promise this version cannot keep and the first thing a processor clicks.</p></div></div>
+    <div class="note"><span class="k">3</span><div><h4>“Where to get it” is the reason the email works</h4><p>It comes from the catalog, indented under its own document as a nested list — not an indent, because the clipboard carries no stylesheet and Outlook renders with Word's engine. It is what lets a borrower act without phoning.</p></div></div>
+    <div class="note"><span class="k">4</span><div><h4>The polish button sits in the toolbar and is violet</h4><p>Violet is the Ledger's provenance colour: it marks <i>a model touched this</i>, never a status. It is available on any draft, not only a free one.</p></div></div>
+    <div class="note"><span class="k">5</span><div><h4>“What it asks for” is read-only here</h4><p>Documents join a draft through the request flow, not by typing in this box. A processor who wants one more opens the catalog, and the dialog on screen 3 brings it here.</p></div></div>
+  </div>
+</section>
+
+<!-- ===== S3 ===== -->
+<section class="scr">
+  <div class="head"><span class="scrno">SCREEN 3</span><h2>Adding to an open draft</h2>
+    <p>The one dialog. It fires from all three request paths, and only when a draft is already open for that party.</p></div>
+
+  <div class="dlg">
+    <h3>There is already an open draft to the borrower</h3>
+    <p>Created Tue 14:02, asking for:</p>
+    <div class="docs"><i>Bank statement — March</i><i>Pay stub</i></div>
+    <p>Add <b>Homeowner's insurance declaration</b> to it — or, if you have already sent that draft from your mail client, mark it sent and start a new one.</p>
+    <div class="acts">
+      <span class="btn ghost">Cancel</span>
+      <span class="btn">I've sent it — mark sent, start new</span>
+      <span class="btn pri">Add to the open draft</span>
+    </div>
+  </div>
+
+  <p class="cap"><b>No third button.</b> You said keep it simple, so a second open draft to the same party cannot be created at all. That removes the four-identical-rows problem by construction rather than by asking the processor to be careful.</p>
+</section>
+
+<!-- ===== S4 ===== -->
+<section class="scr">
+  <div class="head"><span class="scrno">SCREEN 4</span><h2>When one request touches two parties</h2>
+    <p>Tick a bank statement and a title commitment together and two people are owed something. One dialog, a row each — never two dialogs in a row.</p></div>
+
+  <div class="dlg" style="max-width:34rem">
+    <h3>This request goes to two people</h3>
+    <div class="pblock">
+      <h5>Borrower · a draft is already open</h5>
+      <div class="docs"><i>+ Bank statement — March</i></div>
+      <p style="font-size:.75rem;color:var(--ink-3)">Open since Tue 14:02, asking for 2 documents.</p>
+      <div style="display:flex;gap:.35rem;flex-wrap:wrap">
+        <span class="btn">Mark sent, start new</span>
+        <span class="btn pri">Add to it</span>
+      </div>
+    </div>
+    <div class="pblock">
+      <h5>Title company · a new draft</h5>
+      <div class="docs"><i>+ Title commitment</i></div>
+      <p style="font-size:.75rem;color:var(--ink-3)">Nothing open — this creates a draft to <span class="mono">closings@acmetitle.com</span>.</p>
+    </div>
+    <div class="acts">
+      <span class="btn ghost">Cancel</span>
+      <span class="btn pri">Do both</span>
+    </div>
+  </div>
+
+  <div class="notes">
+    <div class="note"><span class="k">1</span><div><h4>The party with nothing open still gets a row</h4><p>Your answer 5: always name the party draft. It needs no decision, so it has no buttons — but the processor leaves this dialog knowing a second message exists, which is the whole point.</p></div></div>
+    <div class="note"><span class="k">2</span><div><h4>And when no dialog is needed at all, the toast does the naming</h4><p>A borrower-only request with nothing open creates a draft silently — but the toast reads <i>“Draft to the borrower — 3 documents”</i>, and a title-only request reads <i>“Draft to the title company”</i>. Never just “Draft prepared”.</p></div></div>
+  </div>
+</section>
+
+<!-- ===== S5 ===== -->
+<section class="scr">
+  <div class="head"><span class="scrno">SCREEN 5</span><h2>When the draft has the processor's own words in it</h2>
+    <p>Your answer 4, on screen. This is the same dialog with one more block — it only appears when <code>body_edited</code> is set.</p></div>
+
+  <div class="dlg">
+    <h3>There is already an open draft to the borrower</h3>
+    <p>Created Tue 14:02, asking for:</p>
+    <div class="docs"><i>Bank statement — March</i><i>Pay stub</i></div>
+    <div class="warn"><b>You have edited this draft.</b> Adding a document rewrites the message from the template, and your changes — including “March statement only, not February” — will be lost. Copy anything you want to keep first.</div>
+    <div class="acts">
+      <span class="btn ghost">Cancel</span>
+      <span class="btn">I've sent it — mark sent, start new</span>
+      <span class="btn pri">Add anyway</span>
+    </div>
+  </div>
+
+  <div class="notes">
+    <div class="note"><span class="k">1</span><div><h4>It quotes the processor's own sentence back</h4><p>“Your changes will be lost” is abstract; the first line of what they actually wrote is not. Cheap to do, and it is the difference between a warning read and a warning dismissed.</p></div></div>
+    <div class="note"><span class="k">2</span><div><h4>This matters more now that the note field is gone</h4><p>With <i>“Anything to add for the borrower?”</i> removed, the body is the <b>only</b> place a processor's own words can live. Silently rewriting it would be the worst defect in the version.</p></div></div>
+    <div class="note"><span class="k">3</span><div><h4>The real fix is a phase away</h4><p>Split the body into a generated document block and processor-owned framing, and regenerate only the block. That is a schema change and belongs with the phase that restores sending. Until then, this warning is the honest version.</p></div></div>
+  </div>
+</section>
+
+<!-- ===== S6 ===== -->
+<section class="scr">
+  <div class="head"><span class="scrno">SCREEN 6</span><h2>“Request all”, with the message folded in</h2>
+    <p>This confirm already exists and already lists every document. It grows one block rather than being followed by a second dialog.</p></div>
+
+  <div class="two">
+    <div class="dlg" style="max-width:none">
+      <h3>Request 5 documents?</h3>
+      <p style="font-size:.75rem;color:var(--ink-3)">TODAY — unchanged when nothing is open</p>
+      <div class="docs"><i>Bank statement — March</i><i>Pay stub</i><i>W-2 (2025)</i><i>Insurance dec</i><i>Title commitment</i></div>
+      <div class="acts"><span class="btn ghost">Cancel</span><span class="btn pri">Looks good</span></div>
+    </div>
+    <div class="dlg" style="max-width:none">
+      <h3>Request 5 documents?</h3>
+      <p style="font-size:.75rem;color:var(--ink-3)">WHEN A DRAFT IS OPEN — one block more</p>
+      <div class="docs"><i>Bank statement — March</i><i>Pay stub</i><i>W-2 (2025)</i><i>Insurance dec</i><i>Title commitment</i></div>
+      <div class="pblock"><h5>Borrower · open since Tue 14:02</h5><p style="font-size:.75rem;color:var(--ink-3)">4 of these go to the borrower.</p></div>
+      <div class="pblock"><h5>Title company · new draft</h5><p style="font-size:.75rem;color:var(--ink-3)">Title commitment → <span class="mono">closings@acmetitle.com</span></p></div>
+      <div class="acts"><span class="btn ghost">Cancel</span><span class="btn">Mark sent, start new</span><span class="btn pri">Add to the open draft</span></div>
+    </div>
+  </div>
+
+  <p class="cap"><b>Two dialogs in sequence is the failure mode to avoid.</b> A processor who has just confirmed five documents and is then asked a second question clicks the primary without reading it — which is exactly how the wrong draft gets chosen.</p>
+</section>
+
+<!-- ===== S7 ===== -->
+<section class="scr">
+  <div class="head"><span class="scrno">SCREEN 7</span><h2>“Request documents” — unchanged</h2>
+    <p>Shown only to confirm it stays as it is. The 167-document catalog, this file's outstanding needs on top, search for the rest, “already requested” marked at selection time.</p></div>
+
+  <div class="mock" style="max-width:34rem">
+    <div class="mock-bar"><span class="dot"></span>Request documents</div>
+    <div class="mock-body" style="display:flex;flex-direction:column;gap:.5rem">
+      <div class="fld" style="border:0"><span>Search</span><span style="color:var(--ink-3)">Search documents…</span></div>
+      <div class="row"><span style="color:var(--petrol)">☑</span><span>Bank statement</span><span class="meta" style="color:var(--attn)">already requested</span></div>
+      <div class="row"><span style="color:var(--petrol)">☑</span><span>Homeowner's insurance declaration</span><span class="meta">Insurance</span></div>
+      <div class="row"><span style="opacity:.4">☐</span><span>Title commitment</span><span class="meta">Title</span></div>
+      <div class="row"><span style="opacity:.4">☐</span><span>W-2</span><span class="meta">Income</span></div>
+      <div class="toolrow" style="border-bottom:0;border-top:1px solid var(--rule-2);padding-top:.7rem;margin-top:.3rem">
+        <span class="grow" style="font-size:.75rem;color:var(--ink-3)">2 selected</span>
+        <span class="btn pri">Generate email</span>
+      </div>
+    </div>
+  </div>
+
+  <p class="cap">After <b>Generate email</b>, the rule applies — screen 3, 4 or 5 depending on what is open. <b>Nothing in this dialog changes</b>; it is the one request path that was already right.</p>
+</section>
+
+<!-- ===== S8 ===== -->
+<section class="scr">
+  <div class="head"><span class="scrno">SCREEN 8</span><h2>Compose, and the AI button</h2>
+    <p>A draft with no needs attached, and a rewrite the processor accepts or throws away.</p></div>
+
+  <div class="mock">
+    <div class="mock-bar"><span class="dot"></span>New message · nothing requested</div>
+    <div class="mock-body" style="display:flex;flex-direction:column;gap:.75rem">
+      <div>
+        <div class="fld"><span>To</span><span>m.delgado@example.com</span></div>
+        <div class="fld"><span>Subject</span><span style="color:var(--ink-3)">Subject</span></div>
+      </div>
+      <div>
+        <div class="tb">
+          <i>↶</i><i>↷</i><span class="sep"></span><i><b>B</b></i><i><em>I</em></i><i><u>U</u></i><span class="sep"></span><i>≔</i><i>1.</i><i>⇤</i><i>⇥</i><span class="sep"></span><i>❝</i><i>🔗</i><span class="sep"></span><i class="w">clear</i>
+          <span class="grow"></span>
+          <i class="w" style="color:#7A5AF8;border-color:#7A5AF8">✦ polish</i>
+        </div>
+        <div class="ed">
+          <p>maria appraisal came in fine no issues. underwriting has it now, should hear thursday or friday. nothing needed from you right now</p>
+        </div>
+      </div>
+      <div class="bar">
+        <span class="btn pri">Copy &amp; open Gmail</span>
+        <span class="btn">Copy message</span>
+        <span class="btn">Mark as sent</span>
+        <span class="grow"></span>
+        <span class="btn ghost">Delete</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="mock">
+    <div class="mock-bar" style="color:#7A5AF8"><span class="dot" style="background:#7A5AF8"></span>After ✦ polish — not saved yet</div>
+    <div class="mock-body" style="display:flex;flex-direction:column;gap:.6rem">
+      <div class="ed" style="border-radius:6px">
+        <p>Hi Maria,</p>
+        <p>Good news — the appraisal came back with no issues. Your file is with underwriting now, and I expect to hear back Thursday or Friday.</p>
+        <p>Nothing is needed from you at the moment. I'll be in touch as soon as there's an update.</p>
+        <p>Best,<br>Priya</p>
+      </div>
+      <div class="bar">
+        <span class="btn ghost">Undo — put mine back</span>
+        <span class="grow"></span>
+        <span class="btn pri">Keep this</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <div class="note"><span class="k">1</span><div><h4>It replaces nothing until the processor says so</h4><p>Shown as a proposal with a one-click undo, and the original is held until they choose. A rewrite that lands silently on save is a message going out in words nobody read.</p></div></div>
+    <div class="note"><span class="k">2</span><div><h4>It fails visibly or not at all</h4><p><code>email_draft_enabled</code> is off in every environment today. When the model is unavailable the button says so and leaves the text alone — it never returns something subtly different and calls it polish.</p></div></div>
+    <div class="note"><span class="k">3</span><div><h4>The recipient is typed here</h4><p>A free draft has no party to look up an address for. Editable, defaulting to the borrower, and nothing written back to the file's party addresses from this screen.</p></div></div>
+    <div class="note"><span class="k">4</span><div><h4>Same list, same row, same buttons</h4><p>It is an ordinary draft with an empty “What it asks for” block — <code>custom.v1</code> already exists as a template key. Not a second kind of object.</p></div></div>
+  </div>
+</section>
+
+<!-- ===== S9 ===== -->
+<section class="scr">
+  <div class="head"><span class="scrno">SCREEN 9</span><h2>A party with nowhere to send</h2>
+    <p><b>This screen exists because of your answer 6.</b> Removing “Write to another party” removes the only place an address could be added — and 13 of 167 document types have no address anywhere in the schema.</p></div>
+
+  <div class="mock" style="max-width:36rem">
+    <div class="mock-bar" style="color:var(--attn)"><span class="dot" style="background:var(--attn)"></span>Draft to the title company · cannot be sent yet</div>
+    <div class="mock-body" style="display:flex;flex-direction:column;gap:.7rem">
+      <div class="fld"><span>To</span><span style="color:var(--attn)">No address on file for the title company</span></div>
+      <div class="bar" style="background:var(--surface)">
+        <span style="font-size:.8125rem;color:var(--ink-2)">Who are they, and where do we write?</span>
+      </div>
+      <div class="fld"><span>Name</span><span style="color:var(--ink-3)">Acme Title</span></div>
+      <div class="fld"><span>Email</span><span style="color:var(--ink-3)">closings@acmetitle.com</span></div>
+      <div class="bar">
+        <span class="grow" style="font-size:.75rem;color:var(--ink-3)">Saved to the file — used for every future message to this party.</span>
+        <span class="btn pri">Save address</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <div class="note"><span class="k">1</span><div><h4>The draft is created either way</h4><p>The request still produces a draft and it still appears in the list — marked <i>cannot be sent yet</i>. Refusing to create it would lose the record that the document was asked for.</p></div></div>
+    <div class="note"><span class="k">2</span><div><h4>Asked where it is needed, not in a settings screen</h4><p>This is the improvement hidden inside removing the button: the address is requested at the moment it blocks something, by the person who knows it, instead of in a panel nobody visits.</p></div></div>
+    <div class="note"><span class="k">3</span><div><h4>Reuse <code>add_party_address</code> as it stands</h4><p>The endpoint and the form both exist inside <code>party-request-dialog</code>. This lifts them out and drops the rest of that dialog — so answer 6 is a net deletion, which is the right shape for a version this size.</p></div></div>
+  </div>
+</section>
+
+<!-- ===== S10 ===== -->
+<section class="scr">
+  <div class="head"><span class="scrno">SCREEN 10</span><h2>Which mail client</h2>
+    <p>Asked once, on the first draft. Nothing in the browser can detect this, so it has to be a setting — and the default has to be the one that always works.</p></div>
+
+  <div class="dlg">
+    <h3>Where do you write your email?</h3>
+    <p>We'll copy the message and open the right compose window for you. You can change this any time in settings.</p>
+    <div class="pblock" style="border-color:var(--petrol)">
+      <h5>● Gmail</h5>
+      <p style="font-size:.75rem;color:var(--ink-3)">Opens mail.google.com — suggested, because you sign in as priya@delgadolending.com</p>
+    </div>
+    <div class="pblock"><h5 style="color:var(--ink-3)">○ Outlook on the web</h5><p style="font-size:.75rem;color:var(--ink-3)">Work or personal account</p></div>
+    <div class="pblock"><h5 style="color:var(--ink-3)">○ Whatever this computer opens</h5><p style="font-size:.75rem;color:var(--ink-3)">Apple Mail, desktop Outlook, Thunderbird — the safe answer if you're unsure</p></div>
+    <div class="acts"><span class="btn ghost">Not now</span><span class="btn pri">Use Gmail</span></div>
+  </div>
+
+  <div class="notes">
+    <div class="note"><span class="k">1</span><div><h4>The suggestion is pre-selected, never silently applied</h4><p>Their own sign-in domain is a decent guess and a bad decision. It moves a radio button and says why.</p></div></div>
+    <div class="note"><span class="k">2</span><div><h4>“Not now” is a real answer</h4><p>It falls back to <code>mailto:</code>, which works for everyone, and the button on the draft reads <i>Copy &amp; open mail app</i> until they choose.</p></div></div>
+    <div class="note"><span class="k">3</span><div><h4>It is a per-user preference, not per file</h4><p><code>preferences</code> already exists as an API. One string.</p></div></div>
+  </div>
+</section>
+
+<!-- ===== TICKETS ===== -->
+<section>
+  <div class="head"><h2>What this is now worth in tickets</h2>
+    <p>Eight, and the order matters — 1 blocks 2 and 3, and 4 blocks everything that renders a body.</p></div>
+
+  <div class="tw">
+    <table class="t">
+      <thead><tr><th>#</th><th>Ticket</th><th>Size</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td><b>The rule and its dialog.</b> One open draft per party, enforced server-side. Screens 3, 4, 5 — including the multi-party rows and the <code>body_edited</code> flag.</td><td>large</td></tr>
+        <tr><td>2</td><td><b>The three entry points wired to it.</b> Remove the note form from <code>rule-finding-actions</code>; fold the message into <code>bulk-request-button</code>; leave <code>compose-request-dialog</code> alone. Screens 6, 7.</td><td>medium</td></tr>
+        <tr><td>3</td><td><b>Always name the party.</b> Toast and dialog copy, everywhere a draft is created.</td><td>small</td></tr>
+        <tr><td>4</td><td><b>HTML bodies.</b> Storage change, placeholder resolution moved ahead of conversion, server-side sanitiser. <i>The one with real risk in it.</i></td><td>large</td></tr>
+        <tr><td>5</td><td><b>The Gmail-grade toolbar.</b> Underline, numbered list, indent, quote, link, remove formatting, undo/redo — on top of ticket 4. Screen 2.</td><td>medium</td></tr>
+        <tr><td>6</td><td><b>Copy &amp; open.</b> The four routes, the client preference, the picker. Screens 2, 10.</td><td>medium</td></tr>
+        <tr><td>7</td><td><b>Compose and polish.</b> The free draft, the AI endpoint, the accept/undo. Screen 8.</td><td>medium</td></tr>
+        <tr><td>8</td><td><b>Take the next phase off the page.</b> Flag out <code>UploadLinkPanel</code> and <code>InboundMessagesPanel</code>; lift the address form out of <code>party-request-dialog</code> and delete the rest. Screens 1, 9.</td><td>small</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note-in"><b>Ticket 4 is the one to watch.</b> Everything else on this page is UI work against existing endpoints. Changing the stored body from a plain string to HTML touches the templates, the placeholder pass, the clipboard, the <code>mailto:</code> derivation and the security model at once — and it exists only because the toolbar has to look like Gmail's. <b>If that trade is not worth it, say so now</b>: keeping bold, italic, bullets and links inside the current plain-string schema is a fraction of the work and covers most of what a document request needs.</div>
+</section>
+
+</div>
