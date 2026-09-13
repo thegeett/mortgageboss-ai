@@ -39,7 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.documents.catalog import ResponsibleParty, get_guidance
-from app.models.communication import Communication
+from app.models.communication import BodyFormat, Communication
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.models.loan_file_participant import LoanFileParticipant, ParticipantRole
@@ -236,7 +236,12 @@ async def build_party_draft(
     """
     from app.models.communication import CommunicationDirection, CommunicationStatus
     from app.models.communication_needs_item import CommunicationNeedsItem
-    from app.services.email_draft import _regenerate, draft_template_key, get_open_draft
+    from app.services.email_draft import (
+        DraftIsAuthored,
+        _regenerate,
+        draft_template_key,
+        get_open_draft,
+    )
 
     if party is ResponsibleParty.PROCESSOR:
         raise ValueError("A processor orders these; there is nobody to send a request to.")
@@ -306,6 +311,18 @@ async def build_party_draft(
         .scalars()
         .all()
     )
+    # LP-853 — REFUSED BEFORE THE MEMBERSHIP CHANGES, and this caller does NOT force.
+    #
+    # `_regenerate` rewrites an edited body only when a processor has been warned, and nothing on
+    # this path warns anybody: LP-851's dialog belongs to the request flow, not to the party button
+    # (which LP-857 removes). Adding the membership and then taking the refusal would leave the
+    # draft asking for a document its own words never name, so the refusal comes first.
+    if draft.body_format is BodyFormat.HTML:
+        raise DraftIsAuthored(
+            "This draft has been edited, so documents cannot be added to it — "
+            "adding one rewrites the message from the template."
+        )
+
     for need in request.needs:
         if need.id not in existing:
             db.add(CommunicationNeedsItem(communication_id=draft.id, needs_item_id=need.id))

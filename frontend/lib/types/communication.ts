@@ -45,6 +45,18 @@ export interface MessageDetail {
   status: string;
   subject: string | null;
   body: string;
+  /**
+   * LP-853 — which language `body` is in, and therefore who wrote it.
+   *
+   * `"plain"` is a generated draft: templates, placeholders and ADR-401's fingerprints are all
+   * untouched by this ticket, so nothing on the backend emits HTML. `"html"` means a processor has
+   * written into it, which is why this is also LP-851's `body_edited` — one fact, one place.
+   *
+   * The editor converts a `plain` body on load and loads an `html` one as-is; the reader renders
+   * a `plain` body through `emailBodyToHtml` and shows an `html` one, which the server sanitised
+   * against an allowlist on the way in.
+   */
+  body_format: "plain" | "html";
   /** Sender for inbound, recipient for outbound. Null on a draft nobody has addressed yet. */
   counterparty: string | null;
   template_key: string | null;

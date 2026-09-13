@@ -9,25 +9,34 @@
  *
  * This reverses LP-844's markdown-in-a-textarea, with the benefit of a processor having used it.
  *
- * THE STORED BODY IS STILL ONE PLAIN STRING. That is what the templates emit, what
- * `finalise_draft_body` resolves placeholders in, what `mailto:` can carry, and what the send record
- * means when it says "this is what went out". Storing HTML would cost every template a new ADR-401
- * version and the placeholder pass would run over markup — to buy nothing a processor can see, since
- * every requirement here is about what they LOOK at.
+ * LP-853 — IT EMITS HTML NOW, AND THE STORED BODY FOLLOWS.
  *
- * So the component converts on the way in and on the way out, and the round trip is tested as a
- * FIXED POINT in `round-trip.test.ts`: a lossy inverse eats formatting gradually, surviving one
- * reopen and degrading on the fourth.
+ * LP-849 kept the stored body as one plain string and had this component convert in and out. That
+ * was right for the schema it shipped — paragraphs, bullets, bold — and was chosen precisely so the
+ * editor could not produce something the converter silently drops. Underline, links, ordered lists,
+ * indent and block quotes cannot round-trip through that string, so LP-854's toolbar is a storage
+ * request whether or not it was meant as one.
  *
- * THE SCHEMA IS THE SUBSET THE RENDERER SUPPORTS. Paragraphs, bullets, bold — nothing else is
- * enabled, which is how the editor and `emailBodyToHtml` stay in agreement. An editor that could
- * produce a heading would produce one the renderer silently drops, and a processor would watch their
- * formatting vanish on save.
+ * SO THE CONVERSION MOVED TO THE EDGE RATHER THAN DISAPPEARING:
+ *
+ *   • a `plain` body — every generated draft — is converted ON LOAD by `emailBodyToHtml`, which is
+ *     still the single renderer for that path;
+ *   • an `html` body is what a processor already wrote, and is loaded as-is;
+ *   • what comes OUT is always HTML, which is what the save stores and what the clipboard carries.
+ *
+ * `htmlToEmailBody` is not gone and is not dead: it derives the plain text `mailto:` and LP-855's
+ * compose routes need, which is the one thing that must never be stored twice. Its round trip is
+ * still tested as a FIXED POINT in `round-trip.test.ts`, because the `plain` path still runs
+ * through both halves on every load.
+ *
+ * THE SCHEMA IS THE SUBSET THE RENDERER AND THE SANITISER SUPPORT. Paragraphs, bullets, bold —
+ * nothing else is enabled, and `app/communications/sanitise.py`'s `ALLOWED` names the same tags. An
+ * editor that could produce a heading would produce one the server strips, and a processor would
+ * watch their formatting vanish on save. LP-854 extends all three together.
  */
 
 import { Button } from "@/components/ui/button";
 import { emailBodyToHtml } from "@/lib/markdown/email-body";
-import { htmlToEmailBody } from "@/lib/markdown/from-html";
 import { cn } from "@/lib/utils";
 import Bold from "@tiptap/extension-bold";
 import BulletList from "@tiptap/extension-bullet-list";
@@ -57,18 +66,30 @@ export const EXTENSIONS = [
 
 export function MessageEditor({
   value,
+  format = "plain",
   onChange,
   label = "Message",
 }: {
-  /** The stored plain body. */
+  /**
+   * The stored body. Plain text when `format` is `"plain"`, the processor's own HTML when it is
+   * `"html"`.
+   *
+   * READ ONCE, AT MOUNT. Tiptap owns the document from then on, and re-seeding from a prop would
+   * throw away an edit mid-sentence every time the draft's row changed underneath — the same reason
+   * `message-dialog` keys its own seeding on message identity rather than on the body.
+   */
   value: string;
-  /** Called with the new stored plain body, never with HTML. */
-  onChange: (body: string) => void;
+  format?: "plain" | "html";
+  /** Called with HTML, always — see the file header. */
+  onChange: (html: string) => void;
   label?: string;
 }) {
   const editor = useEditor({
     extensions: EXTENSIONS,
-    content: emailBodyToHtml(value),
+    // LP-853 — CONVERTED ONLY ON THE PLAIN PATH. An `html` body is what a person already wrote and
+    // has already been through the server's allowlist; running it through `emailBodyToHtml` would
+    // escape their own tags into view.
+    content: format === "html" ? value : emailBodyToHtml(value),
     // Next renders this on the server first, and Tiptap warns that its DOM-dependent parse can
     // mismatch. The editor is a client interaction with nothing to show a crawler.
     immediatelyRender: false,
@@ -90,10 +111,10 @@ export function MessageEditor({
       },
     },
     onUpdate: ({ editor: instance }) => {
-      // BACK TO PLAIN TEXT ON EVERY KEYSTROKE, so the value a caller holds is always the thing that
-      // will be stored and sent. Converting only on save would let the editor and the record
-      // disagree for the whole time a processor is typing, which is exactly when they look at it.
-      onChange(htmlToEmailBody(instance.getHTML()));
+      // HTML ON EVERY KEYSTROKE, so the value a caller holds is always the thing that will be
+      // stored and copied. Converting only on save would let the editor and the record disagree for
+      // the whole time a processor is typing, which is exactly when they look at it.
+      onChange(instance.getHTML());
     },
   });
 

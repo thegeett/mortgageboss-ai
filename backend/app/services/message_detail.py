@@ -32,7 +32,12 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.communication import Communication, CommunicationDirection, CommunicationStatus
+from app.models.communication import (
+    BodyFormat,
+    Communication,
+    CommunicationDirection,
+    CommunicationStatus,
+)
 from app.models.loan_file import LoanFile
 from app.models.user import User
 from app.services.email_draft import (
@@ -53,6 +58,8 @@ class MessageDetail:
     status: str
     subject: str | None
     body: str
+    #: LP-853 — `"plain"` or `"html"`. See `Communication.body_format`.
+    body_format: str
     #: Sender for inbound, recipient for outbound. Either can be absent: an outbound DRAFT has no
     #: recipient until a processor types one, which is the ordinary state of the thing being read.
     counterparty: str | None
@@ -130,6 +137,12 @@ async def message_detail(
         message.direction is CommunicationDirection.OUTBOUND
         and message.status is CommunicationStatus.DRAFT
         and message.template_key is not None
+        # LP-853 — AND THE BODY IS STILL THE TEMPLATE'S. Once a processor has written into it the
+        # body is authored content: there are no placeholders left to resolve (the editor was handed
+        # a body that had already been resolved for reading), and `refresh_if_stale` must not run
+        # over it. Running `safe_substitute` on markup is also how a `$` inside a link or an
+        # attribute becomes something nobody typed.
+        and message.body_format is BodyFormat.PLAIN
     )
     suggested_recipient: str | None = None
     if renders_from_a_template:
@@ -173,6 +186,10 @@ async def message_detail(
         status=message.status.value,
         subject=message.subject,
         body=body,
+        # LP-853 — WHICH LANGUAGE `body` IS IN, so the one editor can load it and the reader can
+        # choose between rendering the plain form and showing the stored HTML. Derived from nothing:
+        # it is the column, which is also LP-851's `body_edited`.
+        body_format=message.body_format.value,
         counterparty=counterparty,
         template_key=message.template_key,
         template_version=message.template_version,

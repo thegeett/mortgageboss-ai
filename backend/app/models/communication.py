@@ -61,6 +61,30 @@ class CommunicationChannel(StrEnum):
     EMAIL = "email"
 
 
+class BodyFormat(StrEnum):
+    """What `Communication.body` holds — and, for a draft, WHO WROTE IT (LP-853).
+
+    A GENERATED BODY IS `PLAIN`. Templates, `finalise_draft_body`, ADR-401's fingerprints and
+    `_regenerate` are all untouched by LP-853: nothing on the backend learns to emit HTML, which is
+    what keeps a Gmail-grade toolbar from costing every template a new version.
+
+    THE FIRST PROCESSOR EDIT STORES HTML and flips this column. From then on the body is authored
+    content and the backend treats it as opaque — `_regenerate` will not rewrite it, and the only
+    thing that may is the explicit, warned action in LP-851's dialog.
+
+    SO THIS IS ALSO LP-851's `body_edited` FLAG, and there is deliberately no second column. "A
+    machine wrote this" and "it is still plain" are the same statement, and storing one fact twice
+    is the pattern that has bitten this codebase seven times (AMENDMENTS A22).
+
+    PLAIN TEXT IS DERIVED, NEVER STORED. `mailto:` is plain by RFC 6068 and LP-855's compose routes
+    are no better, so an `html` body is stripped on demand rather than kept in a second column
+    beside the first — which would be the same anti-pattern one paragraph along.
+    """
+
+    PLAIN = "plain"
+    HTML = "html"
+
+
 class CommunicationStatus(StrEnum):
     """Delivery state. DRAFT/QUEUED/SENT/DELIVERED/FAILED are outbound; RECEIVED inbound."""
 
@@ -124,6 +148,19 @@ class Communication(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     recipient: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
     subject: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: LP-853 — whether `body` is plain text or the processor's own HTML. See :class:`BodyFormat`.
+    #:
+    #: NOT NULL WITH A SERVER DEFAULT, so a row written by code that predates this column — which is
+    #: what a rollback produces — is `plain`, which is what every such row actually is. The
+    #: compatibility guarantee runs in both directions or it is half a guarantee (AMENDMENTS,
+    #: LP-UI-024 review): new code reading old rows is the obvious half, and old code writing new
+    #: rows is the half that fails harder.
+    body_format: Mapped[BodyFormat] = mapped_column(
+        str_enum(BodyFormat),
+        default=BodyFormat.PLAIN,
+        server_default=BodyFormat.PLAIN.value,
+        nullable=False,
+    )
     #: LP-843 — WHO this message is for, as a `ResponsibleParty` value ("borrower", "lender", …).
     #:
     #: SEPARATE FROM `template_key`, which says what RENDERED it, and the two were one field until

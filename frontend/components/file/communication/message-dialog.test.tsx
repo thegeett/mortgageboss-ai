@@ -16,6 +16,10 @@ const mockSend = vi.fn();
 const sendState = { mutate: mockSend, isPending: false, isError: false };
 const mockAttach = vi.fn();
 const attachState = { mutate: mockAttach, isPending: false, isError: false };
+// LP-853 — the autosave. Held here so a case can assert WHAT was saved, and WHETHER anything was:
+// "focus is not an edit" is an assertion that this was never called.
+const mockSave = vi.fn();
+const saveState = { mutate: mockSave, isPending: false, isError: false };
 // LP-831 REVIEW — THE REAL `messageMailtoUrl`, not a stub. What the "Open in mail client" link
 // carries is the assertion; a mocked builder would let the button exist while the link was wrong.
 // Only the two hooks are replaced.
@@ -24,6 +28,7 @@ vi.mock("@/lib/api/communications", async (importOriginal) => ({
   useMessageDetail: (...args: unknown[]) => mockUseMessageDetail(...args),
   useSendDraft: () => sendState,
   useAttachUploadLink: () => attachState,
+  useSaveDraftBody: () => saveState,
 }));
 
 afterEach(cleanup);
@@ -46,6 +51,8 @@ function detail(overrides: Partial<MessageDetail> = {}): { data: MessageDetail }
       status: "sent",
       subject: "Documents we need",
       body: "Hello Sarah,\n\nPlease send the bank statements.\n\nDana Reyes",
+      // LP-853 — every generated draft is plain; a case that wants the authored path overrides it.
+      body_format: "plain",
       counterparty: "sarah@example.com",
       template_key: "initial_documentation_request",
       template_version: "v3",
@@ -121,9 +128,64 @@ describe("MessageDialog", () => {
     expect(mockSend).toHaveBeenCalledTimes(1);
     const sent = mockSend.mock.calls[0]?.[0] as { draftId: string; body: string };
     expect(sent.draftId).toBe("m1");
+    // LP-853 — STILL PLAIN, BECAUSE NOBODY TYPED. `body_format` is `plain` on this fixture, so the
+    // send posts the plain derivation and the record of what went out is byte-for-byte what LP-849
+    // stored. HTML reaches the send only once a processor has actually written into the draft.
     expect(sent.body).not.toContain("<p>");
     expect(sent.body).not.toContain("<strong>");
     expect(sent.body).toContain("Please send the bank statements.");
+  });
+
+  // ------------------------------------------------------------------------------------------- //
+  // LP-853 — the body becomes HTML the moment a person touches it
+  // ------------------------------------------------------------------------------------------- //
+  // The autosave — whether an edit is saved and a non-edit is not — needs the editor replaced by a
+  // stub that can emit a change on demand, so it lives in `message-dialog-autosave.test.tsx`. This
+  // file keeps the REAL editor, which is what "gives the processor the rich editor" asserts.
+
+  it("loads an authored body as HTML rather than escaping it into view", () => {
+    // THE READER HALF. An `html` body is already markup; running it through `emailBodyToHtml` would
+    // escape the processor's own tags, so the message they wrote would read back as source. What
+    // makes showing it safe is the server's allowlist, not this component.
+    mockUseMessageDetail.mockReturnValue(
+      state(
+        detail({
+          is_editable: false,
+          body_format: "html",
+          body: "<p>March statement <strong>only</strong>, not February.</p>",
+        }),
+      ),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    // The word is bold, not surrounded by visible tags.
+    const bold = screen.getByText("only");
+    expect(bold.tagName).toBe("STRONG");
+    expect(screen.queryByText(/&lt;strong&gt;/)).toBeNull();
+    expect(screen.queryByText(/<strong>/)).toBeNull();
+  });
+
+  it("sends the HTML once the draft is authored", () => {
+    // THE CONTROL FOR "still plain, because nobody typed" above. Same button, same assertions
+    // inverted — without this, a dialog that posted plain text forever would pass both.
+    mockUseMessageDetail.mockReturnValue(
+      state(
+        detail({
+          is_editable: true,
+          is_open_draft: true,
+          status: "draft",
+          body_format: "html",
+          body: "<p>March statement <strong>only</strong>.</p>",
+        }),
+      ),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Mark as sent/ }));
+
+    const sent = mockSend.mock.calls[0]?.[0] as { body: string };
+    expect(sent.body).toContain("<strong>");
+    expect(sent.body).toContain("March statement");
   });
 
   it("gives the processor the rich editor, not a textarea", async () => {

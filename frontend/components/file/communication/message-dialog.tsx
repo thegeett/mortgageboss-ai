@@ -12,10 +12,12 @@ import {
   messageMailtoUrl,
   useAttachUploadLink,
   useMessageDetail,
+  useSaveDraftBody,
   useSendDraft,
 } from "@/lib/api/communications";
 import { copyMessage } from "@/lib/markdown/copy-rich";
 import { emailBodyToHtml } from "@/lib/markdown/email-body";
+import { htmlToEmailBody } from "@/lib/markdown/from-html";
 import dynamic from "next/dynamic";
 
 /**
@@ -57,7 +59,7 @@ const BODY_PROSE =
   "[&_p]:mb-3 [&_p:last-child]:mb-0 [&_ul]:mb-3 [&_ul]:ml-5 [&_ul]:list-disc [&_li]:mb-1.5 [&_strong]:font-semibold";
 import { messageInstant, messageTimeFull, messageTimeLabel } from "@/lib/message-time";
 import { Check, Copy, Link as LinkIcon, Mail, Send } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * One message, opened from the timeline (LP-829).
@@ -97,6 +99,7 @@ export function MessageDialog({
 }) {
   const { data, isPending, isError } = useMessageDetail(fileId, messageId);
   const send = useSendDraft(fileId);
+  const save = useSaveDraftBody(fileId);
   const attachLink = useAttachUploadLink(fileId, messageId ?? "");
   const [copied, setCopied] = useState(false);
   const open = messageId !== null;
@@ -108,25 +111,94 @@ export function MessageDialog({
   const [seededFrom, setSeededFrom] = useState<string | null>(null);
   const [recipient, setRecipient] = useState("");
   const [subject, setSubject] = useState("");
-  const [body, setBody] = useState("");
+  // LP-853 — THE EDITOR'S CURRENCY IS HTML, and this holds it. A `plain` body is converted on the
+  // way in by `emailBodyToHtml`, which is still the single renderer for that path; an `html` body
+  // is what a processor already wrote and is loaded as-is.
+  const [bodyHtml, setBodyHtml] = useState("");
+  // What the draft LOOKED like when it was opened. Kept so that "did anything actually change?"
+  // is answerable — see `onEdit`.
+  const [openedAs, setOpenedAs] = useState("");
+  // Starts as the server's answer and becomes "html" once a save has landed.
+  const [format, setFormat] = useState<"plain" | "html">("plain");
   if (data !== undefined && data.id !== seededFrom) {
     setSeededFrom(data.id);
     setRecipient(data.counterparty ?? data.suggested_recipient ?? "");
     setSubject(data.subject ?? "");
-    setBody(data.body);
+    const seeded = data.body_format === "html" ? data.body : emailBodyToHtml(data.body);
+    setBodyHtml(seeded);
+    setOpenedAs(seeded);
+    setFormat(data.body_format);
   }
+
+  // LP-853 — WHAT IS SENT AND COPIED, derived rather than held twice.
+  //
+  // An untouched draft still posts its PLAIN body, which is what LP-849's send record has always
+  // stored and what keeps the round-trip fixed point meaningful. Once a processor has written into
+  // it the HTML is the message, and the plain form is derived for `mailto:` — never stored, because
+  // two copies of one message is the anti-pattern this ticket declines twice.
+  const bodyPlain = htmlToEmailBody(bodyHtml);
+  const bodyForSend = format === "html" ? bodyHtml : bodyPlain;
   // LP-847 — NO RECIPIENT REQUIRED. LP-843 gives a party with no contact on file a draft with an
   // empty To, deliberately; requiring one here meant every such draft had a permanently greyed
   // "Mark as sent" with nothing saying why, which is how it was reported. Nothing in this product
   // transmits — this records that a PROCESSOR sent the message from their own mail client, possibly
   // to an address they know and have never typed in here. A body is still required: there is no
   // message to have sent without one.
-  const canSend = body.trim().length > 0 && !send.isPending;
+  const canSend = bodyPlain.trim().length > 0 && !send.isPending;
   // Built from the EDITED body and the typed recipient, so the link carries what is on screen.
-  const mailtoHref = data ? messageMailtoUrl(data, recipient, body) : null;
+  // ALWAYS THE PLAIN DERIVATION: `mailto:` bodies are plain text by RFC 6068 and no client renders
+  // markup in one, so handing it HTML would put tags in the borrower's message.
+  const mailtoHref = data ? messageMailtoUrl(data, recipient, bodyPlain) : null;
+
+  // LP-853 — SAVED WHEN THE WORDS MOVE, AND NOT WHEN THEY DO NOT.
+  //
+  // Acceptance 2 is "opening a generated draft and not typing leaves it plain — focus is not an
+  // edit". The server cannot tell the difference: a save IS the edit, which is the whole reason
+  // there is no `body_format` field on the payload. So the guarantee lives on this side.
+  //
+  // WHAT ACTUALLY KEEPS IT IS THAT TIPTAP DOES NOT FIRE `onUpdate` WITHOUT A DOCUMENT CHANGE —
+  // not mounting, not focusing, not clicking. That is asserted against the real editor in
+  // `message-editor.test.tsx`, because it is a fact about Tiptap and this file cannot hold it.
+  //
+  // The `openedAs` comparison below is a second line and is honestly that. It cannot be the first:
+  // if Tiptap ever DID report on mount it would report its own normalisation of the seed, which is
+  // a different string, and an exact comparison would call that an edit. What it does cover is a
+  // processor undoing back to where they started.
+  const dirtyRef = useRef(false);
+  const latest = useRef({ draftId: "", html: "", subject: "" });
+  latest.current = { draftId: data?.id ?? "", html: bodyHtml, subject };
+
+  const flush = useCallback(() => {
+    if (!dirtyRef.current) return;
+    dirtyRef.current = false;
+    const { draftId, html, subject: currentSubject } = latest.current;
+    if (!draftId) return;
+    save.mutate(
+      { draftId, body: html, subject: currentSubject },
+      { onSuccess: () => setFormat("html") },
+    );
+  }, [save]);
+
+  // DEBOUNCED, because this fires on every keystroke. One request per pause rather than per letter,
+  // and a flush on close so the last sentence typed is never the one that is lost.
+  useEffect(() => {
+    if (!dirtyRef.current) return;
+    const timer = window.setTimeout(flush, 800);
+    return () => window.clearTimeout(timer);
+  }, [flush]);
+
+  function onEdit(html: string) {
+    setBodyHtml(html);
+    if (html !== openedAs) dirtyRef.current = true;
+  }
+
+  function close() {
+    flush();
+    onClose();
+  }
 
   return (
-    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+    <Dialog open={open} onOpenChange={(next) => !next && close()}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="text-base">
@@ -188,10 +260,15 @@ export function MessageDialog({
                       reported it as "simple notepad version" with "old scholl ***bold***". The
                       toggle is gone because a WYSIWYG IS the preview.
 
-                      The stored body is still one plain string — see `MessageEditor`. `body` here
-                      is what will be sent and recorded, never HTML, which is why nothing else in
-                      this dialog had to change. */}
-                  <MessageEditor value={body} onChange={setBody} />
+                      LP-853 — THE EDITOR NOW SPEAKS HTML, and the stored body follows the moment a
+                      processor types. `data.body_format` says which language the body arrived in;
+                      everything below derives the plain form on demand rather than holding a
+                      second copy of the message. */}
+                  <MessageEditor
+                    value={data.body_format === "html" ? data.body : emailBodyToHtml(data.body)}
+                    format={data.body_format}
+                    onChange={onEdit}
+                  />
                   <p className="text-xs text-muted-foreground">
                     {/* WHICH ROUTE KEEPS THE FORMATTING. `mailto:` bodies are plain text by RFC
                         6068 — no client renders markup in one — so the two buttons below are not
@@ -213,8 +290,17 @@ export function MessageDialog({
               // That ordering is the entire safety argument and it is tested directly.
               <div
                 className={`message-body break-words rounded-md border border-input bg-muted px-3 py-2 text-sm text-foreground ${BODY_PROSE}`}
-                // biome-ignore lint/security/noDangerouslySetInnerHtml: escape-first renderer, see above
-                dangerouslySetInnerHTML={{ __html: emailBodyToHtml(data.body) }}
+                // biome-ignore lint/security/noDangerouslySetInnerHtml: escape-first renderer for a plain body, server-side allowlist for an authored one — see below
+                dangerouslySetInnerHTML={{
+                  // LP-853 — AN AUTHORED BODY IS ALREADY MARKUP AND IS NOT RE-RENDERED. Running it
+                  // through `emailBodyToHtml` would escape the processor's own tags into view, so
+                  // the message they wrote would read back as source. What makes this safe is the
+                  // server: `sanitise_html` rebuilds every saved body from an allowlist on the way
+                  // IN, so the column cannot hold a tag that was not permitted — which is a
+                  // stronger guarantee than sanitising here, because every other reader of the row
+                  // inherits it without knowing the rule.
+                  __html: data.body_format === "html" ? data.body : emailBodyToHtml(data.body),
+                }}
               />
             )}
 
@@ -283,7 +369,7 @@ export function MessageDialog({
                     // LP-844 — BOTH FLAVOURS. This is the send path, so bold and bullets survive
                     // here or nowhere: `mailto:` bodies are plain text by RFC 6068 and no client
                     // renders markup in one.
-                    await copyMessage(body);
+                    await copyMessage(bodyForSend, format);
                     setCopied(true);
                     window.setTimeout(() => setCopied(false), 2000);
                   }}
@@ -317,7 +403,7 @@ export function MessageDialog({
                         draftId: data.id,
                         recipient: recipient.trim(),
                         subject,
-                        body,
+                        body: bodyForSend,
                       },
                       { onSuccess: onClose },
                     )

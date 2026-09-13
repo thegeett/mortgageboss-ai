@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { emailBodyToHtml } from "@/lib/markdown/email-body";
 import { htmlToEmailBody } from "@/lib/markdown/from-html";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { Editor } from "@tiptap/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EXTENSIONS, MessageEditor } from "./message-editor";
@@ -175,4 +175,54 @@ describe("a body driven through the real editor schema", () => {
       }
     });
   }
+});
+
+/**
+ * LP-853 — what the editor emits, and when.
+ *
+ * ACCEPTANCE 2 LIVES HERE, not in the dialog. "Opening a generated draft and not typing leaves it
+ * `plain`" rests on one fact: Tiptap reports a change when the DOCUMENT changes and at no other
+ * time. The dialog's own guard cannot be the primary one — React bails out of a state update that
+ * sets an identical string, so a test of it there passes with the guard deleted.
+ */
+describe("what the editor reports, and when", () => {
+  it("reports nothing on mount, or on focus", async () => {
+    const onChange = vi.fn();
+    render(
+      <MessageEditor value="Hello Sarah,\n\nPlease send the statements." onChange={onChange} />,
+    );
+
+    // Wait for the editor to actually exist, or this asserts about an empty tree.
+    await vi.waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
+    const surface = document.querySelector(".ProseMirror") as HTMLElement;
+    surface.focus();
+    surface.dispatchEvent(new Event("focus", { bubbles: true }));
+    surface.click();
+
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("reports HTML — not a plain body — when the document changes", async () => {
+    // THE POSITIVE CONTROL for the case above, and the LP-853 storage change in one assertion.
+    //
+    // DRIVEN THROUGH THE COMPONENT'S OWN TOOLBAR, not through a hand-built `Editor`. A test that
+    // constructed its own editor with its own `onUpdate` would assert that Tiptap works — it
+    // passes with `MessageEditor` still serialising to plain text, which is LP-849's behaviour and
+    // would quietly undo this whole ticket. Clicking "Bulleted list" changes the document, which
+    // is the one thing that makes the component report at all.
+    const onChange = vi.fn();
+    render(<MessageEditor value="Bank statement" onChange={onChange} />);
+    await vi.waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
+
+    fireEvent.click(screen.getByRole("button", { name: "Bulleted list" }));
+
+    expect(onChange).toHaveBeenCalled();
+    const reported = onChange.mock.calls.at(-1)?.[0] as string;
+    // HTML, and specifically the tag the click produced.
+    expect(reported).toContain("<ul>");
+    expect(reported).toContain("<li>");
+    expect(reported).toContain("Bank statement");
+    // And NOT the plain form, which is what LP-849 emitted here.
+    expect(reported).not.toMatch(/^- /);
+  });
 });

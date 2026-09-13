@@ -108,6 +108,55 @@ export function useMessageDetail(fileId: string, messageId: string | null) {
   });
 }
 
+export interface SavedDraft {
+  id: string;
+  body_format: "plain" | "html";
+  subject: string | null;
+}
+
+export interface SaveDraftBodyInput {
+  draftId: string;
+  /** HTML, as the editor produced it. Sanitised server-side against the allowlist. */
+  body: string;
+  subject?: string;
+}
+
+/**
+ * Store the processor's own words on an unsent draft (LP-853).
+ *
+ * EVERY CALL IS AN EDIT. The server flips `body_format` to `html` on the act of posting, because a
+ * save from a person IS the edit — so a caller that posted on open, or on focus, would record an
+ * edit that never happened and LP-851 would warn about losing changes nobody made. Acceptance 2 is
+ * "focus is not an edit", and this is the side that has to keep it: `message-dialog` posts only
+ * when the editor's content has actually moved.
+ *
+ * THE CACHE IS PATCHED RATHER THAN INVALIDATED. Refetching mid-typing would hand the editor a body
+ * from the server while a processor is still writing into it, which is the re-seed LP-831 keyed on
+ * message identity to avoid. Only the format and the subject are written back; the body on screen
+ * is already the newest copy.
+ */
+export function useSaveDraftBody(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: SaveDraftBodyInput) =>
+      (
+        await apiClient.put<SavedDraft>(`${outboundPath(fileId)}/draft/${input.draftId}/body`, {
+          body: input.body,
+          subject: input.subject ?? null,
+        })
+      ).data,
+    onSuccess: (saved) => {
+      queryClient.setQueryData<MessageDetail>(messageQueryKey(fileId, saved.id), (previous) =>
+        previous
+          ? { ...previous, body_format: saved.body_format, subject: saved.subject }
+          : previous,
+      );
+      // The list row says `Draft · edited · 2m` (LP-852), which is this fact.
+      invalidateDraftViews(queryClient, fileId);
+    },
+  });
+}
+
 export interface SendDraftInput {
   draftId: string;
   recipient: string;

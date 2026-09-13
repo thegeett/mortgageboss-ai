@@ -71,6 +71,32 @@ class SendDraftRequest(BaseModel):
     subject: str | None = Field(default=None, max_length=256)
 
 
+class SaveDraftBodyRequest(BaseModel):
+    """A processor's own words, as the editor produced them (LP-853).
+
+    ``body`` IS HTML AND IS NOT TRUSTED. It is sanitised server-side against the allowlist in
+    `app/communications/sanitise.py` before it reaches the column — the editor is not a security
+    boundary, and a request built by hand does not go through it at all.
+
+    THERE IS NO `body_format` FIELD, and that is deliberate rather than an omission. A save from a
+    person IS the edit; letting a caller declare "this one is still plain" would let the flag and
+    the fact disagree, and the flag's entire job is that they cannot.
+    """
+
+    body: str = Field(min_length=1, max_length=200_000)
+    #: Optional, like the send's. Omitting it means "the one already on the draft", which is a
+    #: complete and true answer; the modal posts both because it edits both.
+    subject: str | None = Field(default=None, max_length=256)
+
+
+class SavedDraftPublic(BaseModel):
+    """What a save stored — never the words back, the caller already has them."""
+
+    id: UUID
+    body_format: str
+    subject: str | None
+
+
 class SentCommunicationPublic(BaseModel):
     """Confirmation of a send — the envelope, never the content."""
 

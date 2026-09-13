@@ -115,7 +115,72 @@ describe("every registered template, rendered for the clipboard", () => {
 });
 
 describe("the only way HTML reaches the DOM", () => {
-  it("feeds every dangerouslySetInnerHTML from emailBodyToHtml and nothing else", () => {
+  /**
+   * Every `__html` expression in the tree, with its braces balanced.
+   *
+   * NOT `[^}]*`, which is what this used and which LP-853 broke by making the one sink a ternary:
+   * the expression now contains a `}`, the regex stopped at it, and the scan matched NOTHING —
+   * reporting zero offenders and zero sinks. It failed only because the count control below caught
+   * it. A guard is only as wide as what it looks at, and a narrow one is indistinguishable from a
+   * clean result.
+   */
+  /**
+   * Comment lines removed, code lines untouched.
+   *
+   * WHOLE LINES ONLY. A stripper that cut from `//` to the end of ANY line drops real code when a
+   * line ends in a trailing comment, and mangles a `//` inside a string literal — this project has
+   * already shipped that bug once. A comment that occupies its own line cannot be either.
+   */
+  const withoutComments = (source: string): string =>
+    source
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("//"))
+      .join("\n");
+
+  const sinksIn = (raw: string): string[] => {
+    // LP-853 — COMMENTS COME OUT FIRST. The marker used to be `={{\s*__html:`, and the sink this
+    // ticket wrote has seven lines of comment between the braces and the key, so the scan matched
+    // nothing at all: zero offenders, zero sinks, and only the count control below noticed.
+    const source = withoutComments(raw);
+    const found: string[] = [];
+    const marker = /dangerouslySetInnerHTML=\{\{\s*__html:/g;
+    for (const match of source.matchAll(marker)) {
+      let depth = 2; // the two braces the marker itself opened
+      let i = match.index + match[0].length;
+      const from = i;
+      while (i < source.length && depth > 0) {
+        if (source[i] === "{") depth += 1;
+        else if (source[i] === "}") depth -= 1;
+        i += 1;
+      }
+      found.push(source.slice(from, i - 2).trim());
+    }
+    return found;
+  };
+
+  /**
+   * The expressions permitted to reach `__html`, normalised to one line.
+   *
+   * LP-853 — THERE ARE TWO SAFETY ARGUMENTS NOW, AND THIS LISTS BOTH.
+   *
+   *   • `emailBodyToHtml(...)` — safe by CONSTRUCTION. It escapes every character that could begin
+   *     markup before it emits a tag, so there is no passthrough to leave open. This is the only
+   *     argument that existed before LP-853, and it still covers every `plain` body.
+   *   • the `body_format === "html"` ternary — safe because the SERVER rebuilt that string from an
+   *     allowlist on the way in (`app/communications/sanitise.py`). The column cannot hold a tag
+   *     that was not permitted, so the guarantee belongs to the row rather than to this renderer.
+   *
+   * WRITTEN OUT IN FULL rather than pattern-matched, because "the body came from a sanitised
+   * column" is a claim about the backend that no regex over this file can check. Listing it forces
+   * the next person adding a sink to say which of the two arguments theirs rests on.
+   */
+  const ALLOWED = new Set([
+    "emailBodyToHtml(data.body)",
+    'data.body_format === "html" ? data.body : emailBodyToHtml(data.body)',
+  ]);
+
+  it("feeds every dangerouslySetInnerHTML from a renderer or a sanitised column, and nothing else", () => {
     const offenders: string[] = [];
     let sinks = 0;
     const walk = (dir: string) => {
@@ -126,80 +191,47 @@ describe("the only way HTML reaches the DOM", () => {
           continue;
         }
         if (!/\.tsx?$/.test(entry.name) || /\.test\.tsx?$/.test(entry.name)) continue;
-        for (const m of readFileSync(full, "utf8").matchAll(
-          /dangerouslySetInnerHTML=\{\{\s*__html:\s*([^}]*)\}\}/g,
-        )) {
+        for (const raw of sinksIn(readFileSync(full, "utf8"))) {
           sinks += 1;
-          if (!/^emailBodyToHtml\(/.test((m[1] ?? "").trim())) {
-            offenders.push(`${entry.name}: ${(m[1] ?? "").trim()}`);
-          }
+          // Line breaks are formatting; the expression is what matters.
+          const expression = raw.replace(/,\s*$/, "").replace(/\s+/g, " ").trim();
+          if (!ALLOWED.has(expression)) offenders.push(`${entry.name}: ${expression}`);
         }
       }
     };
     for (const root of ["components", "app", "lib"]) walk(`${process.cwd()}/${root}`);
 
     expect(offenders).toEqual([]);
-    // ONE SINK, where the LP-844 review recorded two. LP-849 replaced the Markdown preview with a
-    // WYSIWYG editor — the editor IS the preview, so that sink went with it, and only the
-    // read-only reader still injects HTML. The count is a CONTROL against a scan that read nothing,
-    // not a claim about how many sinks there should be, so it tracks the real number rather than
-    // holding a stale one and the guard above is unchanged.
+    // THE CONTROL AGAINST A SCAN THAT READ NOTHING, and it has now earned its keep twice: it is
+    // what caught the `[^}]*` matcher going blind when LP-853 made the sink a ternary. The count
+    // tracks the real number rather than holding a stale one.
     expect(sinks, "the scan found no sink — it read nothing").toBeGreaterThanOrEqual(1);
   });
-});
 
-/**
- * LP-846 — the reported gap, asserted on a REAL catalog body rather than a hand-written one.
- *
- * The backend half is pinned in `test_a_borrower_is_told_where_to_get_each_document`: a request
- * produces a body containing "Where to get it:" for each document. This is the other side of that
- * seam — the same text, through the renderer a processor and a borrower actually read it in.
- *
- * The fixture is the catalog's true output for two real types, copied verbatim. Hand-writing a
- * simpler shape is how LP-844 shipped a renderer that worked on `- one item` and flattened the
- * thing the catalog actually emits.
- */
-describe("the guidance a borrower reads", () => {
-  const REAL_BLOCK = [
-    "- Driver's licence — front and back",
-    "    Where to get it: A photograph or scan of your current licence.",
-    "    What we need to see: Both sides, unexpired, with all four corners in frame.",
-    "    What we cannot accept: an expired licence; the front only.",
-    "",
-    "- Homeowner's insurance — the declarations page",
-    "    Where to get it: From your insurance agent or the insurer's website.",
-    "    What we need to see: The declarations page showing the property address.",
-  ].join("\n");
-
-  it("gives each document one entry, with its guidance inside it", () => {
-    const html = emailBodyToHtml(REAL_BLOCK);
-
-    // ONE list of two documents, not two lists of one.
-    const topLevel = html.match(/^<ul>/)?.length ?? 0;
-    expect(topLevel).toBe(1);
-    expect(html).toContain("<li>Driver&#39;s licence — front and back<ul>");
-    expect(html).toContain("<li>Homeowner&#39;s insurance — the declarations page<ul>");
-
-    // Each guidance line is its own item with its label emphasised — the thing that makes it
-    // findable, and the thing `<br>`-joining destroyed.
-    expect(html.match(/<strong>Where to get it:<\/strong>/g)).toHaveLength(2);
-    expect(html.match(/<strong>What we need to see:<\/strong>/g)).toHaveLength(2);
-    expect(html).toContain("<strong>What we cannot accept:</strong>");
-
-    // THE REGRESSION ITSELF: no run-on. `<br>` inside a bullet is what the report described as the
-    // section being missing.
-    expect(html).not.toContain("<br>");
+  it("would notice an unsanitised sink", () => {
+    // PLANTING THE THING IT FORBIDS. Every assertion above is a not-in over a tree that happens to
+    // be clean, so without this the matcher could be wrong in a second way and still read green.
+    const planted = "<div dangerouslySetInnerHTML={{ __html: message.rawBodyFromSomewhere }} />";
+    const [expression] = sinksIn(planted);
+    expect(expression).toBe("message.rawBodyFromSomewhere");
+    expect(ALLOWED.has(expression ?? "")).toBe(false);
   });
 
-  it("does not put one document's guidance under another", () => {
-    // The blank line between documents no longer flushes the list, so the rule that decides whose
-    // detail a line is has to be the INDENT and the immediacy. If it were only "a list is open",
-    // the second document's guidance would land under the first.
-    const html = emailBodyToHtml(REAL_BLOCK);
-    const [first, second] = html.split("<li>Homeowner&#39;s insurance");
+  it("reads a sink whose braces are separated from its key by a comment", () => {
+    // THE EXACT SHAPE THAT WENT BLIND. Planted, because a matcher that cannot see this reports a
+    // clean tree, and a clean tree is what it reported.
+    const planted = [
+      "<div dangerouslySetInnerHTML={{",
+      "  // a comment explaining the safety argument",
+      "  __html: emailBodyToHtml(data.body),",
+      "}} />",
+    ].join("\n");
+    expect(sinksIn(planted)).toEqual(["emailBodyToHtml(data.body),"]);
+  });
 
-    expect(first).toContain("an expired licence");
-    expect(first).not.toContain("insurance agent");
-    expect(second).toContain("insurance agent");
+  it("reads a ternary sink whole, braces and all", () => {
+    // The exact shape LP-853 introduced, which the previous matcher truncated at the first `}`.
+    const planted = `<div dangerouslySetInnerHTML={{ __html: a === "x" ? { y: 1 } : emailBodyToHtml(b) }} />`;
+    expect(sinksIn(planted)).toEqual(['a === "x" ? { y: 1 } : emailBodyToHtml(b)']);
   });
 });

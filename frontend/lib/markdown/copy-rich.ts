@@ -1,4 +1,5 @@
 import { emailBodyToHtml } from "@/lib/markdown/email-body";
+import { htmlToEmailBody } from "@/lib/markdown/from-html";
 
 /**
  * Put a message on the clipboard in BOTH flavours (LP-844).
@@ -17,13 +18,24 @@ import { emailBodyToHtml } from "@/lib/markdown/email-body";
  * send the message at all, and plain text is exactly what they had before this ticket. The return
  * value says which happened so a caller can tell them the truth about it.
  */
-export async function copyMessage(body: string): Promise<"rich" | "plain"> {
+export async function copyMessage(
+  body: string,
+  format: "plain" | "html" = "plain",
+): Promise<"rich" | "plain"> {
+  // LP-853 — THE PAIRING IS UNTOUCHED; ONLY THE SOURCE CHANGED. A `plain` body is still rendered by
+  // `emailBodyToHtml`, which is the single renderer for that path. An `html` body is what a
+  // processor wrote and what the server already sanitised, so it IS the rich flavour — rendering it
+  // again would escape their own tags into the clipboard — and its plain flavour is derived by
+  // `htmlToEmailBody` rather than stored, because two stored copies of one message is the
+  // anti-pattern this ticket declines twice.
+  const html = format === "html" ? body : emailBodyToHtml(body);
+  const plain = format === "html" ? htmlToEmailBody(body) : body;
   try {
     if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
       await navigator.clipboard.write([
         new ClipboardItem({
-          "text/html": new Blob([emailBodyToHtml(body)], { type: "text/html" }),
-          "text/plain": new Blob([body], { type: "text/plain" }),
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([plain], { type: "text/plain" }),
         }),
       ]);
       return "rich";
@@ -32,6 +44,6 @@ export async function copyMessage(body: string): Promise<"rich" | "plain"> {
     // Fall through. The catch is deliberately silent: the fallback below is a complete answer, and
     // an error toast about a clipboard flavour is noise on top of a copy that worked.
   }
-  await navigator.clipboard.writeText(body);
+  await navigator.clipboard.writeText(plain);
   return "plain";
 }

@@ -34,6 +34,7 @@ from app.ai.email_draft import (
     compose,
     rejection_reason,
 )
+from app.communications.sanitise import sanitise_html
 from app.communications.templates import (
     TEMPLATES,
     Framing,
@@ -49,6 +50,7 @@ from app.core.logging import get_logger
 from app.documents.catalog import ResponsibleParty, get_guidance
 from app.models.borrower import Borrower
 from app.models.communication import (
+    BodyFormat,
     Communication,
     CommunicationDirection,
     CommunicationStatus,
@@ -161,19 +163,46 @@ class DraftDecisionRequired(Exception):
         super().__init__(f"an open draft already exists for: {parties}")
 
 
-def draft_body_edited(draft: Communication) -> bool:
-    """Whether a person has written their own words into this draft's body.
+class DraftIsAuthored(Exception):
+    """Raised when an operation would rewrite a body a processor wrote (LP-853).
 
-    LP-853 IS WHERE THIS BECOMES TRUE. It adds `Communication.body_format`, and the decision there
-    is that `body_format == 'html'` IS this flag — "a machine wrote this" and "it is still plain"
-    are the same statement, and storing them twice is the pattern A22 names.
+    THE REFUSAL IS THE WHOLE POINT OF THE COLUMN. Three mechanisms rewrite a stored draft body
+    without being asked to — `refresh_if_stale` on read, `_regenerate` on every add and remove, and
+    `attach_upload_link` — and all three were safe for exactly one reason: before LP-853 the stored
+    body was always template-generated, so there was nothing human to destroy.
+    `test_no_draft_save_route.py` has failed the build over that assumption since LP-849, and
+    `refresh_if_stale`'s own docstring says it becomes destructive "if an edit-and-save endpoint is
+    ever added". This ticket adds one.
 
-    Until that column exists there is NO RECORD OF AN EDIT, so the honest answer is False. Deriving
-    one by re-rendering the template and comparing would be worse than nothing: a template bump
-    would report as a processor's edit, and LP-851's warning quotes the processor's own sentence
-    back at them — quoting a line they never wrote is how a warning stops being read.
+    SO THE OPERATION IS REFUSED BEFORE IT CHANGES ANYTHING, rather than half-applied. A membership
+    row added to a draft whose body then refuses to mention it is worse than either outcome alone:
+    the draft claims to ask for a document its words never name, and the borrower is never asked.
     """
-    return False
+
+
+class DraftNotEditable(Exception):
+    """The row is not an unsent outbound draft, so its words are not the caller's to change.
+
+    SEPARATE FROM `DraftIsAuthored`, because they are opposite refusals and a caller acts on them
+    differently: this one says the processor may not write here at all, the other says the SYSTEM
+    may not, because the processor already did.
+    """
+
+
+def draft_body_edited(draft: Communication) -> bool:
+    """Whether a person has written their own words into this draft's body (LP-853).
+
+    ONE COLUMN, NOT TWO. `body_format == 'html'` IS this flag, because "a machine wrote this" and
+    "it is still plain" are the same statement — and storing one fact twice is the pattern that has
+    bitten this codebase seven times (AMENDMENTS A22). Nothing on the backend emits HTML, so the
+    format can only have moved by a person typing.
+
+    NOT DERIVED BY COMPARING AGAINST THE TEMPLATE, which was the other candidate and is worse than
+    nothing: a template bump would report as a processor's edit, and LP-851's warning quotes the
+    processor's own sentence back at them. Quoting a line they never wrote is how a warning stops
+    being read.
+    """
+    return draft.body_format is BodyFormat.HTML
 
 
 @dataclass(frozen=True)
@@ -510,6 +539,14 @@ async def refresh_if_stale(db: AsyncSession, *, draft: Communication, loan_file:
     today's template would be falsifying history, which is the opposite of what ADR-401 is for.
     """
     if draft.status is not CommunicationStatus.DRAFT or draft.deleted_at is not None:
+        return False
+    # LP-853 — A BODY A PROCESSOR WROTE IS NOT STALE, IT IS THEIRS. This function's own paragraph
+    # below says regeneration is lossless "because before a send the stored body is always
+    # template-generated, so there is no human edit to discard", and ends: "If an edit-and-save
+    # endpoint is ever added, THIS BECOMES DESTRUCTIVE and must move behind an explicit action."
+    # LP-853 adds one. This is the line that keeps the promise — and it is a READ path, so there is
+    # no action to move it behind: a processor opening their own draft must not have it rewritten.
+    if draft.body_format is BodyFormat.HTML:
         return False
     # ONLY WHERE THE AUDIENCE IS KNOWN, and this is the difference between a fix and a worse bug.
     #
@@ -918,8 +955,42 @@ async def _identification(db: AsyncSession, *, loan_file: LoanFile) -> tuple[str
     return name, address
 
 
-async def _regenerate(db: AsyncSession, *, draft: Communication, loan_file: LoanFile) -> None:
-    """Rewrite the draft's subject and body from its current membership."""
+async def _regenerate(
+    db: AsyncSession, *, draft: Communication, loan_file: LoanFile, force: bool = False
+) -> None:
+    """Rewrite the draft's subject and body from its current membership.
+
+    LP-853 — IT REFUSES A BODY A PROCESSOR WROTE, and `force` is the one way past that.
+
+    Before LP-853 this was unconditionally safe: the stored body of an unsent draft was always
+    template-generated, because nothing could save one. `refresh_if_stale`'s own docstring says the
+    heal "becomes destructive and must move behind an explicit action" the day that changes, and
+    LP-853 is the day.
+
+    `force=True` IS THAT EXPLICIT ACTION, AND IT HAS EXACTLY ONE CALLER: the append in
+    `_apply_party_plan`, which is reachable only after LP-851's dialog has told the processor, in
+    their own words quoted back at them, that adding a document rewrites the message and their
+    changes will be lost. Every other caller takes the refusal, which is why it is the default —
+    a rewrite that nobody was warned about is the thing this guard exists to stop, and a default
+    that had to be opted OUT of would hand it to the next caller somebody adds.
+
+    WHY THE APPEND FORCES RATHER THAN REFUSING. The alternative reading of "`_regenerate` refuses on
+    an `html` body" is that it refuses always. That is worse: the membership would grow and the
+    words would not, so the draft would claim to ask for a document its own body never names, and
+    the borrower would never be asked for it. Silently. That is the failure this whole epic exists
+    to close, and it would also make LP-851's Screen 5 copy false — copy that says what the system
+    will do is a claim, and a false one is worse than no warning at all.
+    """
+    # LP-853 — FIRST, before anything is read or written. See the docstring.
+    if draft.body_format is BodyFormat.HTML and not force:
+        logger.info(
+            "draft_not_regenerated_authored_body",
+            loan_file_id=str(loan_file.id),
+            draft_id=str(draft.id),
+        )
+        raise DraftIsAuthored(
+            "This draft has been edited, so it cannot be rewritten from the template."
+        )
     # LP-848 REVIEW — THE AUDIENCE IS ESTABLISHED HERE, WHERE THE REWRITE HAPPENS, and not at each of
     # the five doors into it. `refresh_if_stale` resolved it strictly and refused a draft it could not
     # place; the other four callers did not, and this function then re-derived it with a lenient
@@ -963,6 +1034,13 @@ async def _regenerate(db: AsyncSession, *, draft: Communication, loan_file: Loan
     )
     draft.subject = rendered.subject
     draft.body = rendered.body
+    # LP-853 — THE COLUMN SAYS WHO WROTE THE BODY, AND THIS FUNCTION JUST DID. A forced rewrite
+    # (the append, behind LP-851's warning) replaces a processor's HTML with the template's plain
+    # text, so leaving the flag on `html` would leave the row claiming an edit that no longer
+    # exists: `_regenerate` would refuse the NEXT request over words no person wrote, and LP-851
+    # would warn about losing changes that are already gone. Found by
+    # `test_the_warned_append_does_rewrite_an_authored_body`.
+    draft.body_format = BodyFormat.PLAIN
     # LP-848 — THE KEY AND THE VERSION ARE ONE FACT AND ARE WRITTEN TOGETHER.
     #
     # This stamped the version alone. A draft composed before LP-843 carries the key
@@ -1281,7 +1359,12 @@ async def _apply_party_plan(
                 CommunicationNeedsItem(communication_id=plan.open_draft.id, needs_item_id=need.id)
             )
         await db.flush()
-        await _regenerate(db, draft=plan.open_draft, loan_file=loan_file)
+        # LP-853 — THE ONE `force=True` IN THE CODEBASE. This path is reachable only through
+        # LP-851's dialog, which has already told the processor that adding a document rewrites the
+        # message from the template and quoted their own edited line back at them. Refusing here
+        # instead would grow the membership without growing the words, so the draft would ask for a
+        # document its body never names.
+        await _regenerate(db, draft=plan.open_draft, loan_file=loan_file, force=True)
         return PartyDraft(
             party=party,
             draft=plan.open_draft,
@@ -1523,6 +1606,19 @@ async def attach_upload_link(
     # revocation — the link this draft is holding — and the row is findable because the URL ends in
     # the plaintext token and the table stores its hash. Anything else on the file is somebody else's
     # decision, and `upload-link-panel.tsx` is where it is made.
+    # LP-853 — REFUSED BEFORE ANYTHING IS MINTED OR REVOKED, not after.
+    #
+    # The link lives only in the rendered body — `upload_links` stores its token's hash, so a link
+    # that never reaches the words is unrecoverable, which is LP-834's whole reason for the column.
+    # On an edited draft `_regenerate` refuses, so minting first would revoke the borrower's live
+    # link, burn a new one into a column nothing renders, and leave the processor with a draft that
+    # says nothing about either. The order is the guard.
+    if draft.body_format is BodyFormat.HTML:
+        raise DraftIsAuthored(
+            "This draft has been edited, so a secure link cannot be added to it — "
+            "the link is written into the message, which would overwrite your changes."
+        )
+
     if draft.upload_link_url:
         await _revoke_link_in_url(db, loan_file=loan_file, url=draft.upload_link_url)
 
@@ -1531,6 +1627,59 @@ async def attach_upload_link(
     await _regenerate(db, draft=draft, loan_file=loan_file)
     # METADATA ONLY — never the URL, which is the credential itself, and never the recipient.
     logger.info("draft_upload_link_attached", loan_file_id=str(loan_file.id))
+    return draft
+
+
+async def save_draft_body(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    draft_id: UUID,
+    body_html: str,
+    subject: str | None = None,
+) -> Communication:
+    """Store a processor's own words, as HTML. ``flush`` only (LP-853).
+
+    THE EDIT IS WHAT FLIPS THE FORMAT. A generated draft is `plain`; the first time a person writes
+    into it the body becomes authored content and `body_format` says so — which is the same fact
+    LP-851 reads as `body_edited`, stored once. From here `_regenerate` refuses the row, and the
+    only thing that may rewrite it is the append behind LP-851's warning.
+
+    SANITISED ON THE WAY IN, NOT ON THE WAY OUT. `email-body.ts` is safe by CONSTRUCTION — it
+    escapes every character that could start markup before it emits a tag, so there is no
+    passthrough to leave open. Storing author HTML ends that property, and an allowlist replaces it
+    HERE so the column never holds anything that was not allowed. A sanitiser at render time would
+    be one renderer's decision; every other reader — the clipboard, a future send provider — would
+    have to remember the rule.
+
+    ONLY AN UNSENT OUTBOUND DRAFT. A sent message is LP-821's record of what actually went out and
+    must not change after the fact; an inbound message is a borrower's words and not ours to
+    rewrite. The check is on the row rather than on a flag the caller passes.
+
+    THE SUBJECT RIDES ALONG because the modal edits both, and posting them separately would let a
+    draft carry a subject from one save and a body from another.
+    """
+    draft = await db.get(Communication, draft_id)
+    if draft is None or draft.loan_file_id != loan_file.id or draft.deleted_at is not None:
+        raise DraftNotEditable("no such draft on this loan file")
+    if (
+        draft.direction is not CommunicationDirection.OUTBOUND
+        or draft.status is not CommunicationStatus.DRAFT
+    ):
+        raise DraftNotEditable("this message has already been sent and cannot be changed")
+
+    draft.body = sanitise_html(body_html)
+    draft.body_format = BodyFormat.HTML
+    if subject is not None:
+        draft.subject = subject
+    await db.flush()
+    # METADATA ONLY. This is the fullest copy of a processor's prose in the product and
+    # `communications.body` is dropped from every readonly view for the same reason.
+    logger.info(
+        "draft_body_saved",
+        loan_file_id=str(loan_file.id),
+        draft_id=str(draft.id),
+    )
     return draft
 
 
@@ -1573,6 +1722,15 @@ async def remove_need_from_draft(
         draft = await get_open_draft(db, loan_file_id=loan_file.id)
     if draft is None:
         return None
+    # LP-853 — BEFORE THE MEMBERSHIP CHANGES. `_regenerate` refuses an edited body, so deleting
+    # first would leave the draft still listing a document it no longer asks for — the same
+    # half-applied state the append avoids from the other direction. Has no caller in `app/` today;
+    # this is the guard for the one LP-851 will add.
+    if draft.body_format is BodyFormat.HTML:
+        raise DraftIsAuthored(
+            "This draft has been edited, so a document cannot be removed from it — "
+            "the list is written into the message, which would overwrite your changes."
+        )
     row = await db.get(CommunicationNeedsItem, (draft.id, needs_item_id))
     if row is None:
         return draft

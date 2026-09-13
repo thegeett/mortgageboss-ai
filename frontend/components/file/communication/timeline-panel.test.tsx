@@ -54,6 +54,10 @@ vi.mock("@/lib/api/communications", () => ({
   // LP-834 — the dialog offers a secure link now. These cases are about the LIST; the dialog has
   // its own file.
   useAttachUploadLink: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+  // LP-853 — the dialog autosaves the processor's edit. Same reasoning as the line above: these
+  // cases are about the LIST.
+  useSaveDraftBody: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+  messageMailtoUrl: () => "mailto:someone@example.com",
 }));
 const mockMessageDetailArgs: unknown[][] = [];
 

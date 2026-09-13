@@ -23,17 +23,22 @@ from app.models.communication import Communication
 from app.schemas.communication import (
     DraftConflictPublic,
     OutboundDraftPublic,
+    SavedDraftPublic,
+    SaveDraftBodyRequest,
     SendDraftRequest,
     SentCommunicationPublic,
 )
 from app.services.email_draft import (
     DraftDecisionRequired,
+    DraftIsAuthored,
+    DraftNotEditable,
     OnConflict,
     _needs_in_draft,
     attach_upload_link,
     compose_request,
     draft_for_reading,
     get_open_draft,
+    save_draft_body,
 )
 from app.services.email_reply import (
     CannotReplyError,
@@ -149,6 +154,49 @@ async def compose_request_endpoint(
         needs_added=len(composed.update.added),
         composed_by_model=composed.composed_by_model,
     )
+
+
+@router.put("/draft/{draft_id}/body", response_model=SavedDraftPublic)
+async def save_draft_body_endpoint(
+    draft_id: UUID,
+    payload: SaveDraftBodyRequest,
+    loan_file: ScopedLoanFile,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> SavedDraftPublic:
+    """Store the processor's own words on an unsent draft, as HTML (LP-853).
+
+    THIS ROUTE DID NOT EXIST BEFORE, AND A TEST FORBADE IT. `tests/api/test_no_draft_save_route.py`
+    has failed the build over a save-without-send since LP-849, for a reason that was correct:
+    three mechanisms rewrite a stored draft body without being asked to — `refresh_if_stale` on
+    read, `_regenerate` on every add and remove, and `attach_upload_link` — and all three were safe
+    only because the stored body was always template-generated. "A rich editor whose output
+    survives until the next page load is worse than no editor at all."
+
+    WHAT CHANGED IS THE PREMISE, NOT THE APPETITE FOR RISK. `body_format` records that a person
+    wrote this body, and all three mechanisms now refuse such a row. The guard's own docstring named
+    the condition — the heal "must move behind an explicit action first" — and this ticket moves it.
+    The guard is not deleted: it is narrowed to permit exactly this route, and paired with
+    behavioural tests that the three refusals actually hold.
+
+    EVERY SAVE IS AN EDIT. There is no "save it back unchanged" — the flag is set by the act of
+    posting, so a client that saves on focus rather than on a change would report an edit that never
+    happened. That is a client rule the client keeps (`message-dialog.tsx` posts only when the
+    editor's content has actually moved), and it is stated here because this endpoint cannot tell
+    the difference.
+    """
+    try:
+        draft = await save_draft_body(
+            db,
+            loan_file=loan_file,
+            draft_id=draft_id,
+            body_html=payload.body,
+            subject=payload.subject,
+        )
+    except DraftNotEditable as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await db.commit()
+    return SavedDraftPublic(id=draft.id, body_format=draft.body_format.value, subject=draft.subject)
 
 
 @router.post("/draft/{draft_id}/send", response_model=SentCommunicationPublic)
@@ -284,6 +332,9 @@ class MessageDetailPublic(BaseModel):
     status: str
     subject: str | None
     body: str
+    #: LP-853 — `"plain"` or `"html"`. The editor loads the stored HTML as-is for `html` and
+    #: converts for `plain`; it is also LP-851's `body_edited`, stored once.
+    body_format: str
     counterparty: str | None
     template_key: str | None
     template_version: str | None
@@ -334,7 +385,12 @@ async def attach_upload_link_endpoint(
 
     draft = await db.get(Communication, communication_id)
     assert draft is not None
-    await attach_upload_link(db, loan_file=loan_file, draft=draft)
+    try:
+        await attach_upload_link(db, loan_file=loan_file, draft=draft)
+    except DraftIsAuthored as exc:
+        # LP-853 — the link is written INTO the body, and an edited body is not ours to rewrite.
+        # Refused rather than forced, because nothing on this path warned the processor.
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await db.commit()
     return await read_message(communication_id, loan_file, db, current_user)
 
@@ -368,6 +424,7 @@ async def read_message(
         status=detail.status,
         subject=detail.subject,
         body=detail.body,
+        body_format=detail.body_format,
         counterparty=detail.counterparty,
         template_key=detail.template_key,
         template_version=detail.template_version,
