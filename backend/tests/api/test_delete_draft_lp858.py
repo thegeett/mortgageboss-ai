@@ -344,3 +344,69 @@ async def test_a_generated_draft_can_never_be_discarded(
     # AND THE SOFT DELETE IS STILL AVAILABLE — refusing the destructive option is not refusing the
     # request. This is the fallback the client takes.
     assert (await _delete(client, loan_file, draft.id, token)).status_code == 204
+
+
+async def test_a_compose_draft_with_a_body_survives_close(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-858 REVIEW — THE GUARD THIS WHOLE ASYMMETRY EXISTS FOR, AND NOTHING ASSERTED IT.
+
+    `_is_untouched_compose_draft` refuses a hard delete on four counts. Three of them had a case;
+    the body did not. Measured by mutation: deleting the body check from the guard left the delete
+    suite green, and left 2,141 tests across `tests/api` and `tests/services` green with it.
+
+    That is the one the docstring is written about — *"a hard delete acting on a claim is how a
+    processor's half-written message disappears because a comparison somewhere was wrong about
+    whitespace"*. A client that miscomputes "no modification" on a draft somebody has TYPED INTO is
+    exactly the failure the server-side re-derivation is there to stop, and it was the one shape the
+    tests did not cover: the recipient case above proves the asymmetry works, this proves it works
+    for the field that holds the words.
+    """
+    company, user, token = await _company_user_token(db, slug="typedbody")
+    loan_file = await create_loan_file(
+        db, company_id=company.id, loan_program=LoanProgram.CONVENTIONAL
+    )
+    draft = await create_compose_draft(
+        db, loan_file=loan_file, body="Half a sentence I was still", actor_user_id=user.id
+    )
+    await db.commit()
+
+    resp = await _delete(client, loan_file, draft.id, token, discard=True)
+
+    assert resp.status_code == 409
+    assert "content" in resp.text
+    survived = await db.get(Communication, draft.id)
+    assert survived is not None
+    assert survived.deleted_at is None, "a refused discard must not fall through to a soft delete"
+    assert survived.body == "Half a sentence I was still"
+
+
+async def test_an_arrived_message_cannot_be_deleted(client: AsyncClient, db: AsyncSession) -> None:
+    """LP-858 REVIEW — the route's direction guard, also unasserted.
+
+    Deleting it from `delete_draft` left the same 2,141 tests green. It is reachable: the route takes
+    an id and `_scoped` resolves any communication on the file, so a caller passing an INBOUND id
+    reaches the guard. A borrower's own words are not ours to remove, which is the same rule
+    `save_draft_body` applies one ticket earlier — an inbound message is not ours to rewrite either.
+    """
+    company, user, token = await _company_user_token(db, slug="inbound")
+    loan_file = await create_loan_file(
+        db, company_id=company.id, loan_program=LoanProgram.CONVENTIONAL
+    )
+    arrived = Communication(
+        loan_file_id=loan_file.id,
+        direction=CommunicationDirection.INBOUND,
+        status=CommunicationStatus.RECEIVED,
+        subject="Here are my statements",
+        body="Attached.",
+        initiated_by_user_id=user.id,
+    )
+    db.add(arrived)
+    await db.commit()
+
+    resp = await _delete(client, loan_file, arrived.id, token)
+
+    assert resp.status_code == 409
+    assert "arrived" in resp.text.lower()
+    still_there = await db.get(Communication, arrived.id)
+    assert still_there is not None and still_there.deleted_at is None

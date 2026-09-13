@@ -279,6 +279,17 @@ async def _is_untouched_compose_draft(db: AsyncSession, *, draft: Communication)
     A TEMPLATE KEY OR A NEEDS LINK DISQUALIFIES IT whatever the text says. A generated request is
     not a compose draft even when a processor has emptied it, and its `communication_needs_items`
     rows are a record that the document was asked for.
+
+    LP-858 REVIEW — THE NEEDS-LINK CHECK IS UNREACHABLE TODAY, AND IS KEPT ON PURPOSE. Every site
+    that writes a `CommunicationNeedsItem` attaches it to a draft whose creation set a
+    `template_key` — `_apply_party_plan`, `build_party_draft`, and the append path, which only ever
+    finds a draft through `get_open_draft`. So the check above always fires first and this one
+    cannot decide anything, which is why mutating it away leaves 2,141 tests green.
+
+    It stays because it is the second lock on the only operation here that destroys a row, and the
+    day something links a need to a template-less draft it is the check that notices. Recorded
+    rather than tested: a test would have to construct a row no code path can produce, which asserts
+    the fixture rather than the product.
     """
     if draft.template_key is not None:
         return False
