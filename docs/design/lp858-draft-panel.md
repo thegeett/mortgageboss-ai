@@ -220,7 +220,14 @@ rg -n "email_draft_enabled|polishAvailable" frontend/                           
 rg -rn "not available on this environment" frontend/                                     # → nothing
 
 # §5 — the picker is not coupled to opening a draft
-rg -n "needsClient" frontend/components/file/communication/message-dialog.tsx            # → referenced by the Copy&open handler, NOT by an `open=` prop
+# NOTE: grepping for the old `open={open && !needsClient}` is USELESS — the fix's own comments
+# quote that string, so it matches forever. Check the live wiring instead:
+rg -n "open=\{pickerOpen\}" frontend/components/file/communication/message-dialog.tsx    # → exactly 1
+# Counting hits does not work either — JSX {/* */} comment bodies match any filter you write.
+# Assert the two LIVE lines by shape instead:
+rg -n "const needsClient = " frontend/components/file/communication/message-dialog.tsx    # → 1, a capability test only
+rg -n "if \(client === null && needsClient\)" frontend/components/file/communication/message-dialog.tsx  # → 1, inside the copy-and-open handler
+# Anything else that mentions needsClient must be prose. Read it; do not count it.
 
 # §7 — delete exists, and does NOT touch finding state
 rg -n '@router.delete' backend/app/api/communications.py                                 # → one route

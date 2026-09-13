@@ -31,7 +31,11 @@ vi.mock("@/lib/api/preferences", async (importOriginal) => ({
 // secure-link button. `false` is the product's default and the restrictive answer; the button's
 // two states are asserted in `message-dialog-address.test.tsx`.
 vi.mock("@/lib/api/capabilities", () => ({
-  useCapabilities: () => ({ data: { receiving: false } }),
+  // LP-858 §5 — POLISH IS WIRED IN THIS SUITE, deliberately. The button is hidden when the
+  // capability says otherwise, and that half is asserted in `message-dialog.test.tsx`. These cases
+  // are about what the button DOES once it exists — the flagged-out feature keeps its tests rather
+  // than rotting, which is the same shape LP-857 used for LP-834's suite.
+  useCapabilities: () => ({ data: { receiving: false, polish: true } }),
 }));
 vi.mock("@/lib/api/communications", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/communications")>()),
@@ -174,13 +178,20 @@ describe("✦ polish", () => {
   });
 
   it("says so when the model is unavailable, and leaves the text alone", async () => {
-    // Acceptance 2 — the ORDINARY outcome today, since `email_draft_enabled` is off everywhere.
+    // LP-856 acceptance 2. NO LONGER THE ORDINARY OUTCOME: LP-858 §5 hides the button entirely
+    // when polish is not wired, so reaching this means the capability changed underneath a page
+    // already open, or the request failed.
     const button = await open();
     fireEvent.click(button);
     answer({ polished: null, refusal: "unavailable" });
 
-    const message = await screen.findByText(/not available on this environment/i);
+    const message = await screen.findByText(/didn’t run/i);
     expect(message.textContent).toMatch(/your message is unchanged/i);
+    // AND IT DOES NOT NAME THE ENVIRONMENT. LP-858 §5 — that wording described a permanent state a
+    // processor can do nothing about and read as breakage. With the button hidden when polish is
+    // not wired, the case that survives here is a race or a failed request, and "try again" is
+    // true of that and was false of the old sentence.
+    expect(message.textContent).not.toMatch(/environment/i);
     // NOT A PROPOSAL. Returning the text untouched under the proposal header would read as "the
     // model looked and changed nothing", which is a different claim and a false one.
     expect(screen.queryByText(/After ✦ polish/i)).toBeNull();

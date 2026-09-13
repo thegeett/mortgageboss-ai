@@ -138,7 +138,10 @@ async def test_the_version_says_it_cannot_receive(client: AsyncClient, db: Async
     resp = await client.get("/api/v1/capabilities", headers=_auth(token))
 
     assert resp.status_code == 200
-    assert resp.json() == {"receiving": False}
+    # LP-858 §5 added `polish`, from `email_draft_enabled` — off in every environment too, and for
+    # its own reason. Asserted as a whole object rather than field by field, so a capability added
+    # later has to be looked at here rather than appearing silently.
+    assert resp.json() == {"receiving": False, "polish": False}
     # THE DEFAULT IS THE PRODUCT, not a test convenience. Every other assertion in this file is
     # about the off state, so if the default flipped they would all be describing a configuration
     # nobody runs.
@@ -161,8 +164,31 @@ async def test_the_flag_is_reported_as_it_is_set(
     monkeypatch.setattr(settings, "receiving_enabled", True)
 
     assert (await client.get("/api/v1/capabilities", headers=_auth(token))).json() == {
-        "receiving": True
+        "receiving": True,
+        "polish": False,
     }
+
+
+async def test_polish_is_reported_as_wired_only_when_the_flag_is_on(
+    client: AsyncClient, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LP-858 §5 — the button is ABSENT when this is false, not present and refusing.
+
+    TWO FLAGS, ONE ENDPOINT, AND THEY MOVE INDEPENDENTLY. `receiving` and `polish` answer different
+    questions and are set by different settings; serving them from one route is convenience, and a
+    test that only ever flipped them together would not notice them being wired to each other.
+    """
+    _company, _user, token = await _company_user_token(db, slug="polishcap")
+    await db.commit()
+    monkeypatch.setattr(settings, "email_draft_enabled", True)
+
+    body = (await client.get("/api/v1/capabilities", headers=_auth(token))).json()
+
+    assert body == {"receiving": False, "polish": True}
+    # THE DEFAULT IS THE PRODUCT. Every environment runs with this off, which is what makes hiding
+    # the button the ordinary case rather than an edge.
+    monkeypatch.undo()
+    assert settings.email_draft_enabled is False
 
 
 # --- Acceptance 5: the body does not promise what the version cannot do --------------------- #

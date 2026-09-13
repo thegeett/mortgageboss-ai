@@ -12,7 +12,12 @@
  */
 export function polishMessage(refusal: string): string {
   if (refusal === "unavailable") {
-    return "Polish is not available on this environment — your message is unchanged.";
+    // LP-858 §5 — THIS IS NOW A RACE, NOT THE ORDINARY CASE. The button is hidden when the
+    // capability says polish is not wired, so reaching this means the answer changed underneath a
+    // page already open, or the request failed. The old wording named the ENVIRONMENT as the
+    // reason, which is a permanent state a processor can do nothing about and reads as breakage;
+    // what is true in the case that survives is that it did not run and nothing moved.
+    return "Polish didn’t run — your message is unchanged. Try again in a moment.";
   }
   if (refusal === "empty") {
     return "There is nothing to polish yet.";

@@ -124,14 +124,18 @@ message to this party."* and `Save address` (primary).
 The draft is still created and still appears in the list. Refusing to create it would lose the
 record that the document was asked for.
 
-## Screen 10 — which mail client · LP-855
+## Screen 10 — which mail client · LP-855, retriggered by LP-858 §1
 
-Dialog, shown once on the first draft.
+Dialog, shown once — **on pressing `Copy & open …`, not on opening a draft.**
 
-> **Where do you write your email?**
+LP-858 moved the trigger. It used to open on the first editable draft of a session, which asked a
+processor which mail client they use about a message they had not read yet; it was reported from use
+in those words. Answering completes the original action in the same gesture — there is no second
+press. `Copy message`, `Mark as sent` and simply reading a draft never raise it.
+
+> **Which mail app should this open?**
 >
-> We'll copy the message and open the right compose window for you. You can change this any time in
-> settings.
+> Asked once. You can change it in preferences.
 
 Three bordered option blocks; the seeded one has a petrol border and a filled radio:
 

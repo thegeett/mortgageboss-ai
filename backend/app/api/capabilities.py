@@ -33,9 +33,15 @@ class Capabilities(BaseModel):
     #: v1, which is draft-only. The same value decides whether a request's closing sentence offers
     #: an upload link, so the page and the email cannot disagree.
     receiving: bool
+    #: LP-858 §5 — whether ✦ polish is wired to anything. `email_draft_enabled` is off in every
+    #: environment, and the button was rendering and then refusing: *"Polish is not available on
+    #: this environment."* That reads as breakage, and a processor cannot switch it on. Served here
+    #: so the button is ABSENT rather than present-and-failing — the page's own principle, applied
+    #: to the one control LP-857 did not reach.
+    polish: bool
 
 
 @router.get("/capabilities", response_model=Capabilities)
 async def get_capabilities(current_user: CurrentUser) -> Capabilities:
     """What this deployment can do. Read from settings; nothing here is per-user."""
-    return Capabilities(receiving=settings.receiving_enabled)
+    return Capabilities(receiving=settings.receiving_enabled, polish=settings.email_draft_enabled)

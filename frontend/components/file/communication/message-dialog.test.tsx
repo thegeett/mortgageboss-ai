@@ -44,7 +44,7 @@ vi.mock("@/lib/api/preferences", async (importOriginal) => ({
 // LP-857 — the dialog asks whether this version can receive, to decide whether to offer the
 // secure-link button. `false` is the product's default and the restrictive answer; the button's
 // two states are asserted in `message-dialog-address.test.tsx`.
-const mockCapabilities = vi.fn(() => ({ data: { receiving: false } }));
+const mockCapabilities = vi.fn(() => ({ data: { receiving: false, polish: false } }));
 vi.mock("@/lib/api/capabilities", () => ({ useCapabilities: () => mockCapabilities() }));
 vi.mock("@/lib/api/communications", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/communications")>()),
@@ -577,7 +577,7 @@ describe("the secure upload link (LP-834)", () => {
   // LP-834 is written and reviewed and returns with the phase that brings receiving back, so its
   // behaviour keeps being asserted. What LP-857 changed is that it is unreachable by default —
   // asserted in `message-dialog-address.test.tsx`, in both directions.
-  beforeEach(() => mockCapabilities.mockReturnValue({ data: { receiving: true } }));
+  beforeEach(() => mockCapabilities.mockReturnValue({ data: { receiving: true, polish: false } }));
 
   it("offers to add one, and warns before the click", () => {
     // THE WARNING IS BEFORE, NOT AFTER. Minting expires every other live link on the file, so a
@@ -755,11 +755,16 @@ describe("the mail-client picker", () => {
     expect(screen.getByRole("heading", { name: "Which mail app should this open?" })).toBeTruthy();
     expect(open).not.toHaveBeenCalled();
 
-    // §5 — THE DRAFT STAYS VISIBLE BEHIND THE DIALOG. The shape being replaced did not merely
-    // layer the picker on top, it unmounted the message: `open={open && !needsClient}`. Asserted
-    // by TEXT rather than by role, deliberately — Radix marks the pane behind the topmost modal
-    // `aria-hidden`, which is correct for something that cannot be interacted with, and a role
-    // query would fail on a draft that is on screen and readable.
+    // §5 — THE DRAFT IS STILL RENDERED BEHIND THE DIALOG, rather than unmounted. The shape being
+    // replaced did not merely layer the picker on top: `open={open && !needsClient}` took the
+    // message out of the tree entirely, and that is the regression this catches.
+    //
+    // "STILL RENDERED", NOT "VISIBLE" — and the distinction is not pedantry. jsdom loads no CSS and
+    // jest-dom is not installed here, so a Tailwind `display: none` is invisible to every matcher
+    // available, `toBeVisible` included. Text-presence is the strongest signal this environment
+    // has; a real visibility guarantee would need a browser-level test, which this does not earn.
+    // Asserted by text rather than by role because Radix `aria-hidden`s the pane under the topmost
+    // modal, which is correct for something that cannot be interacted with.
     expect(screen.getByText(/Please send/)).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Use Gmail" }));
@@ -865,5 +870,61 @@ describe("the mail-client picker", () => {
     expect(screen.queryByText("Which mail app should this open?")).toBeNull();
     // And the button still works, on the safe answer.
     expect(screen.getByRole("button", { name: "Copy & open mail app" })).toBeTruthy();
+  });
+});
+
+/**
+ * LP-858 §5 — ✦ polish is ABSENT when it is not wired, not present and refusing.
+ *
+ * `email_draft_enabled` is false in every environment, so the button rendered, was pressed, and
+ * answered with a sentence naming the environment as the reason. Working as designed, and still the
+ * wrong product: it reads as breakage, and the processor cannot switch it on. The page's own
+ * principle — *"a processor cannot tell a feature that is broken from one that was never wired"* —
+ * was applied to the receiving panels by LP-857 and not to this button.
+ */
+describe("the ✦ polish button", () => {
+  function draftWithPolish(polish: boolean) {
+    mockCapabilities.mockReturnValue({ data: { receiving: false, polish } });
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+  }
+
+  it("is not on screen when polish is not wired", async () => {
+    draftWithPolish(false);
+
+    // WAIT FOR THE REAL EDITOR FIRST. `next/dynamic` with `ssr: false` resolves after the first
+    // paint, so asserting straight away reads a tree that has not mounted — which is how five
+    // assertions in the autosave suite came to be vacuous. The button sits beside the editor; if
+    // the editor is there and the button is not, the absence is real.
+    await vi.waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
+    expect(screen.queryByRole("button", { name: /polish/i })).toBeNull();
+    // AND NOTHING ELSE OF IT EITHER — no explanatory sentence, no disabled shell, no "coming soon".
+    expect(screen.queryByText(/Rewrites how it reads/)).toBeNull();
+  });
+
+  it("is on screen when polish is wired", async () => {
+    // THE POSITIVE CONTROL. Without it the absence above passes against a dialog that never had
+    // the button, against a broken import, and against an editor that failed to mount.
+    draftWithPolish(true);
+
+    await vi.waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
+    expect(screen.getByRole("button", { name: /polish/i })).toBeTruthy();
+    expect(screen.getByText(/Rewrites how it reads/)).toBeTruthy();
+  });
+
+  it("is absent while the answer has not arrived", async () => {
+    // FALSE IS THE RESTRICTIVE DEFAULT, and here it is also the common one: the flag is off in
+    // every environment, so a button that flashed in before the capability resolved would be the
+    // ordinary case rather than the edge.
+    mockCapabilities.mockReturnValue({ data: undefined } as never);
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
+    );
+    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    await vi.waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
+    expect(screen.queryByRole("button", { name: /polish/i })).toBeNull();
   });
 });

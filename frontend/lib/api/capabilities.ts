@@ -17,6 +17,20 @@ export interface Capabilities {
    * next phase."*
    */
   receiving: boolean;
+  /**
+   * LP-858 §5 — whether ✦ polish is wired to anything (`email_draft_enabled`, off everywhere).
+   *
+   * THE BUTTON IS ABSENT WHEN THIS IS FALSE, not present and refusing. It used to render, be
+   * pressed, and answer with a sentence naming the environment as the reason — which reads as
+   * breakage rather than as a deliberate switch, and a processor cannot turn the switch on, so the
+   * button could only ever disappoint them. The page's own principle at `communication/page.tsx`:
+   * *"a processor cannot tell a feature that is broken from one that was never wired."*
+   *
+   * THAT SENTENCE IS NOT QUOTED ANYWHERE, deliberately. §9 checks for it with a grep over the
+   * whole frontend, and a comment repeating it would keep the check red forever — the failure mode
+   * the design file names about `needsClient`, one file over.
+   */
+  polish: boolean;
 }
 
 /**

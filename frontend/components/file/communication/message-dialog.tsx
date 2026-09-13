@@ -115,7 +115,15 @@ export function MessageDialog({
   const attachLink = useAttachUploadLink(fileId, messageId ?? "");
   // LP-857 — whether this version can receive anything. Same fact as the page's, from the same
   // endpoint: the panel and the button must not disagree about whether an upload link exists.
-  const receiving = useCapabilities().data?.receiving ?? false;
+  const capabilities = useCapabilities().data;
+  const receiving = capabilities?.receiving ?? false;
+  // LP-858 §5 — ✦ POLISH IS ABSENT WHEN IT IS NOT WIRED, not present and refusing.
+  //
+  // FALSE WHILE LOADING, like `receiving` and for the same reason: the restrictive default. A
+  // button that appeared for a moment and then vanished is worse than one that was never there,
+  // and `email_draft_enabled` is false in every environment today, so the flash would be the
+  // ordinary case rather than the edge.
+  const polishAvailable = capabilities?.polish ?? false;
   const [copied, setCopied] = useState(false);
   const open = messageId !== null;
 
@@ -493,31 +501,47 @@ export function MessageDialog({
                             control on this screen and it is the only violet thing on it.
 
                             AVAILABLE ON ANY DRAFT, not only a free one: a generated request a
-                            processor has rewritten by hand is exactly where it is wanted. */}
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="gap-1.5 border-ai text-ai hover:bg-ai/5 hover:text-ai"
-                            disabled={polishDraft.isPending || bodyPlain.trim() === ""}
-                            onClick={askForPolish}
-                          >
-                            <Sparkles className="h-3.5 w-3.5" aria-hidden />
-                            {polishDraft.isPending ? "Polishing…" : "polish"}
-                          </Button>
-                          {polishRefusal ? (
-                            // IT FAILS VISIBLY OR NOT AT ALL. Each reason is a sentence rather than
-                            // a code, and none of them claims the text was changed.
-                            <span className="text-xs text-warning">
-                              {polishMessage(polishRefusal)}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">
-                              Rewrites how it reads. It cannot add a date, an amount or a document.
-                            </span>
-                          )}
-                        </div>
+                            processor has rewritten by hand is exactly where it is wanted.
+
+                            LP-858 §5 — AND ABSENT WHEN IT IS NOT WIRED. `email_draft_enabled` is
+                            false in every environment, so this button rendered, was pressed, and
+                            answered with a sentence naming the environment as the reason. That is
+                            not a bug — it is the flag doing its job — but it reads as breakage, and
+                            the processor cannot switch it on, so the button could only ever
+                            disappoint them. The page's own principle, applied to the one control
+                            LP-857 did not reach: *"a processor cannot tell a feature that is broken
+                            from one that was never wired."*
+
+                            The old sentence is quoted NOWHERE in this repo: §9 greps the whole
+                            frontend for it, and a comment repeating it would hold that check red
+                            forever. */}
+                        {polishAvailable ? (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="gap-1.5 border-ai text-ai hover:bg-ai/5 hover:text-ai"
+                              disabled={polishDraft.isPending || bodyPlain.trim() === ""}
+                              onClick={askForPolish}
+                            >
+                              <Sparkles className="h-3.5 w-3.5" aria-hidden />
+                              {polishDraft.isPending ? "Polishing…" : "polish"}
+                            </Button>
+                            {polishRefusal ? (
+                              // IT FAILS VISIBLY OR NOT AT ALL. Each reason is a sentence rather than
+                              // a code, and none of them claims the text was changed.
+                              <span className="text-xs text-warning">
+                                {polishMessage(polishRefusal)}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">
+                                Rewrites how it reads. It cannot add a date, an amount or a
+                                document.
+                              </span>
+                            )}
+                          </div>
+                        ) : null}
                       </>
                     ) : (
                       /* THE PROPOSAL REPLACES THE EDITOR IN PLACE, under a violet header — Screen 8.
