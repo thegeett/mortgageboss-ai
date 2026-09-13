@@ -57,6 +57,16 @@ class TimelineEntryPublic(BaseModel):
     #: client is a second definition of "the lender's messages", and when the two drift a draft
     #: exists with an empty tab in front of it.
     party: str | None
+    #: LP-852 — what the draft asks for, so a row says what is inside without being opened. Four
+    #: rows reading "A document request is being prepared" is the screenshot that started the ticket.
+    documents: list[str]
+    #: LP-852 — who wrote it, for the attributed status: "Marked sent by Priya", never "Sent".
+    actor_name: str | None
+    #: LP-852 — `Draft · edited · 2m`. LP-853's `body_format` is where this is stored.
+    body_edited: bool
+    #: LP-852 — when the draft came into existence, which is NOT `at` (`sent_at or created_at`). The
+    #: "since you last looked" dot is about creation, and for a sent message those differ.
+    created_at: datetime | None
 
     @classmethod
     def of(cls, entry: TimelineEntry) -> "TimelineEntryPublic":
@@ -76,6 +86,10 @@ class TimelineEntryPublic(BaseModel):
             ],
             is_important=entry.is_important,
             unread=entry.unread,
+            documents=list(entry.documents),
+            actor_name=entry.actor_name,
+            body_edited=entry.body_edited,
+            created_at=entry.created_at,
             detail=entry.detail,
             party=entry.party,
         )

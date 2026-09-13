@@ -99,11 +99,23 @@ class ComposeRequestPayload(BaseModel):
     on_conflict: OnConflict | None = None
 
 
+class DraftMadePublic(BaseModel):
+    """One party's share of a compose — who it is to, and how much (LP-852)."""
+
+    party: str
+    needs_added: int
+
+
 class ComposedRequestPublic(BaseModel):
     """What the compose produced."""
 
     draft_id: UUID | None
     needs_added: int
+    #: LP-852 — PER PARTY, because the toast has to name one. "Draft prepared" cannot say which
+    #: draft or to whom, and the party is the part a processor cannot infer: a selection spanning a
+    #: bank statement and a title commitment makes two messages, and the second one is the one that
+    #: goes unsent because nobody knew it existed.
+    drafts: list[DraftMadePublic] = []
     #: Whether a MODEL wrote the framing, or LP-817's template did. Served so the screen can say
     #: which — `email_draft_enabled` is off in every environment, so today this is always False and
     #: the processor gets the template. A flow claiming otherwise would be untrue about itself.
@@ -152,6 +164,13 @@ async def compose_request_endpoint(
     return ComposedRequestPublic(
         draft_id=composed.update.draft.id if composed.update.draft else None,
         needs_added=len(composed.update.added),
+        # LP-852 — only the parties this request actually put something in front of. A party whose
+        # share was empty produced no message, and naming it in a toast would announce one.
+        drafts=[
+            DraftMadePublic(party=party.party.value, needs_added=len(party.added))
+            for party in composed.update.parties
+            if party.added
+        ],
         composed_by_model=composed.composed_by_model,
     )
 

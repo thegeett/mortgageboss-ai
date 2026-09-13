@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { fetchReplyContext, useMarkRead, useReply, useSetImportant } from "@/lib/api/messages";
 import { useTimeline } from "@/lib/api/timeline";
+import { isNewSince, readLastSeen, writeLastSeen } from "@/lib/communication/last-seen";
 import { messageTimeLabel, messageTimeShort } from "@/lib/message-time";
 import type { TimelineEntry, TimelineFilter } from "@/lib/types/timeline";
 import { Check, Copy, Mail, MailOpen, PenLine, Reply, Star, TriangleAlert } from "lucide-react";
@@ -36,46 +37,82 @@ const PILLS: { value: TimelineFilter; label: string }[] = [
 ];
 
 /**
- * The party tabs (LP-841) — the four buckets a processor works in, plus whoever else this file has.
+ * The party, as the column it now is (LP-852).
  *
- * A SECOND AXIS, NOT A SECOND SET OF PILLS. The pills above answer "what happened to it" (sent,
- * received, still a draft); these answer "who is it with". They are orthogonal — a processor
- * chasing the title company wants that company's drafts AND its replies — so collapsing them into
- * one row of pills would make every useful combination unreachable.
+ * A COLUMN, NEVER A HEADING, AND NEVER A TAB. This was a strip of party tabs, and the reported
+ * defect is what that costs: *"in some instance Not from the borrower go bottom of the list and
+ * processor may not realize that draft has been created for non borrower"*. A tab is a region that
+ * can be left unclicked and a heading is one that can be scrolled past; a column is on every row
+ * whether or not anybody is looking for it.
  *
- * THE ORDER IS THE WORK, not the alphabet: the borrower is who a processor chases most, then the
- * employer for a VOE, then the lender, then title. The three after them are rare and sit where they
- * fall. The PROCESSOR is deliberately absent — the catalog's 24 processor-owned types are ordered
- * by the processor from somebody who is not on this list, so they never become a message and there
- * is nothing for that tab to hold.
+ * The vocabulary is unchanged — LP-841 argued these words out and LP-843's `party` column is still
+ * the only source of truth for which one a draft gets. What changed is where they appear.
  */
-const PARTY_ORDER = ["borrower", "employer", "lender", "title", "cpa", "agent", "insurer"] as const;
-
 const PARTY_LABEL: Record<string, string> = {
   borrower: "Borrower",
   employer: "Employer",
   lender: "Lender",
-  title: "Title",
+  title: "Title co.",
   cpa: "Accountant",
   agent: "Agent",
   insurer: "Insurer",
 };
 
 /**
- * Which tabs to show: the ones this file actually has something for.
+ * The party cell.
  *
- * DERIVED, NOT LISTED. Showing all seven on every file would put five empty tabs in front of a
- * processor on the ordinary purchase that only ever involves a borrower and a lender. Showing only
- * the four the ticket names would do the opposite and worse — an accountant draft would exist with
- * no tab that reaches it, which is invisible rather than merely noisy.
+ * FIXED WIDTH so the subjects line up and the column reads as a column rather than as a prefix.
+ * The borrower is petrol because they are the party a processor is chasing on almost every file;
+ * everybody else is muted, which is what makes a title-company row catch the eye in a list of
+ * borrower rows — the exact scan this ticket exists to make possible.
  *
- * `selected` is always kept, so switching the status pill to one a party has nothing under does not
- * pull the tab out from under the person standing on it.
+ * A MESSAGE WITH NO PARTY STILL GETS A CELL. An inbound message from an address nobody on the file
+ * recognises belongs to no party (LP-841 says so deliberately), and leaving the cell out would
+ * shift its subject into the party column and break the alignment the column is for.
  */
-function partyTabs(entries: TimelineEntry[], selected: string | null): string[] {
-  const present = new Set(entries.map((e) => e.party).filter((p): p is string => p !== null));
-  if (selected) present.add(selected);
-  return PARTY_ORDER.filter((p) => present.has(p));
+function PartyCell({ party }: { party: string | null }) {
+  const label = party === null ? "—" : (PARTY_LABEL[party] ?? party);
+  return (
+    <span
+      className={
+        party === "borrower"
+          ? "w-[5.6rem] shrink-0 truncate text-[11px] uppercase tracking-wide text-primary"
+          : "w-[5.6rem] shrink-0 truncate text-[11px] uppercase tracking-wide text-muted-foreground"
+      }
+      title={label}
+    >
+      {label}
+    </span>
+  );
+}
+
+/**
+ * Column three — what happened to it, said as a word and attributed (LP-852).
+ *
+ * `Draft · edited · 2m` / `Marked sent by Priya · Mon 16:41`.
+ *
+ * "MARKED SENT BY PRIYA", NEVER "SENT". Nothing in this version observed a send — `mail_transport`
+ * has no provider — so what the record holds is a processor's claim that they sent it from their
+ * own mail client. `Sent` reads as something the system did and watched happen, which is the
+ * confusion this whole epic is fencing off. When the actor is unknown the claim is still a claim,
+ * so it reads "Marked sent" rather than acquiring a name it does not have.
+ *
+ * THE WORD IS ALWAYS THERE. The Ledger's rule is that a state is colour AND glyph AND word; the
+ * glyph is `EntryIcon` and this is the word, so deleting the colour mentally still leaves the row
+ * readable.
+ */
+function statusLine(entry: TimelineEntry): string {
+  const when = messageTimeShort(entry.at);
+  if (entry.status === "draft" || entry.status === "queued") {
+    return entry.body_edited ? `Draft · edited · ${when}` : `Draft · ${when}`;
+  }
+  if (entry.status === "sent" || entry.status === "delivered") {
+    return entry.actor_name
+      ? `Marked sent by ${entry.actor_name} · ${when}`
+      : `Marked sent · ${when}`;
+  }
+  // Everything else keeps LP-838's label, which already says what it is in a processor's words.
+  return `${messageTimeLabel(entry)} ${when}`;
 }
 
 /**
@@ -273,9 +310,6 @@ const ATTACHMENT_DISPOSITION: Record<string, string> = {
 
 export function TimelinePanel({ fileId }: { fileId: string }) {
   const [filter, setFilter] = useState<TimelineFilter>("all");
-  // LP-841 — null is "everyone", which is the landing state. A processor opening this page wants
-  // the file's history, not one correspondent's.
-  const [party, setParty] = useState<string | null>(null);
   const { data, isPending, isError } = useTimeline(fileId, filter);
   const [copied, setCopied] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
@@ -296,12 +330,25 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
   const [openMessage, setOpenMessage] = useState<string | null>(linkedDraft);
 
   const entries = data?.entries ?? [];
-  const tabs = partyTabs(entries, party);
-  // The party axis is applied HERE while the status axis is a query parameter, and the asymmetry is
-  // deliberate: "sent" and "draft" are server definitions (see the header comment), but `party` is
-  // a value the server already put on every row — this only groups by it. Nothing is being decided
-  // twice.
-  const shown = party === null ? entries : entries.filter((e) => e.party === party);
+  // LP-852 — ONE LIST, IN ONE TIME ORDER. There is no party axis any more: it was a strip of tabs,
+  // and a tab is a region a processor can leave unclicked, which is how a draft to the title
+  // company came to exist behind one. The party is a column on every row instead.
+  const shown = entries;
+
+  // LP-852 — WHICH DRAFTS APPEARED SINCE THIS PROCESSOR LAST LOOKED.
+  //
+  // Read ONCE, on mount, and the clock is moved forward immediately — so the dots describe this
+  // visit and are already correct for the next one. Reading it on every render would clear them the
+  // instant anything re-rendered, which is every keystroke in the reply box.
+  const [lastSeen] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : readLastSeen(fileId),
+  );
+  useEffect(() => {
+    writeLastSeen(fileId, new Date().toISOString());
+  }, [fileId]);
+  // Rows the processor has opened during THIS visit. The dot is about their attention, so it clears
+  // when they give it — without waiting for a refetch to tell them what they just did.
+  const [acknowledged, setAcknowledged] = useState<Set<string>>(() => new Set());
   // Tracked rather than compared against `openMessage`: after a processor CLOSES the linked message
   // the parameter is still in the URL, and re-opening it on the next render would make the dialog
   // impossible to dismiss.
@@ -357,50 +404,11 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
             </div>
           ) : null}
         </div>
-        {/* LP-841 — WHO IT IS WITH, above WHAT HAPPENED TO IT. The underline treatment separates
-            the two axes at a glance: these are tabs a processor lives in, the pills below narrow
-            what is inside one. Hidden entirely when the file has one correspondent, which is the
-            common case — a single tab is a control that cannot do anything. */}
-        {tabs.length > 1 ? (
-          <div
-            className="-mb-px flex flex-wrap items-center gap-4 border-b border-border"
-            role="tablist"
-            aria-label="Filter by who the message is with"
-          >
-            {[null, ...tabs].map((value) => {
-              const active = party === value;
-              const label = value === null ? "Everyone" : (PARTY_LABEL[value] ?? value);
-              // The count is the reason a tab is worth clicking — an unread reply or an unsent
-              // draft waiting under a name a processor is not currently looking at.
-              const waiting =
-                value === null
-                  ? 0
-                  : entries.filter((e) => e.party === value && (e.unread || e.status === "draft"))
-                      .length;
-              return (
-                <button
-                  key={value ?? "all"}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => setParty(value)}
-                  className={
-                    active
-                      ? "flex items-center gap-1.5 border-b-2 border-primary pb-1.5 text-xs font-semibold text-foreground"
-                      : "flex items-center gap-1.5 border-b-2 border-transparent pb-1.5 text-xs text-muted-foreground hover:text-foreground"
-                  }
-                >
-                  {label}
-                  {waiting > 0 ? (
-                    <span className="rounded-full bg-primary/10 px-1.5 text-[10px] font-semibold tabular-nums text-primary">
-                      {waiting}
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
+        {/* LP-852 — THE PARTY TAB STRIP IS GONE. It was the reported defect: a tab is a region a
+            processor can leave unclicked, so a draft to the title company sat behind one and was
+            never sent. The party is a column on every row now — see `PartyCell`. The status pills
+            below stay: they answer "what happened to it", which is a different question and one a
+            processor asks deliberately. */}
         <div className="flex flex-wrap gap-1" role="tablist" aria-label="Filter the history">
           {PILLS.map((pill) => (
             <button
@@ -430,21 +438,15 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
       ) : shown.length === 0 ? (
         // "filtered" when a pill is on, "nothing-yet" otherwise — they mean different things, and
         // telling a processor who filtered to Drafts that nothing has ever happened is false.
-        // LP-841 — THE PARTY TAB IS A FILTER TOO. This tested only the pill, so standing on the
-        // Lender tab of a busy file was told "Nothing has happened yet" — the message that means
-        // the file is new, in front of a processor looking at a file that is not.
-        filter === "all" && party === null ? (
-          <EmptyState kind="nothing-yet" title="Nothing has happened yet">
-            Messages you send and replies that arrive appear here, alongside what changes on the
-            file.
+        // LP-852 — THE PARTY IS NO LONGER A FILTER, so the pill is the only one left to test. The
+        // LP-841 clause that also checked the party tab went with the tabs.
+        filter === "all" ? (
+          // Screen 1's empty state, in its own words.
+          <EmptyState kind="nothing-yet" title="Nothing has been written on this file.">
+            Request documents to start a draft, or compose one yourself.
           </EmptyState>
         ) : (
-          <EmptyState
-            kind="filtered"
-            title={
-              party ? `Nothing with the ${PARTY_LABEL[party] ?? party}` : `Nothing in ${filter}`
-            }
-          >
+          <EmptyState kind="filtered" title={`Nothing in ${filter}`}>
             There is history on this file; this filter hides it.
           </EmptyState>
         )
@@ -458,6 +460,9 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
               <span className="mt-0.5 shrink-0">
                 <EntryIcon entry={entry} />
               </span>
+              {/* LP-852 — COLUMN ONE. On every row, before the subject, and therefore read before
+                  the subject by a screen reader too. */}
+              <PartyCell party={entry.party} />
               <div className="flex min-w-0 flex-1 flex-col">
                 {/* LP-829 — THE SUMMARY IS THE HANDLE. A whole-row click would swallow the reply and
                     flag controls beside it, and a separate "open" affordance would be a second thing
@@ -466,12 +471,28 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
                     the keyboard and announced as something that does anything at all. */}
                 <button
                   type="button"
-                  onClick={() => setOpenMessage(entry.id)}
+                  onClick={() => {
+                    setOpenMessage(entry.id);
+                    // The dot is about this processor's attention, so it clears the moment they
+                    // give it — without waiting for a refetch to tell them what they just did.
+                    setAcknowledged((seen) => new Set(seen).add(entry.id));
+                  }}
                   className="text-left hover:underline"
                 >
                   <span
                     className={entry.unread ? "font-semibold text-foreground" : "text-foreground"}
                   >
+                    {/* LP-852 — "SINCE YOU LAST LOOKED", NOT "UNREAD". Nothing is received in this
+                        version, so unread would be a claim about somebody else's behaviour; this is
+                        a claim about this processor. Labelled, because a bare coloured dot says
+                        nothing to a screen reader and the Ledger's rule is that a state is a word
+                        as well as a colour. */}
+                    {isNewSince(entry.created_at, lastSeen) && !acknowledged.has(entry.id) ? (
+                      <span
+                        className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-primary align-middle"
+                        aria-label="New since you last looked"
+                      />
+                    ) : null}
                     {entry.summary}
                     {entry.is_important ? (
                       <Star
@@ -483,6 +504,19 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
                 </button>
                 {entry.subject ? (
                   <span className="truncate text-xs text-muted-foreground">{entry.subject}</span>
+                ) : null}
+                {/* LP-852 — WHAT IS INSIDE, WITHOUT OPENING IT. Four rows reading "A document
+                    request is being prepared", identical but for a timestamp, is the screenshot
+                    that started this ticket. Names AND a count: the count says how much is in an
+                    email, the names say whether it is the one they are looking for. Capped, because
+                    a request for nine documents would otherwise be nine lines of prose in a list
+                    whose whole job is to be scanned. */}
+                {entry.documents.length > 0 ? (
+                  <span className="truncate text-xs text-muted-foreground">
+                    {entry.documents.length} document{entry.documents.length === 1 ? "" : "s"} ·{" "}
+                    {entry.documents.slice(0, 3).join(", ")}
+                    {entry.documents.length > 3 ? ` and ${entry.documents.length - 3} more` : ""}
+                  </span>
                 ) : null}
                 {entry.counterparty ? (
                   <span className="truncate text-xs text-muted-foreground">
@@ -517,11 +551,14 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
                 ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <span className="whitespace-nowrap text-xs text-muted-foreground">
-                  {/* LP-838 — THE LABEL, because a bare timestamp is ambiguous in exactly the way
-                      that matters. A draft composed on Monday and sent on Thursday shows Thursday,
-                      and "Thursday" alone does not say whether the borrower has heard from us. */}
-                  {messageTimeLabel(entry)} {messageTimeShort(entry.at)}
+                {/* LP-838 — THE LABEL, because a bare timestamp is ambiguous in exactly the way
+                    that matters. A draft composed on Monday and sent on Thursday shows Thursday,
+                    and "Thursday" alone does not say whether the borrower has heard from us.
+                    LP-852 — AND IT IS ATTRIBUTED. Nothing in this version observed a send: what a
+                    processor pressed was a claim that they sent it from their own mail client, so
+                    the record names them. `Sent` alone reads as something the system did. */}
+                <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">
+                  {statusLine(entry)}
                 </span>
                 {entry.kind === "message" ? (
                   <MessageActions

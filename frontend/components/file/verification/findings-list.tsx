@@ -25,7 +25,7 @@ import {
   type FindingFilters,
   matchesFilters,
 } from "@/lib/verification/finding-filters";
-import { requestConsequence } from "@/lib/verification/request-consequence";
+import { requestConsequence, requestToastTitle } from "@/lib/verification/request-consequence";
 
 export function FindingsList({
   fileId,
@@ -65,7 +65,9 @@ export function FindingsList({
       title,
       consequence,
     }: {
-      title: string;
+      // LP-852 — A FUNCTION HERE TOO, for the same reason `consequence` is one: the party and the
+      // count are not known until the server replies, and the title is where the party goes.
+      title: string | ((status: VerificationStatus) => string);
       // LP-826 — A FUNCTION WHERE THE ANSWER IS NOT KNOWN UNTIL THE SERVER REPLIES. The request
       // toast used to hedge — "whatever the borrower can send is in the draft" — because nothing
       // told the client what the draft had actually taken. It does now, and a hedge in the one
@@ -77,7 +79,7 @@ export function FindingsList({
     resolve.mutate(action, {
       onSuccess: (status) =>
         notifySuccess({
-          title,
+          title: typeof title === "function" ? title(status) : title,
           consequence: typeof consequence === "function" ? consequence(status) : consequence,
           // A bulk action has no single finding to reverse, and `undo` is not
           // itself undoable. Both fall through to no undo rather than to a
@@ -187,7 +189,8 @@ export function FindingsList({
                 act(
                   { kind: "request-docs", findingId: f.id, note },
                   {
-                    title: "Documents requested",
+                    // LP-852 — the party and the count, from the server's own outcome.
+                    title: requestToastTitle,
                     // LP-809 review — SAY THAT AN EMAIL WAS STARTED. A request now joins the file's
                     // open draft, and this sentence described only the needs item, so the one thing
                     // that changed on another page went unmentioned. "Whatever the borrower can

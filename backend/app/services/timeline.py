@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.documents.catalog import ResponsibleParty
 from app.models.activity_log import ActivityType
 from app.models.communication import (
+    BodyFormat,
     Communication,
     CommunicationDirection,
     CommunicationStatus,
@@ -45,6 +46,7 @@ from app.models.communication import (
 from app.models.helpers import only_active
 from app.models.inbound_attachment import InboundAttachment
 from app.models.loan_file import LoanFile
+from app.models.user import User
 
 #: Every activity type that DESCRIBES a `Communication` rather than being an event in its own right.
 #:
@@ -143,6 +145,22 @@ class TimelineEntry:
     #: decision made once. Defaulted, because an activity has no party and every caller that builds
     #: one would otherwise have to say so.
     party: str | None = None
+    #: LP-852 — WHAT THE DRAFT ASKS FOR, so a row says what is inside without being opened.
+    #:
+    #: Four rows reading "A document request is being prepared", identical but for a timestamp, is
+    #: the screenshot that started this ticket. Names rather than a count alone: a count tells a
+    #: processor how much is in an email and not whether it is the one they are looking for.
+    documents: tuple[str, ...] = ()
+    #: LP-852 — who did it, for the attributed status. "Marked sent by Priya · Mon 16:41", never
+    #: "Sent": nothing in this version observed a send, so the record is a person's claim and the
+    #: person belongs in it.
+    actor_name: str | None = None
+    #: LP-852 — `Draft · edited · 2m`. LP-853's `body_format` is the one place this is stored.
+    body_edited: bool = False
+    #: LP-852 — WHEN IT WAS WRITTEN, which is not `at`. `at` is `sent_at or created_at` so the list
+    #: orders by when the borrower heard from us; the "since you last looked" dot is about when the
+    #: draft came into existence, and for a sent message those are different days.
+    created_at: datetime | None = None
 
 
 async def _party_by_address(
@@ -258,6 +276,53 @@ def _summarise(message: Communication) -> str:
     if message.status is CommunicationStatus.FAILED:
         return "A message could not be delivered"
     return "A message was sent"
+
+
+async def _documents_by_message(
+    db: AsyncSession, message_ids: list[UUID]
+) -> dict[UUID, tuple[str, ...]]:
+    """`{communication_id: (document title, ...)}` — what each draft asks for (LP-852).
+
+    ONE QUERY FOR THE WHOLE LIST, not one per row. A file with forty messages would otherwise make
+    forty round trips to render a page whose entire job is to be scanned quickly.
+
+    ORDERED BY WHEN EACH NEED JOINED, matching `_needs_in_draft` and therefore matching the order
+    the borrower reads them in. A row and the message it opens naming the same documents in a
+    different order is a small thing that makes a processor check twice.
+    """
+    if not message_ids:
+        return {}
+    from app.models.communication_needs_item import CommunicationNeedsItem
+    from app.models.needs_item import NeedsItem
+
+    rows = (
+        await db.execute(
+            select(CommunicationNeedsItem.communication_id, NeedsItem.title)
+            .join(NeedsItem, NeedsItem.id == CommunicationNeedsItem.needs_item_id)
+            .where(
+                CommunicationNeedsItem.communication_id.in_(message_ids),
+                NeedsItem.deleted_at.is_(None),
+            )
+            .order_by(CommunicationNeedsItem.created_at, NeedsItem.id)
+        )
+    ).all()
+    found: dict[UUID, list[str]] = {}
+    for communication_id, title in rows:
+        found.setdefault(communication_id, []).append(title)
+    return {key: tuple(value) for key, value in found.items()}
+
+
+async def _actor_names(db: AsyncSession, user_ids: list[UUID]) -> dict[UUID, str]:
+    """`{user_id: full name}` for the attributed status line (LP-852).
+
+    A NAME, NOT AN ID. "Marked sent by Priya" is the whole point of decision 5 — nothing observed a
+    send, so what is recorded is a person's claim, and a claim with no claimant is the thing the
+    attribution exists to prevent.
+    """
+    if not user_ids:
+        return {}
+    rows = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
+    return {user.id: user.full_name for user in rows}
 
 
 async def _inbound_senders(db: AsyncSession, message_ids: list[UUID]) -> dict[UUID, str | None]:
@@ -406,6 +471,11 @@ async def build_timeline(
     manifests = await _attachment_manifest(db, inbound_ids)
     senders = await _inbound_senders(db, inbound_ids)
     by_address = await _party_by_address(db, loan_file=loan_file)
+    # LP-852 — TWO MORE QUERIES FOR THE WHOLE LIST, not two per row. See each function.
+    documents = await _documents_by_message(db, [m.id for m in messages])
+    actors = await _actor_names(
+        db, [m.initiated_by_user_id for m in messages if m.initiated_by_user_id is not None]
+    )
 
     entries: list[TimelineEntry] = [
         TimelineEntry(
@@ -413,6 +483,12 @@ async def build_timeline(
             kind=TimelineKind.MESSAGE,
             at=_message_at(message),
             summary=_summarise(message),
+            documents=documents.get(message.id, ()),
+            actor_name=(
+                actors.get(message.initiated_by_user_id) if message.initiated_by_user_id else None
+            ),
+            body_edited=message.body_format is BodyFormat.HTML,
+            created_at=message.created_at,
             direction=message.direction.value,
             status=message.status.value,
             subject=message.subject,

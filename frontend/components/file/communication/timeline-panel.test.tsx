@@ -14,7 +14,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockTimeline = vi.fn();
 const mockReplyContext = vi.fn(async (_fileId: string, _entryId: string) => ({
@@ -85,6 +85,10 @@ const MESSAGE: TimelineEntry = {
   is_important: false,
   unread: true,
   party: "borrower",
+  documents: [],
+  actor_name: null,
+  body_edited: false,
+  created_at: new Date(Date.now() - 3600 * 1000).toISOString(),
   detail: {},
 };
 
@@ -136,7 +140,11 @@ describe("the empty states", () => {
   it("says nothing has happened when no filter is on", () => {
     loaded([]);
     render(<TimelinePanel fileId="f1" />, { wrapper });
-    expect(screen.getByText("Nothing has happened yet")).toBeDefined();
+    // Screen 1's words, which say what to DO rather than only what is absent.
+    expect(screen.getByText("Nothing has been written on this file.")).toBeDefined();
+    expect(
+      screen.getByText("Request documents to start a draft, or compose one yourself."),
+    ).toBeDefined();
   });
 
   it("says the FILTER hides it when one is on", () => {
@@ -148,7 +156,7 @@ describe("the empty states", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Drafts" }));
 
     expect(screen.getByText("Nothing in drafts")).toBeDefined();
-    expect(screen.queryByText("Nothing has happened yet")).toBeNull();
+    expect(screen.queryByText("Nothing has been written on this file.")).toBeNull();
   });
 });
 
@@ -438,9 +446,11 @@ describe("the ?draft deep link (LP-831)", () => {
 });
 
 describe("when it happened (LP-838)", () => {
-  it("labels a draft Created and a sent message Sent", () => {
-    // A BARE TIMESTAMP IS AMBIGUOUS IN EXACTLY THE WAY THAT MATTERS. Both rows below show the same
-    // kind of value; only the label says whether the borrower has heard from us.
+  it("says Draft, and ATTRIBUTES a send to the person who claimed it", () => {
+    // A BARE TIMESTAMP IS AMBIGUOUS IN EXACTLY THE WAY THAT MATTERS (LP-838), and LP-852 adds the
+    // name. Nothing in this version observed a send — what a processor pressed was a claim that
+    // they sent it from their own mail client — so "Sent" alone reads as something the system did
+    // and watched happen, which is the confusion this epic exists to fence off.
     loaded([
       {
         ...MESSAGE,
@@ -449,13 +459,39 @@ describe("when it happened (LP-838)", () => {
         status: "draft",
         summary: "Documents we need",
       },
-      { ...MESSAGE, id: "s1", direction: "outbound", status: "sent", summary: "Documents we sent" },
+      {
+        ...MESSAGE,
+        id: "s1",
+        direction: "outbound",
+        status: "sent",
+        summary: "Documents we sent",
+        actor_name: "Priya",
+      },
     ]);
 
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
-    expect(screen.getByText(/^Created /)).toBeTruthy();
-    expect(screen.getByText(/^Sent /)).toBeTruthy();
+    expect(screen.getByText(/^Draft · /)).toBeTruthy();
+    expect(screen.getByText(/^Marked sent by Priya · /)).toBeTruthy();
+    // AND NEVER THE BARE WORD. This is the assertion that would fail if somebody "tidied" the
+    // status line back to `Sent`.
+    expect(screen.queryByText(/^Sent /)).toBeNull();
+  });
+
+  it("says Marked sent without a name rather than inventing one", () => {
+    // A draft sent before this column existed, or by a user row that has since gone. The claim is
+    // still a claim; it simply has no claimant to name.
+    loaded([{ ...MESSAGE, id: "s1", direction: "outbound", status: "sent", actor_name: null }]);
+
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(screen.getByText(/^Marked sent · /)).toBeTruthy();
+  });
+
+  it("says a draft has been edited when it has", () => {
+    loaded([{ ...MESSAGE, id: "d1", direction: "outbound", status: "draft", body_edited: true }]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+    expect(screen.getByText(/^Draft · edited · /)).toBeTruthy();
   });
 
   it("shows a time on every row", () => {
@@ -465,86 +501,273 @@ describe("when it happened (LP-838)", () => {
 
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
-    expect(screen.getByText(/^Created .*ago$/)).toBeTruthy();
+    expect(screen.getByText(/^Draft · .*ago$/)).toBeTruthy();
   });
 });
 
 /**
- * LP-841 — THE PARTY TABS.
+ * LP-852 — THE PARTY IS A COLUMN, NEVER A TAB AND NEVER A HEADING.
  *
- * The reported shape was a request that reached nobody. Routing it to the right party's draft fixes
- * the backend half; a draft in a bucket with no tab is the same invisibility with a different cause,
- * so these assert that what exists is reachable.
+ * LP-841 put the parties in a tab strip, and the report is what that cost: *"in some instance Not
+ * from the borrower go bottom of the list and processor may not realize that draft has been created
+ * for non borrower"*. A tab is a region that can be left unclicked; a heading is one that can be
+ * scrolled past. Both put a title-company draft where nobody looks, and a draft nobody looks at is
+ * never sent.
+ *
+ * These replace the tab tests rather than sitting beside them. The property they protected —
+ * "what exists is reachable" — is the same one; what changed is that it is now true without anybody
+ * clicking anything.
  */
-describe("the party tabs", () => {
+describe("the party column", () => {
   function entry(over: Partial<TimelineEntry>): TimelineEntry {
     return { ...MESSAGE, ...over };
   }
 
-  it("shows a tab per party on the file and filters the list to it", async () => {
+  it("offers no party tabs at all", () => {
     loaded([
       entry({ id: "b1", party: "borrower", summary: "Documents we need" }),
+      entry({ id: "t1", party: "title", summary: "Title commitment request" }),
+    ]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    // The status pills remain — they answer "what happened to it", a different question a processor
+    // asks deliberately. What is gone is the axis that could hide a row.
+    expect(screen.queryByRole("tab", { name: /Title/ })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Everyone" })).toBeNull();
+    expect(screen.getByRole("tab", { name: "Drafts" })).toBeTruthy();
+  });
+
+  it("names the party on EVERY row, with nothing to click first", () => {
+    loaded([
+      entry({ id: "b1", party: "borrower", summary: "Documents we need" }),
+      entry({ id: "t1", party: "title", summary: "Title commitment request" }),
       entry({ id: "l1", party: "lender", summary: "Credit report request" }),
     ]);
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
-    const lender = await screen.findByRole("tab", { name: /Lender/ });
-    expect(screen.getByRole("tab", { name: /Borrower/ })).toBeTruthy();
-    // Both rows are there before anyone clicks.
+    expect(screen.getByText("Borrower")).toBeTruthy();
+    expect(screen.getByText("Title co.")).toBeTruthy();
+    expect(screen.getByText("Lender")).toBeTruthy();
+    // And every row is present at once.
     expect(screen.getByText("Documents we need")).toBeTruthy();
-
-    fireEvent.click(lender);
-
+    expect(screen.getByText("Title commitment request")).toBeTruthy();
     expect(screen.getByText("Credit report request")).toBeTruthy();
-    expect(screen.queryByText("Documents we need")).toBeNull();
   });
 
-  it("offers no tab for a party this file has nothing with", async () => {
-    loaded([entry({ id: "b1", party: "borrower" })]);
+  it("ACCEPTANCE 1 — a title-company draft is visible on a file with ten drafts", () => {
+    // The reported case, at the size it was reported at. Nine borrower drafts and one to the title
+    // company, and the tenth row must be in the document without a click — no tab, no heading, no
+    // group to expand.
+    const rows = [
+      ...Array.from({ length: 9 }, (_, i) =>
+        entry({ id: `b${i}`, party: "borrower", summary: `Borrower request ${i}` }),
+      ),
+      entry({ id: "t1", party: "title", summary: "Title commitment request" }),
+    ];
+    loaded(rows);
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
-    await screen.findByText(MESSAGE.summary);
-    // Five empty tabs on an ordinary purchase is the noise this derivation exists to avoid.
-    expect(screen.queryByRole("tab", { name: /Accountant/ })).toBeNull();
+
+    expect(screen.getByText("Title commitment request")).toBeTruthy();
+    expect(screen.getByText("Title co.")).toBeTruthy();
+    // THE CONTROL: there is no heading or tab between it and the top that could hide it.
+    expect(screen.queryAllByRole("tab", { name: /Title/ })).toHaveLength(0);
+    expect(screen.queryAllByRole("heading", { name: /Title/ })).toHaveLength(0);
   });
 
-  it("reaches a party the ticket never named", async () => {
-    // THE ONE THE FOUR-TAB READING WOULD HAVE HIDDEN. The request names borrower, employer, lender
-    // and title; the catalog also routes to an accountant, an agent and an insurer. A draft those
-    // produce must have a tab, or it exists where nobody can open it — the reported failure again.
+  it("ACCEPTANCE 4 — a screen reader reads the party before the subject", () => {
+    // The party cell is the first thing in the row after the icon, so it is first in the
+    // accessibility tree too. Asserted on document order rather than on a label, because that is
+    // what a screen reader actually follows.
+    loaded([entry({ id: "t1", party: "title", summary: "Title commitment request" })]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    const row = screen.getByText("Title commitment request").closest("li");
+    expect(row).not.toBeNull();
+    const text = row?.textContent ?? "";
+    expect(text.indexOf("Title co.")).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf("Title co.")).toBeLessThan(text.indexOf("Title commitment request"));
+  });
+
+  it("still gives a row with no party a cell, rather than shifting the column", () => {
+    // An inbound message from an address nobody on the file recognises belongs to no party (LP-841
+    // decided that deliberately). Dropping its cell would slide its subject into the party column
+    // and break the alignment the column exists for.
+    loaded([entry({ id: "x1", party: null, summary: "A message arrived" })]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(screen.getByText("—")).toBeTruthy();
+  });
+
+  it("renders a party the vocabulary does not know as itself", () => {
+    // LP-841's rule, kept: a party we have no word for is still a party the processor must be told
+    // about. Rendering nothing would be the invisibility this ticket is about, with a new cause.
+    loaded([entry({ id: "z1", party: "escrow", summary: "Something" })]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(screen.getByText("escrow")).toBeTruthy();
+  });
+});
+
+describe("what is inside a draft, without opening it", () => {
+  it("names the documents and counts them", () => {
+    // Four rows reading "A document request is being prepared", identical but for a timestamp, is
+    // the screenshot that started this ticket.
     loaded([
-      entry({ id: "b1", party: "borrower" }),
-      entry({ id: "c1", party: "cpa", summary: "P&L request" }),
+      {
+        ...MESSAGE,
+        id: "d1",
+        direction: "outbound",
+        status: "draft",
+        documents: ["Bank statement — March", "Pay stub"],
+      },
     ]);
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
-    fireEvent.click(await screen.findByRole("tab", { name: /Accountant/ }));
-    expect(screen.getByText("P&L request")).toBeTruthy();
+    expect(screen.getByText(/2 documents · Bank statement — March, Pay stub/)).toBeTruthy();
   });
 
-  it("does not tell a processor on a tab that outlived its messages that the file is new", async () => {
-    // THE CASE THE PILL VERSION OF THIS TEST COULD NOT REACH. A selected tab is kept alive after
-    // its last entry goes (sent, deleted, re-fetched away) so it does not vanish from under the
-    // person standing on it — and that is the one state where the party tab alone empties the list
-    // while the status pill is still All. Measured: asserting this through the pill instead passed
-    // against a build with no party clause at all.
+  it("caps a long list rather than printing nine lines of prose", () => {
     loaded([
-      entry({ id: "b1", party: "borrower" }),
-      entry({ id: "l1", party: "lender", status: "draft" }),
+      {
+        ...MESSAGE,
+        id: "d1",
+        direction: "outbound",
+        status: "draft",
+        documents: ["A", "B", "C", "D", "E"],
+      },
     ]);
-    const view = render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
-    fireEvent.click(await screen.findByRole("tab", { name: /Lender/ }));
-    loaded([entry({ id: "b1", party: "borrower" })]);
-    view.rerender(<TimelinePanel fileId="LF-JR4T" />);
-
-    expect(screen.queryByText(/Nothing has happened yet/)).toBeNull();
-    expect(screen.getByText(/Nothing with the Lender/)).toBeTruthy();
+    expect(screen.getByText(/5 documents · A, B, C and 2 more/)).toBeTruthy();
   });
 
-  it("hides the strip entirely when the file has one correspondent", async () => {
-    loaded([entry({ id: "b1", party: "borrower" })]);
+  it("says nothing about documents on a row that has none", () => {
+    // THE CONTROL. An inbound message asks for nothing, and a row that said "0 documents" would be
+    // noise on every one of them.
+    loaded([{ ...MESSAGE, id: "m1", documents: [] }]);
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
-    await screen.findByText(MESSAGE.summary);
-    expect(screen.queryByRole("tab", { name: "Everyone" })).toBeNull();
+
+    expect(screen.queryByText(/document/)).toBeNull();
+  });
+});
+
+/**
+ * LP-852 — "SINCE YOU LAST LOOKED", not "unread".
+ *
+ * Nothing is received in this version, so "unread" would be a claim about somebody ELSE's
+ * behaviour — whether a borrower opened a message. The dot is a claim about THIS processor: a draft
+ * appeared while they were not looking, and a draft they never learn about is never sent.
+ */
+describe("the since-you-last-looked dot", () => {
+  const KEY = "mbai:comm-last-seen:LF-JR4T";
+
+  /**
+   * A REAL `localStorage`, INSTALLED HERE AND NOWHERE ELSE.
+   *
+   * This project's jsdom provides `window.localStorage` as a plain object with NO METHODS — calling
+   * `getItem` on it throws `TypeError`. That is why `last-seen.ts` guards every access, and it is
+   * also why the other tests in this file exercise the unavailable path for free: leaving the
+   * global environment alone keeps that true. A shim in `vitest.setup.ts` would quietly remove a
+   * condition the product has to survive.
+   */
+  let store: Map<string, string>;
+  beforeEach(() => {
+    store = new Map();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, value),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => store.clear(),
+      },
+    });
+  });
+  afterEach(() => {
+    Object.defineProperty(window, "localStorage", { configurable: true, value: {} });
+  });
+
+  function draftRow(over: Partial<TimelineEntry> = {}): TimelineEntry {
+    return {
+      ...MESSAGE,
+      id: "d1",
+      direction: "outbound",
+      status: "draft",
+      summary: "Documents we need",
+      party: "title",
+      ...over,
+    };
+  }
+
+  it("ACCEPTANCE 3 — marks a draft created since the last visit", () => {
+    // "Created by another session" is, from this browser's point of view, exactly "created after
+    // the last time this page recorded that it was open".
+    window.localStorage.setItem(KEY, new Date(Date.now() - 7200 * 1000).toISOString());
+    loaded([draftRow({ created_at: new Date(Date.now() - 60 * 1000).toISOString() })]);
+
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(screen.getByLabelText("New since you last looked")).toBeTruthy();
+  });
+
+  it("and clears it when the row is opened", () => {
+    window.localStorage.setItem(KEY, new Date(Date.now() - 7200 * 1000).toISOString());
+    loaded([draftRow({ created_at: new Date(Date.now() - 60 * 1000).toISOString() })]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    fireEvent.click(screen.getByRole("button", { name: /Documents we need/ }));
+
+    expect(screen.queryByLabelText("New since you last looked")).toBeNull();
+  });
+
+  it("does NOT mark a draft that predates the last visit", () => {
+    // THE CONTROL. A dot on every row is a dot that means nothing, and it would be indistinguishable
+    // from a working one in the test above.
+    window.localStorage.setItem(KEY, new Date(Date.now() - 60 * 1000).toISOString());
+    loaded([draftRow({ created_at: new Date(Date.now() - 7200 * 1000).toISOString() })]);
+
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(screen.queryByLabelText("New since you last looked")).toBeNull();
+  });
+
+  it("marks nothing on a first visit", () => {
+    // No stored timestamp. Ten dots saying "all of this is new to you" is true, useless, and it
+    // teaches a processor that the dot means nothing.
+    loaded([draftRow({ created_at: new Date().toISOString() })]);
+
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(screen.queryByLabelText("New since you last looked")).toBeNull();
+  });
+
+  it("records the visit, so the next one has something to compare against", () => {
+    loaded([draftRow()]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(window.localStorage.getItem(KEY)).not.toBeNull();
+  });
+
+  it("renders when localStorage throws", () => {
+    // It throws outright behind a few privacy settings, and in this project's jsdom it throws by
+    // default. A drafts list that failed to render because a decoration could not be stored would
+    // be a far worse outcome than no decoration.
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: () => {
+          throw new Error("denied");
+        },
+        setItem: () => {
+          throw new Error("denied");
+        },
+      },
+    });
+
+    loaded([draftRow()]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(screen.getByText("Documents we need")).toBeTruthy();
+    expect(screen.queryByLabelText("New since you last looked")).toBeNull();
   });
 });

@@ -110,7 +110,12 @@ describe("ComposeRequestDialog", () => {
     fireEvent.click(screen.getByLabelText(/W-2/));
     fireEvent.click(screen.getByRole("button", { name: "Generate email" }));
     const onSuccess = mockCompose.mock.calls[0]?.[1]?.onSuccess as (r: unknown) => void;
-    onSuccess({ draft_id: "d1", needs_added: 1, composed_by_model: false });
+    onSuccess({
+      draft_id: "d1",
+      needs_added: 1,
+      drafts: [{ party: "borrower", needs_added: 1 }],
+      composed_by_model: false,
+    });
 
     const said = notifySuccess.mock.calls[0]?.[0] as { consequence: string };
     expect(said.consequence).toContain("standard wording");
@@ -123,9 +128,56 @@ describe("ComposeRequestDialog", () => {
     fireEvent.click(screen.getByLabelText(/W-2/));
     fireEvent.click(screen.getByRole("button", { name: "Generate email" }));
     const onSuccess = mockCompose.mock.calls[0]?.[1]?.onSuccess as (r: unknown) => void;
-    onSuccess({ draft_id: "d1", needs_added: 1, composed_by_model: true });
+    onSuccess({
+      draft_id: "d1",
+      needs_added: 1,
+      drafts: [{ party: "borrower", needs_added: 1 }],
+      composed_by_model: true,
+    });
 
     const said = notifySuccess.mock.calls[0]?.[0] as { consequence: string };
     expect(said.consequence).toContain("drafted for this file");
+  });
+
+  it("LP-852 — the toast NAMES THE PARTY AND THE COUNT", () => {
+    // "Draft prepared" could not say which draft or to whom. The party is the part a processor
+    // cannot infer, and this is the layer they actually read — a grep over the source proves the
+    // old string is gone and says nothing about what replaced it on screen.
+    open();
+    fireEvent.click(screen.getByLabelText(/W-2/));
+    fireEvent.click(screen.getByRole("button", { name: "Generate email" }));
+    const onSuccess = mockCompose.mock.calls[0]?.[1]?.onSuccess as (r: unknown) => void;
+    onSuccess({
+      draft_id: "d1",
+      needs_added: 3,
+      drafts: [{ party: "borrower", needs_added: 3 }],
+      composed_by_model: false,
+    });
+
+    const said = notifySuccess.mock.calls[0]?.[0] as { title: string };
+    expect(said.title).toBe("Draft to the borrower — 3 documents");
+  });
+
+  it("names BOTH parties when a selection makes two drafts", () => {
+    // The case the ticket exists for: the second message is the one that goes unsent because
+    // nobody knew it existed. A summarised "2 drafts prepared" would still not say who.
+    open();
+    fireEvent.click(screen.getByLabelText(/W-2/));
+    fireEvent.click(screen.getByRole("button", { name: "Generate email" }));
+    const onSuccess = mockCompose.mock.calls[0]?.[1]?.onSuccess as (r: unknown) => void;
+    onSuccess({
+      draft_id: "d1",
+      needs_added: 4,
+      drafts: [
+        { party: "borrower", needs_added: 3 },
+        { party: "title", needs_added: 1 },
+      ],
+      composed_by_model: false,
+    });
+
+    const said = notifySuccess.mock.calls[0]?.[0] as { title: string };
+    expect(said.title).toBe(
+      "Draft to the borrower — 3 documents · Draft to the title company — 1 document",
+    );
   });
 });

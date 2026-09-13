@@ -16,6 +16,7 @@ import type { ConflictChoice } from "@/lib/api/draft-conflict";
 import { useNeeds } from "@/lib/api/needs";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { notifyError, notifySuccess } from "@/lib/toast";
+import { draftToastTitle } from "@/lib/verification/request-consequence";
 import { useMemo, useState } from "react";
 
 /**
@@ -88,7 +89,12 @@ export function ComposeRequestDialog({
       {
         onSuccess: (result) => {
           notifySuccess({
-            title: "Draft prepared",
+            // LP-852 — NAMES THE PARTY AND THE COUNT. "Draft prepared" could not say which draft or
+            // to whom, and a selection spanning a bank statement and a title commitment makes TWO
+            // messages: the second is the one that goes unsent because nobody knew it existed.
+            title: draftToastTitle(
+              result.drafts.map((draft) => ({ party: draft.party, count: draft.needs_added })),
+            ),
             // NAMES WHICH KIND OF EMAIL IT IS. `email_draft_enabled` is off in every
             // environment, so this says "from the template" today — and a message claiming
             // the model wrote it would be the untrue half of this feature's own headline.

@@ -45,6 +45,26 @@ export interface TimelineEntry {
    * inbound message from an address nobody on the file recognises belongs in no party's thread.
    */
   party: string | null;
+  /**
+   * LP-852 — what the draft asks for, so a row says what is inside without being opened.
+   *
+   * Four rows reading "A document request is being prepared", identical but for a timestamp, is the
+   * screenshot that started that ticket. Names rather than a count alone: a count says how much is
+   * in an email and not whether it is the one a processor is looking for.
+   */
+  documents: string[];
+  /** LP-852 — who wrote it, for the attributed status. "Marked sent by Priya", never "Sent". */
+  actor_name: string | null;
+  /** LP-852 — `Draft · edited · 2m`. LP-853's `body_format` is where this is stored. */
+  body_edited: boolean;
+  /**
+   * LP-852 — when the draft came into existence, which is NOT `at`.
+   *
+   * `at` is `sent_at or created_at` so the list orders by when the borrower heard from us; the
+   * "since you last looked" dot is about when the draft was written, and for a sent message those
+   * are different days.
+   */
+  created_at: string | null;
   detail: Record<string, unknown>;
 }
 

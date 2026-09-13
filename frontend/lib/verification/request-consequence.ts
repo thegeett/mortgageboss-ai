@@ -75,3 +75,46 @@ export function requestConsequence(status: VerificationStatus | undefined): stri
   }
   return `${parts.join(". ")}. The finding stays open until it is met.`;
 }
+
+/**
+ * The toast's TITLE, which names the party and the count (LP-852).
+ *
+ * `"Draft prepared"` — WHICH DRAFT, TO WHOM? That was the whole title, on every creation path, and
+ * the party is precisely the part a processor cannot infer: a request spanning a bank statement and
+ * a title commitment makes two messages, and the second is the one that goes unsent because nobody
+ * knew it existed. LP-835 already fixed one version of this — the panel said "Send it from the
+ * document request above" and the draft above was the borrower's, so a processor following that
+ * instruction emailed the wrong person.
+ *
+ * THE SAME VOCABULARY as the consequence below it, from the same `PARTY_NOUN`. One toast calling
+ * them "the title company" and the next "Title co." is two names for one party in one second.
+ *
+ * SEVERAL PARTIES ARE JOINED RATHER THAN SUMMARISED. "2 drafts prepared" is `"Draft prepared"` with
+ * a number on it — it still does not say who, which is the only thing this title is for.
+ */
+export function draftToastTitle(drafts: { party: string; count: number }[]): string {
+  const made = drafts.filter((draft) => draft.count > 0);
+  if (made.length === 0) {
+    // Nothing was added — a second click on a row already requested. Claiming a draft here would
+    // be the failure LP-826's review found in the consequence, moved into the title.
+    return "Nothing new to request";
+  }
+  const each = made.map(
+    ({ party, count }) =>
+      `Draft to the ${PARTY_NOUN[party] ?? party} — ${count} document${count === 1 ? "" : "s"}`,
+  );
+  return each.join(" · ");
+}
+
+/** The same title, from a verification response's own outcome. */
+export function requestToastTitle(status: VerificationStatus | undefined): string {
+  const outcome = status?.document_request;
+  if (!outcome) return "Documents requested";
+  return draftToastTitle([
+    { party: "borrower", count: outcome.added_to_draft },
+    ...Object.entries(outcome.routed_elsewhere ?? {}).map(([party, count]) => ({
+      party,
+      count,
+    })),
+  ]);
+}

@@ -13,6 +13,7 @@ import { useAddPartyAddress, useBuildPartyDraft, usePartyRequests } from "@/lib/
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import type { PartyRequest, ResponsibleParty } from "@/lib/types/party-request";
+import { draftToastTitle } from "@/lib/verification/request-consequence";
 import { useState } from "react";
 
 /** What a processor calls each party. The enum value is an internal identifier. */
@@ -143,7 +144,10 @@ function PartyRow({
               build.mutate(request.party, {
                 onSuccess: (draft) => {
                   notifySuccess({
-                    title: "Draft prepared",
+                    // LP-852 — the party is the part a processor cannot infer, and this dialog
+                    // is the one place it was always known up front. (LP-857 removes this dialog;
+                    // the title is corrected here so "Draft prepared" greps to nothing today.)
+                    title: draftToastTitle([{ party: request.party, count: request.needs.length }]),
                     // LP-835 — THE SENTENCE THAT MAILED THE WRONG PERSON. This said "Send it from
                     // the document request above", and the draft above is the BORROWER's. It now
                     // names where the draft actually is, which since LP-831 is the file's drafts

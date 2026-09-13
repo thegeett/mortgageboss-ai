@@ -58,9 +58,17 @@ export interface ComposeRequestInput {
   onConflict?: ConflictChoice;
 }
 
+/** One party's share of a compose — who it is to, and how much (LP-852). */
+export interface DraftMade {
+  party: string;
+  needs_added: number;
+}
+
 export interface ComposedRequest {
   draft_id: string | null;
   needs_added: number;
+  /** LP-852 — per party, because the toast has to name one. Only parties that got something. */
+  drafts: DraftMade[];
   /** Whether a MODEL wrote the framing, or the deterministic template did. */
   composed_by_model: boolean;
 }
