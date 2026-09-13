@@ -97,7 +97,7 @@ interface Note {
   at?: string;
 }
 
-type FormKind = "override" | "note" | "accept" | "request";
+type FormKind = "override" | "note" | "accept";
 
 export function FindingCard({
   finding,
@@ -192,8 +192,6 @@ export function FindingCard({
       onNote?.(value);
     } else if (form === "accept") {
       onAcceptRisk?.(value);
-    } else if (form === "request") {
-      onRequestDocs?.(value);
     }
     setForm(null);
     setText("");
@@ -213,11 +211,6 @@ export function FindingCard({
       label: "Compensating factor / accepted-risk rationale (optional)",
       submit: "Accept risk",
       placeholder: "e.g. 6 months reserves; subject-to-repair re-inspection scheduled",
-    },
-    request: {
-      label: "What to request (optional)",
-      submit: "Request docs",
-      placeholder: "e.g. the 2024 W-2; a letter of explanation",
     },
   };
 
@@ -423,7 +416,10 @@ export function FindingCard({
                       variant="outline"
                       className="gap-1 text-xs"
                       disabled={busy || docsRequested}
-                      onClick={() => openForm("request")}
+                      // LP-851 — FIRES DIRECTLY, like the governed rows. The note form is gone
+                      // from both request paths; the pop-up that replaces it is the open-draft
+                      // decision, and two questions for one click is how the second goes unread.
+                      onClick={() => onRequestDocs?.("")}
                     >
                       <Send className="h-3 w-3" /> {docsRequested ? "Requested" : "Request docs"}
                     </Button>

@@ -29,6 +29,13 @@ text, and `from-html.ts` already derives it — tested as a round-trip fixed poi
 second implementation on this side would be two answers to one question, which is A22. The only
 thing the backend reads the body's LENGTH for is the `mailto:` ceiling, and an HTML body is longer
 than the text it renders to, so that gate stays conservative rather than wrong.
+
+`text_lines` IS NOT THAT FUNCTION, and the distinction is worth stating because it looks like it.
+It produces the lines of a body for a HUMAN TO READ IN A WARNING — LP-851 quotes a processor's own
+sentence back at them. It is never the message, never stored, never sent, and nothing round-trips
+through it, so the property `from-html.ts` has to hold (that its output converts back) is not a
+property this needs at all. Two functions, two jobs; the one that must be reversible has exactly
+one implementation.
 """
 
 from __future__ import annotations
@@ -164,4 +171,65 @@ def sanitise_html(html: str) -> str:
     return parser.finish()
 
 
-__all__ = ["ALLOWED", "ALLOWED_SCHEMES", "DROP_CONTENT", "href_is_safe", "sanitise_html"]
+class _Text(HTMLParser):
+    """Visible text, one entry per block — see `text_lines`."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.lines: list[str] = []
+        self.buffer: list[str] = []
+        self.muted = 0
+
+    def _flush(self) -> None:
+        text = " ".join("".join(self.buffer).split())
+        self.buffer = []
+        if text:
+            self.lines.append(text)
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in DROP_CONTENT:
+            self.muted += 1
+        elif tag in BLOCK:
+            self._flush()
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in DROP_CONTENT:
+            self.muted = max(self.muted - 1, 0)
+        elif tag in BLOCK:
+            self._flush()
+
+    def handle_data(self, data: str) -> None:
+        if not self.muted:
+            self.buffer.append(data)
+
+    def finish(self) -> list[str]:
+        self._flush()
+        return self.lines
+
+
+#: Tags that end a line of visible text. `br` is here with the block elements because a processor
+#: pressing shift-return means a new line, whatever the schema calls it.
+BLOCK = frozenset({"p", "br", "li", "ul", "ol", "blockquote", "div", "tr"})
+
+
+def text_lines(html: str) -> list[str]:
+    """The visible lines of an HTML body, for a human to read in a warning (LP-851).
+
+    NOT A PLAIN-TEXT CONVERSION — see the module docstring. Whitespace is collapsed and nothing is
+    reversible: this exists so a dialog can say *"your changes — including ..."* in the processor's
+    own words, and the only property it needs is that a line a person typed comes back recognisable.
+    """
+    parser = _Text()
+    parser.feed(html)
+    parser.close()
+    return parser.finish()
+
+
+__all__ = [
+    "ALLOWED",
+    "ALLOWED_SCHEMES",
+    "DROP_CONTENT",
+    "href_is_safe",
+    "sanitise_html",
+    "text_lines",
+]

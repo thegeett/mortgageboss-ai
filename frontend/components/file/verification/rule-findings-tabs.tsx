@@ -11,6 +11,7 @@
  */
 
 import { BulkRequestButton } from "@/components/file/verification/bulk-request-button";
+import type { RuleActionOptions } from "@/components/file/verification/rule-finding-actions";
 import { Button } from "@/components/ui/button";
 import { useDragScroll } from "@/hooks/use-drag-scroll";
 import { humanize } from "@/lib/format";
@@ -155,7 +156,7 @@ function AttentionTab({
   fileId,
 }: {
   findings: RuleFinding[];
-  onAct?: (action: RuleFindingAction) => void;
+  onAct?: (action: RuleFindingAction, options?: RuleActionOptions) => void;
   /** LP-577 — threaded to the row so Apply opens its before/after preview. */
   fileId?: string;
 }) {
@@ -192,7 +193,7 @@ function OutcomeGroup({
 }: {
   outcome: EvaluationOutcome;
   findings: RuleFinding[];
-  onAct?: (action: RuleFindingAction) => void;
+  onAct?: (action: RuleFindingAction, options?: RuleActionOptions) => void;
   /** LP-577 — threaded to the row so Apply opens its before/after preview. */
   fileId?: string;
 }) {
@@ -255,7 +256,7 @@ function MissingVsPresent({
   fileId,
 }: {
   findings: RuleFinding[];
-  onAct?: (action: RuleFindingAction) => void;
+  onAct?: (action: RuleFindingAction, options?: RuleActionOptions) => void;
   /** LP-577 — threaded to the row so Apply opens its before/after preview. */
   fileId?: string;
 }) {
@@ -286,11 +287,17 @@ function MissingVsPresent({
             // see beforehand — the count is on the button, the LIST is not.
             <BulkRequestButton
               documents={awaitedDocuments(missing)}
-              onConfirm={() =>
-                onAct({
-                  kind: "request-docs-bulk",
-                  findingIds: missing.map((finding) => finding.id),
-                })
+              // LP-851 — THE ERROR COMES BACK HERE. "Request all" answers the open-draft decision
+              // inside its own confirm rather than handing off to a second dialog, so it needs the
+              // refusal rather than a toast about it.
+              onConfirm={(onConflict, onError) =>
+                onAct(
+                  {
+                    kind: "request-docs-bulk",
+                    findingIds: missing.map((finding) => finding.id),
+                  },
+                  { onConflict, onError },
+                )
               }
             />
           )}
@@ -320,7 +327,7 @@ function GroupedFindingList({
   fileId,
 }: {
   findings: RuleFinding[];
-  onAct?: (action: RuleFindingAction) => void;
+  onAct?: (action: RuleFindingAction, options?: RuleActionOptions) => void;
   /** LP-577 — threaded to the row so Apply opens its before/after preview. */
   fileId?: string;
 }) {
@@ -395,7 +402,7 @@ function CollapsedFindings({
   fileId,
 }: {
   findings: RuleFinding[];
-  onAct?: (action: RuleFindingAction) => void;
+  onAct?: (action: RuleFindingAction, options?: RuleActionOptions) => void;
   /** LP-577 — threaded to the row so Apply opens its before/after preview. */
   fileId?: string;
 }) {
@@ -491,7 +498,7 @@ function FindingList({
   fileId,
 }: {
   findings: RuleFinding[];
-  onAct?: (action: RuleFindingAction) => void;
+  onAct?: (action: RuleFindingAction, options?: RuleActionOptions) => void;
   /** LP-577 — threaded to the row so Apply opens its before/after preview. */
   fileId?: string;
 }) {
@@ -521,7 +528,7 @@ export function RuleFindingsTabs({
   crossSourceCount?: number;
   /** LP-561 — resolve a governed finding. Optional so a read-only caller (a test, a print view) can
    *  render the tabs without the action bar appearing at all. */
-  onAct?: (action: RuleFindingAction) => void;
+  onAct?: (action: RuleFindingAction, options?: RuleActionOptions) => void;
 }) {
   const [active, setActive] = useState<TabId>("attention");
   const buckets = bucketRuleFindings(ruleFindings);

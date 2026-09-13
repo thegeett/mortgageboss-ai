@@ -34,7 +34,7 @@ from app.ai.email_draft import (
     compose,
     rejection_reason,
 )
-from app.communications.sanitise import sanitise_html
+from app.communications.sanitise import sanitise_html, text_lines
 from app.communications.templates import (
     TEMPLATES,
     Framing,
@@ -73,6 +73,12 @@ from app.services.upload_links import mint_upload_link, revoke_link
 from app.verification.rule_engine.reasons import document_label
 
 logger = get_logger(__name__)
+
+#: How much of a processor's own sentence LP-851's warning quotes back at them.
+#:
+#: LONG ENOUGH TO BE RECOGNISED AS THEIRS, and no longer. The point is that they see their own
+#: words rather than an abstraction; a whole paragraph in a dialog is read as prose and skipped.
+EXCERPT_MAX_CHARS = 160
 
 #: The template a document-request draft is rendered from, and the key its uniqueness is scoped to.
 DRAFT_TEMPLATE = TemplateKey.INITIAL_DOCUMENTATION_REQUEST
@@ -125,8 +131,11 @@ class OpenDraftConflict:
     #: What this request would add to it.
     adding: tuple[NeedSummary, ...]
     #: Whether a processor has written their own words into this draft, which an append would
-    #: overwrite. LP-853 owns the column that answers this; see `draft_body_edited`.
+    #: overwrite. LP-853's `body_format` column answers this; see `draft_body_edited`.
     body_edited: bool
+    #: LP-851 — the processor's own first line, for the warning to quote back at them. None when
+    #: the body is the template's, or when the edit left nothing quotable. See `_edited_excerpt`.
+    edited_excerpt: str | None = None
 
 
 @dataclass(frozen=True)
@@ -955,6 +964,80 @@ async def _identification(db: AsyncSession, *, loan_file: LoanFile) -> tuple[str
     return name, address
 
 
+async def _render_current(
+    db: AsyncSession,
+    *,
+    draft: Communication,
+    loan_file: LoanFile,
+    party: ResponsibleParty,
+) -> RenderedTemplate:
+    """What the template WOULD produce for this draft right now. Writes nothing.
+
+    LIFTED OUT OF `_regenerate` FOR LP-851, which needs the same words without storing them: the
+    warning quotes the processor's own first edited line, and "their own" can only be decided
+    against what the machine would have written. Two renders that could differ would put a
+    template sentence in quotation marks and attribute it to a person.
+    """
+    needs = await _needs_in_draft(db, draft=draft)
+    framing = await _cached_framing(db, loan_file=loan_file, needs=needs)
+    # LP-834 — REGENERATION IS LOSSLESS BECAUSE THE DRAFT REMEMBERS. The body is rewritten from the
+    # template on every add and remove; a link that lived only in the prose would be wiped the first
+    # time a processor requested one more document, and could not be rebuilt because the token is
+    # hashed in `upload_links`.
+    identity = (
+        await _identification(db, loan_file=loan_file)
+        if party is not ResponsibleParty.BORROWER
+        else ("", "")
+    )
+    return render_draft_body(
+        loan_file,
+        needs,
+        party=party,
+        borrower_name=identity[0],
+        property_address=identity[1],
+        framing=framing,
+        upload_link_url=draft.upload_link_url,
+    )
+
+
+async def _edited_excerpt(
+    db: AsyncSession, *, draft: Communication, loan_file: LoanFile
+) -> str | None:
+    """The processor's own first line — the one LP-851's warning quotes back at them.
+
+    "YOUR CHANGES WILL BE LOST" IS ABSTRACT AND GETS DISMISSED; THEIR OWN SENTENCE DOES NOT. That is
+    the whole reason this exists, and it is also the reason it must not guess: a warning that quotes
+    a line the processor never wrote teaches them to stop reading warnings.
+
+    SO "THEIRS" IS DECIDED AGAINST THE TEMPLATE, not against a heuristic. The first line of the
+    authored body that the current render does not contain is a line a person put there. The
+    greeting, the document list and the security notice all appear in both and are skipped, which is
+    what stops the quote being "Hello Sarah,".
+
+    NONE IS AN ORDINARY ANSWER. A processor who only DELETED something, or who reworded a line into
+    something the template happens to contain, leaves nothing to quote — and the dialog falls back
+    to the sentence without the quotation rather than inventing one.
+
+    NEVER STORED AND NEVER SENT. This is a fragment of a person's prose travelling in an error body
+    so a dialog can render; it is derived on demand, capped, and has no column.
+    """
+    if draft.body_format is not BodyFormat.HTML:
+        return None
+    party = _known_party_of(draft)
+    if party is None:
+        return None
+    generated = (await _render_current(db, draft=draft, loan_file=loan_file, party=party)).body
+    for line in text_lines(draft.body or ""):
+        if line and line not in generated:
+            # TRUNCATION IS VISIBLE. A processor writing one long paragraph gets a fragment, and a
+            # fragment that does not LOOK cut off is one they will not recognise as their own
+            # sentence — which is the only thing this quote is for.
+            if len(line) > EXCERPT_MAX_CHARS:
+                return line[:EXCERPT_MAX_CHARS].rstrip() + "\u2026"
+            return line
+    return None
+
+
 async def _regenerate(
     db: AsyncSession, *, draft: Communication, loan_file: LoanFile, force: bool = False
 ) -> None:
@@ -1012,26 +1095,7 @@ async def _regenerate(
             draft_id=str(draft.id),
         )
         return
-    needs = await _needs_in_draft(db, draft=draft)
-    framing = await _cached_framing(db, loan_file=loan_file, needs=needs)
-    # LP-834 — REGENERATION IS LOSSLESS BECAUSE THE DRAFT REMEMBERS. The body is rewritten from the
-    # template on every add and remove; a link that lived only in the prose would be wiped the first
-    # time a processor requested one more document, and could not be rebuilt because the token is
-    # hashed in `upload_links`.
-    identity = (
-        await _identification(db, loan_file=loan_file)
-        if party is not ResponsibleParty.BORROWER
-        else ("", "")
-    )
-    rendered = render_draft_body(
-        loan_file,
-        needs,
-        party=party,
-        borrower_name=identity[0],
-        property_address=identity[1],
-        framing=framing,
-        upload_link_url=draft.upload_link_url,
-    )
+    rendered = await _render_current(db, draft=draft, loan_file=loan_file, party=party)
     draft.subject = rendered.subject
     draft.body = rendered.body
     # LP-853 — THE COLUMN SAYS WHO WROTE THE BODY, AND THIS FUNCTION JUST DID. A forced rewrite
@@ -1240,6 +1304,12 @@ async def add_needs_to_draft(
                     ),
                     adding=tuple(NeedSummary.of(need) for need in plan.fresh),
                     body_edited=draft_body_edited(plan.open_draft),
+                    # LP-851 — DERIVED HERE, WHERE THE REFUSAL IS BUILT, so the dialog renders
+                    # without a second round trip. Costs a render, and only for a draft that has
+                    # actually been edited.
+                    edited_excerpt=await _edited_excerpt(
+                        db, draft=plan.open_draft, loan_file=loan_file
+                    ),
                 )
             )
         planned: list[PlannedDraft] = []

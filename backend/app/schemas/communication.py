@@ -130,6 +130,11 @@ class OpenDraftPublic(BaseModel):
     needs: list[NeedSummaryPublic]
     #: Whether a person has written their own words into it, which an append would overwrite.
     body_edited: bool
+    #: LP-851 — the processor's own first line, so the warning can quote it rather than describe it.
+    #: "Your changes will be lost" is abstract and gets dismissed; their own sentence does not. None
+    #: when there is nothing quotable, and the dialog then drops the quotation rather than inventing
+    #: one.
+    edited_excerpt: str | None = None
 
 
 class DraftDecisionPublic(BaseModel):
@@ -186,6 +191,7 @@ class DraftConflictPublic(BaseModel):
                             NeedSummaryPublic(id=n.id, title=n.title) for n in conflict.carrying
                         ],
                         body_edited=conflict.body_edited,
+                        edited_excerpt=conflict.edited_excerpt,
                     ),
                     adding=[NeedSummaryPublic(id=n.id, title=n.title) for n in conflict.adding],
                 )

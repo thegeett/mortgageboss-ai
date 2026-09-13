@@ -1,5 +1,6 @@
 "use client";
 
+import { useDraftConflict } from "@/components/file/communication/use-draft-conflict";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,6 +12,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { useComposeRequest } from "@/lib/api/communications";
 import { useDocumentTypes } from "@/lib/api/documents";
+import type { ConflictChoice } from "@/lib/api/draft-conflict";
 import { useNeeds } from "@/lib/api/needs";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { notifyError, notifySuccess } from "@/lib/toast";
@@ -44,6 +46,7 @@ export function ComposeRequestDialog({
   const { data: types } = useDocumentTypes();
   const { data: needs } = useNeeds(fileId);
   const compose = useComposeRequest(fileId);
+  const conflict = useDraftConflict();
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
 
@@ -75,81 +78,97 @@ export function ComposeRequestDialog({
     );
   }
 
+  // LP-851 — SCREEN 7 IS UNCHANGED, AND THIS IS WHAT FOLLOWS IT. The catalog, the needs-first
+  // ordering and the "already requested" markers all stay exactly as LP-833 left them; what is new
+  // is that Generate can be refused, and the open-draft dialog answers for it. One function, called
+  // twice, so the answered request is the same request rather than a second one assembled nearby.
+  function generate(onConflict?: ConflictChoice) {
+    compose.mutate(
+      { documentTypes: picked, onConflict },
+      {
+        onSuccess: (result) => {
+          notifySuccess({
+            title: "Draft prepared",
+            // NAMES WHICH KIND OF EMAIL IT IS. `email_draft_enabled` is off in every
+            // environment, so this says "from the template" today — and a message claiming
+            // the model wrote it would be the untrue half of this feature's own headline.
+            consequence: result.composed_by_model
+              ? `${result.needs_added} document(s) added, with wording drafted for this file. It is in this file's drafts.`
+              : `${result.needs_added} document(s) added, using the standard wording. It is in this file's drafts.`,
+          });
+          setPicked([]);
+          onOpenChange(false);
+        },
+        onError: (error) => {
+          if (conflict.capture(error, generate)) return;
+          notifyError({
+            title: "Couldn’t prepare the request",
+            whatToDo: getErrorMessage(error),
+          });
+        },
+      },
+    );
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="text-base">Request documents</DialogTitle>
-          <DialogDescription className="text-xs">
-            Pick what you need. They join this file&apos;s needs list and a draft to the borrower.
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-base">Request documents</DialogTitle>
+            <DialogDescription className="text-xs">
+              Pick what you need. They join this file&apos;s needs list and a draft to the borrower.
+            </DialogDescription>
+          </DialogHeader>
 
-        <Input
-          type="search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search documents"
-          aria-label="Search documents"
-        />
+          <Input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search documents"
+            aria-label="Search documents"
+          />
 
-        <ul className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          {matches.map((type) => (
-            <li key={type.value}>
-              <label className="flex cursor-pointer items-center gap-2 border-b border-border px-1 py-2 text-sm last:border-b-0 hover:bg-muted">
-                <input
-                  type="checkbox"
-                  checked={picked.includes(type.value)}
-                  onChange={() => toggle(type.value)}
-                />
-                <span className="flex-1 truncate text-foreground">{type.label}</span>
-                {outstanding.has(type.value) ? (
-                  // SAID AT SELECTION, NOT AFTER. LP-826 built the after-the-fact answer; telling a
-                  // processor before they pick is cheaper for everybody, and asking twice for one
-                  // document is the mistake this prevents.
-                  <span className="shrink-0 text-xs text-muted-foreground">already requested</span>
-                ) : (
-                  <span className="shrink-0 text-xs text-muted-foreground">{type.category}</span>
-                )}
-              </label>
-            </li>
-          ))}
-        </ul>
+          <ul className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+            {matches.map((type) => (
+              <li key={type.value}>
+                <label className="flex cursor-pointer items-center gap-2 border-b border-border px-1 py-2 text-sm last:border-b-0 hover:bg-muted">
+                  <input
+                    type="checkbox"
+                    checked={picked.includes(type.value)}
+                    onChange={() => toggle(type.value)}
+                  />
+                  <span className="flex-1 truncate text-foreground">{type.label}</span>
+                  {outstanding.has(type.value) ? (
+                    // SAID AT SELECTION, NOT AFTER. LP-826 built the after-the-fact answer; telling a
+                    // processor before they pick is cheaper for everybody, and asking twice for one
+                    // document is the mistake this prevents.
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      already requested
+                    </span>
+                  ) : (
+                    <span className="shrink-0 text-xs text-muted-foreground">{type.category}</span>
+                  )}
+                </label>
+              </li>
+            ))}
+          </ul>
 
-        <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
-          <span className="text-xs text-muted-foreground">
-            {picked.length === 0 ? "Nothing selected" : `${picked.length} selected`}
-          </span>
-          <Button
-            type="button"
-            disabled={picked.length === 0 || compose.isPending}
-            onClick={() =>
-              compose.mutate(picked, {
-                onSuccess: (result) => {
-                  notifySuccess({
-                    title: "Draft prepared",
-                    // NAMES WHICH KIND OF EMAIL IT IS. `email_draft_enabled` is off in every
-                    // environment, so this says "from the template" today — and a message claiming
-                    // the model wrote it would be the untrue half of this feature's own headline.
-                    consequence: result.composed_by_model
-                      ? `${result.needs_added} document(s) added, with wording drafted for this file. It is in this file's drafts.`
-                      : `${result.needs_added} document(s) added, using the standard wording. It is in this file's drafts.`,
-                  });
-                  setPicked([]);
-                  onOpenChange(false);
-                },
-                onError: (error) =>
-                  notifyError({
-                    title: "Couldn’t prepare the request",
-                    whatToDo: getErrorMessage(error),
-                  }),
-              })
-            }
-          >
-            {compose.isPending ? "Preparing…" : "Generate email"}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+          <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
+            <span className="text-xs text-muted-foreground">
+              {picked.length === 0 ? "Nothing selected" : `${picked.length} selected`}
+            </span>
+            <Button
+              type="button"
+              disabled={picked.length === 0 || compose.isPending}
+              onClick={() => generate()}
+            >
+              {compose.isPending ? "Preparing…" : "Generate email"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      {conflict.dialog}
+    </>
   );
 }

@@ -1,11 +1,13 @@
 "use client";
 
+import { useDraftConflict } from "@/components/file/communication/use-draft-conflict";
 import { StatusToken, figureToneClass } from "@/components/status-token";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCalculator } from "@/lib/api/calculators";
 import { useLoanFileDocuments } from "@/lib/api/documents";
+import type { ConflictChoice } from "@/lib/api/draft-conflict";
 import { useDti } from "@/lib/api/dti";
 import { useLoanFile, useLoanFileActivity } from "@/lib/api/loan-files";
 import { useLtv } from "@/lib/api/ltv";
@@ -455,9 +457,21 @@ function VerificationSection({ fileId }: { fileId: string }) {
  */
 function AwaitingDocuments({ fileId, findings }: { fileId: string; findings: RuleFinding[] }) {
   const resolve = useResolveFinding(fileId);
+  // LP-851 — THIS DOOR REACHES THE SAME 409 AS THE OTHERS. It is one of two entry points for the
+  // identical `request-docs-bulk`, so it answers the open-draft decision with the identical dialog:
+  // a rail button that surfaced the refusal as a raw error would be the one place a processor
+  // could not answer it.
+  const conflict = useDraftConflict();
   const { missing } = splitByMissingDocument(findings);
   const documents = awaitedDocuments(missing);
   if (documents.length === 0) return null;
+
+  function request(onConflict?: ConflictChoice) {
+    resolve.mutate(
+      { kind: "request-docs-bulk", findingIds: missing.map((finding) => finding.id), onConflict },
+      { onError: (error) => conflict.capture(error, request) },
+    );
+  }
 
   // Fifteen document names run to six lines of prose in a 288px rail, which is
   // the opposite of "answerable in one action". Stacked and capped: the names a
@@ -481,15 +495,11 @@ function AwaitingDocuments({ fileId, findings }: { fileId: string; findings: Rul
         variant="outline"
         className="mt-2 h-7 w-full text-xs"
         disabled={resolve.isPending}
-        onClick={() =>
-          resolve.mutate({
-            kind: "request-docs-bulk",
-            findingIds: missing.map((finding) => finding.id),
-          })
-        }
+        onClick={() => request()}
       >
         Request all {documents.length}
       </Button>
+      {conflict.dialog}
     </div>
   );
 }

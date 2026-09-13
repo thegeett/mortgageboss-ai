@@ -629,3 +629,118 @@ async def test_an_authored_draft_the_processor_did_change_is_still_recorded_as_e
     assert row.body_composed != row.body_as_sent
     assert "April" in (row.body_as_sent or "")
     assert "April" not in (row.body_composed or "")
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-851 — the line the warning quotes back
+# --------------------------------------------------------------------------------------------- #
+async def test_the_excerpt_is_the_processors_own_line_not_the_templates(
+    db_session: AsyncSession,
+) -> None:
+    """LP-851 quotes the processor's own first edited line. "Theirs" is decided against the template.
+
+    THE GREETING IS THE TRAP. It is the first line of the body and the processor did not write it,
+    so an implementation that took `text_lines(body)[0]` would quote "Hello Sarah," at somebody as
+    though they had typed it — and a warning that quotes a line you never wrote teaches you to stop
+    reading warnings.
+    """
+    from app.services.email_draft import _edited_excerpt
+
+    loan_file, _actor, draft, _first = await _draft(db_session)
+    generated_first = (draft.body or "").splitlines()[0]
+    assert generated_first, "the fixture's draft has no first line to be confused by"
+
+    await save_draft_body(
+        db_session,
+        loan_file=loan_file,
+        draft_id=draft.id,
+        body_html=(
+            f"<p>{generated_first}</p><p>March statement only, not February.</p><p>Thanks.</p>"
+        ),
+    )
+
+    assert (
+        await _edited_excerpt(db_session, draft=draft, loan_file=loan_file)
+    ) == "March statement only, not February."
+
+
+async def test_a_plain_draft_has_nothing_to_quote(db_session: AsyncSession) -> None:
+    """THE CONTROL. An implementation that always returned the body's first line would pass the
+    test above and put a template sentence in quotation marks on every unedited draft."""
+    from app.services.email_draft import _edited_excerpt
+
+    loan_file, _actor, draft, _first = await _draft(db_session)
+    assert await _edited_excerpt(db_session, draft=draft, loan_file=loan_file) is None
+
+
+async def test_an_edit_that_only_deletes_leaves_nothing_to_quote(
+    db_session: AsyncSession,
+) -> None:
+    """None is an ordinary answer. The dialog drops the quotation rather than inventing one."""
+    from app.services.email_draft import _edited_excerpt
+
+    loan_file, _actor, draft, _first = await _draft(db_session)
+    kept = (draft.body or "").splitlines()[0]
+    await save_draft_body(
+        db_session, loan_file=loan_file, draft_id=draft.id, body_html=f"<p>{kept}</p>"
+    )
+    assert await _edited_excerpt(db_session, draft=draft, loan_file=loan_file) is None
+
+
+async def test_a_very_long_line_is_visibly_truncated(db_session: AsyncSession) -> None:
+    """A fragment that does not LOOK cut off is one a processor will not recognise as their own."""
+    from app.services.email_draft import EXCERPT_MAX_CHARS, _edited_excerpt
+
+    loan_file, _actor, draft, _first = await _draft(db_session)
+    long_line = "The March statement specifically, not February, and please " + ("x" * 400)
+    await save_draft_body(
+        db_session, loan_file=loan_file, draft_id=draft.id, body_html=f"<p>{long_line}</p>"
+    )
+
+    excerpt = await _edited_excerpt(db_session, draft=draft, loan_file=loan_file)
+    assert excerpt is not None
+    assert excerpt.endswith("…")
+    assert len(excerpt) <= EXCERPT_MAX_CHARS + 1
+    assert excerpt.startswith("The March statement specifically")
+
+
+async def test_the_refusal_carries_the_excerpt_and_the_flag_together(
+    db_session: AsyncSession,
+) -> None:
+    """At the layer LP-851 reads it: on the exception, and therefore in the 409."""
+    from app.services.email_draft import DraftDecisionRequired
+
+    loan_file, actor, draft, _first = await _draft(db_session)
+    await save_draft_body(
+        db_session,
+        loan_file=loan_file,
+        draft_id=draft.id,
+        body_html="<p>March statement only, not February.</p>",
+    )
+    second = await _need(db_session, loan_file, title="Pay stubs", needs_type="pay_stub")
+
+    with pytest.raises(DraftDecisionRequired) as raised:
+        await add_needs_to_draft(
+            db_session, loan_file=loan_file, needs=[second], actor_user_id=actor
+        )
+
+    conflict = raised.value.decisions_required[0]
+    assert conflict.body_edited is True
+    assert conflict.edited_excerpt == "March statement only, not February."
+
+
+async def test_an_unedited_draft_refuses_without_a_quote(db_session: AsyncSession) -> None:
+    """THE CONTROL for the case above — the ordinary refusal carries no warning and no quotation."""
+    from app.services.email_draft import DraftDecisionRequired
+
+    loan_file, actor, _draft_row, _first = await _draft(db_session)
+    second = await _need(db_session, loan_file, title="Pay stubs", needs_type="pay_stub")
+
+    with pytest.raises(DraftDecisionRequired) as raised:
+        await add_needs_to_draft(
+            db_session, loan_file=loan_file, needs=[second], actor_user_id=actor
+        )
+
+    conflict = raised.value.decisions_required[0]
+    assert conflict.body_edited is False
+    assert conflict.edited_excerpt is None

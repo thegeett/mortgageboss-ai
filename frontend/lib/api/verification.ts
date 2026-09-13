@@ -6,6 +6,7 @@
  * (and stops once it settles), surfacing the findings + the staleness flag.
  */
 import { apiClient } from "@/lib/api/client";
+import type { ConflictChoice } from "@/lib/api/draft-conflict";
 import { invalidateDraftViews } from "@/lib/api/draft-views";
 import { dtiQueryKey } from "@/lib/api/dti";
 import { ltvQueryKey } from "@/lib/api/ltv";
@@ -140,27 +141,40 @@ type Resolution =
   // it as wrong) and from apply (which changes the loan). The note is optional, where an
   // override reason is required: ratifying agrees with what the finding already says.
   | { kind: "ratify"; findingId: string; note?: string }
-  | { kind: "request-docs"; findingId: string; note: string }
+  // LP-851 — `onConflict` is the processor's answer to LP-850's open-draft dialog. Absent means
+  // "nobody has been asked yet", and the server refuses with a 409 describing every draft it found
+  // rather than writing anything.
+  | { kind: "request-docs"; findingId: string; note: string; onConflict?: ConflictChoice }
   | { kind: "undo"; findingId: string } // reverse a resolution (LP-98)
   // LP-562 — request every document a GROUP of findings is waiting on, as ONE needs item per
   // DOCUMENT. Nine findings on the real file want five documents; a loop over the per-finding
   // action would put five near-duplicate credit-report asks on the needs list.
-  | { kind: "request-docs-bulk"; findingIds: string[]; note?: string };
+  | {
+      kind: "request-docs-bulk";
+      findingIds: string[];
+      note?: string;
+      onConflict?: ConflictChoice;
+    };
 
 async function resolveFinding(identifier: string, action: Resolution): Promise<VerificationStatus> {
   if (action.kind === "request-docs-bulk") {
     const res = await apiClient.post<VerificationStatus>(
       `${API_V1}/loan-files/${identifier}/findings/request-docs`,
-      { finding_ids: action.findingIds, note: action.note ?? null },
+      {
+        finding_ids: action.findingIds,
+        note: action.note ?? null,
+        on_conflict: action.onConflict ?? null,
+      },
     );
     return res.data;
   }
   const base = `${API_V1}/loan-files/${identifier}/findings/${action.findingId}`;
-  let body: Record<string, string> = {};
+  let body: Record<string, string | null> = {};
   if (action.kind === "override") body = { reason: action.reason };
   else if (action.kind === "note") body = { note: action.note };
   else if (action.kind === "accept-risk") body = { reason: action.reason };
-  else if (action.kind === "request-docs") body = { note: action.note };
+  else if (action.kind === "request-docs")
+    body = { note: action.note, on_conflict: action.onConflict ?? null };
   else if (action.kind === "ratify" && action.note) body = { note: action.note };
   else if (action.kind === "apply" && action.expectedFingerprint)
     body = { expected_fingerprint: action.expectedFingerprint };

@@ -11,9 +11,14 @@
  */
 
 import { CalculatorsSection } from "@/components/file/calculators/calculators-section";
+import { useDraftConflict } from "@/components/file/communication/use-draft-conflict";
 import { FindingFilterPills } from "@/components/file/verification/finding-filters";
 import { FindingsList } from "@/components/file/verification/findings-list";
 import { NeedsCompleteness } from "@/components/file/verification/needs-completeness";
+import type {
+  RuleActionOptions,
+  RuleFindingAction,
+} from "@/components/file/verification/rule-finding-actions";
 import { RuleFindingsTabs } from "@/components/file/verification/rule-findings-tabs";
 import { VerificationStats } from "@/components/file/verification/verification-stats";
 import { VersionSelector } from "@/components/file/verification/version-selector";
@@ -23,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { InlineErrorState } from "@/components/ui/error-state";
 import { SkeletonText } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import type { ConflictChoice } from "@/lib/api/draft-conflict";
 import { dtiQueryKey } from "@/lib/api/dti";
 import { ltvQueryKey } from "@/lib/api/ltv";
 import { useUpdatePreferences } from "@/lib/api/preferences";
@@ -434,11 +440,80 @@ function VerificationBody({
   // LP-561 — the governed findings become actionable. This hook already refreshes the DTI, LTV
   // and needs list on success, which is exactly what an Apply or a Request needs.
   const resolveRuleFinding = useResolveFinding(fileId);
+  // LP-851 — THE OPEN-DRAFT DECISION, ONCE, FOR EVERY DOOR ON THIS PANEL. The row-level Request and
+  // "Request all N" both reach LP-850's 409, and both answer it with the same dialog.
+  const draftConflict = useDraftConflict();
+
+  /**
+   * Fire a rule-finding action, and let the open-draft dialog answer for it if the server refuses.
+   *
+   * ONE FUNCTION, CALLED TWICE. The answered request is the SAME request re-sent with the
+   * processor's `on_conflict`, rather than a second one assembled somewhere else — which is how the
+   * two would start to differ.
+   */
+  function fireRuleAction(action: RuleFindingAction, options?: RuleActionOptions) {
+    const carried =
+      action.kind === "request-docs" || action.kind === "request-docs-bulk"
+        ? { ...action, onConflict: options?.onConflict }
+        : action;
+    resolveRuleFinding.mutate(carried, {
+      // LP-809 review — THE GOVERNED ROWS SAID NOTHING AT ALL. Every confirmation in this
+      // panel lived in `findings-list`, which renders the LEGACY AI-sweep findings; the §8
+      // rule-finding rows — including the row-level Request button LP-809 wired to the email
+      // draft — mutated silently, so a successful request and a failed one looked identical.
+      // Only the request is confirmed here: the other actions have their own on-screen
+      // consequence (a row moves, a preview closes, a verdict changes), where a request's
+      // whole effect is on two other pages.
+      // LP-839 — THE SAME SENTENCE THE LEGACY ROWS SAY, from the server's own outcome.
+      // This handler had its own hedge — "whatever the borrower can send is in the file's
+      // email draft" — which is true whether the draft gained a line or not, and 16 of the 43
+      // documents a rule can put behind this button are somebody else's to send. A processor
+      // requesting a VOE, an appraisal or a credit report saw success and an unchanged draft.
+      // LP-826 built `requestConsequence` and wired it into `findings-list` only; this is the
+      // half where a processor clicks.
+      onSuccess: (status) => {
+        if (action.kind !== "request-docs" && action.kind !== "request-docs-bulk") return;
+        notifySuccess({
+          title: "Documents requested",
+          consequence: requestConsequence(status),
+        });
+      },
+      onError: (error) => {
+        // A CALLER WITH ITS OWN DIALOG TAKES THE ERROR INSTEAD. "Request all N" folds the party
+        // blocks into the confirm the processor is already looking at; routing it through the
+        // panel's dialog as well would be the second dialog this ticket forbids.
+        if (options?.onError) {
+          options.onError(error);
+          return;
+        }
+        // LP-851 — THE OPEN DRAFT IS NOT A FAILURE. `capture` takes only a 409 carrying a
+        // refusal and returns false for everything else, so an ordinary error still reaches
+        // the toast — a helper that swallowed a real failure into a dialog nobody could
+        // answer would be worse than no dialog at all.
+        if (
+          draftConflict.capture(error, (choice) => fireRuleAction(action, { onConflict: choice }))
+        ) {
+          return;
+        }
+        notifyError({
+          title:
+            action.kind === "request-docs"
+              ? "Couldn’t request the documents"
+              : "Couldn’t update the finding",
+          whatToDo: getErrorMessage(error),
+        });
+      },
+    });
+  }
+
   // The file-level chrome sits ABOVE the tabs; the governed §8 tabs (1-4) render the rule engine's
   // output; the LEGACY body (the dial + stats + AI-sweep findings list) is quarantined into Tab 5, its
   // behaviour unchanged. The two systems' lists + counts are never merged (LP-375/376).
   return (
     <div className="space-y-4">
+      {/* LP-851 — ONE DIALOG FOR THE WHOLE PANEL. Rendered here rather than beside each button:
+          there is one decision to make and never two in sequence. */}
+      {draftConflict.dialog}
       {/* A FAILED run is the FIRST thing to say. It used to be said nowhere: the status was typed but
           never rendered, so a run that died on the worker (a dead AI call, a governed pass exhausted
           after retries) left the button re-enabled over an unchanged panel — indistinguishable from a
@@ -455,40 +530,7 @@ function VerificationBody({
         crossSourceCount={
           (crossSource.data ?? []).filter((f: SnapshotFinding) => f.disposition === "open").length
         }
-        onAct={(action) =>
-          resolveRuleFinding.mutate(action, {
-            // LP-809 review — THE GOVERNED ROWS SAID NOTHING AT ALL. Every confirmation in this
-            // panel lived in `findings-list`, which renders the LEGACY AI-sweep findings; the §8
-            // rule-finding rows — including the row-level Request button LP-809 wired to the email
-            // draft — mutated silently, so a successful request and a failed one looked identical.
-            // Only the request is confirmed here: the other actions have their own on-screen
-            // consequence (a row moves, a preview closes, a verdict changes), where a request's
-            // whole effect is on two other pages.
-            // LP-839 — THE SAME SENTENCE THE LEGACY ROWS SAY, from the server's own outcome.
-            // This handler had its own hedge — "whatever the borrower can send is in the file's
-            // email draft" — which is true whether the draft gained a line or not, and 16 of the 43
-            // documents a rule can put behind this button are somebody else's to send. A processor
-            // requesting a VOE, an appraisal or a credit report saw success and an unchanged draft.
-            // LP-826 built `requestConsequence` and wired it into `findings-list` only; this is the
-            // half where a processor clicks.
-            onSuccess: (status) => {
-              if (action.kind !== "request-docs" && action.kind !== "request-docs-bulk") return;
-              notifySuccess({
-                title: "Documents requested",
-                consequence: requestConsequence(status),
-              });
-            },
-            onError: (error) => {
-              notifyError({
-                title:
-                  action.kind === "request-docs"
-                    ? "Couldn’t request the documents"
-                    : "Couldn’t update the finding",
-                whatToDo: getErrorMessage(error),
-              });
-            },
-          })
-        }
+        onAct={fireRuleAction}
         // `?? []` guards a stale/version-skewed response missing the newly-added field — degrade to the
         // empty-state tabs rather than throwing in bucketRuleFindings and blanking the whole panel.
         ruleFindings={data.rule_findings ?? []}

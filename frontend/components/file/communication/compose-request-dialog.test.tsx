@@ -56,7 +56,12 @@ describe("ComposeRequestDialog", () => {
     fireEvent.click(screen.getByLabelText(/Pay stub/));
     fireEvent.click(screen.getByRole("button", { name: "Generate email" }));
 
-    expect(mockCompose.mock.calls[0]?.[0]).toEqual(["w2", "pay_stub"]);
+    // LP-851 — `onConflict` is undefined on the FIRST attempt: nobody has been asked about an open
+    // draft yet, which is what makes the server refuse rather than write.
+    expect(mockCompose.mock.calls[0]?.[0]).toEqual({
+      documentTypes: ["w2", "pay_stub"],
+      onConflict: undefined,
+    });
   });
 
   it("refuses to generate with nothing picked", () => {

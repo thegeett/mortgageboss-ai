@@ -709,10 +709,17 @@ describe("LP-562 — one click requests every outstanding document", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Looks good" }));
 
-    expect(onAct).toHaveBeenCalledWith({
-      kind: "request-docs-bulk",
-      findingIds: ["a", "b"],
-    });
+    // LP-851 — AND IT CARRIES THE OPEN-DRAFT ANSWER, which is `undefined` on the first attempt
+    // because nobody has been asked yet. The second argument is how the refusal gets back to THIS
+    // confirm rather than to a second dialog.
+    expect(onAct).toHaveBeenCalledTimes(1);
+    const [action, options] = onAct.mock.calls[0] as [
+      { kind: string; findingIds: string[] },
+      { onConflict: undefined; onError: (error: unknown) => void },
+    ];
+    expect(action).toEqual({ kind: "request-docs-bulk", findingIds: ["a", "b"] });
+    expect(options.onConflict).toBeUndefined();
+    expect(typeof options.onError).toBe("function");
   });
 
   it("cancelling asks for nothing", () => {

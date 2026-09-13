@@ -757,8 +757,10 @@ describe("VerificationPanel — the governed rows say what happened", () => {
     mock({ data: { ...STATUS, rule_findings: [ruleFinding()] } });
     render(<VerificationPanel fileId="LF-1" />);
 
+    // LP-851 — ONE CLICK. This used to open the "Anything to add for the borrower?" form and needed
+    // a second click on its submit; the form is gone, and the row's Request fires the rule directly.
     fireEvent.click(screen.getByRole("button", { name: /request pay stub/i }));
-    fireEvent.click(screen.getByRole("button", { name: /^Request$/ }));
+    expect(screen.queryByText("Anything to add for the borrower?")).toBeNull();
 
     const [action, handlers] = resolveMutate.mock.calls[0] as [
       { kind: string },

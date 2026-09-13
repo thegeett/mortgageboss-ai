@@ -9,6 +9,7 @@
  * display). Each open finding carries the core resolution actions.
  */
 
+import { useDraftConflict } from "@/components/file/communication/use-draft-conflict";
 import { AGGRESSION_META } from "@/components/file/verification/aggression-dial";
 import { FindingCard } from "@/components/file/verification/finding-card";
 import { useResolveFinding } from "@/lib/api/verification";
@@ -38,6 +39,7 @@ export function FindingsList({
   filters?: FindingFilters;
 }) {
   const resolve = useResolveFinding(fileId);
+  const conflict = useDraftConflict();
   const cutoff = data.aggression.cutoffs[activeLevel];
 
   const openAll = data.findings.filter((f) => f.resolution_status === "open");
@@ -95,7 +97,19 @@ export function FindingsList({
                 },
               }),
         }),
-      onError: (e) =>
+      onError: (e) => {
+        // LP-851 — THE OPEN DRAFT IS NOT A FAILURE. This list's Request docs reaches the same
+        // endpoint as the governed rows, so it reaches the same 409, and a legacy row that
+        // surfaced it as "couldn't resolve the finding" would be the one door where a processor
+        // cannot answer. `capture` takes only a refusal and returns false for everything else.
+        if (
+          (action.kind === "request-docs" || action.kind === "request-docs-bulk") &&
+          conflict.capture(e, (choice) =>
+            act({ ...action, onConflict: choice }, { title, consequence }),
+          )
+        ) {
+          return;
+        }
         notifyError({
           // NAMES WHAT THE PROCESSOR ACTUALLY DID. `act` serves both the
           // resolutions and the undo, and a fixed "couldn't resolve" told someone
@@ -106,12 +120,14 @@ export function FindingsList({
               ? "Couldn’t undo the resolution"
               : "Couldn’t resolve the finding",
           whatToDo: getErrorMessage(e),
-        }),
+        });
+      },
     });
   }
 
   return (
     <div className="space-y-4">
+      {conflict.dialog}
       {shownOpen.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {!data.latest_run

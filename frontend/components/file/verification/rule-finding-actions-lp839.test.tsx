@@ -129,13 +129,38 @@ describe("after a request", () => {
 });
 
 describe("the note", () => {
-  it("says who reads it", () => {
-    // It asked "anything to add to the request?", stored the answer in NeedsItem.description, and
-    // nothing rendered it — the draft body came from the catalog's guidance or the title. The label
-    // now names the borrower because the note now reaches them.
-    render(<RuleFindingActions finding={finding()} onAct={vi.fn()} />);
+  it("asks nothing and fires the request — LP-851 removed the note form", () => {
+    // LP-839 ADDED THIS FORM AND LP-851 TAKES IT AWAY, and the inversion is the ticket rather than
+    // a weakening. The question is replaced by the open-draft decision, and asking two questions
+    // for one click is how the second goes unread.
+    //
+    // WHAT IT COSTS, SAID PLAINLY: "the March statement specifically, not February" now has to be
+    // typed into the draft body. That is only acceptable because LP-853 makes the body KEEP an
+    // edit — the two tickets ship together or this is a regression.
+    const onAct = vi.fn();
+    render(<RuleFindingActions finding={finding()} onAct={onAct} />);
     fireEvent.click(screen.getByRole("button", { name: /Request/ }));
 
-    expect(screen.getByText("Anything to add for the borrower?")).toBeTruthy();
+    expect(screen.queryByText("Anything to add for the borrower?")).toBeNull();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    // AND THE CLICK DID THE THING. Half of this test is an absence, and a button that had stopped
+    // working entirely would satisfy every one of them.
+    expect(onAct).toHaveBeenCalledTimes(1);
+    expect(onAct.mock.calls[0]?.[0]).toMatchObject({ kind: "request-docs" });
+  });
+
+  it("writes no note from the request path — acceptance 6", () => {
+    // `NeedsItem.description` is what the removed field wrote. The endpoint still accepts `note`,
+    // so the guarantee is that this door sends nothing for it: a path that quietly kept sending a
+    // stale value would be invisible on screen and visible in the borrower's email.
+    const onAct = vi.fn();
+    render(<RuleFindingActions finding={finding()} onAct={onAct} />);
+    fireEvent.click(screen.getByRole("button", { name: /Request/ }));
+
+    expect(onAct.mock.calls[0]?.[0]).toEqual({
+      kind: "request-docs",
+      findingId: "f1",
+      note: "",
+    });
   });
 });

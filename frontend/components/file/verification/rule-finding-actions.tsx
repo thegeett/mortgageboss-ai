@@ -2,6 +2,7 @@
 
 import { ViewFixDialog } from "@/components/file/verification/view-fix-dialog";
 import { Button } from "@/components/ui/button";
+import type { ConflictChoice } from "@/lib/api/draft-conflict";
 import type { RuleFinding } from "@/lib/types/verification";
 import { cn } from "@/lib/utils";
 import { resolutionLabel } from "@/lib/verification/rule-findings";
@@ -30,7 +31,19 @@ export type RuleFindingAction =
   | { kind: "undo"; findingId: string }
   | { kind: "request-docs-bulk"; findingIds: string[]; note?: string };
 
-type FormKind = "override" | "accept-risk" | "note" | "request-docs";
+/**
+ * How a caller asks for a request to be fired differently (LP-851).
+ *
+ * `onConflict` is the processor's answer to the open-draft dialog. `onError` lets a caller that
+ * owns its OWN dialog — "Request all N", whose confirm grows the party blocks rather than being
+ * replaced by a second dialog — receive the refusal instead of a toast about it.
+ */
+export interface RuleActionOptions {
+  onConflict?: ConflictChoice;
+  onError?: (error: unknown) => void;
+}
+
+type FormKind = "override" | "accept-risk" | "note";
 
 const FORM: Record<
   FormKind,
@@ -60,17 +73,6 @@ const FORM: Record<
     submit: "Add note",
     placeholder: "e.g. emailed borrower 8/19 — waiting on the DCU statement",
     required: true,
-  },
-  "request-docs": {
-    // LP-839 — SAYS WHO READS IT. This asked "anything to add to the request?", stored the answer
-    // in `NeedsItem.description`, and nothing rendered it: the draft's body came from the catalog's
-    // guidance or the need's title, so a processor's note reached a column and stopped. It now
-    // appears under its own document in the email, which makes the label a promise rather than an
-    // invitation into a void.
-    label: "Anything to add for the borrower?",
-    submit: "Request",
-    placeholder: "e.g. the March statement specifically, not February",
-    required: false,
   },
 };
 
@@ -130,8 +132,7 @@ export function RuleFindingActions({
     if (form === "override") onAct({ kind: "override", findingId: finding.id, reason: value });
     else if (form === "accept-risk")
       onAct({ kind: "accept-risk", findingId: finding.id, reason: value });
-    else if (form === "note") onAct({ kind: "note", findingId: finding.id, note: value });
-    else onAct({ kind: "request-docs", findingId: finding.id, note: value });
+    else onAct({ kind: "note", findingId: finding.id, note: value });
     setForm(null);
     setText("");
   }
@@ -257,7 +258,16 @@ export function RuleFindingActions({
                     }.`
                   : "This will be added to the latest communication draft."
               }
-              onClick={() => setForm("request-docs")}
+              // LP-851 — FIRES THE REQUEST DIRECTLY. This opened a form asking "Anything to add
+              // for the borrower?", whose answer LP-839 rendered under its own document in the
+              // email. The form is gone because the pop-up that replaces it is the open-draft
+              // decision, and asking two questions for one click is how the second goes unread.
+              //
+              // WHAT THAT COSTS, SAID PLAINLY: "the March statement specifically, not February" now
+              // has to be typed into the draft body. That is only acceptable because LP-853 makes
+              // the body KEEP an edit — ship this without LP-853 and it is a regression, not a
+              // simplification.
+              onClick={() => onAct({ kind: "request-docs", findingId: finding.id, note: "" })}
             >
               {alreadyRequested ? "Re-request" : "Request"} {finding.missing_documents.join(", ")}
             </Button>

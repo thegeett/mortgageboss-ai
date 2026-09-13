@@ -339,3 +339,65 @@ async def test_the_409_body_is_what_the_dialog_will_render(
     assert isinstance(decision["open_draft"]["id"], str)
     assert isinstance(decision["open_draft"]["created_at"], str)
     assert detail["would_create"] == []
+
+
+async def test_the_409_carries_the_processors_own_line(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-851 — SCREEN 5's QUOTE, AT THE LAYER THE DIALOG READS IT.
+
+    The warning quotes the processor's own first edited line back at them, and that is the one
+    fragment of authored prose in this feature that travels outside the body column. It has to
+    survive the exception-to-JSON hop, which is where LP-850's whole payload was lost once already.
+    """
+    loan_file, token = await _file(db)
+    await db.commit()
+
+    first = await client.post(
+        f"{API}/{loan_file.display_id}/outbound/compose",
+        headers=_auth(token),
+        json={"document_types": ["bank_statement"]},
+    )
+    draft_id = first.json()["draft_id"]
+    saved = await client.put(
+        f"{API}/{loan_file.display_id}/outbound/draft/{draft_id}/body",
+        headers=_auth(token),
+        json={"body": "<p>March statement only, not February.</p>"},
+    )
+    assert saved.status_code == 200, saved.text
+
+    refused = await client.post(
+        f"{API}/{loan_file.display_id}/outbound/compose",
+        headers=_auth(token),
+        json={"document_types": ["pay_stub"]},
+    )
+
+    assert refused.status_code == 409, refused.text
+    decision = refused.json()["error"]["data"]["decisions_required"][0]
+    assert decision["open_draft"]["body_edited"] is True
+    assert decision["open_draft"]["edited_excerpt"] == "March statement only, not February."
+
+
+async def test_an_unedited_draft_refuses_with_no_quote(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """THE CONTROL. A payload that always carried an excerpt would put a TEMPLATE sentence in
+    quotation marks and attribute it to the processor — which is how a warning stops being read."""
+    loan_file, token = await _file(db)
+    await db.commit()
+
+    await client.post(
+        f"{API}/{loan_file.display_id}/outbound/compose",
+        headers=_auth(token),
+        json={"document_types": ["bank_statement"]},
+    )
+    refused = await client.post(
+        f"{API}/{loan_file.display_id}/outbound/compose",
+        headers=_auth(token),
+        json={"document_types": ["pay_stub"]},
+    )
+
+    assert refused.status_code == 409
+    decision = refused.json()["error"]["data"]["decisions_required"][0]
+    assert decision["open_draft"]["body_edited"] is False
+    assert decision["open_draft"]["edited_excerpt"] is None
