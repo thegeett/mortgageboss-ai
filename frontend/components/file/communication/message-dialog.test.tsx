@@ -529,6 +529,24 @@ describe("the button bar", () => {
     expect(screen.queryByText(/Paste into the message/)).toBeNull();
   });
 
+  it("a refused clipboard still opens the window, and says which half is missing", async () => {
+    // THE MIRROR IMAGE of the blocked-popup case below, and it was unhandled: `writeText` rejects
+    // when the permission is denied outright, so `copyAndOpen` never reached `window.open` and set
+    // no state. No copy, no window, no sentence — a primary button that appears broken.
+    const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+    Object.assign(navigator, { clipboard: { writeText } });
+    const open = vi.fn().mockReturnValue({});
+    Object.defineProperty(window, "open", { configurable: true, value: open });
+    draftOpen();
+
+    fireEvent.click(screen.getByRole("button", { name: /Copy & open/ }));
+
+    // The window opens anyway — To and Subject are worth having without the body.
+    await vi.waitFor(() => expect(open).toHaveBeenCalled());
+    await vi.waitFor(() => expect(screen.getByText(/refused the copy/)).toBeTruthy());
+    expect(screen.getByText(/copy it in yourself/)).toBeTruthy();
+  });
+
   it("a blocked popup still leaves the message on the clipboard, and says so", async () => {
     // ACCEPTANCE 3. The clipboard is written FIRST, so a refusal leaves the processor with the
     // message rather than with neither a window nor a copy — and the sentence says which.

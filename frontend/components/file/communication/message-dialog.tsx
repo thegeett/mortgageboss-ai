@@ -187,7 +187,7 @@ export function MessageDialog({
     !askedThisSession;
 
   /** What just happened to the compose window — see the sentence under the buttons. */
-  const [opened, setOpened] = useState<"idle" | "opened" | "blocked">("idle");
+  const [opened, setOpened] = useState<"idle" | "opened" | "blocked" | "copy-failed">("idle");
 
   /**
    * The whole send path, in one click.
@@ -199,9 +199,24 @@ export function MessageDialog({
    */
   async function copyAndOpen() {
     if (!data) return;
-    await copyMessage(bodyForSend, format);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 2000);
+
+    // LP-855 REVIEW — A REJECTED CLIPBOARD MUST NOT MAKE THE BUTTON DO NOTHING.
+    //
+    // `copyMessage` falls back from `ClipboardItem` to `writeText`, but `writeText` itself rejects
+    // when the permission is denied outright — and an unhandled rejection here meant `window.open`
+    // was never reached and no state was set. No copy, no window, no sentence: a primary button
+    // that appears broken. That is the mirror image of the blocked-popup case, which WAS handled.
+    //
+    // THE WINDOW STILL OPENS. To and Subject are worth having even without the body, and it leaves
+    // the processor one action short rather than at a dead end.
+    let copyFailed = false;
+    try {
+      await copyMessage(bodyForSend, format);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      copyFailed = true;
+    }
 
     const url = composeUrl(effectiveClient(activeClient), {
       to: recipient.trim(),
@@ -210,7 +225,9 @@ export function MessageDialog({
     // `mailto:` is handled by the OS rather than opened as a tab, and a blocker does not apply; the
     // web routes are ordinary windows and can be refused.
     const window_ = window.open(url, "_blank", "noopener,noreferrer");
-    setOpened(window_ === null ? "blocked" : "opened");
+    // PRECEDENCE: say what is MISSING. A failed copy is the worse of the two, because the message
+    // is the half a processor cannot reconstruct from the screen behind them.
+    setOpened(copyFailed ? "copy-failed" : window_ === null ? "blocked" : "opened");
   }
   // LP-855 — `messageMailtoUrl` AND ITS LENGTH GATE ARE GONE FROM THIS SCREEN.
   //
@@ -535,11 +552,16 @@ export function MessageDialog({
                     copy still worked — so the message says so rather than reporting an error about
                     a window. */}
                   <p className="text-xs text-muted-foreground">
-                    {opened === "blocked"
-                      ? "Your browser blocked the compose window — the message is on your clipboard, so open your mail app and paste it."
-                      : opened === "opened"
-                        ? "Paste into the message — ⌘V."
-                        : "Records that you sent it. Nothing is transmitted from here."}
+                    {/* NAMES WHAT FAILED AND OFFERS THE NEXT MOVE — the Ledger's rule 9, no
+                        apologies and no "something went wrong". Each says which HALF is missing,
+                        because the recovery is different for each. */}
+                    {opened === "copy-failed"
+                      ? "Your browser refused the copy — the compose window is open, so select the message above and copy it in yourself."
+                      : opened === "blocked"
+                        ? "Your browser blocked the compose window — the message is on your clipboard, so open your mail app and paste it."
+                        : opened === "opened"
+                          ? "Paste into the message — ⌘V."
+                          : "Records that you sent it. Nothing is transmitted from here."}
                   </p>
                 </div>
               ) : null}
