@@ -230,9 +230,21 @@ class Settings(BaseSettings):
     # someone chooses to compare it against the templates, which is one env var.
     finding_prose_enabled: bool = False
 
-    # LP-857 — THE NEXT PHASE, OFF. One switch over both ways a document comes back IN: the secure
-    # upload link (LP-815) and inbound mail (LP-807). V1 is draft-only — "No receiving, sending,
-    # secure upload link, reply email and all. We will do it in next phase."
+    # LP-857 — THE NEXT PHASE, OFF THE PAGE AND OUT OF THE EMAIL. V1 is draft-only — "No receiving,
+    # sending, secure upload link, reply email and all. We will do it in next phase."
+    #
+    # WHAT IT ACTUALLY GATES, because the name is wider than the switch. Three things: the panels on
+    # the Communication page (through `GET /capabilities`), the closing sentence of a generated
+    # request, and `POST /messages/{id}/upload-link`, which is the one call that writes a live link
+    # into a body bound for a borrower.
+    #
+    # WHAT IT DOES NOT GATE, said here so nobody reads the name and assumes otherwise: the
+    # file-level `POST /loan-files/{id}/upload-links`, the public redemption route a token holder
+    # posts a document to, and inbound ingestion. Those are LP-815's and LP-807's own surfaces and
+    # they still work — so a link minted before this flag existed can still be redeemed, and a
+    # deployment that wires the inbound webhook still receives. Nothing on the page reaches any of
+    # them in v1, which is what this ticket was for; making the flag mean "this deployment cannot
+    # receive at all" is a larger decision about the epic's fence than a config comment can make.
     #
     # ONE FLAG AND NOT TWO, because the two halves make one promise to a borrower. With it off the
     # request's closing sentence is the caution alone; with it on, the caution plus a route — either

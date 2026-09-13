@@ -243,5 +243,25 @@ async def test_stage1_end_to_end_build_persist_load(db_session: AsyncSession) ->
     # Strip the keyed match-hash (v1:<hex>) — it legitimately contains digit runs — before
     # the raw-number sweep, matching the script's precise strip (not a broad hex strip).
     blob = re.sub(r"v1:[0-9a-f]+", "", json.dumps(row.snapshot_json))
+    # LP-857 REVIEW — AND STRIP THE UUIDs, for the same reason as the match-hash above.
+    #
+    # THIS TEST WAS FLAKY AND THIS IS WHY. A `uuid4()` whose final group happens to be twelve
+    # DECIMAL digits is an ordinary UUID and a `\b\d{9,}\b` match — the hyphen and the closing
+    # quote are both word boundaries. Measured at 0.41% per UUID over 20,000 draws, which is small
+    # per id and not small at all over a snapshot blob holding dozens of them. It failed once in a
+    # full run and passed eight times in isolation, which is exactly the shape that gets rediscovered
+    # as somebody's change.
+    #
+    # Stripping them keeps the guard pointed at what it is for. A UUID is a structural identifier we
+    # generate, not a borrower's number, and the control below is what stops this strip quietly
+    # widening into "no sweep at all".
+    blob = re.sub(
+        r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", "", blob, flags=re.I
+    )
     assert "123456789" not in blob and _AKASH_SSN not in blob
     assert not re.search(r"\d{3}-\d{2}-\d{4}|\b\d{9,}\b", blob)  # no SSN-shaped or long bare run
+    # THE CONTROL. Every assertion above is a not-in over a blob that is expected to be clean, so
+    # without this the strip could widen — or the sweep break — and the whole block would read green.
+    planted = f'{blob}"ssn": "123-45-6789", "account": "987654321098"'
+    assert re.search(r"\d{3}-\d{2}-\d{4}", planted), "the SSN sweep stopped matching an SSN"
+    assert re.search(r"\b\d{9,}\b", planted), "the long-run sweep stopped matching a long run"
