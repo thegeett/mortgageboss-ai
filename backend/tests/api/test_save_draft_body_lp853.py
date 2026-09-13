@@ -11,7 +11,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
+import pytest
 import pytest_asyncio
+from app.core.config import settings
 from app.core.database import get_db
 from app.main import app
 from app.models import Borrower, Company, LoanProgram, User, UserRole
@@ -237,13 +239,20 @@ async def test_an_empty_body_is_refused(client: AsyncClient, db: AsyncSession) -
 
 
 async def test_adding_a_link_to_an_edited_draft_is_refused_with_a_readable_sentence(
-    client: AsyncClient, db: AsyncSession
+    client: AsyncClient, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The link is written INTO the body, so on an edited draft there is nowhere for it to go.
 
     The message has to say which of the two things went wrong — LP-UI rule 9, "every error names
     what failed and offers the next move".
+
+    LP-857 — RECEIVING IS ON HERE, deliberately. The route now refuses the same call with a 409
+    when the version cannot receive at all, and that check runs FIRST because it is the more
+    fundamental reason. Without the flag this test would pass on the wrong refusal — a 409 whose
+    sentence says nothing about editing — which is exactly what "name which of the two things went
+    wrong" is about. The off state is asserted in `test_next_phase_off_lp857.py`.
     """
+    monkeypatch.setattr(settings, "receiving_enabled", True)
     loan_file, token, draft_id = await _draft(client, db)
     await client.put(
         f"{API}/{loan_file.display_id}/outbound/draft/{draft_id}/body",

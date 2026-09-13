@@ -416,7 +416,9 @@ def render_draft_body(
                     property_address=property_address,
                 ),
                 "document_list": document_list,
-                "secure_upload_block": secure_upload_block(upload_link_url),
+                "secure_upload_block": secure_upload_block(
+                    upload_link_url, offer_link=settings.receiving_enabled
+                ),
             },
         )
     # LP-810 — the composed framing where there is one, the file's own plain sentences otherwise.
@@ -436,7 +438,9 @@ def render_draft_body(
             # LP-834 — the caution plus a live link where the draft has one, and LP-824's offer to
             # send one where it does not. Passed in rather than looked up: the plaintext token is
             # not in the database to look up.
-            "secure_upload_block": secure_upload_block(upload_link_url),
+            "secure_upload_block": secure_upload_block(
+                upload_link_url, offer_link=settings.receiving_enabled
+            ),
         },
     )
 

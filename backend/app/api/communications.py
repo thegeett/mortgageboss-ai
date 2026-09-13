@@ -18,6 +18,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from app.ai.polish import polish
 from app.api.dependencies import CurrentUser, ScopedLoanFile
+from app.core.config import settings
 from app.core.database import DbSession
 from app.documents.catalog import CATALOG
 from app.models.communication import Communication, CommunicationStatus
@@ -410,6 +411,9 @@ class MessageDetailPublic(BaseModel):
     #: request is a draft under its own template key, and that filter is why no screen could send one.
     is_editable: bool
     suggested_recipient: str | None
+    #: LP-857 — whose draft this is, so the modal can ask for a missing address and know which party
+    #: to save it against. Never derived on the client: five parties share one template key.
+    party: str | None
     #: LP-831 review — what a `mailto:` link and a copy need. Nothing here transmits mail, so these
     #: are how the message actually reaches anybody; see `MessageDetail`.
     suggested_bcc: str
@@ -431,7 +435,18 @@ async def attach_upload_link_endpoint(
 
     REFUSES ANYTHING THAT IS NOT AN EDITABLE DRAFT. A sent message must not gain a link — LP-821's
     evidence record is what actually went out — and an inbound one is not ours to edit at all.
+
+    LP-857 — AND REFUSES WHEN THE VERSION CANNOT RECEIVE. A link minted here is written into the
+    body and goes to a borrower, so with `receiving_enabled` off this call is the one way a live
+    upload link still reaches a message — acceptance 5 broken by a click rather than by a template.
+    The button is hidden on the client too; this is the half that does not depend on the client
+    being the only caller.
     """
+    if not settings.receiving_enabled:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="This version cannot receive uploads, so a secure link cannot be added.",
+        )
     detail = await message_detail(
         db, loan_file=loan_file, communication_id=communication_id, reader=current_user
     )
@@ -501,6 +516,7 @@ async def read_message(
         is_open_draft=detail.is_open_draft,
         is_editable=detail.is_editable,
         suggested_recipient=detail.suggested_recipient,
+        party=detail.party,
         suggested_bcc=detail.suggested_bcc,
         mailto_available=detail.mailto_available,
         mailto_max_chars=detail.mailto_max_chars,

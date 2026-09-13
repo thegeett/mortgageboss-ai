@@ -12,7 +12,9 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
 import pytest_asyncio
+from app.core.config import settings
 from app.core.database import get_db
 from app.main import app
 from app.models import Borrower, Company, LoanProgram, User, UserRole
@@ -33,6 +35,22 @@ PUBLIC = "/api/v1/upload"
 #: fixture that can never be accepted satisfied them all. The first test to require an
 #: acceptance is the one that found it.
 _PDF = (Path(__file__).resolve().parents[1] / "fixtures" / "attachments" / "clean.pdf").read_bytes()
+
+
+@pytest.fixture(autouse=True)
+def _receiving_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LP-857 — THIS WHOLE FEATURE IS FLAGGED OUT, AND THAT IS WHY THESE STILL RUN.
+
+    `receiving_enabled` is off in v1, and the mint endpoint refuses while it is: a link written into
+    a body on a version that can receive nothing through it is acceptance 5 broken by a click. LP-834
+    is written, reviewed and returns with the phase that brings receiving back, so its behaviour goes
+    on being asserted here rather than being deleted and rewritten later — a flag that rots is a
+    deletion with extra steps.
+
+    THE OFF STATE IS ASSERTED TOO, in `test_next_phase_off_lp857.py`, in both directions. Without
+    that, turning the flag on here would be a suite quietly testing a configuration nobody runs.
+    """
+    monkeypatch.setattr(settings, "receiving_enabled", True)
 
 
 @pytest_asyncio.fixture
@@ -206,7 +224,14 @@ async def test_a_draft_with_no_link_is_a_complete_email(
 ) -> None:
     """THE CONTROL ON THE SLOT. A template variable that rendered empty would leave a blank line
     where a sentence belongs, and the security caution is a fixed decision — it must be there either
-    way."""
+    way.
+
+    LP-857 — AND THE OFFER IS NOT PART OF "COMPLETE". With `receiving_enabled` off there is no
+    upload link to send, so *"reply and ask — we will send you a secure upload link instead"* names
+    something nobody in this version can do. That is the same defect LP-824 rewrote v1's wording
+    for, one flag later. The caution is what this test was always about; the offer moved to
+    `test_next_phase_off_lp857.py`, where both states are asserted.
+    """
     loan_file, draft, token = await _file_with_draft(db)
     await db.commit()
 
@@ -215,8 +240,28 @@ async def test_a_draft_with_no_link_is_a_complete_email(
     ).json()["body"]
 
     assert "Email is not a fully secure channel." in body
-    assert "reply and ask" in body
     assert "/upload/" not in body
+    # The slot rendered SOMETHING — the blank-line failure this test exists for would leave the
+    # caution's line empty too, and asserting the caution alone cannot tell a dropped sentence from
+    # a dropped slot.
+    assert body.rstrip().endswith("Dana Reyes")
+
+
+async def test_the_offer_returns_when_the_version_can_send_a_link(
+    client: AsyncClient, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LP-857 — the sentence above is gated, not deleted. LP-834 and LP-824 return with it."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "receiving_enabled", True)
+    loan_file, draft, token = await _file_with_draft(db)
+    await db.commit()
+
+    body = (
+        await client.get(f"{API}/{loan_file.display_id}/messages/{draft.id}", headers=_auth(token))
+    ).json()["body"]
+
+    assert "reply and ask" in body
 
 
 async def test_a_sent_message_cannot_gain_a_link(client: AsyncClient, db: AsyncSession) -> None:

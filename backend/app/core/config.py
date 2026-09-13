@@ -230,6 +230,21 @@ class Settings(BaseSettings):
     # someone chooses to compare it against the templates, which is one env var.
     finding_prose_enabled: bool = False
 
+    # LP-857 — THE NEXT PHASE, OFF. One switch over both ways a document comes back IN: the secure
+    # upload link (LP-815) and inbound mail (LP-807). V1 is draft-only — "No receiving, sending,
+    # secure upload link, reply email and all. We will do it in next phase."
+    #
+    # ONE FLAG AND NOT TWO, because the two halves make one promise to a borrower. With it off the
+    # request's closing sentence is the caution alone; with it on, the caution plus a route — either
+    # a link the processor minted or LP-824's offer to send one. A flag that hid the panel while the
+    # email still said "reply and ask — we will send you a secure upload link instead" would put a
+    # promise in a borrower's inbox that nobody in this version can keep, which is the exact class
+    # of problem this ticket is about: an interface with nothing behind it.
+    #
+    # The frontend reads the same value through `GET /capabilities`, so the panel and the sentence
+    # cannot disagree.
+    receiving_enabled: bool = False
+
     # LP-810 — AI drafting of the borrower request's framing. OFF by default, like the two prose
     # flags above and for a stronger reason: those compose text a PROCESSOR reads, this composes text
     # a BORROWER reads. With it off, LP-817's deterministic render is not a degraded fallback — it is

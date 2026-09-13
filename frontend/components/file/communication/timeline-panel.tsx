@@ -101,9 +101,32 @@ function PartyCell({ party }: { party: string | null }) {
  * glyph is `EntryIcon` and this is the word, so deleting the colour mentally still leaves the row
  * readable.
  */
+/**
+ * A draft WE wrote and have not addressed.
+ *
+ * THE DIRECTION IS PART OF IT. `counterparty` is the sender on an inbound row, and an inbound
+ * message whose sender we could not read is not a draft that cannot be sent — it is mail that
+ * arrived. `status === "draft"` is checked by the caller; this is the rest.
+ */
+function isOutboundDraft(entry: TimelineEntry): boolean {
+  return entry.direction === "outbound";
+}
+
 function statusLine(entry: TimelineEntry): string {
   const when = messageTimeShort(entry.at);
   if (entry.status === "draft") {
+    // LP-857 — CANNOT BE SENT YET, AND THE ROW SAYS SO. A party draft is created even when the file
+    // has no address for that party (LP-841 — "the message is the part a processor wants"), and
+    // until this the row read "Draft · 2m" like any other: identical to one that was ready, with
+    // the difference only visible after opening it. Of 166 document types, 13 across title, agent,
+    // CPA, insurer and employer had no address anywhere (LP-820), so this is the common case for
+    // those, not an edge.
+    //
+    // A WORD, NOT A COLOUR. `text-warning` carries it too (see the row), but the Ledger's rule is
+    // that a state is colour AND glyph AND word, and this is the word.
+    if (isOutboundDraft(entry) && entry.counterparty === null) {
+      return `Draft · cannot be sent yet · ${when}`;
+    }
     return entry.body_edited ? `Draft · edited · ${when}` : `Draft · ${when}`;
   }
   // LP-852 REVIEW — `queued` IS NOT A DRAFT, AND THIS SAID IT WAS. The two were grouped here, so

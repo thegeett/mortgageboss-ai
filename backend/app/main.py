@@ -11,6 +11,7 @@ from app.api.activity import router as activity_router
 from app.api.auth import router as auth_router
 from app.api.borrowers import router as borrowers_router
 from app.api.calculators import router as calculators_router
+from app.api.capabilities import router as capabilities_router
 from app.api.communications import message_router as messages_router
 from app.api.communications import router as communications_router
 from app.api.document_findings import router as findings_router
@@ -168,6 +169,7 @@ app.include_router(preferences_router, prefix=API_V1_PREFIX)
 app.include_router(timeline_router, prefix=API_V1_PREFIX)
 app.include_router(evidence_router, prefix=API_V1_PREFIX)
 app.include_router(party_requests_router, prefix=API_V1_PREFIX)
+app.include_router(capabilities_router, prefix=API_V1_PREFIX)
 app.include_router(reminders_router, prefix=API_V1_PREFIX)
 app.include_router(reminders_file_router, prefix=API_V1_PREFIX)
 app.include_router(mailbox_connections_router, prefix=API_V1_PREFIX)

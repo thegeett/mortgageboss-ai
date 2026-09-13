@@ -3,9 +3,9 @@
 import { ComposeDraftButton } from "@/components/file/communication/compose-draft-dialog";
 import { ComposeRequestButton } from "@/components/file/communication/compose-request-button";
 import { InboundMessagesPanel } from "@/components/file/communication/inbound-messages-panel";
-import { PartyRequestButton } from "@/components/file/communication/party-request-button";
 import { TimelinePanel } from "@/components/file/communication/timeline-panel";
 import { UploadLinkPanel } from "@/components/file/communication/upload-link-panel";
+import { useCapabilities } from "@/lib/api/capabilities";
 import { useParams } from "next/navigation";
 
 /**
@@ -17,44 +17,54 @@ import { useParams } from "next/navigation";
  * asking for an attachment.
  *
  * LP-831 turns it into a mailbox: the message list leads, and the compose form that used to sit open
- * at the top is now the modal a row opens. The panels below it are the two things still waiting to
- * be folded in — the secure link (LP-834) and the other parties (LP-835).
+ * at the top is now the modal a row opens.
+ *
+ * LP-857 — THE PAGE DOES NOT OFFER WHAT THE VERSION CANNOT DO. *"In this version I want to limit to
+ * draft only... No receiving, sending, secure upload link, reply email and all."* Half the confusion
+ * in the screen this replaces came from controls that existed as an interface with nothing behind
+ * them — `mail_transport` is the standing example — and a processor cannot tell a feature that is
+ * broken from one that was never wired.
  */
 export default function CommunicationPage() {
   const { id } = useParams<{ id: string }>();
+  // FALSE WHILE LOADING AND FALSE ON ERROR. The safe default is the restrictive one: a panel that
+  // flashed in before the answer arrived would be a control a processor could click on a version
+  // where the thing behind it does not exist.
+  const receiving = useCapabilities().data?.receiving ?? false;
+
   return (
     <div className="flex flex-col gap-8">
-      {/* LP-831 — THE LIST LEADS, and the compose form is gone from the page.
-          `OutboundDraftPanel` was a full editor open at all times, which works while a file has ONE
-          draft. LP-832 makes several the ordinary state: a request creates a new draft carrying
-          everything outstanding, and the older ones stay. A page with one form on it cannot show
-          that, and it could never show a PARTY draft at all — `get_open_draft` filters on the
-          borrower's template key, which is why a title company's request was built and no screen
-          could send it.
-          A list has no template filter to be wrong about. Every draft is reachable, and the modal
-          it opens is the one editor. */}
-      <div className="flex items-center justify-end">
-        {/* LP-835 — WRITING TO SOMEBODY WHO IS NOT THE BORROWER. This was a panel below the list
-            with an inline address form per party. It is a modal behind one button now, because it
-            is an occasional act on a mailbox rather than a permanent fixture of one — and because
-            the drafts it makes belong in the list above, which is what LP-831 made possible and
-            what the panel's own success message got wrong. */}
-        {/* LP-833 — asking for a document no rule flagged. Until this, a draft could come only
-            from a FINDING: a processor who knew what they needed could add a needs item by hand and
+      {/* LP-857 — TWO BUTTONS, AND THE THIRD IS NOT MISSING. "Write to another party" was the only
+          place a missing address could be added, so the button went and the FORM was lifted: a
+          party draft with no address is still created, says "cannot be sent yet" on the list, and
+          carries the address form inside it. LP-820 measured why that matters — of 166 document
+          types, 13 across title, agent, CPA, insurer and employer had no address anywhere in the
+          schema, and the blocker was never "no way to compose", it was "nobody to send to".
+
+          Asking in the draft asks the person who knows, at the moment it is stopping them, instead
+          of in a panel nobody visits. */}
+      <div className="flex items-center justify-end gap-2">
+        {/* LP-833 — asking for a document no rule flagged. Until this, a draft could come only from
+            a FINDING: a processor who knew what they needed could add a needs item by hand and
             nothing drafted from it. */}
-        {/* LP-856 — A THIRD BUTTON: a draft with no documents behind it. Outline to "Request
-            documents"' primary, which is Screen 1's order — requesting is the common act and
-            writing a free message is the occasional one. */}
+        {/* LP-856 — a draft with no documents behind it. Outline to "Request documents"' primary,
+            which is Screen 1's order — requesting is the common act and writing a free message is
+            the occasional one. */}
         <ComposeDraftButton fileId={id} />
         <ComposeRequestButton fileId={id} />
-        <PartyRequestButton fileId={id} />
       </div>
       <TimelinePanel fileId={id} />
-      {/* LP-815 — BETWEEN the request and what came back, because that is where it is used: the
-          processor composes the request above, and the link is what the request should carry
-          instead of asking for an attachment. */}
-      <UploadLinkPanel fileId={id} />
-      <InboundMessagesPanel fileId={id} />
+      {/* LP-857 — FLAGGED OUT, NOT DELETED. LP-815 and LP-807 are written, reviewed and tested, and
+          they return in the phase that brings sending and receiving back; deleting them would buy
+          nothing and cost the review that already happened. Their tests still run — a flag that
+          rots is a deletion with extra steps. */}
+      {receiving ? (
+        <>
+          {/* LP-815 — BETWEEN the request and what came back, because that is where it is used. */}
+          <UploadLinkPanel fileId={id} />
+          <InboundMessagesPanel fileId={id} />
+        </>
+      ) : null}
     </div>
   );
 }

@@ -27,6 +27,12 @@ vi.mock("@/lib/api/preferences", async (importOriginal) => ({
   useUpdatePreferences: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
+// LP-857 — the dialog asks whether this version can receive, to decide whether to offer the
+// secure-link button. `false` is the product's default and the restrictive answer; the button's
+// two states are asserted in `message-dialog-address.test.tsx`.
+vi.mock("@/lib/api/capabilities", () => ({
+  useCapabilities: () => ({ data: { receiving: false } }),
+}));
 vi.mock("@/lib/api/communications", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/communications")>()),
   useMessageDetail: (...args: unknown[]) => mockUseMessageDetail(...args),

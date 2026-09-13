@@ -85,6 +85,22 @@ export interface MessageDetail {
   suggested_bcc: string;
   mailto_available: boolean;
   mailto_max_chars: number;
-  /** Who to address it to when nobody has yet. Null once a recipient is set. */
+  /**
+   * Who to address it to when nobody has yet. Null once a recipient is set.
+   *
+   * LP-857 — A PARTY'S ADDRESS TOO, not only the borrower's. The old rule suggested nothing on a
+   * party draft, on the reasoning that such a draft carries its own address; that holds only when
+   * the file had one at creation, and LP-841 deliberately creates the draft either way. The
+   * borrower is never suggested on a party draft — that would put a third party's document request
+   * in the borrower's inbox.
+   */
   suggested_recipient: string | null;
+  /**
+   * LP-857 — whose draft this is (`borrower`, `title`, `lender`, …), or null.
+   *
+   * FROM THE SERVER, never derived here. Five parties share `document_request_third_party`, so a
+   * client computing the party from `template_key` would file a lender's address under the title
+   * company — the same reason the timeline's `party` comes from the server.
+   */
+  party: string | null;
 }

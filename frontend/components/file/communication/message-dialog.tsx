@@ -1,6 +1,7 @@
 "use client";
 
 import { MailClientDialog } from "@/components/file/communication/mail-client-dialog";
+import { PartyAddressForm } from "@/components/file/communication/party-address-form";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -9,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useCapabilities } from "@/lib/api/capabilities";
 import {
   useAttachUploadLink,
   useMessageDetail,
@@ -27,6 +29,7 @@ import { polishMessage } from "@/lib/communication/polish-messages";
 import { copyMessage } from "@/lib/markdown/copy-rich";
 import { emailBodyToHtml } from "@/lib/markdown/email-body";
 import { htmlToEmailBody } from "@/lib/markdown/from-html";
+import type { ResponsibleParty } from "@/lib/types/party-request";
 import dynamic from "next/dynamic";
 
 /**
@@ -110,6 +113,9 @@ export function MessageDialog({
   const send = useSendDraft(fileId);
   const save = useSaveDraftBody(fileId);
   const attachLink = useAttachUploadLink(fileId, messageId ?? "");
+  // LP-857 — whether this version can receive anything. Same fact as the page's, from the same
+  // endpoint: the panel and the button must not disagree about whether an upload link exists.
+  const receiving = useCapabilities().data?.receiving ?? false;
   const [copied, setCopied] = useState(false);
   const open = messageId !== null;
 
@@ -217,6 +223,37 @@ export function MessageDialog({
       },
     );
   }
+
+  // LP-857 — WHETHER THIS DRAFT IS BLOCKED ON AN ADDRESS NOBODY HAS RECORDED.
+  //
+  // FOUR CONDITIONS, AND ALL FOUR ARE LOAD-BEARING. It has to be a PARTY draft (the borrower's
+  // address is a borrower record, not a participant row, and `add_party_address` would file it
+  // under the wrong thing); nobody may have addressed it (`counterparty`), because an addressed
+  // draft is not blocked; the file must not already know the answer (`suggested_recipient`),
+  // because asking again for something already recorded is how a second title company ends up on a
+  // file; and the box must be empty. `party` comes from the server — five parties share
+  // `document_request_third_party`, so deriving it from `template_key` here would file a lender's
+  // address under the title company.
+  //
+  // THE MIDDLE TWO ARE NOT REDUNDANT WITH THE LAST, though at open time they agree: an addressed
+  // draft seeds the box, so an empty box already means nobody is addressed. They part company the
+  // moment a processor CLEARS it — "No address on file" would then be false for a file that has one
+  // and is offering it.
+  //
+  // NO `is_editable` HERE, deliberately. The form renders inside the `data.is_editable` branch
+  // below, so a condition for it on this line is one no mutation can find: dropping it left every
+  // test green, which makes it decoration rather than a guard. A sent message has no form because
+  // it has no editable block, and that is what the test asserts against.
+  const needsAnAddress =
+    data !== undefined &&
+    // TRUTHY, not `!== null`. Null is the documented "no party" answer, but a payload that simply
+    // omits the field gives `undefined`, and `undefined !== null` would render the form with no
+    // role to save against — an address filed under nothing, from a control that looked ordinary.
+    Boolean(data.party) &&
+    data.party !== "borrower" &&
+    !data.counterparty &&
+    !data.suggested_recipient &&
+    recipient.trim() === "";
 
   /** What just happened to the compose window — see the sentence under the buttons. */
   const [opened, setOpened] = useState<"idle" | "opened" | "blocked" | "copy-failed">("idle");
@@ -372,6 +409,23 @@ export function MessageDialog({
                 markup. */}
               {data.is_editable ? (
                 <div className="flex flex-col gap-3">
+                  {/* LP-857 — THE ADDRESS IS ASKED WHERE IT BLOCKS. This was a form inside "Write to
+                      another party", a dialog on the Communication page that a processor opened only
+                      if they already knew they needed it. A party draft with no address is created
+                      anyway (LP-841 — the message is the part they want), so the question belongs
+                      in front of the person who knows the answer at the moment it stops them.
+
+                      ABOVE "Send to", not instead of it. The box below still works and still sends
+                      this one message; what this adds is the option to record the address as a fact
+                      about the file, which is the difference between answering once and answering
+                      every time. */}
+                  {needsAnAddress ? (
+                    <PartyAddressForm
+                      fileId={fileId}
+                      party={data.party as ResponsibleParty}
+                      onSaved={setRecipient}
+                    />
+                  ) : null}
                   <label className="flex flex-col gap-1 text-sm">
                     <span className="font-medium text-foreground">Send to</span>
                     <input
@@ -637,25 +691,34 @@ export function MessageDialog({
                       <Check className="h-4 w-4" /> {send.isPending ? "Recording…" : "Mark as sent"}
                     </Button>
 
-                    {/* LP-834 — the secure link. LP-857 takes it off the page with the rest of the
-                      next phase; it stays here until then. */}
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="gap-2"
-                      disabled={attachLink.isPending}
-                      title={
-                        data.body.includes("/upload/")
-                          ? "Replaces the link in this draft. Any link already sent stops working."
-                          : "Any link already sent to this borrower stops working."
-                      }
-                      onClick={() => attachLink.mutate()}
-                    >
-                      <LinkIcon className="h-4 w-4" />
-                      {data.body.includes("/upload/")
-                        ? "Replace the secure link"
-                        : "Add a secure upload link"}
-                    </Button>
+                    {/* LP-834 — the secure link. LP-857 TAKES IT OFF WITH THE REST OF THE NEXT
+                      PHASE, which this comment has been promising since LP-834.
+
+                      NOT COSMETIC. This button mints a link and writes it into the body, so leaving
+                      it while the upload panel is hidden would let a processor put a live upload
+                      link in a message on a version that cannot receive anything through it — which
+                      is acceptance 5 broken by a click rather than by a template. The server
+                      refuses the same call for the same reason; this is the half a processor sees.
+                      */}
+                    {receiving ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="gap-2"
+                        disabled={attachLink.isPending}
+                        title={
+                          data.body.includes("/upload/")
+                            ? "Replaces the link in this draft. Any link already sent stops working."
+                            : "Any link already sent to this borrower stops working."
+                        }
+                        onClick={() => attachLink.mutate()}
+                      >
+                        <LinkIcon className="h-4 w-4" />
+                        {data.body.includes("/upload/")
+                          ? "Replace the secure link"
+                          : "Add a secure upload link"}
+                      </Button>
+                    ) : null}
                   </div>
 
                   {/* WHAT JUST HAPPENED, in the processor's next action rather than as reassurance.

@@ -53,6 +53,12 @@ vi.mock("@/lib/api/preferences", async (importOriginal) => ({
   useUpdatePreferences: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
+// LP-857 — the dialog asks whether this version can receive, to decide whether to offer the
+// secure-link button. `false` is the product's default and the restrictive answer; the button's
+// two states are asserted in `message-dialog-address.test.tsx`.
+vi.mock("@/lib/api/capabilities", () => ({
+  useCapabilities: () => ({ data: { receiving: false } }),
+}));
 vi.mock("@/lib/api/communications", () => ({
   useMessageDetail: (...args: unknown[]) => {
     mockMessageDetailArgs.push(args);
@@ -530,6 +536,47 @@ describe("when it happened (LP-838)", () => {
     loaded([{ ...MESSAGE, id: "d1", direction: "outbound", status: "draft", body_edited: true }]);
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
     expect(screen.getByText(/^Draft · edited · /)).toBeTruthy();
+  });
+
+  it("says an unaddressed draft cannot be sent yet", () => {
+    // LP-857 — A PARTY DRAFT IS CREATED EVEN WHEN THE FILE HAS NO ADDRESS for that party (LP-841 —
+    // "the message is the part a processor wants"), and until this it read "Draft · 2m" like any
+    // other: identical on the list to one that is ready, with the difference visible only after
+    // opening it. Of 166 document types, 13 across title, agent, CPA, insurer and employer had no
+    // address anywhere (LP-820), so for those this is the common case rather than an edge.
+    loaded([
+      {
+        ...MESSAGE,
+        id: "d1",
+        direction: "outbound",
+        status: "draft",
+        party: "title",
+        counterparty: null,
+      },
+    ]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(screen.getByText(/^Draft · cannot be sent yet · /)).toBeTruthy();
+  });
+
+  it("does not say it about an inbound message whose sender we could not read", () => {
+    // `counterparty` IS THE SENDER ON AN INBOUND ROW. Mail that arrived from an address nobody on
+    // the file recognises is not a draft that cannot be sent, and the direction is what tells them
+    // apart. Nothing else on the row would.
+    loaded([{ ...MESSAGE, id: "i1", direction: "inbound", status: "draft", counterparty: null }]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(screen.queryByText(/cannot be sent yet/)).toBeNull();
+    expect(screen.getByText(/^Draft · /)).toBeTruthy();
+  });
+
+  it("does not say it about a draft that has a recipient", () => {
+    // THE OTHER HALF of the control: the fixture's default carries an address, so "Draft · 2m" here
+    // proves the new branch is reached only by the case it is for.
+    loaded([{ ...MESSAGE, id: "d1", direction: "outbound", status: "draft" }]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(screen.queryByText(/cannot be sent yet/)).toBeNull();
   });
 
   it("shows a time on every row", () => {

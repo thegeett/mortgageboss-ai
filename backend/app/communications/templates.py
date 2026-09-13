@@ -78,7 +78,7 @@ SECURITY_NOTICE = (
 _LINK_DAYS = DEFAULT_TTL_HOURS // 24
 
 
-def secure_upload_block(url: str | None) -> str:
+def secure_upload_block(url: str | None, *, offer_link: bool = True) -> str:
     """The security caution, and the route out of email — a live link where there is one (LP-834).
 
     ONE SLOT, TWO SENTENCES, AND NEITHER IS OPTIONAL. `SECURITY_CAUTION` is a fixed decision in the
@@ -89,9 +89,18 @@ def secure_upload_block(url: str | None) -> str:
     THE URL IS PASSED IN, NEVER READ BACK. `MintedLink`'s token "exists HERE AND NOWHERE ELSE — the
     row holds a hash", so there is no rebuilding this for an email composed later. That is why the
     draft has to remember its own link rather than the renderer looking one up.
+
+    LP-857 — `offer_link=False` DROPS THE SECOND SENTENCE, leaving the caution alone. It is what
+    `receiving_enabled` off means at the point a borrower reads it: LP-824's whole argument was that
+    a caution needs a route that exists, and in a draft-only version there is no route, so the offer
+    would name something nobody can act on. The caution stays because it is true either way.
+
+    A PARAMETER RATHER THAN A SETTINGS READ. Templates are content, not code — this module is
+    deliberately free of configuration, and the flag is read by the service that renders, next to
+    the other flag reads.
     """
     if url is None:
-        return SECURITY_NOTICE
+        return SECURITY_NOTICE if offer_link else SECURITY_CAUTION
     return (
         f"{SECURITY_CAUTION} If you would rather not send documents by email, you can upload them "
         f"securely here instead:\n\n  {url}\n\n"

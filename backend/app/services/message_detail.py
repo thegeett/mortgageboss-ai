@@ -32,6 +32,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.documents.catalog import ResponsibleParty
 from app.models.communication import (
     BodyFormat,
     Communication,
@@ -43,7 +44,9 @@ from app.models.user import User
 from app.services.email_draft import (
     DRAFT_TEMPLATE,
     _needs_in_draft,
+    _party_address,
     draft_for_reading,
+    party_for_draft_template,
 )
 from app.services.email_send import MAILTO_MAX_CHARS, build_outbound
 from app.services.timeline import TimelineAttachment, _attachment_manifest, _inbound_senders
@@ -81,10 +84,25 @@ class MessageDetail:
     #: `get_open_draft` filters on the borrower's. `send_draft` takes a draft id and has never cared
     #: which template rendered it, so the screen was the whole missing piece.
     is_editable: bool
-    #: LP-831 — who to address it to, when nobody has yet. The borrower's email for a borrower
-    #: draft; None once `recipient` is set, because a party draft carries its own address and a
-    #: suggestion would be wrong there.
+    #: LP-831 — who to address it to, when nobody has yet. None once `recipient` is set.
+    #:
+    #: LP-857 — AND A PARTY'S ADDRESS TOO, not only the borrower's. The old rule suggested nothing
+    #: on a party draft, reasoning that "a party draft carries the title company's address on the
+    #: row". That is true only when there WAS one at creation: LP-841 deliberately creates a party
+    #: draft with no recipient when the file has no address, because "the message is the part a
+    #: processor wants", and 13 of 166 document types had no address anywhere (LP-820). Those drafts
+    #: reached the modal with an empty box and no hint of why. Resolved through `_party_address`,
+    #: which is the same function the draft's own creation uses — the borrower is never suggested on
+    #: a party draft, which is what the old rule was protecting against.
     suggested_recipient: str | None
+    #: LP-857 — whose draft this is (`borrower`, `title`, `lender`, …), or None.
+    #:
+    #: FROM THE SERVER, like the timeline's. The modal needs it to know which party an address is
+    #: being saved FOR, and `template_key` cannot answer: five parties share
+    #: `document_request_third_party`, so a client deriving the party from the key would file a
+    #: lender's address under the title company. Same order as `_party_of`: the stored column first,
+    #: the template key as the fallback for a draft written before the column existed.
+    party: str | None
     #: LP-831 REVIEW — WHAT THE MESSAGE NEEDS IN ORDER TO ACTUALLY LEAVE.
     #:
     #: Nothing in this product transmits mail. "Mark as sent" records an outbound event, moves every
@@ -155,8 +173,17 @@ async def message_detail(
         # to the borrower. A party draft carries the title company's or the employer's address on the
         # row (`party_requests` sets it at creation), and offering the borrower's there would put a
         # third party's document request in the borrower's inbox.
-        if message.recipient is None and message.template_key == DRAFT_TEMPLATE.value:
-            suggested_recipient = borrower_email
+        if message.recipient is None:
+            # LP-857 — THE PARTY'S OWN ADDRESS, and the borrower's only on the borrower's draft.
+            # `_party_address` resolves the borrower through their row and everybody else through
+            # the participants table, which is the same resolution the draft's creation used; going
+            # through it rather than reading `party_addresses` here is what stops a second
+            # definition of "the title company's address" existing.
+            suggested_recipient = (
+                borrower_email
+                if message.template_key == DRAFT_TEMPLATE.value
+                else await _suggested_party_address(db, loan_file=loan_file, message=message)
+            )
     else:
         body = message.body or ""
 
@@ -206,10 +233,46 @@ async def message_detail(
             and message.status is CommunicationStatus.DRAFT
         ),
         suggested_recipient=suggested_recipient,
+        party=_party_of_draft(message),
         suggested_bcc=outbound.suggested_bcc,
         mailto_available=outbound.mailto_available,
         mailto_max_chars=MAILTO_MAX_CHARS,
     )
+
+
+def _party_of_draft(message: Communication) -> str | None:
+    """Whose draft this is, by the same rule the timeline uses (LP-857).
+
+    THE STORED COLUMN FIRST, the template key as a fallback. LP-843 added `Communication.party`
+    because `template_key` stopped being able to answer once five parties came to share
+    `document_request_third_party` — a lender draft and a title draft are the same key — and the
+    fallback is for rows written before the column existed.
+
+    NOT `_party_of`. That function additionally places an outbound message by the address it was
+    sent to, which needs the file's whole address book and is a page-level lookup. What the modal
+    asks is narrower: whose draft is this, so an address saved from it lands on the right party. A
+    draft with no address is exactly the case here, so the address route could never answer anyway.
+    """
+    if message.party:
+        return message.party
+    party = party_for_draft_template(message.template_key)
+    return party.value if party else None
+
+
+async def _suggested_party_address(
+    db: AsyncSession, *, loan_file: LoanFile, message: Communication
+) -> str | None:
+    """This party's address from the file, or None when nobody has recorded one."""
+    name = _party_of_draft(message)
+    if name is None:
+        return None
+    try:
+        party = ResponsibleParty(name)
+    except ValueError:
+        # A `party` column holding something outside the enum is a data problem, not a reason to
+        # guess — and guessing here means putting an address on somebody else's draft.
+        return None
+    return await _party_address(db, loan_file=loan_file, party=party)
 
 
 __all__ = ["MessageDetail", "message_detail"]

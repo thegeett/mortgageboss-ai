@@ -41,6 +41,11 @@ vi.mock("@/lib/api/preferences", async (importOriginal) => ({
   useUpdatePreferences: () => mockSavePreferences,
 }));
 
+// LP-857 — the dialog asks whether this version can receive, to decide whether to offer the
+// secure-link button. `false` is the product's default and the restrictive answer; the button's
+// two states are asserted in `message-dialog-address.test.tsx`.
+const mockCapabilities = vi.fn(() => ({ data: { receiving: false } }));
+vi.mock("@/lib/api/capabilities", () => ({ useCapabilities: () => mockCapabilities() }));
 vi.mock("@/lib/api/communications", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/communications")>()),
   useMessageDetail: (...args: unknown[]) => mockUseMessageDetail(...args),
@@ -568,6 +573,12 @@ describe("the button bar", () => {
 });
 
 describe("the secure upload link (LP-834)", () => {
+  // LP-857 FLAGS THIS WHOLE FEATURE OUT, and these cases are why it is a flag and not a deletion:
+  // LP-834 is written and reviewed and returns with the phase that brings receiving back, so its
+  // behaviour keeps being asserted. What LP-857 changed is that it is unreachable by default —
+  // asserted in `message-dialog-address.test.tsx`, in both directions.
+  beforeEach(() => mockCapabilities.mockReturnValue({ data: { receiving: true } }));
+
   it("offers to add one, and warns before the click", () => {
     // THE WARNING IS BEFORE, NOT AFTER. Minting expires every other live link on the file, so a
     // borrower already sent one loses it — they click and are refused, with no explanation on their
