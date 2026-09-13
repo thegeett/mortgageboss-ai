@@ -540,3 +540,92 @@ async def test_an_authored_body_gets_its_loan_tag_as_a_paragraph(
     # THE THREADING MATCH IS ON THE TEXT, and it has to keep working — `inbound_routing` finds the
     # file by this tag, so a change of spelling that lost it would silently orphan every reply.
     assert tag in stored
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-853 review, second round — the evidence record and the footer's language
+# --------------------------------------------------------------------------------------------- #
+async def test_sending_an_authored_draft_unchanged_is_not_recorded_as_an_edit(
+    db_session: AsyncSession,
+) -> None:
+    """LP-821's `was_edited` is `body_composed != body_as_sent`, and its own comment says it means
+    "the processor changed the drafted words".
+
+    THE FOOTER WAS SPELT DIFFERENTLY ON THE TWO SIDES. The LP-853 review gave `build_outbound` an
+    `html` flag so an authored body gets `<p>[LF-XXXX]</p>` rather than a newline HTML collapses —
+    and passed it to the SENT copy only. So the two strings differed by the footer alone and every
+    authored draft recorded itself as edited, including one where the processor opened the modal and
+    pressed Mark as sent without touching a character. Measured at exactly that: True, where it
+    should be False.
+
+    This is the third time this comparison has been wrong in the same way — LP-823's placeholder
+    resolved on one side, and now a footer spelt one way on one side. Both answer "yes, they changed
+    it" when nobody did.
+    """
+    from app.models.communication_evidence import CommunicationEvidence
+    from app.services.email_send import send_draft
+    from sqlalchemy import select
+
+    loan_file, actor, draft, _first = await _draft(db_session)
+    authored = "<p>Please send the March statement.</p>"
+    await save_draft_body(db_session, loan_file=loan_file, draft_id=draft.id, body_html=authored)
+
+    # The processor changes NOTHING — the modal posts back exactly what it is holding.
+    await send_draft(
+        db_session,
+        loan_file=loan_file,
+        draft_id=draft.id,
+        recipient="s@example.com",
+        body=authored,
+        approver_user_id=actor,
+    )
+
+    row = (
+        await db_session.execute(
+            select(CommunicationEvidence).where(CommunicationEvidence.communication_id == draft.id)
+        )
+    ).scalar_one()
+    assert row.body_composed == row.body_as_sent, (
+        "an authored draft sent unchanged was recorded as edited"
+    )
+    # AND THE COMPOSED COPY IS IN THE BODY'S OWN LANGUAGE. A plain-text newline inside an HTML body
+    # is what the `html` flag exists to stop; storing one in the evidence record keeps it alive in
+    # the copy an auditor reads.
+    assert "\n\n[" not in (row.body_composed or "")
+    assert "<p>[" in (row.body_composed or "")
+
+
+async def test_an_authored_draft_the_processor_did_change_is_still_recorded_as_edited(
+    db_session: AsyncSession,
+) -> None:
+    """THE CONTROL. Making both sides agree is trivially achievable by making `was_edited` always
+    False, which would delete the field's only purpose."""
+    from app.models.communication_evidence import CommunicationEvidence
+    from app.services.email_send import send_draft
+    from sqlalchemy import select
+
+    loan_file, actor, draft, _first = await _draft(db_session)
+    await save_draft_body(
+        db_session,
+        loan_file=loan_file,
+        draft_id=draft.id,
+        body_html="<p>Please send the March statement.</p>",
+    )
+
+    await send_draft(
+        db_session,
+        loan_file=loan_file,
+        draft_id=draft.id,
+        recipient="s@example.com",
+        body="<p>Please send the March statement, and the April one too.</p>",
+        approver_user_id=actor,
+    )
+
+    row = (
+        await db_session.execute(
+            select(CommunicationEvidence).where(CommunicationEvidence.communication_id == draft.id)
+        )
+    ).scalar_one()
+    assert row.body_composed != row.body_as_sent
+    assert "April" in (row.body_as_sent or "")
+    assert "April" not in (row.body_composed or "")

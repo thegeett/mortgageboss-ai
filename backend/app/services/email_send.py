@@ -329,12 +329,27 @@ async def send_draft(
     # `template_key` and `template_version`, both of which are on the same row.
     # THROUGH THE SAME PIPELINE, not merely the same substitution: `build_outbound` also appends the
     # footer tag, so resolving alone would still leave the two strings differing by it.
+    # LP-853 REVIEW (second round) — AND THROUGH THE SAME TAG SPELLING.
+    #
+    # The `html` flag was added to the sent copy above and not to this one, so for an AUTHORED draft
+    # the two differed by the footer alone: composed `…</p>\n\n[LF-XXXX]`, as sent
+    # `…</p><p>[LF-XXXX]</p>`. `EvidencePublic.was_edited` is `body_composed != body_as_sent`, so
+    # every authored draft recorded itself as edited — including one where the processor opened the
+    # modal and pressed Mark as sent without touching a character. Measured on exactly that: True,
+    # where it should be False.
+    #
+    # That is the same defect this comment block was written for one ticket earlier. LP-823's
+    # version was a placeholder resolved on one side and not the other; this one is a footer spelt
+    # one way on one side and the other way on the other. Both make "the processor changed the
+    # drafted words" answer yes when nobody did — and the composed copy also carried a plain-text
+    # newline inside an HTML body, which is the very thing the flag was added to stop.
     body_composed = build_outbound(
         loan_file,
         subject=draft.subject or "",
         body=finalise_draft_body(
             body_composed or "", borrower_first_name=greeting, processor_name=signature
         ),
+        html=authored,
     ).body
 
     # LP-853 REVIEW — SANITISED, BECAUSE THIS WRITES THE SAME COLUMN THE SAVE DOES.
