@@ -32,10 +32,17 @@ vi.mock("@/lib/api/communications", async (importOriginal) => ({
 // editor's whole contract as far as this dialog is concerned. `next/dynamic` resolves through the
 // module registry, so mocking the module is enough.
 vi.mock("@/components/file/communication/message-editor", () => ({
-  MessageEditor: ({ onChange }: { onChange: (html: string) => void }) => (
-    <button type="button" onClick={() => onChange("<p>March statement only.</p>")}>
-      simulate-typing
-    </button>
+  MessageEditor: ({ value, onChange }: { value: string; onChange: (html: string) => void }) => (
+    <>
+      <button type="button" onClick={() => onChange("<p>March statement only.</p>")}>
+        simulate-typing
+      </button>
+      {/* UNDO, which is `onChange` with the body the editor was handed — the exact case the
+          `openedAs` comparison in `message-dialog.tsx` says it covers. */}
+      <button type="button" onClick={() => onChange(value)}>
+        simulate-undo
+      </button>
+    </>
   ),
 }));
 
@@ -113,6 +120,24 @@ describe("the autosave", () => {
   // debounce at all — the assertion passed with the comparison deleted, which makes it a test that
   // cannot fail. The guarantee it was reaching for is that Tiptap does not report without a
   // document change, and that is asserted against the REAL editor in `message-editor.test.tsx`.
+
+  it("does not save a draft typed in and then undone back to where it started", async () => {
+    // The `openedAs` comparison in `message-dialog.tsx` says this is what it covers: "a processor
+    // undoing back to where they started". `dirtyRef` is only ever set TRUE, never cleared when the
+    // text returns to `openedAs`, so the flag survives the undo and the flush saves an unchanged
+    // body — flipping `body_format` to html, freezing the draft against `_regenerate`, and making
+    // LP-851 warn about losing changes that do not exist.
+    const { typing } = await open(draft());
+    const undo = await screen.findByRole("button", { name: "simulate-undo" });
+    vi.useFakeTimers();
+
+    fireEvent.click(typing);
+    fireEvent.click(undo);
+    await vi.advanceTimersByTimeAsync(1000);
+    vi.useRealTimers();
+
+    expect(mockSave).not.toHaveBeenCalled();
+  });
 
   it("does not save a draft nobody typed in", async () => {
     // ACCEPTANCE 2 — FOCUS IS NOT AN EDIT, on the side that can actually keep it.

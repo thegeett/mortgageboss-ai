@@ -434,3 +434,109 @@ async def test_omitting_the_subject_keeps_the_one_on_the_draft(db_session: Async
     await save_draft_body(db_session, loan_file=loan_file, draft_id=draft.id, body_html="<p>x</p>")
     await db_session.refresh(draft)
     assert draft.subject == before
+
+
+async def test_the_send_cannot_put_unsanitised_markup_in_the_column(
+    db_session: AsyncSession,
+) -> None:
+    """LP-853 REVIEW — THE FIFTH BODY WRITER, and the one the allowlist was not applied to.
+
+    `sanitise.py` states the guarantee the modal relies on by name: the column "never holds anything
+    that was not allowed", so every reader "inherits the guarantee without knowing the rule".
+    `message-dialog.tsx` renders an `html` row through `dangerouslySetInnerHTML` on exactly that
+    basis.
+
+    `send_draft` writes the same column from a client-supplied body and does not change
+    `body_format`, so before this guard a send could store `<img src=x onerror=...>` on a row marked
+    `html` — and the next person in the company to open the sent message ran it. Measured, then
+    fixed: a stored XSS across a user boundary.
+    """
+    from app.services.email_send import send_draft
+
+    loan_file, actor, draft, _first = await _draft(db_session)
+    await save_draft_body(
+        db_session, loan_file=loan_file, draft_id=draft.id, body_html="<p>mine</p>"
+    )
+    await db_session.refresh(draft)
+    assert draft.body_format is BodyFormat.HTML
+
+    await send_draft(
+        db_session,
+        loan_file=loan_file,
+        draft_id=draft.id,
+        recipient="s@example.com",
+        body='<p>Keep this.</p><img src=x onerror="alert(1)"><script>alert(2)</script>',
+        subject=draft.subject,
+        approver_user_id=actor,
+    )
+    await db_session.refresh(draft)
+    stored = draft.body or ""
+
+    assert "onerror" not in stored, f"the send stored an event handler: {stored!r}"
+    assert "<script" not in stored, f"the send stored a script tag: {stored!r}"
+    assert "<img" not in stored, f"the send stored an img tag: {stored!r}"
+    # THE POSITIVE CONTROL. Without it this passes on a send that stored nothing at all, or that
+    # escaped the processor's own formatting into unreadable source.
+    assert "<p>Keep this.</p>" in stored, (
+        f"the allowlisted markup the processor wrote did not survive: {stored!r}"
+    )
+
+
+async def test_a_plain_send_is_not_touched_by_the_allowlist(db_session: AsyncSession) -> None:
+    """THE OTHER HALF. A plain row is escaped by `emailBodyToHtml` at render — LP-844's
+    escape-first argument — and must keep its newlines, which the sanitiser would not preserve."""
+    from app.services.email_send import send_draft
+
+    loan_file, actor, draft, _first = await _draft(db_session)
+    assert draft.body_format is BodyFormat.PLAIN
+
+    await send_draft(
+        db_session,
+        loan_file=loan_file,
+        draft_id=draft.id,
+        recipient="s@example.com",
+        body="Hello Sarah,\n\nPlease send the statements.\n\nDana",
+        subject=draft.subject,
+        approver_user_id=actor,
+    )
+    await db_session.refresh(draft)
+
+    assert "Hello Sarah,\n\nPlease send the statements." in (draft.body or "")
+    assert draft.body_format is BodyFormat.PLAIN
+
+
+async def test_an_authored_body_gets_its_loan_tag_as_a_paragraph(
+    db_session: AsyncSession,
+) -> None:
+    """LP-853 REVIEW — THE TAG IN THE BODY'S OWN LANGUAGE.
+
+    Every body was plain text until this ticket, so `\n\n[LF-XXXX]` put the tag on its own line. In
+    HTML a newline is whitespace: the tag rendered inline, running on from the processor's last
+    sentence in the message the borrower reads.
+    """
+    from app.services.email_send import send_draft
+
+    loan_file, actor, draft, _first = await _draft(db_session)
+    await save_draft_body(
+        db_session, loan_file=loan_file, draft_id=draft.id, body_html="<p>Only March.</p>"
+    )
+    await db_session.refresh(draft)
+
+    await send_draft(
+        db_session,
+        loan_file=loan_file,
+        draft_id=draft.id,
+        recipient="s@example.com",
+        body="<p>Only March.</p>",
+        subject=draft.subject,
+        approver_user_id=actor,
+    )
+    await db_session.refresh(draft)
+    stored = draft.body or ""
+
+    tag = f"[{loan_file.display_id}]"
+    assert f"<p>{tag}</p>" in stored, f"the tag is not a paragraph: {stored!r}"
+    assert f"\n\n{tag}" not in stored, f"the plain-text tag survived into an html body: {stored!r}"
+    # THE THREADING MATCH IS ON THE TEXT, and it has to keep working — `inbound_routing` finds the
+    # file by this tag, so a change of spelling that lost it would silently orphan every reply.
+    assert tag in stored

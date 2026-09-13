@@ -22,9 +22,11 @@ import structlog
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.communications.sanitise import sanitise_html
 from app.models.activity_log import ActivityType
 from app.models.base import utcnow
 from app.models.communication import (
+    BodyFormat,
     Communication,
     CommunicationDirection,
     CommunicationStatus,
@@ -131,8 +133,17 @@ def loan_reference_in(text: str) -> str | None:
     return found.group(1) if found else None
 
 
-def build_outbound(loan_file: LoanFile, *, subject: str, body: str) -> OutboundMessage:
-    """Assemble the message a processor will send, footer tag included."""
+def build_outbound(
+    loan_file: LoanFile, *, subject: str, body: str, html: bool = False
+) -> OutboundMessage:
+    """Assemble the message a processor will send, footer tag included.
+
+    LP-853 REVIEW — THE TAG HAS TO BE IN THE BODY'S OWN LANGUAGE. Until LP-853 every body was plain
+    text, so `\n\n[LF-XXXX]` put the tag on its own line. An authored body is HTML, where a newline
+    is whitespace: the tag rendered inline, running straight on from the processor's last sentence
+    in the message the borrower reads. `html=True` appends it as a paragraph instead. The tag's TEXT
+    is identical either way, so `inbound_routing`'s threading match is unaffected.
+    """
     address = loan_file.get_inbox_address()
     # LP-823 REVIEW — IDEMPOTENT, because this function runs TWICE over one message. `GET
     # /outbound/draft` returns `build_outbound(...).body`, the panel puts that in the textarea, and
@@ -143,7 +154,17 @@ def build_outbound(loan_file: LoanFile, *, subject: str, body: str) -> OutboundM
     # single-pass case untouched.
     stripped = body.rstrip()
     tag = footer_tag(loan_file)
-    tagged = stripped if stripped.endswith(tag) else f"{stripped}\n\n{tag}"
+    if html:
+        # Either spelling counts as already-tagged, so a body that has been through the plain path
+        # does not collect a second copy in the other language.
+        marker = f"<p>{tag}</p>"
+        tagged = (
+            stripped
+            if stripped.endswith(marker) or stripped.endswith(tag)
+            else f"{stripped}{marker}"
+        )
+    else:
+        tagged = stripped if stripped.endswith(tag) else f"{stripped}\n\n{tag}"
     return OutboundMessage(
         subject=subject,
         body=tagged,
@@ -290,7 +311,10 @@ async def send_draft(
     # `body`: what is recorded as sent is what actually went out, and the modal is now a place a
     # subject can be edited.
     subject_sent = subject if subject is not None else (draft.subject or "")
-    outbound = build_outbound(loan_file, subject=subject_sent, body=body)
+    # LP-853 REVIEW — THE FORMAT THE ROW IS IN, so an authored body gets its tag as a paragraph
+    # rather than a newline that HTML collapses into the preceding sentence.
+    authored = draft.body_format is BodyFormat.HTML
+    outbound = build_outbound(loan_file, subject=subject_sent, body=body, html=authored)
 
     # LP-823 REVIEW — RESOLVED THE SAME WAY, so the comparison downstream is like with like.
     # `EvidencePublic.was_edited` is `body_composed != body_as_sent`, and its own comment says it
@@ -313,7 +337,23 @@ async def send_draft(
         ),
     ).body
 
-    draft.body = outbound.body
+    # LP-853 REVIEW — SANITISED, BECAUSE THIS WRITES THE SAME COLUMN THE SAVE DOES.
+    #
+    # `sanitise.py` states the guarantee the rest of the system is built on: the body column "never
+    # holds anything that was not allowed", so "every reader of it — the modal, the clipboard, a
+    # future send provider — inherits the guarantee without knowing the rule". The modal took it
+    # literally and renders an `html` row through `dangerouslySetInnerHTML` on that basis.
+    #
+    # THIS PATH DID NOT HOLD IT. `send_draft` takes `body` from the client and assigned it here
+    # untouched, without changing `body_format`. So a request that posted
+    # `<img src=x onerror=...>` to the send of a draft already marked `html` stored exactly that,
+    # and the next person in the company to open the sent message executed it — a stored XSS across
+    # a user boundary, through the one writer the allowlist was not applied to. Measured before this
+    # line existed; `test_the_send_cannot_put_unsanitised_markup_in_the_column` is the guard.
+    #
+    # The plain path is untouched: a plain row is escaped by `emailBodyToHtml` at render, which is
+    # LP-844's escape-first argument and does not depend on this.
+    draft.body = sanitise_html(outbound.body) if authored else outbound.body
     draft.subject = outbound.subject
     draft.recipient = recipient
     draft.status = CommunicationStatus.SENT

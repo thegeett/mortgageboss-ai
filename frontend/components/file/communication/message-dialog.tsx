@@ -189,7 +189,14 @@ export function MessageDialog({
 
   function onEdit(html: string) {
     setBodyHtml(html);
-    if (html !== openedAs) dirtyRef.current = true;
+    // LP-853 REVIEW — ASSIGNED, NOT ONLY RAISED. This was `if (html !== openedAs) dirty = true`,
+    // which never cleared the flag on the way back: type one letter and undo it, and the flag set
+    // by the keystroke survived the undo, so the flush saved a body identical to the one the editor
+    // was handed. That flips `body_format` to html for a draft nobody changed — `_regenerate` then
+    // refuses it and LP-851 warns about losing changes that do not exist, which is acceptance 2
+    // failing by a longer route than the one it was written for. The comment above already claimed
+    // this case was covered; now it is.
+    dirtyRef.current = html !== openedAs;
   }
 
   function close() {
