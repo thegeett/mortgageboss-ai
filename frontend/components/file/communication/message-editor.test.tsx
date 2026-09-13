@@ -3,10 +3,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { emailBodyToHtml } from "@/lib/markdown/email-body";
 import { htmlToEmailBody } from "@/lib/markdown/from-html";
+import { EMAIL_TAGS } from "@/lib/markdown/schema";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { Editor } from "@tiptap/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EXTENSIONS, MessageEditor } from "./message-editor";
+import { EXTENSIONS, MessageEditor, isSafeHref } from "./message-editor";
 
 /**
  * LP-849 — a rich box, and the plain body it keeps underneath.
@@ -85,16 +86,25 @@ describe("MessageEditor", () => {
  * prevent. Adding one means teaching the renderer and its inverse first — which is what failing this
  * test is telling you to do.
  */
-const RENDERER_TAGS = new Set(["p", "br", "ul", "li", "strong"]);
-
-/** Each enabled extension, and the renderer tag it produces. `null` is structural and emits none. */
+/**
+ * LP-854 — THE LIST MOVED. `EMAIL_SCHEMA` is the one place the tag set is written down now, and
+ * `schema-drift.test.ts` is what holds the Tiptap extensions, the server allowlist and the
+ * renderer's output to it. What stays here is the half that is about THIS component: which
+ * `@tiptap/extension-*` packages it pulls in, and that it does not reach for StarterKit.
+ */
 const SCHEMA: Record<string, string | null> = {
   document: null,
   text: null,
+  extensions: null, // `UndoRedo` — a history stack, not a tag
   paragraph: "p",
   bold: "strong",
+  italic: "em",
+  underline: "u",
   "bullet-list": "ul",
+  "ordered-list": "ol",
   "list-item": "li",
+  blockquote: "blockquote",
+  link: "a",
   "hard-break": "br",
 };
 
@@ -105,19 +115,29 @@ describe("the editor's schema and the renderer agree", () => {
   );
 
   it("enables exactly the extensions the renderer can express", () => {
-    const enabled = [...source.matchAll(/@tiptap\/extension-([a-z-]+)/g)].map((m) => m[1] ?? "");
+    // LP-854 — `@tiptap/extensions` IS MATCHED TOO. The pattern was `extension-([a-z-]+)`, which
+    // does not match the bundle package `@tiptap/extensions` — so `UndoRedo` was imported from a
+    // package this scan could not see. That is the same shape as every other narrow-guard finding
+    // in this epic: a scan that does not look somewhere looks exactly like a clean scan.
+    const enabled = [...source.matchAll(/@tiptap\/(extensions|extension-[a-z-]+)/g)].map((m) =>
+      (m[1] ?? "").replace(/^extension-/, ""),
+    );
     // THE POSITIVE CONTROL. An empty scan — a renamed file, a changed import style — would satisfy
     // the comparison below by finding nothing, which is the failure mode this whole block is about.
     expect(enabled.length).toBeGreaterThan(0);
     expect([...enabled].sort()).toEqual(Object.keys(SCHEMA).sort());
   });
 
-  it("and every one of them produces a tag the renderer owns", () => {
+  it("and every one of them produces a tag the schema owns", () => {
+    // LP-854 — AGAINST `EMAIL_TAGS`, not against the renderer's output. The renderer emits a SUBSET
+    // now: the plain body format has no syntax for underline, links, ordered lists or quotes, so
+    // requiring `emailBodyToHtml` to emit them would be requiring it to parse something no template
+    // writes. `schema-drift.test.ts` holds the subset relation.
     for (const [extension, tag] of Object.entries(SCHEMA)) {
       if (tag === null) continue;
       expect(
-        RENDERER_TAGS,
-        `${extension} produces <${tag}>, which the renderer does not emit`,
+        EMAIL_TAGS,
+        `${extension} produces <${tag}>, which the schema does not allow`,
       ).toContain(tag);
     }
   });
@@ -224,5 +244,235 @@ describe("what the editor reports, and when", () => {
     expect(reported).toContain("Bank statement");
     // And NOT the plain form, which is what LP-849 emitted here.
     expect(reported).not.toMatch(/^- /);
+  });
+});
+
+/**
+ * LP-854 — the seven marks, driven through the REAL schema.
+ *
+ * ACCEPTANCE 1 is "apply → save → reopen → still there, and the stored HTML contains only
+ * allowlisted tags". The save and the reopen are `getHTML()` and `content:` — that is exactly what
+ * the dialog does — and "only allowlisted tags" is checked against `EMAIL_TAGS`, the same list the
+ * server's allowlist is held to.
+ */
+describe("the seven marks round-trip", () => {
+  /** Apply a command, read the HTML back, and load it again — the save and the reopen. */
+  function through(apply: (editor: Editor) => void): string {
+    const element = document.createElement("div");
+    document.body.appendChild(element);
+    const editor = new Editor({
+      element,
+      extensions: EXTENSIONS,
+      content: "<p>Please send the March statement</p>",
+    });
+    try {
+      editor.commands.selectAll();
+      apply(editor);
+      const saved = editor.getHTML();
+
+      const second = document.createElement("div");
+      document.body.appendChild(second);
+      const reopened = new Editor({ element: second, extensions: EXTENSIONS, content: saved });
+      try {
+        return reopened.getHTML();
+      } finally {
+        reopened.destroy();
+        second.remove();
+      }
+    } finally {
+      editor.destroy();
+      element.remove();
+    }
+  }
+
+  const CASES: [string, (editor: Editor) => void, string][] = [
+    ["bold", (e) => e.commands.toggleBold(), "strong"],
+    ["italic", (e) => e.commands.toggleItalic(), "em"],
+    ["underline", (e) => e.commands.toggleUnderline(), "u"],
+    ["bulleted list", (e) => e.commands.toggleBulletList(), "ul"],
+    ["numbered list", (e) => e.commands.toggleOrderedList(), "ol"],
+    ["quote", (e) => e.commands.toggleBlockquote(), "blockquote"],
+    ["link", (e) => e.commands.setLink({ href: "https://example.com/docs" }), "a"],
+  ];
+
+  for (const [name, apply, tag] of CASES) {
+    it(`${name} survives a save and a reopen`, () => {
+      const html = through(apply);
+      expect(html).toContain(`<${tag}`);
+      expect(html).toContain("March statement");
+    });
+  }
+
+  it("indent nests a list, which is where the indentation comes from", () => {
+    // It is the only indentation that survives a paste, because it comes from a TAG rather than
+    // from a margin — and it is how LP-846's nested detail block is built.
+    const element = document.createElement("div");
+    document.body.appendChild(element);
+    const editor = new Editor({
+      element,
+      extensions: EXTENSIONS,
+      content: "<ul><li><p>one</p></li><li><p>two</p></li></ul>",
+    });
+    try {
+      // Put the cursor in the SECOND item, which is the only one that can sink.
+      editor.commands.setTextSelection(editor.state.doc.content.size - 4);
+      editor.commands.sinkListItem("listItem");
+      expect(editor.getHTML()).toMatch(/<ul>[\s\S]*<ul>/);
+    } finally {
+      editor.destroy();
+      element.remove();
+    }
+  });
+
+  it("produces ONLY tags the schema allows", () => {
+    // The other half of acceptance 1, and the one that catches a mark the server would strip: a tag
+    // the editor can make and `sanitise.py` does not keep is formatting that vanishes on save.
+    const everything = CASES.map(([, apply]) => through(apply)).join("");
+    const produced = new Set(
+      [...everything.matchAll(/<\/?([a-z0-9]+)/g)].map((match) => match[1] ?? ""),
+    );
+    expect(produced.size).toBeGreaterThan(0);
+    for (const tag of produced) {
+      expect(EMAIL_TAGS, `the editor produced <${tag}>`).toContain(tag);
+    }
+  });
+
+  it("emits no class and no inline style", () => {
+    // OUTLOOK ON THE DESKTOP RENDERS WITH WORD'S ENGINE and discards most CSS, so anything that
+    // leaned on a stylesheet would arrive unformatted. The editor's own styling is on the
+    // contenteditable container, never in the content.
+    const everything = CASES.map(([, apply]) => through(apply)).join("");
+    expect(everything).not.toContain("class=");
+    expect(everything).not.toContain("style=");
+    expect(everything).not.toContain("target=");
+    expect(everything).not.toContain("rel=");
+  });
+});
+
+describe("a link's address", () => {
+  it("ACCEPTANCE 3 — the editor refuses a javascript: href", () => {
+    // The editor is NOT the security boundary — `sanitise.py` is, and refuses it there too
+    // (`test_a_refused_link_loses_the_TAG_not_just_the_href`). This is the half that stops a
+    // processor pasting something dangerous by accident, and it has to SAY it refused: a control
+    // that silently does nothing reads as broken rather than as declining.
+    expect(isSafeHref("javascript:alert(1)")).toBe(false);
+    expect(isSafeHref("JaVaScRiPt:alert(1)")).toBe(false);
+    expect(isSafeHref("java\tscript:alert(1)")).toBe(false);
+    expect(isSafeHref("  javascript:alert(1)")).toBe(false);
+    expect(isSafeHref("data:text/html,<script>x</script>")).toBe(false);
+    expect(isSafeHref("vbscript:msgbox(1)")).toBe(false);
+    expect(isSafeHref("/relative")).toBe(false);
+    expect(isSafeHref("#anchor")).toBe(false);
+  });
+
+  it("keeps the three schemes a request legitimately uses", () => {
+    // THE CONTROL. A rule that refused everything would satisfy every assertion above and make the
+    // Link button useless.
+    expect(isSafeHref("https://example.com/docs")).toBe(true);
+    expect(isSafeHref("http://example.com")).toBe(true);
+    expect(isSafeHref("HTTPS://EXAMPLE.COM")).toBe(true);
+    expect(isSafeHref("mailto:closings@acmetitle.example")).toBe(true);
+  });
+
+  it("the schema itself refuses it, not just the prompt", () => {
+    // `Link.configure({ protocols })` is the second half: a paste carries an href that never goes
+    // near `promptForLink`.
+    const element = document.createElement("div");
+    document.body.appendChild(element);
+    const editor = new Editor({
+      element,
+      extensions: EXTENSIONS,
+      content: '<p><a href="javascript:alert(1)">click</a></p>',
+    });
+    try {
+      expect(editor.getHTML()).not.toContain("javascript:");
+    } finally {
+      editor.destroy();
+      element.remove();
+    }
+  });
+});
+
+describe("no markup is visible to the processor", () => {
+  it("ACCEPTANCE 5 — the new marks render as formatting, not as tags", () => {
+    // LP-849's requirement, extended to the seven. A `**` on screen is a failure and so is a raw
+    // `<a href>`.
+    render(
+      <MessageEditor
+        format="html"
+        value={
+          "<p><em>italic</em> <u>under</u></p><ol><li>one</li></ol>" +
+          '<blockquote>quoted</blockquote><p><a href="https://example.com">link text</a></p>'
+        }
+        onChange={vi.fn()}
+      />,
+    );
+
+    const text = document.querySelector(".ProseMirror")?.textContent ?? "";
+    expect(text).not.toContain("<");
+    expect(text).not.toContain("href");
+    expect(text).toContain("italic");
+    expect(text).toContain("link text");
+    // And they ARE the elements, not text that happens to read the same.
+    expect(document.querySelector(".ProseMirror em")).not.toBeNull();
+    expect(document.querySelector(".ProseMirror u")).not.toBeNull();
+    expect(document.querySelector(".ProseMirror ol")).not.toBeNull();
+    expect(document.querySelector(".ProseMirror blockquote")).not.toBeNull();
+    expect(document.querySelector(".ProseMirror a")).not.toBeNull();
+  });
+});
+
+describe("Remove formatting", () => {
+  /**
+   * ACCEPTANCE 2 — a styled block pasted from Word or a web page, returned to plain paragraphs.
+   *
+   * WITHOUT IT A BAD PASTE IS UNFIXABLE and the processor retypes the message, which is the whole
+   * argument for the button. The paste is simulated by loading the markup Tiptap would have parsed
+   * it into: what the button has to undo is the DOCUMENT, and driving a real clipboard through
+   * jsdom would test the simulation.
+   */
+  function cleared(content: string): string {
+    const element = document.createElement("div");
+    document.body.appendChild(element);
+    const editor = new Editor({ element, extensions: EXTENSIONS, content });
+    try {
+      editor.commands.selectAll();
+      // BOTH COMMANDS. `unsetAllMarks` takes the inline marks and `clearNodes` takes the blocks —
+      // a pasted quote or list is a NODE and survives the first alone.
+      editor.commands.unsetAllMarks();
+      editor.commands.clearNodes();
+      return editor.getHTML();
+    } finally {
+      editor.destroy();
+      element.remove();
+    }
+  }
+
+  it("returns a styled paste to plain paragraphs with no residue", () => {
+    const pasted =
+      "<p><strong>Bold</strong> and <em>italic</em> and <u>under</u></p>" +
+      "<blockquote><p>quoted</p></blockquote>" +
+      "<ol><li><p>one</p></li><li><p>two</p></li></ol>" +
+      "<ul><li><p>bullet</p></li></ul>" +
+      '<p><a href="https://example.com">link</a></p>';
+
+    const out = cleared(pasted);
+
+    for (const tag of ["strong", "em", "u", "blockquote", "ol", "ul", "li", "a"]) {
+      expect(out, `<${tag}> survived Remove formatting`).not.toContain(`<${tag}`);
+    }
+    // AND THE WORDS ARE ALL STILL THERE. A "clear" that deleted the content would satisfy every
+    // assertion above, and would be the worst possible reading of the button.
+    for (const word of ["Bold", "italic", "under", "quoted", "one", "two", "bullet", "link"]) {
+      expect(out, `"${word}" was deleted rather than unformatted`).toContain(word);
+    }
+    expect(out).toContain("<p>");
+  });
+
+  it("leaves an already-plain body alone", () => {
+    // THE CONTROL: a command that rewrote everything would pass the case above.
+    expect(cleared("<p>Please send the March statement</p>")).toBe(
+      "<p>Please send the March statement</p>",
+    );
   });
 });

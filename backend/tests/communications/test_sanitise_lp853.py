@@ -47,6 +47,15 @@ BENIGN = [
     "<ul><li>a<li>b</ul>",
     "<div>kept text</div>",
     "<p>March statement only, not February.</p>",
+    # LP-854 — the seven marks. The idempotence property below is what `was_edited` now depends on,
+    # and seven new marks is exactly the change that could break it, so they join the corpus every
+    # property in this file runs over rather than getting a test of their own.
+    "<p><em>italic</em> and <u>underline</u></p>",
+    "<ol><li>one</li><li>two</li></ol>",
+    "<blockquote><p>Their own sentence, quoted back.</p></blockquote>",
+    '<p>See <a href="https://example.com/docs">the guidance</a>.</p>',
+    '<p><a href="mailto:closings@acmetitle.example">Email the closer</a></p>',
+    "<ul><li>Bank statement<ol><li>March</li><li>April</li></ol></li></ul>",
 ]
 
 
@@ -131,6 +140,66 @@ def test_a_safe_href_is_kept(href: str) -> None:
     assert href_is_safe(href) is True
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "<p><em>italic</em></p>",
+        "<p><u>underline</u></p>",
+        "<ol><li>one</li></ol>",
+        "<blockquote>quoted</blockquote>",
+        '<p><a href="https://example.com">link</a></p>',
+        "<ul><li>a<ul><li>b</li></ul></li></ul>",
+    ],
+)
+def test_each_new_mark_survives(payload: str) -> None:
+    """LP-854 ACCEPTANCE 1, the server's half — the stored HTML keeps the mark.
+
+    A mark the editor can produce and this strips is formatting that vanishes on save, which is the
+    failure LP-849's notes record. Asserted per mark rather than over one payload containing all of
+    them, so a single stripped tag names itself.
+    """
+    assert sanitise_html(payload) == payload
+
+
+@pytest.mark.parametrize(
+    "href",
+    [
+        "https://example.com/docs",
+        "http://example.com",
+        "mailto:closings@acmetitle.example",
+    ],
+)
+def test_a_safe_link_keeps_its_href(href: str) -> None:
+    assert f'href="{href}"' in sanitise_html(f'<a href="{href}">text</a>')
+
+
+@pytest.mark.parametrize(
+    "href",
+    ["javascript:alert(1)", "data:text/html,<script>x</script>", "/relative", "#anchor"],
+)
+def test_a_refused_link_loses_the_TAG_not_just_the_href(href: str) -> None:
+    """AN ANCHOR WITH NO href IS NOT A LINK, AND IS NOT EMITTED AS ONE.
+
+    The first version kept the tag and dropped the attribute, leaving `<a>click</a>`: something that
+    looks like a link, is styled like one in every mail client, and goes nowhere. The processor's
+    TEXT survives — their words are not ours to delete — and the thing that was refused is visibly
+    absent rather than silently inert.
+    """
+    out = sanitise_html(f'<a href="{href}">click here</a>')
+    assert "<a" not in out
+    assert "click here" in out
+
+
+def test_no_other_attribute_survives_on_a_link() -> None:
+    """`href` is the only one. `target`, `rel`, `class` and `style` are not allowlisted, and the
+    output has to survive Word's engine, which discards most of what it does not recognise."""
+    out = sanitise_html(
+        '<a href="https://example.com" target="_blank" rel="noopener" '
+        'class="x" style="color:red" onclick="steal()">text</a>'
+    )
+    assert out == '<a href="https://example.com">text</a>'
+
+
 def test_the_allowlist_is_exactly_the_editor_schema() -> None:
     """LP-854 EXTENDS THIS AND THE TIPTAP EXTENSIONS TOGETHER, OR FORMATTING VANISHES ON SAVE.
 
@@ -142,10 +211,25 @@ def test_the_allowlist_is_exactly_the_editor_schema() -> None:
     editor can produce and this cannot store is formatting a processor watches disappear; a tag this
     stores and the editor cannot produce is a hole nothing else is watching.
     """
-    assert set(ALLOWED) == {"p", "br", "strong", "ul", "li"}
-    assert all(attributes == frozenset() for attributes in ALLOWED.values()), (
-        "an attribute was allowed without a test naming why"
-    )
+    assert set(ALLOWED) == {
+        # LP-849
+        "p",
+        "br",
+        "strong",
+        "ul",
+        "li",
+        # LP-854
+        "em",
+        "u",
+        "ol",
+        "blockquote",
+        "a",
+    }
+    # ONE TAG HAS AN ATTRIBUTE, and it is the one with a security dimension. Anything else gaining
+    # one is a decision somebody has to make here, on purpose.
+    assert {tag: set(attributes) for tag, attributes in ALLOWED.items() if attributes} == {
+        "a": {"href"}
+    }
 
 
 def test_a_processors_own_words_survive_intact() -> None:

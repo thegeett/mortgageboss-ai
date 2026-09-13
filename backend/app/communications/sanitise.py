@@ -45,15 +45,32 @@ from html.parser import HTMLParser
 
 #: Tag -> the attributes it may keep. THE EDITOR'S SCHEMA, WRITTEN ONCE.
 #:
-#: Exactly what LP-849's Tiptap extensions produce and what `emailBodyToHtml` emits: paragraphs, a
-#: single-newline break, bold, and bullet lists. LP-854 adds underline, ordered lists, blockquote
-#: and links — here, and in the same breath as the extensions, because these are one list.
+#: LP-854 — THE CANONICAL COPY IS `frontend/lib/markdown/schema.ts`, and this must equal it.
+#: Python cannot import TypeScript, so the agreement is a test rather than an import:
+#: `frontend/lib/markdown/schema-drift.test.ts` reads THIS dict and fails when the two disagree.
+#: Adding a mark means adding it to that file, and this one, and the Tiptap extensions — and the
+#: test is what stops two of the three being enough.
+#:
+#: WHY EQUAL AND NOT MERELY COMPATIBLE: a tag the editor can produce and this strips is formatting
+#: that vanishes on save, which LP-849's notes record happening; a tag this allows and the editor
+#: cannot make is a hole with nothing watching it.
 ALLOWED: dict[str, frozenset[str]] = {
+    # LP-849's original set: paragraphs, a single-newline break, bold, and bullet lists.
     "p": frozenset(),
     "br": frozenset(),
     "strong": frozenset(),
     "ul": frozenset(),
     "li": frozenset(),
+    # LP-854 — the Gmail marks that need a tag of their own. `em` is here despite that ticket's
+    # table claiming italic already existed: it did not, in the editor or in the renderer.
+    "em": frozenset(),
+    "u": frozenset(),
+    "ol": frozenset(),
+    "blockquote": frozenset(),
+    # THE ONLY TAG WITH AN ATTRIBUTE, and the only one with a security dimension. `href` is checked
+    # against `ALLOWED_SCHEMES` below; nothing else on an `<a>` survives — no `target`, no `rel`,
+    # no `class`, no `style`.
+    "a": frozenset({"href"}),
 }
 
 #: Tags that close themselves. Written down rather than inferred, because emitting `</br>` produces
@@ -122,6 +139,13 @@ class _Allowlist(HTMLParser):
             if name == "href" and not href_is_safe(value):
                 continue
             kept.append(f' {name}="{escape(value, quote=True)}"')
+        # LP-854 — AN ANCHOR WITH NO SURVIVING href IS NOT A LINK, so it is not emitted as one. The
+        # first version kept the tag and dropped the attribute, which left `<a>click</a>`: something
+        # that looks like a link, is styled like one in every client, and goes nowhere. Dropping the
+        # element and keeping its TEXT is the honest outcome — the processor's words survive and the
+        # thing that was refused is visibly absent.
+        if tag == "a" and not kept:
+            return
         self.out.append(f"<{tag}{''.join(kept)}>")
         if tag not in VOID:
             self.open.append(tag)
