@@ -287,3 +287,70 @@ def test_sanitising_twice_changes_nothing(payload: str) -> None:
     """
     once = sanitise_html(payload)
     assert sanitise_html(once) == once
+
+
+def test_an_invisible_inside_the_scheme_is_not_cleaned_into_a_safe_one() -> None:
+    """LP-854 REVIEW — `href_is_safe` answered about a string the browser never sees.
+
+    It stripped everything not `isprintable()` or that `isspace()`, which is far wider than the URL
+    parser's rule. Over-stripping cannot let a dangerous scheme through — deleting characters from
+    `javascript:` still spells `javascript` — but it did the opposite: `h​ttp://x.com` cleaned
+    to `http`, passed, and was STORED with the zero-width space intact. No browser resolves that as
+    http, so the borrower received a link to nowhere that this function had called safe.
+
+    WHATWG strips leading/trailing C0 and space, and tab/CR/LF anywhere. Nothing else.
+    """
+    for href in ("h​ttp://x.com", "ht﻿tp://x.com", "h\xa0ttp://x.com"):
+        assert href_is_safe(href) is False, f"{href!r} was accepted as a safe scheme"
+        assert "<a" not in sanitise_html(f'<a href="{href}">click</a>')
+
+    # THE POSITIVE CONTROL, and it is the reason the strip exists at all: the characters a browser
+    # DOES remove must still be removed, or `java<TAB>script:` stops being refused.
+    assert href_is_safe("java\tscript:alert(1)") is False
+    assert href_is_safe("java\nscript:alert(1)") is False
+    assert href_is_safe("\x00javascript:alert(1)") is False
+    assert href_is_safe("  javascript:alert(1)  ") is False
+    # And an ordinary link is untouched by all of it.
+    assert href_is_safe("https://example.com/path?q=1") is True
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        # Markup INSIDE a refused anchor is the processor's too, and survives with it.
+        (
+            '<p><a href="javascript:x"><strong>bold</strong> tail</a></p>',
+            "<p><strong>bold</strong> tail</p>",
+        ),
+        # Dropping one must not disturb the next, in either order.
+        (
+            '<p><a href="javascript:x">bad</a> and <a href="https://ok.com">good</a></p>',
+            '<p>bad and <a href="https://ok.com">good</a></p>',
+        ),
+        (
+            '<p><a href="https://ok.com">good</a> and <a href="javascript:x">bad</a></p>',
+            '<p><a href="https://ok.com">good</a> and bad</p>',
+        ),
+        # No closing tag at all — the refused anchor was never opened, so nothing is left dangling.
+        ('<p><a href="javascript:x">text', "<p>text</p>"),
+        # Nested anchors are not something the editor can produce, and a paste can.
+        (
+            '<p><a href="javascript:x">out <a href="https://ok.com">in</a></a></p>',
+            '<p>out <a href="https://ok.com">in</a></p>',
+        ),
+        # Nothing between the tags: no stray empty element, and the text either side is intact.
+        ('<p>before<a href="javascript:x"></a>after</p>', "<p>beforeafter</p>"),
+    ],
+)
+def test_dropping_a_refused_link_neither_duplicates_nor_loses_its_text(
+    source: str, expected: str
+) -> None:
+    """LP-854 REVIEW — the anchor is dropped and its CONTENTS are not.
+
+    `handle_starttag` returns early for an `<a>` whose href did not survive, so the element is never
+    pushed onto the open stack — which is what keeps the matching `</a>` from closing something it
+    did not open, and what keeps `handle_endtag`'s unwinding loop from popping past it. These are
+    the shapes where that could go wrong: nested markup, an adjacent link in either order, no
+    closing tag, a nested anchor, and an empty one.
+    """
+    assert sanitise_html(source) == expected

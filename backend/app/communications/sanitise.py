@@ -103,7 +103,23 @@ def href_is_safe(value: str) -> bool:
     invisible characters and lowercasing first compares against what a client would actually
     resolve rather than against what the string looks like.
     """
-    cleaned = "".join(ch for ch in value if ch.isprintable() and not ch.isspace()).lower()
+    # LP-854 REVIEW — EXACTLY WHAT A BROWSER STRIPS, AND NOTHING MORE.
+    #
+    # This removed every character that is not `isprintable()` or that `isspace()`, which is a
+    # far wider set than the URL parser's: it also takes a zero-width space, a non-breaking
+    # space and a BOM, none of which a browser removes. Over-stripping cannot let a dangerous
+    # scheme through — deleting characters from `javascript:` still spells `javascript` — but it
+    # does the opposite. `h\u200bttp://x.com` cleaned to `http`, passed as safe, and was STORED
+    # with the invisible intact; no browser resolves that as http, so what reached the borrower
+    # was a link to nowhere, validated by a rule the client does not apply.
+    #
+    # WHATWG's URL parser strips leading and trailing C0 controls and space, and removes tab, CR
+    # and LF anywhere. That is the whole list, and it is what makes `java<TAB>script:` run. This
+    # is strictly NARROWER than what it replaces — every href refused before is refused still —
+    # and it removes the only measured divergence from `isSafeHref`, which keeps those same
+    # characters and therefore already refused them.
+    cleaned = value.strip("".join(chr(code) for code in range(0x21)))
+    cleaned = cleaned.replace("\t", "").replace("\n", "").replace("\r", "").lower()
     if ":" not in cleaned:
         # A relative or anchor-only href. Refused rather than resolved: this text is pasted into a
         # mail client, where there is no page for it to be relative to.

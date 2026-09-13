@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { EXTENSIONS } from "@/components/file/communication/message-editor";
 import { describe, expect, it } from "vitest";
 import { emailBodyToHtml } from "./email-body";
-import { ALLOWED_SCHEMES, EMAIL_SCHEMA, EMAIL_TAGS } from "./schema";
+import { ALLOWED_SCHEMES, AT_RISK_IN_WORD, EMAIL_SCHEMA, EMAIL_TAGS } from "./schema";
 
 const SANITISER = join(process.cwd(), "..", "backend", "app", "communications", "sanitise.py");
 
@@ -151,5 +151,21 @@ describe("the check can fail", () => {
     const withExtra = SOURCE.replace('    "p": frozenset(),', '    "p": frozenset({"style"}),');
     expect(withExtra).not.toBe(SOURCE);
     expect(serverAllowlist(withExtra).p).not.toEqual([...(EMAIL_SCHEMA.p ?? [])]);
+  });
+
+  it("every tag flagged as at risk in Word is a tag we actually emit", () => {
+    // LP-854 REVIEW — `AT_RISK_IN_WORD` sits beside the canonical list and is NOT derived from it,
+    // which I found by mutating the wrong one: renaming it there changed nothing, because no test
+    // reads it. That is fine for what it is — guidance, not a schema — right up until the schema
+    // moves without it. It names what the person doing the manual Gmail and Outlook paste should
+    // look at, so a stale entry sends them hunting for a tag the renderer can no longer produce,
+    // and a tag dropped from it is one they will not think to check.
+    //
+    // Only one direction is a rule: every at-risk tag must be one we emit. The reverse is not,
+    // because `p`, `br`, `strong` and `em` are deliberately excluded — every engine keeps them.
+    for (const tag of AT_RISK_IN_WORD) {
+      expect(EMAIL_TAGS).toContain(tag);
+    }
+    expect(AT_RISK_IN_WORD.length).toBeGreaterThan(0);
   });
 });
