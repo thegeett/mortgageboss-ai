@@ -38,7 +38,7 @@ vi.mock("@/components/file/communication/message-editor", () => ({
 const mockCapabilities = vi.fn(() => ({ data: { receiving: false } }));
 vi.mock("@/lib/api/capabilities", () => ({ useCapabilities: () => mockCapabilities() }));
 
-import { MessageDialog } from "./message-dialog";
+import { DraftPane } from "./message-dialog";
 
 afterEach(cleanup);
 beforeEach(() => vi.clearAllMocks());
@@ -76,7 +76,7 @@ function draft(overrides: Partial<MessageDetail> = {}): { data: MessageDetail } 
 
 async function open(detail = draft()) {
   mockUseMessageDetail.mockReturnValue({ ...detail, isPending: false, isError: false });
-  render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+  render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
   // WAIT FOR THE DIALOG'S CONTENT, not for the editor. `next/dynamic` resolves after the first
   // paint, so asserting straight away reads an empty tree — but a SENT message has no editor at
   // all, and waiting for one there would time out rather than fail on the property.

@@ -331,19 +331,68 @@ async def test_an_empty_reply_is_refused(db_session: AsyncSession) -> None:
 # --------------------------------------------------------------------------------------------- #
 # Compose
 # --------------------------------------------------------------------------------------------- #
-async def test_a_composed_message_needs_a_subject(db_session: AsyncSession) -> None:
-    """REFUSED RATHER THAN DEFAULTED. A subject a system invented is one a borrower cannot
-    recognise, and the request path never has this problem because its template supplies one."""
-    company, loan_file = await _company_and_file(db_session, slug="nosubject")
+async def test_a_composed_draft_may_be_completely_empty(db_session: AsyncSession) -> None:
+    """LP-858 §8 — THE ROW IS CREATED WHEN COMPOSE IS PRESSED, before a word is typed.
+
+    This used to refuse on three counts: no recipient, no subject, no body. It appears in the left
+    list immediately as *"New message" / "Nothing written yet"*, and a server that demanded all
+    three first made that shape impossible.
+
+    NOTHING IS DEFAULTED, which is what the old refusal was actually protecting. The argument was
+    *"a subject a system invented is one a borrower cannot recognise"* — an argument against
+    inventing one, not against leaving the field empty for the person who will write it.
+    """
+    company, loan_file = await _company_and_file(db_session, slug="emptycompose")
     actor = await _actor(db_session, company)
 
-    with pytest.raises(CannotReplyError, match="subject"):
+    draft = await create_compose_draft(db_session, loan_file=loan_file, actor_user_id=actor)
+
+    assert draft.recipient is None
+    assert draft.subject is None
+    assert draft.body == ""
+    # AND IT IS A REAL DRAFT — in the list, openable, deletable. Not a placeholder.
+    assert draft.status is CommunicationStatus.DRAFT
+    assert draft.direction is CommunicationDirection.OUTBOUND
+    assert draft.template_key is None
+
+
+async def test_an_empty_composed_draft_still_cannot_be_SENT(db_session: AsyncSession) -> None:
+    """WHERE THE OLD GUARANTEE WENT. A draft nobody has finished is not a message anybody sent, and
+    `send_draft` is the boundary that has always enforced it — so relaxing creation moved the check
+    rather than deleting it. Asserted here so the move is visible from the test that used to hold
+    the other end."""
+    from app.services.email_send import CannotSendError, send_draft
+
+    company, loan_file = await _company_and_file(db_session, slug="emptysend")
+    actor = await _actor(db_session, company)
+    draft = await create_compose_draft(db_session, loan_file=loan_file, actor_user_id=actor)
+    await db_session.flush()
+
+    with pytest.raises(CannotSendError, match="empty"):
+        await send_draft(
+            db_session,
+            loan_file=loan_file,
+            draft_id=draft.id,
+            recipient="jane@borrower.example",
+            body="   ",
+            approver_user_id=actor,
+        )
+
+
+async def test_a_composed_draft_still_refuses_a_malformed_address(
+    db_session: AsyncSession,
+) -> None:
+    """ABSENT AND MALFORMED ARE DIFFERENT ANSWERS. One is "not yet"; the other is a typo worth
+    reporting, and swallowing it would leave a draft that can never be sent with nothing saying
+    why."""
+    company, loan_file = await _company_and_file(db_session, slug="badaddr")
+    actor = await _actor(db_session, company)
+
+    with pytest.raises(CannotReplyError, match="address"):
         await create_compose_draft(
             db_session,
             loan_file=loan_file,
-            recipient="jane@borrower.example",
-            subject="  ",
-            body="hello",
+            recipient="not-an-address",
             actor_user_id=actor,
         )
 

@@ -157,9 +157,9 @@ async def create_compose_draft(
     db: AsyncSession,
     *,
     loan_file: LoanFile,
-    recipient: str,
-    subject: str,
-    body: str,
+    recipient: str | None = None,
+    subject: str = "",
+    body: str = "",
     actor_user_id: UUID,
 ) -> Communication:
     """A message with nothing behind it — no needs, no message being answered.
@@ -167,23 +167,32 @@ async def create_compose_draft(
     Spec 4.3's "compose". The same needs-less shape as a reply, without the threading, and it exists
     because a processor telling a borrower "your file went to underwriting" is answering nothing and
     requesting nothing, and had no way to record that it happened.
+
+    LP-858 §8 — AN EMPTY DRAFT IS A LEGITIMATE THING TO CREATE, and this used to refuse one on three
+    counts. The row is created when **Compose is pressed**, before a word is typed: it appears in
+    the left list immediately, reading *"New message" / "Nothing written yet"*, which is what the
+    processor asked for. A server that demanded a recipient, a subject and a body first made that
+    shape impossible.
+
+    WHAT WAS BEING PROTECTED IS STILL PROTECTED, one step later. The argument for refusing an empty
+    subject was *"a subject a system invented is one a borrower cannot recognise"* — which is an
+    argument against DEFAULTING one, and nothing here defaults anything: the field stays empty and
+    the processor fills it. "An empty message cannot be sent" is enforced by `send_draft`, which is
+    where it belongs, because a draft nobody has finished is not a message anybody sent.
+
+    A RECIPIENT THAT IS PRESENT MUST STILL BE VALID. Absent and malformed are different answers:
+    one is "not yet", the other is a typo worth reporting.
     """
-    address = normalise_address(recipient)
-    if address is None:
+    address = normalise_address(recipient) if (recipient or "").strip() else None
+    if (recipient or "").strip() and address is None:
         raise CannotReplyError("That is not an address a message can be sent to.")
-    if not (body or "").strip():
-        raise CannotReplyError("An empty message cannot be saved.")
-    if not (subject or "").strip():
-        # REFUSED RATHER THAN DEFAULTED. A subject a system invented is one a borrower cannot
-        # recognise, and the request path never has this problem because its template supplies one.
-        raise CannotReplyError("A message needs a subject.")
 
     draft = Communication(
         loan_file_id=loan_file.id,
         direction=CommunicationDirection.OUTBOUND,
         status=CommunicationStatus.DRAFT,
         recipient=address,
-        subject=subject.strip(),
+        subject=subject.strip() or None,
         body=body,
         template_key=None,
         template_version=None,

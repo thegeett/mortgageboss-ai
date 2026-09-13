@@ -327,9 +327,19 @@ class ReplyRequest(BaseModel):
 
 
 class ComposeRequest(BaseModel):
-    recipient: EmailStr
-    subject: str = Field(min_length=1, max_length=256)
-    body: str = Field(min_length=1)
+    """LP-858 §8 — every field optional, because the row is created when Compose is PRESSED.
+
+    It appears in the left list immediately, reading "New message" / "Nothing written yet", and the
+    processor types into the right pane. A schema that required a recipient, a subject and a body
+    made that shape impossible. Nothing is defaulted — an empty field stays empty — and `send_draft`
+    still refuses to send an empty message, which is where that guarantee belongs.
+    """
+
+    #: `None` is "nobody has said yet". A string that IS present must still parse as an address:
+    #: absent and malformed are different answers, and one of them is a typo worth reporting.
+    recipient: EmailStr | None = None
+    subject: str = Field(default="", max_length=256)
+    body: str = ""
 
 
 class ImportantRequest(BaseModel):

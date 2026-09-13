@@ -74,7 +74,7 @@ vi.mock("@/components/file/communication/message-editor", () => ({
   ),
 }));
 
-import { MessageDialog } from "./message-dialog";
+import { DraftPane } from "./message-dialog";
 
 afterEach(cleanup);
 beforeEach(() => vi.clearAllMocks());
@@ -123,7 +123,7 @@ describe("the autosave", () => {
    */
   async function open(detail: { data: MessageDetail }, onClose = vi.fn()) {
     mockUseMessageDetail.mockReturnValue({ ...detail, isPending: false, isError: false });
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={onClose} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={onClose} />);
     const typing = await screen.findByRole("button", { name: "simulate-typing" });
     return { typing, onClose };
   }
@@ -183,15 +183,19 @@ describe("the autosave", () => {
     expect(mockSave).not.toHaveBeenCalled();
   });
 
-  it("flushes the last edit when the dialog closes", async () => {
+  it("flushes the last edit when the pane closes", async () => {
     // The debounce is 800ms; a processor who types and immediately closes must not lose the
     // sentence they just wrote.
+    //
+    // LP-858 §2/§3 — CLOSED BY THE PANE'S OWN ✕, not by Escape. This was a Radix modal, which
+    // handled Escape for free; a pane has no scrim and no key handler, so the button IS the close
+    // path and testing the old one would assert against a route nothing takes.
     const { typing, onClose } = await open(draft());
     vi.useFakeTimers();
 
     fireEvent.click(typing);
     // Closed well before the debounce would have fired.
-    fireEvent.keyDown(document.body, { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     vi.useRealTimers();
 
     expect(mockSave).toHaveBeenCalledTimes(1);
@@ -202,7 +206,7 @@ describe("the autosave", () => {
     await open(draft());
     vi.useFakeTimers();
 
-    fireEvent.keyDown(document.body, { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     vi.useRealTimers();
 
     expect(mockSave).not.toHaveBeenCalled();

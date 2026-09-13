@@ -54,7 +54,7 @@ vi.mock("@/components/file/communication/message-editor", () => ({
   ),
 }));
 
-import { MessageDialog } from "./message-dialog";
+import { DraftPane } from "./message-dialog";
 
 afterEach(cleanup);
 beforeEach(() => vi.clearAllMocks());
@@ -97,7 +97,7 @@ function draft(overrides: Partial<MessageDetail> = {}): { data: MessageDetail } 
 /** Render and WAIT FOR THE STUBBED EDITOR — `next/dynamic` resolves after the first paint. */
 async function open(detail = draft()) {
   mockUseMessageDetail.mockReturnValue({ ...detail, isPending: false, isError: false });
-  render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+  render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
   await screen.findByTestId("editor");
   return screen.getByRole("button", { name: /polish/i });
 }

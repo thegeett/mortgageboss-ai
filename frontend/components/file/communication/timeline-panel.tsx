@@ -14,7 +14,6 @@
  * documents into this file — so it is shown, copyable, and never linked.
  */
 
-import { MessageDialog } from "@/components/file/communication/message-dialog";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { fetchReplyContext, useMarkRead, useReply, useSetImportant } from "@/lib/api/messages";
@@ -23,7 +22,6 @@ import { isNewSince, readLastSeen, writeLastSeen } from "@/lib/communication/las
 import { messageTimeLabel, messageTimeShort } from "@/lib/message-time";
 import type { TimelineEntry, TimelineFilter } from "@/lib/types/timeline";
 import { Check, Copy, Mail, MailOpen, PenLine, Reply, Star, TriangleAlert } from "lucide-react";
-import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 const PILLS: { value: TimelineFilter; label: string }[] = [
@@ -347,7 +345,17 @@ const ATTACHMENT_DISPOSITION: Record<string, string> = {
   rejected: "rejected",
 };
 
-export function TimelinePanel({ fileId }: { fileId: string }) {
+export function TimelinePanel({
+  fileId,
+  selectedId = null,
+  onSelect,
+}: {
+  fileId: string;
+  /** LP-858 §2 — which row is the right pane showing. Owned by the page, not by the list. */
+  selectedId?: string | null;
+  /** Selecting a row swaps the right pane's content and moves nothing. */
+  onSelect?: (messageId: string) => void;
+}) {
   const [filter, setFilter] = useState<TimelineFilter>("all");
   const { data, isPending, isError } = useTimeline(fileId, filter);
   const [copied, setCopied] = useState(false);
@@ -361,12 +369,6 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
   // shut looks exactly like a mis-click, which is the way that feature fails quietly. Reading it
   // here rather than retrofitting later also makes the modal's open state something a processor can
   // send a colleague.
-  const searchParams = useSearchParams();
-  // OPTIONAL, because `useSearchParams()` is null outside a router context — which is not only a
-  // test artefact: it is also the value during a static render. A deep link is a convenience, and
-  // the panel has to render without one.
-  const linkedDraft = searchParams?.get("draft") ?? null;
-  const [openMessage, setOpenMessage] = useState<string | null>(linkedDraft);
 
   const entries = data?.entries ?? [];
   // LP-852 — ONE LIST, IN ONE TIME ORDER. There is no party axis any more: it was a strip of tabs,
@@ -388,14 +390,6 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
   // Rows the processor has opened during THIS visit. The dot is about their attention, so it clears
   // when they give it — without waiting for a refetch to tell them what they just did.
   const [acknowledged, setAcknowledged] = useState<Set<string>>(() => new Set());
-  // Tracked rather than compared against `openMessage`: after a processor CLOSES the linked message
-  // the parameter is still in the URL, and re-opening it on the next render would make the dialog
-  // impossible to dismiss.
-  const [seededFromUrl, setSeededFromUrl] = useState<string | null>(linkedDraft);
-  if (linkedDraft !== seededFromUrl) {
-    setSeededFromUrl(linkedDraft);
-    setOpenMessage(linkedDraft);
-  }
 
   async function copyAddress(address: string) {
     await navigator.clipboard.writeText(address);
@@ -408,7 +402,9 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <h2 className="text-base font-semibold text-foreground">History</h2>
+            {/* LP-858 §10 — the literal string. "History" described a read-only record; this
+                list's first job is the drafts that still need doing. */}
+            <h2 className="text-base font-semibold text-foreground">Drafts &amp; messages</h2>
             {/* THE BADGE. §C.5: "without the badge the queue is pull-only and an evening reply sits
                 unseen until she happens to open the tab." Counted over the WHOLE file, so it does
                 not shrink when a pill is clicked. */}
@@ -494,7 +490,17 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
           {shown.map((entry) => (
             <li
               key={`${entry.kind}-${entry.id}`}
-              className="flex items-start gap-3 border-t border-border py-2 text-sm first:border-t-0"
+              // LP-858 §2 — THE SELECTED ROW IS MARKED. A two-pane layout where the list does not
+              // say which row the right pane is showing leaves the processor to infer it from the
+              // content, which fails exactly when two drafts are to the same party. A left petrol
+              // bar rather than a fill: it reads as a position in a list, and the Ledger's hairline
+              // rule means a background block here would compete with the row's own borders.
+              aria-current={entry.id === selectedId ? "true" : undefined}
+              className={
+                entry.id === selectedId
+                  ? "flex items-start gap-3 border-t border-border border-l-2 border-l-primary bg-primary/5 py-2 pl-2 text-sm first:border-t-0"
+                  : "flex items-start gap-3 border-t border-border border-l-2 border-l-transparent py-2 pl-2 text-sm first:border-t-0"
+              }
             >
               <span className="mt-0.5 shrink-0">
                 <EntryIcon entry={entry} />
@@ -511,7 +517,7 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
                 <button
                   type="button"
                   onClick={() => {
-                    setOpenMessage(entry.id);
+                    onSelect?.(entry.id);
                     // The dot is about this processor's attention, so it clears the moment they
                     // give it — without waiting for a refetch to tell them what they just did.
                     setAcknowledged((seen) => new Set(seen).add(entry.id));
@@ -621,7 +627,6 @@ export function TimelinePanel({ fileId }: { fileId: string }) {
           Older entries are not shown — this file has more history than fits on one page.
         </p>
       ) : null}
-      <MessageDialog fileId={fileId} messageId={openMessage} onClose={() => setOpenMessage(null)} />
     </section>
   );
 }

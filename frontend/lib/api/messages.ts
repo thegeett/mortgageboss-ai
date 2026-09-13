@@ -76,7 +76,11 @@ export function useReply(fileId: string) {
 export function useComposeDraft(fileId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { recipient: string; subject: string; body: string }) =>
+    // LP-858 §8 — EVERY FIELD OPTIONAL. The row is created when Compose is PRESSED, before a word
+    // is typed, and appears in the list reading "New message" / "Nothing written yet". The server
+    // schema was relaxed to match; nothing is defaulted, and `send_draft` still refuses to send an
+    // empty message.
+    mutationFn: async (input: { recipient?: string; subject?: string; body?: string } = {}) =>
       (await apiClient.post<MessageSummary>(messagesPath(fileId), input)).data,
     onSuccess: () => invalidateTimeline(queryClient, fileId),
   });

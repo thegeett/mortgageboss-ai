@@ -6,7 +6,7 @@
  * second editor for a draft the panel above already owns, and a borrower's own text being rendered
  * as anything other than the characters they typed.
  */
-import { MessageDialog } from "@/components/file/communication/message-dialog";
+import { DraftPane } from "@/components/file/communication/message-dialog";
 import type { MessageDetail } from "@/lib/types/communication";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -114,11 +114,11 @@ function state(over: Record<string, unknown>) {
   return { data: undefined, isPending: false, isError: false, ...over };
 }
 
-describe("MessageDialog", () => {
+describe("DraftPane", () => {
   it("shows the words that went out", () => {
     // The state this exists for: before LP-829 a sent message's body was readable nowhere.
     mockUseMessageDetail.mockReturnValue(state(detail()));
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     expect(screen.getByText(/Please send the bank statements/)).toBeTruthy();
     expect(screen.getByText("Bank statements")).toBeTruthy();
@@ -129,7 +129,7 @@ describe("MessageDialog", () => {
     // editor, so "there is no editor here" stopped being true of the COMPONENT and became true of
     // this STATE, which is the thing that actually has to hold.
     mockUseMessageDetail.mockReturnValue(state(detail({ is_editable: false })));
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     // LP-829 REVIEW — THE POSITIVE HALF, IN THIS TEST. Both assertions below are absences, and a
     // dialog that rendered nothing at all would satisfy them. "Renders nothing when no message is
@@ -145,7 +145,7 @@ describe("MessageDialog", () => {
     mockUseMessageDetail.mockReturnValue(
       state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     // LP-849 — WHAT THE SEND RECEIVES IS PLAIN TEXT, and that is the property worth pinning here.
     //
@@ -192,7 +192,7 @@ describe("MessageDialog", () => {
         }),
       ),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     // The word is bold, not surrounded by visible tags.
     const bold = screen.getByText("only");
@@ -215,7 +215,7 @@ describe("MessageDialog", () => {
         }),
       ),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: /Mark as sent/ }));
 
@@ -232,7 +232,7 @@ describe("MessageDialog", () => {
     mockUseMessageDetail.mockReturnValue(
       state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     await vi.waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
     // And the notepad it replaced is gone, rather than both being present.
@@ -260,7 +260,7 @@ describe("MessageDialog", () => {
         }),
       ),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     expect((screen.getByRole("textbox", { name: "Send to" }) as HTMLInputElement).value).toBe(
       "t@title.example",
@@ -280,7 +280,7 @@ describe("MessageDialog", () => {
         }),
       ),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     expect((screen.getByRole("textbox", { name: "Send to" }) as HTMLInputElement).value).toBe(
       "sarah@example.com",
@@ -299,7 +299,7 @@ describe("MessageDialog", () => {
     mockUseMessageDetail.mockReturnValue(
       state(detail({ is_editable: true, status: "draft", counterparty: null })),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     expect(
       (screen.getByRole("button", { name: /Mark as sent/ }) as HTMLButtonElement).disabled,
@@ -312,7 +312,7 @@ describe("MessageDialog", () => {
     mockUseMessageDetail.mockReturnValue(
       state(detail({ is_editable: true, status: "draft", counterparty: null, body: "   " })),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     expect(
       (screen.getByRole("button", { name: /Mark as sent/ }) as HTMLButtonElement).disabled,
@@ -330,7 +330,7 @@ describe("MessageDialog", () => {
         }),
       ),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     expect(screen.getByText("Who is $processor_name? I paid $10,000 <b>in cash</b>.")).toBeTruthy();
   });
@@ -347,7 +347,7 @@ describe("MessageDialog", () => {
         }),
       ),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     expect(screen.getByText(/March_statement\.pdf · accepted/)).toBeTruthy();
     expect(screen.getByText(/selfie\.heic · not yet accepted/)).toBeTruthy();
@@ -357,7 +357,7 @@ describe("MessageDialog", () => {
     mockUseMessageDetail.mockReturnValue(
       state(detail({ status: "failed", error_detail: "550 5.1.1 user unknown" })),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     expect(screen.getByText(/550 5\.1\.1 user unknown/)).toBeTruthy();
   });
@@ -374,7 +374,7 @@ describe("MessageDialog", () => {
         }),
       ),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     // SENT, not created — and the date is `sent_at`, three days after composition. A dialog reading
     // `created_at` would show 1 Sep and label it Sent, which is two wrong answers that look like one
@@ -393,7 +393,7 @@ describe("MessageDialog", () => {
         }),
       ),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     expect(screen.getByText(/Created 1 Sep 2026/)).toBeTruthy();
   });
@@ -402,7 +402,7 @@ describe("MessageDialog", () => {
     // THE CONTROL. A dialog that rendered its content regardless would satisfy every assertion
     // above and sit permanently over the timeline.
     mockUseMessageDetail.mockReturnValue(state({ data: undefined }));
-    render(<MessageDialog fileId="LF-JR4T" messageId={null} onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId={null} onClose={vi.fn()} />);
 
     expect(screen.queryByText(/Please send the bank statements/)).toBeNull();
   });
@@ -420,7 +420,7 @@ describe("MessageDialog", () => {
  * A processor could therefore record that a borrower was emailed, start the clock on chasing them
  * for a reply, and have had no way to send the message at all.
  */
-describe("MessageDialog — a draft can actually be sent", () => {
+describe("DraftPane — a draft can actually be sent", () => {
   it("copies the body, and the copy carries no markup on a plain draft", async () => {
     // LP-855 — THE `mailto:` LINK IS GONE FROM THIS BAR. It was a second control carrying the body
     // in the URL; the primary now copies the rich body and opens the compose window with the body
@@ -431,7 +431,7 @@ describe("MessageDialog — a draft can actually be sent", () => {
     );
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: /copy message/i }));
     const copied = writeText.mock.calls[0]?.[0] as string;
@@ -443,7 +443,7 @@ describe("MessageDialog — a draft can actually be sent", () => {
     // The control: a sent message has already gone, and offering to send it again would be a second
     // email the record does not describe.
     mockUseMessageDetail.mockReturnValue(state(detail({ is_editable: false, status: "sent" })));
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     expect(screen.queryByRole("button", { name: /copy message/i })).toBeNull();
     expect(screen.queryByRole("link", { name: /open in mail client/i })).toBeNull();
@@ -463,7 +463,7 @@ describe("MessageDialog — a draft can actually be sent", () => {
     mockUseMessageDetail.mockReturnValue(
       state(detail({ is_editable: true, status: "draft", mailto_available: false })),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     const open = screen.getByRole("button", { name: /Copy & open/ });
     expect((open as HTMLButtonElement).disabled).toBe(false);
@@ -480,7 +480,7 @@ describe("the button bar", () => {
     mockUseMessageDetail.mockReturnValue(
       state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
   }
 
   it("has NO Send button, not even disabled", () => {
@@ -584,7 +584,7 @@ describe("the secure upload link (LP-834)", () => {
     // borrower already sent one loses it — they click and are refused, with no explanation on their
     // end. That is not a thing to discover afterwards.
     mockUseMessageDetail.mockReturnValue(state(detail({ is_editable: true, status: "draft" })));
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     const button = screen.getByRole("button", { name: "Add a secure upload link" });
     expect(button.getAttribute("title")).toContain("stops working");
@@ -606,7 +606,7 @@ describe("the secure upload link (LP-834)", () => {
         }),
       ),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: "Replace the secure link" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Add a secure upload link" })).toBeNull();
@@ -616,7 +616,7 @@ describe("the secure upload link (LP-834)", () => {
     // LP-821 — the evidence record is what actually went out; a link added afterwards would make
     // the stored message differ from the one the borrower received. The server refuses it too.
     mockUseMessageDetail.mockReturnValue(state(detail({ is_editable: false })));
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     expect(screen.queryByRole("button", { name: /secure/i })).toBeNull();
   });
@@ -630,7 +630,7 @@ describe("the rendered body", () => {
     mockUseMessageDetail.mockReturnValue(
       state(detail({ body: "Hello,\n\n- Bank statements\n- Pay stubs" })),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
     await screen.findByText("Hello,");
 
     // SCOPED TO THE BODY. "Bank statements" is also in the "What it asks for" list below, which has
@@ -650,7 +650,7 @@ describe("the rendered body", () => {
     mockUseMessageDetail.mockReturnValue(
       state(detail({ body: "Please send <script>alert(1)</script> it" })),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     await screen.findByText(/Please send/);
     expect(document.querySelector("script")).toBeNull();
@@ -697,7 +697,7 @@ describe("the mail-client picker", () => {
     const open = vi.fn().mockReturnValue({});
     Object.defineProperty(window, "open", { configurable: true, value: open });
     Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     // LP-858 §1 — the picker is raised by the button now, so the gesture starts here.
     fireEvent.click(screen.getByRole("button", { name: "Copy & open mail app" }));
@@ -724,7 +724,7 @@ describe("the mail-client picker", () => {
     mockUseMessageDetail.mockReturnValue(
       state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     expect(screen.queryByRole("heading", { name: /Which mail app/ })).toBeNull();
     // THE DRAFT IS THE THING ON SCREEN, which is what the processor clicked for. Without this the
@@ -744,7 +744,7 @@ describe("the mail-client picker", () => {
     const open = vi.fn().mockReturnValue({});
     Object.defineProperty(window, "open", { configurable: true, value: open });
     Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     // Nothing has opened yet: the button has not been pressed.
     expect(open).not.toHaveBeenCalled();
@@ -785,7 +785,7 @@ describe("the mail-client picker", () => {
       state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
     );
     Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Copy message" }));
     expect(screen.queryByRole("heading", { name: /Which mail app/ })).toBeNull();
@@ -809,7 +809,7 @@ describe("the mail-client picker", () => {
     mockUseMessageDetail.mockReturnValue(
       state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     expect(screen.queryByRole("heading", { name: "Which mail app should this open?" })).toBeNull();
     expect(screen.getByRole("button", { name: "Copy & open mail app" })).toBeTruthy();
@@ -824,7 +824,7 @@ describe("the mail-client picker", () => {
     const open = vi.fn().mockReturnValue({});
     Object.defineProperty(window, "open", { configurable: true, value: open });
     Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Copy & open Gmail" }));
 
@@ -837,7 +837,7 @@ describe("the mail-client picker", () => {
     mockUseMessageDetail.mockReturnValue(
       state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Copy & open mail app" }));
     fireEvent.click(screen.getByRole("button", { name: "Use Gmail" }));
@@ -852,7 +852,7 @@ describe("the mail-client picker", () => {
     // nothing.
     unanswered();
     mockUseMessageDetail.mockReturnValue(state(detail({ is_editable: false, status: "sent" })));
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     expect(screen.queryByText("Which mail app should this open?")).toBeNull();
   });
@@ -865,7 +865,7 @@ describe("the mail-client picker", () => {
     mockUseMessageDetail.mockReturnValue(
       state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     expect(screen.queryByText("Which mail app should this open?")).toBeNull();
     // And the button still works, on the safe answer.
@@ -888,7 +888,7 @@ describe("the ✦ polish button", () => {
     mockUseMessageDetail.mockReturnValue(
       state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
   }
 
   it("is not on screen when polish is not wired", async () => {
@@ -922,7 +922,7 @@ describe("the ✦ polish button", () => {
     mockUseMessageDetail.mockReturnValue(
       state(detail({ is_editable: true, is_open_draft: true, status: "draft" })),
     );
-    render(<MessageDialog fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     await vi.waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
     expect(screen.queryByRole("button", { name: /polish/i })).toBeNull();
