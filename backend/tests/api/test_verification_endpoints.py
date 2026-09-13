@@ -1067,7 +1067,9 @@ async def test_both_request_routes_accumulate_into_ONE_LIST(
             f"{API}/{loan_file.display_id}/findings/request-docs",
             headers=_auth(token),
             # LP-850 — the first request left a draft open, so the second answers for it. Without
-            # `on_conflict` this is a 409 that writes nothing; that path has its own tests.
+            # `on_conflict` this is a 409. "Writes nothing" is two claims with two homes: the
+            # service writes no draft (`test_draft_lifecycle_lp850.py`) and the needs rows the
+            # route created first are rolled back (`test_get_db_rollback_contract.py`).
             json={"finding_ids": [str(two.id)], "note": None, "on_conflict": "append"},
         )
     ).status_code == 200

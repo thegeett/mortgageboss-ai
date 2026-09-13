@@ -23,6 +23,7 @@ from app.models.communication import Communication, CommunicationStatus
 from app.models.lender import Lender
 from app.models.loan_file_participant import LoanFileParticipant, ParticipantRole
 from app.models.needs_item import NeedsItem, NeedsItemOrigin, NeedsItemStatus
+from app.services.email_draft import draft_template_key
 from app.services.party_requests import (
     PARTY_ROLE,
     add_participant,
@@ -347,7 +348,12 @@ async def test_a_party_draft_is_a_real_draft_on_the_existing_send_path(
 
     assert draft.status is CommunicationStatus.DRAFT
     assert draft.recipient == "t@title.example"
-    assert draft.template_key == template_key_for(ResponsibleParty.TITLE)
+    # LP-850 REVIEW — THE KEY THAT NAMES A REAL TEMPLATE. This asserted
+    # `template_key_for(TITLE)` == "document_request_title", which paired with a `template_version`
+    # identifies no template that has ever existed — the ADR-401 breakage LP-843 fixed everywhere
+    # except here, because this path wrote its own key and did its own render. Both now go through
+    # `_regenerate`, which stamps the key and the version together from the render itself.
+    assert draft.template_key == draft_template_key(ResponsibleParty.TITLE)
     assert [item.id for item in await _needs_in_draft(db_session, draft=draft)] == [need.id]
 
 
@@ -624,3 +630,45 @@ async def test_a_lender_with_no_contact_is_still_unreachable(db_session: AsyncSe
 
     assert not lender_request.reachable
     assert lender_request.address is None
+
+
+async def test_a_party_draft_joins_the_one_email_draft_made_rather_than_forking_it(
+    db_session: AsyncSession,
+) -> None:
+    """LP-850 REVIEW — decision 2 held across BOTH draft-creation paths, not just one.
+
+    `build_party_draft` looked its existing draft up by `template_key == template_key_for(party)`,
+    which is LP-841's legacy key, while `email_draft` has written LP-843's key since that ticket.
+    Seven of the eight parties never matched, so a title company with a draft from the request flow
+    got a SECOND open draft here — the precise state LP-850 says cannot exist.
+
+    This asserts the two paths converge on ONE draft. It fails on the pre-fix lookup (measured: two
+    ids), which is what makes it worth keeping.
+    """
+    from app.services.email_draft import add_needs_to_draft, open_drafts
+
+    company, loan_file = await _company_and_file(db_session, slug="onedraft")
+    actor = await _actor(db_session, company)
+    await add_participant(
+        db_session, loan_file=loan_file, role=ParticipantRole.TITLE, email="t@example.com"
+    )
+    need = await _need(
+        db_session, loan_file, needs_type=_type_for(ResponsibleParty.TITLE), title="One"
+    )
+
+    made = await add_needs_to_draft(
+        db_session, loan_file=loan_file, needs=[need], actor_user_id=actor.id
+    )
+    via_email_draft = made.parties[0].draft
+    assert via_email_draft is not None
+
+    via_party_requests = await build_party_draft(
+        db_session, loan_file=loan_file, party=ResponsibleParty.TITLE, actor_user_id=actor.id
+    )
+
+    live = await open_drafts(db_session, loan_file_id=loan_file.id, party=ResponsibleParty.TITLE)
+    assert via_party_requests.id == via_email_draft.id, (
+        "party_requests created a SECOND open draft for the title company: "
+        f"{[str(d.id) for d in live]}"
+    )
+    assert len(live) == 1, f"{len(live)} open drafts for one party"

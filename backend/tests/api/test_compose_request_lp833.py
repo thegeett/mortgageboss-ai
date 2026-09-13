@@ -166,8 +166,11 @@ async def test_a_type_already_outstanding_is_not_asked_for_twice(
         f"{API}/{loan_file.display_id}/outbound/compose",
         headers=_auth(token),
         # LP-850 — the first compose left a draft open, so the second needs an answer about it.
-        # `append` is what the processor picks in the dialog; without it this is a 409 that writes
-        # nothing, which is asserted in `test_draft_lifecycle_lp850.py`.
+        # `append` is what the processor picks in the dialog. Without it this is a 409: its BODY is
+        # asserted in `test_the_409_body_is_what_the_dialog_will_render` below, the service writing
+        # no draft in `test_draft_lifecycle_lp850.py`, and the needs rows this route creates before
+        # the conflict being rolled back in `test_get_db_rollback_contract.py`. The comment here
+        # used to name only the second of those, which is the one that does NOT cover this route.
         json={"document_types": ["bank_statement", "pay_stub"], "on_conflict": "append"},
     )
 
@@ -290,3 +293,49 @@ async def test_another_companys_file_is_a_404(client: AsyncClient, db: AsyncSess
 
     assert resp.status_code == 404
     assert mine is not None
+
+
+async def test_the_409_body_is_what_the_dialog_will_render(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-850 REVIEW — the REFUSAL'S JSON, which nothing asserted.
+
+    `DraftConflictPublic.of` is the exception-to-response mapping LP-851's dialog is built against,
+    and every existing assertion about a conflict reads the EXCEPTION OBJECT at the service layer.
+    Between the two sits `model_dump(mode="json")` inside an `HTTPException` detail — UUIDs and
+    datetimes have to survive it, and a failure there is a 500, not a 409.
+    """
+    loan_file, token = await _file(db)
+    await db.commit()
+
+    first = await client.post(
+        f"{API}/{loan_file.display_id}/outbound/compose",
+        headers=_auth(token),
+        json={"document_types": ["bank_statement"]},
+    )
+    assert first.status_code == 201, first.text
+
+    refused = await client.post(
+        f"{API}/{loan_file.display_id}/outbound/compose",
+        headers=_auth(token),
+        json={"document_types": ["pay_stub"]},
+    )
+    assert refused.status_code == 409, refused.text
+
+    envelope = refused.json()["error"]
+    assert envelope["type"] == "conflict"
+    # THE FALLBACK SENTENCE. It was "Request failed" — true, and useless to somebody being asked
+    # to choose between appending and sending.
+    assert envelope["message"] == "There is already an open draft to the borrower."
+
+    detail = envelope["data"]
+    assert [d["party"] for d in detail["decisions_required"]] == ["borrower"]
+    decision = detail["decisions_required"][0]
+    # THE CONTENTS AND THE AGE, which is the whole reason the refusal carries a body at all.
+    assert [n["title"] for n in decision["open_draft"]["needs"]] == ["bank statement"]
+    assert [n["title"] for n in decision["adding"]] == ["pay stub"]
+    assert decision["open_draft"]["body_edited"] is False
+    # SERIALISED, not left as a UUID/datetime that `model_dump(mode="json")` would have choked on.
+    assert isinstance(decision["open_draft"]["id"], str)
+    assert isinstance(decision["open_draft"]["created_at"], str)
+    assert detail["would_create"] == []

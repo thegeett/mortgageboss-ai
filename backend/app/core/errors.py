@@ -46,12 +46,23 @@ _GENERIC_500_MESSAGE = "An unexpected error occurred. Please try again."
 
 
 def error_body(
-    type_: str, message: str, details: list[dict[str, str]] | None = None
+    type_: str,
+    message: str,
+    details: list[dict[str, str]] | None = None,
+    data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build the error envelope. ``details`` is included only when provided."""
+    """Build the error envelope. ``details`` and ``data`` are included only when provided.
+
+    ``details`` is the per-FIELD list a validation error carries. ``data`` is a STRUCTURED PAYLOAD
+    a refusal needs the caller to act on — LP-850's open-draft conflict is the first: the dialog
+    has to name the draft, its contents and its age, and "Request failed" is not something a
+    processor can answer.
+    """
     error: dict[str, Any] = {"type": type_, "message": message}
     if details is not None:
         error["details"] = details
+    if data is not None:
+        error["data"] = data
     return {"error": error}
 
 
@@ -82,11 +93,26 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
     through leaks nothing. The ``type`` is derived from the status code.
     """
     error_type = _STATUS_TO_TYPE.get(exc.status_code, "http_error")
-    message = exc.detail if isinstance(exc.detail, str) else "Request failed"
+    # LP-850 REVIEW — A DICT DETAIL USED TO BE DISCARDED HERE, and with it the entire refusal.
+    # LP-850's three request routes raise `HTTPException(409, detail=DraftConflictPublic...)` so the
+    # UI can render the open draft, its contents and its age without a second round trip. Every
+    # assertion about that payload was written against the EXCEPTION OBJECT at the service layer,
+    # so nothing noticed that the client received `{"type": "conflict", "message": "Request
+    # failed"}` and none of the contents. A structured detail now travels as `error.data`; a string
+    # detail behaves exactly as before.
+    message = "Request failed"
+    data: dict[str, Any] | None = None
+    if isinstance(exc.detail, str):
+        message = exc.detail
+    elif isinstance(exc.detail, dict):
+        data = exc.detail
+        supplied = exc.detail.get("message")
+        if isinstance(supplied, str) and supplied:
+            message = supplied
     headers = getattr(exc, "headers", None)
     return JSONResponse(
         status_code=exc.status_code,
-        content=error_body(error_type, message),
+        content=error_body(error_type, message, data=data),
         headers=headers,
     )
 

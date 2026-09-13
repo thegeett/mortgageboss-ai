@@ -136,10 +136,20 @@ class DraftConflictPublic(BaseModel):
 
     decisions_required: list[DraftDecisionPublic]
     would_create: list[WouldCreatePublic]
+    #: LP-850 REVIEW — the sentence shown if anything renders the envelope's `message` rather than
+    #: this payload. The envelope reads this key, and its fallback is "Request failed", which tells
+    #: a processor nothing about a refusal whose entire point is that THEY have to choose.
+    message: str = ""
 
     @classmethod
     def of(cls, exc: DraftDecisionRequired) -> DraftConflictPublic:
+        parties = [conflict.party.value for conflict in exc.decisions_required]
+        if len(parties) == 1:
+            summary = f"There is already an open draft to the {parties[0]}."
+        else:
+            summary = f"There are already open drafts to {len(parties)} parties."
         return cls(
+            message=summary,
             decisions_required=[
                 DraftDecisionPublic(
                     party=conflict.party.value,

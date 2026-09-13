@@ -236,7 +236,7 @@ async def build_party_draft(
     """
     from app.models.communication import CommunicationDirection, CommunicationStatus
     from app.models.communication_needs_item import CommunicationNeedsItem
-    from app.services.email_draft import _identification, render_draft_body
+    from app.services.email_draft import _regenerate, draft_template_key, get_open_draft
 
     if party is ResponsibleParty.PROCESSOR:
         raise ValueError("A processor orders these; there is nobody to send a request to.")
@@ -250,19 +250,28 @@ async def build_party_draft(
         # a clock that will never start — the exact state this ticket exists to end.
         raise ValueError("There is no address on this file for that party.")
 
-    key = template_key_for(party)
-    draft = (
-        await db.execute(
-            only_active(
-                select(Communication).where(
-                    Communication.loan_file_id == loan_file.id,
-                    Communication.status == CommunicationStatus.DRAFT,
-                    Communication.template_key == key,
-                ),
-                Communication,
-            )
-        )
-    ).scalar_one_or_none()
+    # LP-850 REVIEW — THE KEY THE RENDERER WILL STAMP. This was `template_key_for(party)`, LP-841's
+    # per-party name, which `_regenerate` then overwrote with the real one on the next rewrite — so
+    # the row's key depended on whether anything had regenerated it yet. `document_request_title`
+    # paired with a `template_version` names no template that has ever existed, which is the
+    # ADR-401 breakage LP-843 was written to fix; creating rows with it and correcting them later
+    # is not a fix. `_legacy_draft_keys` still reads the old name, which is what keeps a draft
+    # written by the previous code findable.
+    key = draft_template_key(party)
+    # LP-850 REVIEW — THE THIRD DEFINITION OF "THIS PARTY'S OPEN DRAFT", and the one that was not
+    # merged. This searched on `template_key == template_key_for(party)`, which is LP-841's LEGACY
+    # per-party key; `email_draft` has written LP-843's key since that ticket. Measured across all
+    # eight parties, only `employer` matched — so for the other seven this found no draft that
+    # `email_draft` had made, and created a SECOND open draft for one party. That is exactly the
+    # invariant LP-850 exists to hold ("the second open draft cannot be created"), broken through a
+    # module LP-850 did not touch.
+    #
+    # It is the same defect `_legacy_draft_keys` records for LP-843's compatibility arm and
+    # `_outstanding_needs` records for LP-850 itself: one audience, three expressions. This is the
+    # third, and it now reads the same one the other two do. `get_open_draft` also returns the
+    # NEWEST rather than raising on two, which `scalar_one_or_none` did — and two is a state this
+    # file's own bug has been able to produce.
+    draft = await get_open_draft(db, loan_file_id=loan_file.id, party=party)
 
     if draft is None:
         draft = Communication(
@@ -303,23 +312,24 @@ async def build_party_draft(
             existing.add(need.id)
     await db.flush()
 
-    # LP-843 — THE PARTY'S OWN TEMPLATE. This rendered the BORROWER's file for every party, which
-    # is how a title company came to read "we are working through your loan file and there are a few
-    # documents we still need from you". The renderer picks the template from the party now, so the
-    # one thing this call had to say is the one thing it was not saying.
-    borrower_name, property_address = await _identification(db, loan_file=loan_file)
-    rendered = render_draft_body(
-        loan_file,
-        list(request.needs),
-        party=party,
-        borrower_name=borrower_name,
-        property_address=property_address,
-        framing=None,
-    )
-    draft.subject = rendered.subject
-    draft.body = rendered.body
-    draft.template_version = rendered.version
-    await db.flush()
+    # LP-843 — THE PARTY'S OWN TEMPLATE, so a title company stops reading the borrower's letter.
+    #
+    # LP-850 REVIEW — VIA `_regenerate`, WHICH IS THE SAME REWRITE `email_draft` DOES. This built
+    # its own render call, and now that the lookup above finds drafts `email_draft` created, three
+    # differences between the two became reachable on the same row:
+    #
+    #   * it rendered from `request.needs` (PENDING|REJECTED) rather than from the draft's
+    #     MEMBERSHIP, so a carried-forward REQUESTED need stayed joined to the draft and vanished
+    #     from its words — and `send_draft` marks every need in the membership, including one the
+    #     borrower was never shown;
+    #   * it did not pass `upload_link_url`, which is LP-834's defect exactly: the link lives only
+    #     in the body, its token is hashed in `upload_links`, and a render without it is not
+    #     recoverable;
+    #   * it stamped `template_version` without `template_key`, which is the ADR-401 pair LP-848
+    #     put back together.
+    #
+    # One rewrite, one set of fixes. The body now always says what the membership holds.
+    await _regenerate(db, draft=draft, loan_file=loan_file)
     # A PARTY AND A COUNT. Never the address, never the document titles.
     logger.info(
         "party_draft_built",
