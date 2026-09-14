@@ -269,6 +269,93 @@ async def test_the_processor_is_not_blocked_after_deleting(
     assert titles, "the new draft asks for nothing"
 
 
+# --- LP-859 §3 — the same predicate, asked by the timeline ------------------------------------ #
+
+
+async def test_a_blank_compose_draft_says_nothing_is_written_yet(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """LP-859 §3 — the row said the opposite of the pane beside it.
+
+    `_summarise` returned "A document request is being prepared" for EVERY draft, so a compose draft
+    with no template, no recipient, no subject, no body and nothing linked described itself as a
+    document request — while the right pane correctly read "New message · To nobody yet". Screenshot
+    `03-compose-row-wrong-summary.png`.
+
+    ONE PREDICATE, NOT TWO. `draft_row_is_blank` is `_is_untouched_compose_draft`'s row half, shared
+    rather than restated; the needs half comes from the batch the timeline already loads.
+    """
+    company, user, token = await _company_user_token(db, slug="blankrow")
+    loan_file = await create_loan_file(
+        db, company_id=company.id, loan_program=LoanProgram.CONVENTIONAL
+    )
+    draft = await create_compose_draft(db, loan_file=loan_file, actor_user_id=user.id)
+    await db.commit()
+
+    row = next(
+        e
+        for e in (
+            await client.get(f"{API}/{loan_file.display_id}/timeline", headers=_auth(token))
+        ).json()["entries"]
+        if e["id"] == str(draft.id)
+    )
+
+    assert row["summary"] == "Nothing written yet"
+    assert row["nothing_written"] is True
+
+
+async def test_it_stops_saying_so_the_moment_a_recipient_is_typed(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """§3's done-when: *"it changes the moment anything is typed into it."*
+
+    THE CONTROL on the case above — "Nothing written yet" would otherwise be satisfied by a build
+    that says it about every draft, which is the defect with different words.
+    """
+    company, user, token = await _company_user_token(db, slug="typedrow")
+    loan_file = await create_loan_file(
+        db, company_id=company.id, loan_program=LoanProgram.CONVENTIONAL
+    )
+    draft = await create_compose_draft(
+        db, loan_file=loan_file, recipient="jane@borrower.example", actor_user_id=user.id
+    )
+    await db.commit()
+
+    row = next(
+        e
+        for e in (
+            await client.get(f"{API}/{loan_file.display_id}/timeline", headers=_auth(token))
+        ).json()["entries"]
+        if e["id"] == str(draft.id)
+    )
+
+    assert row["summary"] == "A document request is being prepared"
+    assert row["nothing_written"] is False
+
+
+async def test_a_generated_request_still_describes_itself_as_one(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """THE CASE THAT MUST NOT CHANGE. A request carries a template key and needs links, so neither
+    half of the predicate holds — and a build that summarised everything as "Nothing written yet"
+    would pass the first test and break every row a processor actually reads."""
+    loan_file, _user, token, draft = await _file_with_a_generated_draft(db, slug="genrow")
+
+    row = next(
+        e
+        for e in (
+            await client.get(f"{API}/{loan_file.display_id}/timeline", headers=_auth(token))
+        ).json()["entries"]
+        if e["id"] == str(draft.id)
+    )
+
+    assert row["summary"] == "A document request is being prepared"
+    assert row["nothing_written"] is False
+    # AND THE ROW STILL NAMES WHAT IS INSIDE, which is the sub-line LP-852 added and the thing that
+    # makes "prepared" specific rather than four identical rows.
+    assert row["documents"], "the fixture's draft carries no documents"
+
+
 # --- §8 — the untouched compose draft -------------------------------------------------------- #
 
 

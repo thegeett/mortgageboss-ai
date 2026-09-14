@@ -36,6 +36,7 @@ function draft(over: Partial<TimelineEntry> = {}): TimelineEntry {
     documents: [],
     actor_name: null,
     body_edited: false,
+    nothing_written: false,
     created_at: new Date(Date.now() - 3600 * 1000).toISOString(),
     party: "borrower",
     detail: {},

@@ -58,6 +58,15 @@ export interface TimelineEntry {
   /** LP-852 — `Draft · edited · 2m`. LP-853's `body_format` is where this is stored. */
   body_edited: boolean;
   /**
+   * LP-859 §3 — nothing has been written into this draft: no template, no recipient, no subject,
+   * no body, nothing linked. The row reads `New message` / `Nothing written yet`.
+   *
+   * FROM THE SERVER, for the reason `party` is. `email_reply.draft_row_is_blank` decides it — the
+   * same predicate the hard delete uses — and one of the fields it reads (`template_key`) is not on
+   * this entry at all, so a client-side version would be a DIFFERENT rule wearing the same name.
+   */
+  nothing_written: boolean;
+  /**
    * LP-852 — when the draft came into existence, which is NOT `at`.
    *
    * `at` is `sent_at or created_at` so the list orders by when the borrower heard from us; the

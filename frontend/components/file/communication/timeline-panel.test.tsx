@@ -109,6 +109,7 @@ const MESSAGE: TimelineEntry = {
   documents: [],
   actor_name: null,
   body_edited: false,
+  nothing_written: false,
   created_at: new Date(Date.now() - 3600 * 1000).toISOString(),
   detail: {},
 };
@@ -518,6 +519,53 @@ describe("when it happened (LP-838)", () => {
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
     expect(screen.getByText(/^Draft · cannot be sent yet · /)).toBeTruthy();
+  });
+
+  it("says New message on a draft nobody has written into", () => {
+    // LP-859 §3 — this row read `Draft · cannot be sent yet`. That branch fired on ANY outbound
+    // draft with no counterparty, which a brand-new compose draft is, so the no-address warning was
+    // being said about a draft nobody had written yet. A warning that means two things is read as
+    // neither. Screenshot `03-compose-row-wrong-summary.png`.
+    loaded([
+      {
+        ...MESSAGE,
+        id: "c1",
+        direction: "outbound",
+        status: "draft",
+        counterparty: null,
+        party: null,
+        nothing_written: true,
+        summary: "Nothing written yet",
+      },
+    ]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(screen.getByText(/^New message · /)).toBeTruthy();
+    expect(screen.queryByText(/cannot be sent yet/)).toBeNull();
+    // The contract pairs the two strings (§6, §10); the subtitle comes from the server.
+    expect(screen.getByText("Nothing written yet")).toBeTruthy();
+  });
+
+  it("still says cannot be sent yet on a party draft with no address", () => {
+    // THE CASE THE BRANCH WAS WRITTEN FOR (LP-857), and the control on the case above: narrowing it
+    // must not delete it. A party draft is created even when the file has no address for that
+    // party, and of 166 document types 13 had no address anywhere — so this is the common case for
+    // those rather than an edge.
+    loaded([
+      {
+        ...MESSAGE,
+        id: "p1",
+        direction: "outbound",
+        status: "draft",
+        counterparty: null,
+        party: "title",
+        nothing_written: false,
+      },
+    ]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(screen.getByText(/^Draft · cannot be sent yet · /)).toBeTruthy();
+    expect(screen.queryByText(/New message/)).toBeNull();
   });
 
   it("does not say it about an inbound message whose sender we could not read", () => {

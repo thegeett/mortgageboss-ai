@@ -269,6 +269,32 @@ async def delete_draft(
     logger.info("draft_deleted", loan_file_id=str(loan_file.id))
 
 
+def draft_row_is_blank(draft: Communication) -> bool:
+    """Whether this ROW holds nothing a person put there — no template, no To, no Subject, no body.
+
+    LP-859 §3 — SPLIT OUT SO THERE IS ONE DEFINITION OF "UNTOUCHED", NOT TWO. The timeline needs the
+    same question answered to summarise a blank compose draft as `Nothing written yet` instead of
+    `A document request is being prepared`, and the ticket is explicit: *"use the predicate that
+    already exists… do not write a second one."*
+
+    THE SPLIT IS WHERE THE QUERY IS, and that is the whole reason it is a split rather than a call.
+    `_is_untouched_compose_draft` also asks whether any `CommunicationNeedsItem` points at the
+    draft, which costs a round trip; `build_timeline` answers that for the WHOLE list in one query
+    already (`_documents_by_message`) and its own comment protects that — *"two more queries for the
+    whole list, not two per row"*. Calling the async predicate per row would turn a two-query page
+    into an N+1 to re-derive something the caller is holding.
+
+    So this is the row-only half, shared verbatim, and each caller supplies the link half from what
+    it has. A `template_key` disqualifies a row here exactly as it does there: a generated request is
+    not a compose draft even when a processor has emptied it.
+    """
+    if draft.template_key is not None:
+        return False
+    if (draft.recipient or "").strip() or (draft.subject or "").strip():
+        return False
+    return not (draft.body or "").strip()
+
+
 async def _is_untouched_compose_draft(db: AsyncSession, *, draft: Communication) -> bool:
     """Whether this row never held anything — the only thing a hard delete may remove.
 
@@ -291,11 +317,7 @@ async def _is_untouched_compose_draft(db: AsyncSession, *, draft: Communication)
     rather than tested: a test would have to construct a row no code path can produce, which asserts
     the fixture rather than the product.
     """
-    if draft.template_key is not None:
-        return False
-    if (draft.recipient or "").strip() or (draft.subject or "").strip():
-        return False
-    if (draft.body or "").strip():
+    if not draft_row_is_blank(draft):
         return False
     linked = await db.execute(
         select(CommunicationNeedsItem.needs_item_id).where(

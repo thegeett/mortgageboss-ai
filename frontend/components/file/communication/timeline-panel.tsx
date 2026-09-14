@@ -122,6 +122,17 @@ function statusLine(entry: TimelineEntry): string {
     //
     // A WORD, NOT A COLOUR. `text-warning` carries it too (see the row), but the Ledger's rule is
     // that a state is colour AND glyph AND word, and this is the word.
+    // LP-859 §3 — A BLANK COMPOSE DRAFT IS NOT A PARTY DRAFT WITH NO ADDRESS, and this branch
+    // could not tell them apart: it fired on any outbound draft with no counterparty, which a
+    // brand-new compose draft is. The screen then read `Draft · cannot be sent yet` over "A
+    // document request is being prepared", for a draft that asks for nothing and says nothing,
+    // while the pane beside it correctly read "New message · To nobody yet".
+    //
+    // "Cannot be sent yet" is the NO-ADDRESS warning. Saying it about a draft nobody has written
+    // yet makes it mean two things, and a warning that means two things is read as neither.
+    if (entry.nothing_written) {
+      return `New message · ${when}`;
+    }
     if (isOutboundDraft(entry) && entry.counterparty === null) {
       return `Draft · cannot be sent yet · ${when}`;
     }

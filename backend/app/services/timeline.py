@@ -47,6 +47,7 @@ from app.models.helpers import only_active
 from app.models.inbound_attachment import InboundAttachment
 from app.models.loan_file import LoanFile
 from app.models.user import User
+from app.services.email_reply import draft_row_is_blank
 
 #: Every activity type that DESCRIBES a `Communication` rather than being an event in its own right.
 #:
@@ -157,6 +158,15 @@ class TimelineEntry:
     actor_name: str | None = None
     #: LP-852 — `Draft · edited · 2m`. LP-853's `body_format` is the one place this is stored.
     body_edited: bool = False
+    #: LP-859 §3 — NOTHING HAS BEEN WRITTEN INTO THIS DRAFT: no template, no recipient, no subject,
+    #: no body and nothing linked. Decided by `email_reply.draft_row_is_blank`, the same predicate
+    #: the hard delete uses, rather than by a second definition of "untouched".
+    #:
+    #: FROM THE SERVER, for the reason `party` is. The client could compute something like it from
+    #: the fields on this row and would be computing a DIFFERENT rule — the delete path's version
+    #: reads `template_key`, which is not on the entry at all. Two rules for "blank" is how a row
+    #: says "New message" beside a pane that says otherwise, which is the defect this section is.
+    nothing_written: bool = False
     #: LP-852 — WHEN IT WAS WRITTEN, which is not `at`. `at` is `sent_at or created_at` so the list
     #: orders by when the borrower heard from us; the "since you last looked" dot is about when the
     #: draft came into existence, and for a sent message those are different days.
@@ -260,7 +270,7 @@ def _message_at(message: Communication) -> datetime:
     return message.sent_at or message.created_at
 
 
-def _summarise(message: Communication) -> str:
+def _summarise(message: Communication, *, asks_for_nothing: bool = False) -> str:
     """One line describing a message, in a processor's words.
 
     NEVER THE BODY. `phase4.md`'s standing rule is that message content stays out of anything that
@@ -270,6 +280,25 @@ def _summarise(message: Communication) -> str:
     if message.direction is CommunicationDirection.INBOUND:
         return "A message arrived"
     if message.status is CommunicationStatus.DRAFT:
+        # LP-859 §3 — A BLANK COMPOSE DRAFT IS NOT A DOCUMENT REQUEST, and this said it was. The
+        # row for a draft with no template, no recipient, no subject, no body and nothing linked
+        # read "A document request is being prepared" while the pane beside it correctly read
+        # "New message · To nobody yet". The draft asks for nothing and says nothing; the contract
+        # names the words (`lp858-draft-panel.md` §6 and §10).
+        #
+        # `draft_row_is_blank` IS THE PREDICATE THE HARD DELETE USES, shared rather than restated —
+        # `email_reply.py` owns it. `asks_for_nothing` is the other half, passed in because the
+        # caller has already answered it for the whole list in one query; see the call site.
+        #
+        # AND `asks_for_nothing` CANNOT DECIDE ANYTHING TODAY — measured, not assumed: forcing it
+        # true leaves every test green. Every site that writes a `CommunicationNeedsItem` attaches
+        # it to a draft whose creation set a `template_key`, so `draft_row_is_blank` has already
+        # returned False by the time this is read. It is the same unreachability
+        # `_is_untouched_compose_draft` carries for its own needs-link check, and it is kept for the
+        # same reason: the two callers then answer ONE question the same way, and the day something
+        # links a need to a template-less draft this row does not start lying about it.
+        if asks_for_nothing and draft_row_is_blank(message):
+            return "Nothing written yet"
         return "A document request is being prepared"
     if message.status is CommunicationStatus.QUEUED:
         return "An automatic reply is queued"
@@ -482,7 +511,15 @@ async def build_timeline(
             id=message.id,
             kind=TimelineKind.MESSAGE,
             at=_message_at(message),
-            summary=_summarise(message),
+            # LP-859 §3 — the needs half of "untouched", from the batch already loaded above
+            # rather than from a per-row query. `documents` is built by joining
+            # `communication_needs_items`, which is the same source the hard-delete predicate reads.
+            summary=_summarise(message, asks_for_nothing=not documents.get(message.id)),
+            nothing_written=(
+                message.status is CommunicationStatus.DRAFT
+                and not documents.get(message.id)
+                and draft_row_is_blank(message)
+            ),
             documents=documents.get(message.id, ()),
             actor_name=(
                 actors.get(message.initiated_by_user_id) if message.initiated_by_user_id else None

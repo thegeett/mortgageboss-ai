@@ -64,6 +64,8 @@ class TimelineEntryPublic(BaseModel):
     actor_name: str | None
     #: LP-852 — `Draft · edited · 2m`. LP-853's `body_format` is where this is stored.
     body_edited: bool
+    #: LP-859 §3 — nothing has been written into this draft. The row reads `New message`.
+    nothing_written: bool
     #: LP-852 — when the draft came into existence, which is NOT `at` (`sent_at or created_at`). The
     #: "since you last looked" dot is about creation, and for a sent message those differ.
     created_at: datetime | None
@@ -89,6 +91,7 @@ class TimelineEntryPublic(BaseModel):
             documents=list(entry.documents),
             actor_name=entry.actor_name,
             body_edited=entry.body_edited,
+            nothing_written=entry.nothing_written,
             created_at=entry.created_at,
             detail=entry.detail,
             party=entry.party,
