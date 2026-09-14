@@ -99,6 +99,13 @@ vi.mock("@/components/file/communication/message-editor", () => ({
           HTML once, which is a change to `message-editor.tsx` rather than to this stub. Making the
           stub faithful without that fix would turn this red rather than green, which is a true
           signal about the product and a broken suite — so the claim is written down here instead. */}
+      {/* LP-859 §3 follow-up — WHAT TIPTAP EMITS FOR AN EMPTY DOCUMENT. Measured: the seed for a
+          blank compose draft is `""`, and the editor's empty document serialises to `<p></p>`. So
+          typing one character and deleting it leaves a string that differs from the seed while
+          holding no message at all. */}
+      <button type="button" onClick={() => onChange("<p></p>")}>
+        simulate-typed-then-cleared
+      </button>
       <button
         type="button"
         onClick={() => onChange(format === "html" ? value : emailBodyToHtml(value))}
@@ -235,6 +242,57 @@ describe("the autosave", () => {
 
     expect(mockSave).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("does not save a blank draft that was typed in and cleared again", async () => {
+    // LP-859 §3 FOLLOW-UP — THE WAY TO DEFEAT §3, found in review and reachable in two keystrokes.
+    //
+    // A blank compose draft seeds the editor with `""`. Tiptap's empty document serialises to
+    // `<p></p>`, so type one character and delete it and `html !== openedAs` is true: the debounce
+    // saves `body = "<p></p>"`. The server's `draft_row_is_blank` then tests `(body or "").strip()`
+    // and finds it non-empty FOREVER — so the row reverts to "cannot be sent yet" over "A document
+    // request is being prepared" for a draft that is visibly empty, and
+    // `_is_untouched_compose_draft` refuses the hard delete, leaving exactly the `deleted_at` row
+    // for a message that never held a word that LP-858 §8 exists to prevent.
+    //
+    // FIXED ON THIS SIDE, WITH THE CONVERTER THAT ALREADY EXISTS. `sanitise.py` declined an
+    // html-to-plain on the backend in writing — *"a second implementation on this side would be
+    // two answers to one question"* — and `htmlToEmailBody` already gives the right answer here.
+    const { typing } = await open(draft({ template_key: null, body: "", subject: null }));
+    vi.useFakeTimers();
+
+    fireEvent.click(screen.getByRole("button", { name: "simulate-typed-then-cleared" }));
+    await vi.advanceTimersByTimeAsync(1000);
+    vi.useRealTimers();
+
+    expect(mockSave).not.toHaveBeenCalled();
+    // THE CONTROL, through the same stub and the same debounce: real words still save. Without it
+    // this passes on an autosave that was simply switched off.
+    vi.useFakeTimers();
+    fireEvent.click(typing);
+    await vi.advanceTimersByTimeAsync(1000);
+    vi.useRealTimers();
+    expect(mockSave).toHaveBeenCalledTimes(1);
+  });
+
+  it("saves a draft the processor cleared out, because that is a real change", async () => {
+    // THE OTHER SIDE OF THE SAME GUARD, and it was untested until a mutant said so: suppressing
+    // whenever the NEW body is empty passed every case above. That version loses a deliberate
+    // "select all, delete" on a generated draft — the processor empties it, nothing saves, and the
+    // old words come back on reload.
+    //
+    // The guard is about BOTH sides being empty. Here `openedAs` holds a real message, so clearing
+    // it is a change and must be stored.
+    const { typing } = await open(draft());
+    expect(typing).toBeTruthy(); // the seeded body is non-empty — see the fixture
+    vi.useFakeTimers();
+
+    fireEvent.click(screen.getByRole("button", { name: "simulate-typed-then-cleared" }));
+    await vi.advanceTimersByTimeAsync(1000);
+    vi.useRealTimers();
+
+    expect(mockSave).toHaveBeenCalledTimes(1);
+    expect((mockSave.mock.calls[0]?.[0] as { body: string }).body).toBe("<p></p>");
   });
 
   it("closing a draft nobody typed in saves nothing", async () => {

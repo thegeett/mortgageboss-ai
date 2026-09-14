@@ -422,7 +422,28 @@ export function DraftPane({
     // refuses it and LP-851 warns about losing changes that do not exist, which is acceptance 2
     // failing by a longer route than the one it was written for. The comment above already claimed
     // this case was covered; now it is.
-    dirtyRef.current = html !== openedAs;
+    // LP-859 §3 FOLLOW-UP — AN EMPTY DOCUMENT IS NOT A CHANGE TO AN EMPTY DRAFT.
+    //
+    // A blank compose draft seeds this editor with `""`, and Tiptap's empty document serialises to
+    // `<p></p>`. So typing one character and deleting it makes `html !== openedAs` true and the
+    // debounce saves `body = "<p></p>"` — after which the server's `draft_row_is_blank` tests
+    // `(body or "").strip()`, finds it non-empty forever, and the row reverts to "cannot be sent
+    // yet" over "A document request is being prepared" for a draft that is visibly empty.
+    // `_is_untouched_compose_draft` refuses the hard delete too, leaving precisely the `deleted_at`
+    // row for a message that never held a word that LP-858 §8 exists to prevent. Two keystrokes.
+    //
+    // ANSWERED HERE, WITH THE CONVERTER THAT ALREADY EXISTS. `sanitise.py` declined an html-to-plain
+    // on the backend in writing — *"`from-html.ts` already derives it… a second implementation on
+    // this side would be two answers to one question"* — and this is the side that holds the
+    // converter AND writes the offending value.
+    //
+    // NARROW ON PURPOSE: it suppresses the save only when NEITHER side holds a message. A
+    // formatting-only edit (bold, a bullet) still saves, because its plain form is not empty; and
+    // clearing a draft that HAD words is a real change, because `openedAs` is not empty then.
+    const changed = html !== openedAs;
+    const neitherHoldsAMessage =
+      htmlToEmailBody(html).trim() === "" && htmlToEmailBody(openedAs).trim() === "";
+    dirtyRef.current = changed && !neitherHoldsAMessage;
   }
 
   function close() {
