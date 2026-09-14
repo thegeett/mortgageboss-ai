@@ -101,8 +101,15 @@ export default function CommunicationPage() {
   // just did it on purpose, and an error message for their own successful action is the one case
   // where that answer is wrong.
   const deleted = deletedIds.has(chosen ?? "") ? null : chosen;
-  const autoSelected =
-    narrow || closed ? null : (openDrafts.find((d) => !deletedIds.has(d.id))?.id ?? null);
+  // LP-859 §4 — ONE LIST OF WHAT IS STILL SELECTABLE, derived once.
+  //
+  // The timeline refetch is not instant, so for the frame between the 204 and the new list a
+  // deleted row is still in `entries`. Two places need to know what is left — which draft to select,
+  // and which of the two empty states the pane shows — and deriving it twice is how they disagree:
+  // the first version of §4's branch tested `openDrafts.length` and showed the third empty state
+  // after the LAST draft was deleted, over a rail about to have nothing to select.
+  const liveDrafts = openDrafts.filter((draft) => !deletedIds.has(draft.id));
+  const autoSelected = narrow || closed ? null : (liveDrafts[0]?.id ?? null);
   const selected = deleted ?? autoSelected;
 
   const compose = useComposeDraft(id);
@@ -180,8 +187,16 @@ export default function CommunicationPage() {
               messageId={selected}
               onDeleted={(draftId) => {
                 // §2.1 rule 6 — the next newest open draft, or the empty state. `closed` stays
-                // false, because a delete is not a close: the processor is still working, and the
-                // next draft is what they want in front of them.
+                // false HERE, because a delete is not a close: the processor is still working, and
+                // the next draft is what they want in front of them.
+                //
+                // LP-859 §4 — AND THAT IS TRUE OF ONE OF THE TWO CALLERS, which this comment used
+                // to claim of both. `removeDraft` (the Delete button) calls `onDeleted` alone, so
+                // the next draft is selected. The ✕-discard path in `close()` calls `onDeleted` AND
+                // `onClose`, so `closed` becomes true and nothing is selected — which is RIGHT, and
+                // is why the Delete button never showed §4's false sentence while ✕ always did.
+                // The processor pressed ✕: they closed. Left as it is, and the empty state below
+                // now says which of the two happened rather than claiming the file has no drafts.
                 setDeletedIds((seen) => new Set(seen).add(draftId));
                 setChosen(null);
               }}
@@ -193,13 +208,41 @@ export default function CommunicationPage() {
                 setClosed(true);
               }}
             />
-          ) : (
+          ) : liveDrafts.length === 0 ? (
             // §2.1 rule 4's second half: sent history with nothing open carries the same empty
-            // state INSIDE the right pane.
+            // state INSIDE the right pane. THIS ONE IS TRUE — there really are no drafts.
             <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
               <h2 className="text-base font-semibold text-foreground">No drafts on this file</h2>
               <p className="text-sm text-muted-foreground">
                 Request documents from a finding, or write a message.
+              </p>
+            </div>
+          ) : (
+            // LP-859 §4 — THE THIRD STATE, which was borrowing the second one's words.
+            //
+            // Reported from `04-empty-state-over-a-full-rail.png`: a rail listing two BORROWER
+            // drafts, an EMPLOYER draft, a LENDER draft and a sent message, beside a pane claiming
+            // the file had none. The screen contradicted itself, and the half that was wrong had
+            // the larger type.
+            //
+            // THE STRING IS NOT QUOTED IN THIS COMMENT, deliberately. §4's acceptance command
+            // counts it in this file and expects exactly the two branches that render it; a comment
+            // repeating it makes the count unreadable. Three tickets running have had an acceptance
+            // command defeated by the fix's own prose — this is the half of that which is mine.
+            //
+            // One empty state was doing two jobs. Closing the pane sets `closed`, `autoSelected`
+            // goes null for the rest of the mount — CORRECT and deliberate, the pane must stay
+            // dismissed — and what got rendered in its place was a sentence about a file with no
+            // drafts. Nothing distinguished "this file has none" from "you closed the one you were
+            // reading".
+            //
+            // THE BEHAVIOUR IS UNCHANGED. It would be easy to "fix" this by re-selecting a draft on
+            // close, which trades a false sentence for a pane that cannot be dismissed. The fix is
+            // the words.
+            <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+              <h2 className="text-base font-semibold text-foreground">No draft selected</h2>
+              <p className="text-sm text-muted-foreground">
+                Pick one from the list, or start a new message.
               </p>
             </div>
           )}

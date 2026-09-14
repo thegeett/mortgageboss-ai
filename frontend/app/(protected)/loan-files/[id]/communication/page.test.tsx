@@ -312,6 +312,53 @@ describe("the landing state", () => {
     expect(selectedMessage()).toBe("d-new");
   });
 
+  it("a closed pane says no draft is selected, not that the file has none", () => {
+    // LP-859 §4 — the screen contradicted itself. Screenshot `04-empty-state-over-a-full-rail.png`:
+    // a rail listing four drafts and a sent message, beside a pane reading "No drafts on this
+    // file". The half that was wrong had the larger type.
+    //
+    // One empty state was doing two jobs. Closing sets `closed`, `autoSelected` goes null for the
+    // rest of the mount — correct and deliberate, the pane must stay dismissed — and what rendered
+    // in its place was a sentence about a file with no drafts.
+    entries([{ id: "d-new" }, { id: "d-old" }]);
+    render(<CommunicationPage />);
+    expect(selectedMessage()).toBe("d-new");
+
+    fireEvent.click(screen.getByRole("button", { name: "close-pane" }));
+
+    expect(screen.getByText("No draft selected")).toBeTruthy();
+    // THE SENTENCE THAT WAS FALSE. Absent, and the rail that made it false is still there — a test
+    // asserting only the new words would pass on a build that had emptied the list instead.
+    expect(screen.queryByText("No drafts on this file")).toBeNull();
+    expect(screen.getByTestId("rail")).toBeTruthy();
+  });
+
+  it("a file with only sent messages still says the file has no drafts", () => {
+    // THE CASE THAT MUST NOT CHANGE, and the control on the case above: with no open drafts the old
+    // words are TRUE, and a build that replaced them everywhere would pass the test above while
+    // telling a processor to pick from a list that has nothing to pick.
+    entries([
+      { id: "s-1", status: "sent" },
+      { id: "s-2", status: "sent" },
+    ]);
+    render(<CommunicationPage />);
+
+    expect(screen.getByText("No drafts on this file")).toBeTruthy();
+    expect(screen.queryByText("No draft selected")).toBeNull();
+  });
+
+  it("says no draft is selected after the last draft is deleted only if others remain", () => {
+    // THE TWO EMPTY STATES MEET HERE. Delete the only draft and the file has none left, so the old
+    // words are the true ones — even though the pane also became empty by an action.
+    entries([{ id: "d-only" }, { id: "s-1", status: "sent" }]);
+    render(<CommunicationPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "delete-pane" }));
+
+    expect(screen.getByText("No drafts on this file")).toBeTruthy();
+    expect(screen.queryByText("No draft selected")).toBeNull();
+  });
+
   it("selecting a row swaps the pane and leaves the layout alone", () => {
     // §2 — "Selecting a row swaps the right pane's content and moves nothing." The rail is present
     // before and after, which is the half a list that collapsed on selection would fail.
