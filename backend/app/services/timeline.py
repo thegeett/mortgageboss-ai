@@ -162,10 +162,14 @@ class TimelineEntry:
     #: no body and nothing linked. Decided by `email_reply.draft_row_is_blank`, the same predicate
     #: the hard delete uses, rather than by a second definition of "untouched".
     #:
-    #: FROM THE SERVER, for the reason `party` is. The client could compute something like it from
-    #: the fields on this row and would be computing a DIFFERENT rule — the delete path's version
-    #: reads `template_key`, which is not on the entry at all. Two rules for "blank" is how a row
-    #: says "New message" beside a pane that says otherwise, which is the defect this section is.
+    #: FROM THE SERVER, for the reason `party` is. Two rules for "blank" is how a row says
+    #: "New message" beside a pane that says otherwise, which is the defect this section is.
+    #:
+    #: LP-859 REVIEW — THE REASON GIVEN HERE WAS WRONG, and the conclusion survives it. It said
+    #: `template_key` "is not on the entry at all"; it is, inside `detail`. What the client cannot
+    #: see is the BODY — deliberately, because `phase4.md` keeps message content off a list — and a
+    #: rule that cannot read the body cannot answer whether anything was written into it. That is
+    #: the argument, and it does not depend on hiding the template key.
     nothing_written: bool = False
     #: LP-852 — WHEN IT WAS WRITTEN, which is not `at`. `at` is `sent_at or created_at` so the list
     #: orders by when the borrower heard from us; the "since you last looked" dot is about when the
@@ -270,7 +274,34 @@ def _message_at(message: Communication) -> datetime:
     return message.sent_at or message.created_at
 
 
-def _summarise(message: Communication, *, asks_for_nothing: bool = False) -> str:
+def _nothing_written(message: Communication, documents: dict[UUID, tuple[str, ...]]) -> bool:
+    """Whether this row is a draft nobody has written into — the one definition of it (LP-859 §3).
+
+    THE PRECEDENCE IS `_summarise`'s, not a second opinion of it. The direction test is here because
+    that function answers INBOUND before it ever reaches the draft branch; a version without it
+    would call an inbound draft blank while the summary called it an arrival. Unreachable today —
+    `inbound_routing` writes RECEIVED — and the point is that it stays unreachable by construction
+    rather than by nobody having written that row yet.
+
+    THE NEEDS HALF COMES FROM THE CALLER'S BATCH. `documents` is loaded once for the whole list, so
+    asking per row would turn a two-query page into an N+1 to re-derive something already in hand.
+
+    LP-859 REVIEW — AND IT IS NOT THE SAME SOURCE THE HARD DELETE READS, which the previous comment
+    claimed. `_documents_by_message` joins `NeedsItem` and drops the soft-deleted;
+    `_is_untouched_compose_draft` counts any `communication_needs_items` row whatever became of the
+    need. A template-less draft whose only linked needs were soft-deleted is blank here and not
+    there. Unreachable for the usual reason — `template_key` short-circuits first — and written down
+    because "the same source" was the claim that made it look checked.
+    """
+    return (
+        message.direction is not CommunicationDirection.INBOUND
+        and message.status is CommunicationStatus.DRAFT
+        and not documents.get(message.id)
+        and draft_row_is_blank(message)
+    )
+
+
+def _summarise(message: Communication, *, nothing_written: bool = False) -> str:
     """One line describing a message, in a processor's words.
 
     NEVER THE BODY. `phase4.md`'s standing rule is that message content stays out of anything that
@@ -287,17 +318,17 @@ def _summarise(message: Communication, *, asks_for_nothing: bool = False) -> str
         # names the words (`lp858-draft-panel.md` §6 and §10).
         #
         # `draft_row_is_blank` IS THE PREDICATE THE HARD DELETE USES, shared rather than restated —
-        # `email_reply.py` owns it. `asks_for_nothing` is the other half, passed in because the
-        # caller has already answered it for the whole list in one query; see the call site.
+        # `email_reply.py` owns it. The needs half is folded into `_nothing_written` above, which is
+        # the one place either answer is derived; see the call site for why it comes from a batch.
         #
-        # AND `asks_for_nothing` CANNOT DECIDE ANYTHING TODAY — measured, not assumed: forcing it
-        # true leaves every test green. Every site that writes a `CommunicationNeedsItem` attaches
+        # AND THE NEEDS HALF CANNOT DECIDE ANYTHING TODAY — measured, not assumed: forcing it true
+        # leaves every test green. Every site that writes a `CommunicationNeedsItem` attaches
         # it to a draft whose creation set a `template_key`, so `draft_row_is_blank` has already
         # returned False by the time this is read. It is the same unreachability
         # `_is_untouched_compose_draft` carries for its own needs-link check, and it is kept for the
         # same reason: the two callers then answer ONE question the same way, and the day something
         # links a need to a template-less draft this row does not start lying about it.
-        if asks_for_nothing and draft_row_is_blank(message):
+        if nothing_written:
             return "Nothing written yet"
         return "A document request is being prepared"
     if message.status is CommunicationStatus.QUEUED:
@@ -511,15 +542,14 @@ async def build_timeline(
             id=message.id,
             kind=TimelineKind.MESSAGE,
             at=_message_at(message),
-            # LP-859 §3 — the needs half of "untouched", from the batch already loaded above
-            # rather than from a per-row query. `documents` is built by joining
-            # `communication_needs_items`, which is the same source the hard-delete predicate reads.
-            summary=_summarise(message, asks_for_nothing=not documents.get(message.id)),
-            nothing_written=(
-                message.status is CommunicationStatus.DRAFT
-                and not documents.get(message.id)
-                and draft_row_is_blank(message)
-            ),
+            # LP-859 REVIEW — ONE EXPRESSION, READ TWICE. These were two: the summary went through
+            # `_summarise`, which short-circuits on INBOUND before it reaches the draft branch, while
+            # the field checked status alone. No inbound row carries DRAFT today
+            # (`inbound_routing` writes RECEIVED), so they cannot disagree yet — but two derivations
+            # of one fact is the shape this section exists to remove, and the first edit to either
+            # would ship a row whose label and whose subtitle contradict each other.
+            summary=_summarise(message, nothing_written=_nothing_written(message, documents)),
+            nothing_written=_nothing_written(message, documents),
             documents=documents.get(message.id, ()),
             actor_name=(
                 actors.get(message.initiated_by_user_id) if message.initiated_by_user_id else None

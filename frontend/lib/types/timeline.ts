@@ -62,8 +62,14 @@ export interface TimelineEntry {
    * no body, nothing linked. The row reads `New message` / `Nothing written yet`.
    *
    * FROM THE SERVER, for the reason `party` is. `email_reply.draft_row_is_blank` decides it — the
-   * same predicate the hard delete uses — and one of the fields it reads (`template_key`) is not on
-   * this entry at all, so a client-side version would be a DIFFERENT rule wearing the same name.
+   * same predicate the hard delete uses — so a client-side version would be a DIFFERENT rule
+   * wearing the same name.
+   *
+   * LP-859 REVIEW — THE REASON GIVEN WAS WRONG AND THE CONCLUSION SURVIVES IT. This said
+   * `template_key` "is not on this entry at all"; it is, inside `detail`. The field the client
+   * genuinely cannot see is the BODY, kept off the list on purpose because `phase4.md` keeps
+   * message content out of anything that is not the message — and a rule that cannot read the body
+   * cannot say whether anything was written into it.
    */
   nothing_written: boolean;
   /**
