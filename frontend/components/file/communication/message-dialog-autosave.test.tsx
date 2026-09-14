@@ -82,7 +82,23 @@ vi.mock("@/components/file/communication/message-editor", () => ({
           editor converts a plain body on the way in. This stub echoed `value` untouched, which was
           HTML only because the caller was pre-converting — the double conversion that was §1's
           defect. So the stub was accidentally correct, and correct BECAUSE of the bug: with the
-          caller fixed it started reporting a plain body as an edit, and this test caught it. */}
+          caller fixed it started reporting a plain body as an edit, and this test caught it.
+
+          LP-859 REVIEW — AND IT IS STILL ONE STEP SHORT OF THE REAL EDITOR, WHICH BOUNDS WHAT THIS
+          TEST CAN SAY. The real editor emits `getHTML()` — ProseMirror's re-serialisation of the
+          document it built — not the string it was seeded with. Measured against the real
+          `EXTENSIONS`: seeding `emailBodyToHtml(body)` and reading `getHTML()` back differs by the
+          newline block joiner AND structurally, because `<li>text</li>` is re-serialised as
+          `<li><p>text</p></li>`. So a whitespace-tolerant comparison would not close the gap either.
+
+          WHAT THAT MEANS FOR THIS TEST: it catches a caller that pre-converts again (§1's defect
+          returning — verified by mutation, it goes red), and it CANNOT catch the mismatch between
+          `openedAs` and what the editor actually reports, because the stub's output equals
+          `openedAs` by construction. That mismatch is real and is recorded against
+          `message-dialog.tsx:154`; the honest fix is for the editor to report its own normalised
+          HTML once, which is a change to `message-editor.tsx` rather than to this stub. Making the
+          stub faithful without that fix would turn this red rather than green, which is a true
+          signal about the product and a broken suite — so the claim is written down here instead. */}
       <button
         type="button"
         onClick={() => onChange(format === "html" ? value : emailBodyToHtml(value))}
