@@ -419,6 +419,7 @@ async def test_document_change_marks_verification_stale(db_session: AsyncSession
         loan_file=loan_file,
         document_id=uuid4(),
         filename="paystub.pdf",
+        content=b"paystub bytes",
         mime_type="application/pdf",
         size=1000,
         storage_path="some/path.pdf",

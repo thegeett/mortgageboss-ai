@@ -375,12 +375,32 @@ def test_the_mismo_subject_id_moves_when_a_balance_moves() -> None:
     assert before[0][0] != after[0][0]
 
 
-def test_two_credit_reports_double_list_the_same_debt() -> None:
-    """⚠️ RECORDED LIMITATION: no dedup WITHIN a source. ``liability.source`` does not protect a summing
-    rule here — both subjects are ``credit_report_reported``."""
+def test_one_report_filed_twice_lists_the_debt_once() -> None:
+    """bug-025 — THIS TEST WAS THE TRIPWIRE AND IT FIRED, so the assertion now records the fix.
+
+    It used to read ``test_two_credit_reports_double_list_the_same_debt`` and assert TWO subjects,
+    under "⚠️ RECORDED LIMITATION: no dedup WITHIN a source — ``liability.source`` does not protect a
+    summing rule here, both subjects are ``credit_report_reported``". That limitation was real and
+    live: staging carried the same credit report twice on one loan file, each extraction listing the
+    same 24 tradelines, so `liability_rows` minted two subjects per debt and every row-level sum over
+    them doubled — including ``credit.collection_aggregate_balance``, which gates LIVE CR-10 against
+    Fannie's payoff thresholds.
+
+    `all_list_rows` now collapses documents contributing identical rows, so one document filed twice
+    contributes once. Kept as a test of the UNION rather than deleted, because the limitation it
+    recorded is exactly what the union must not re-introduce.
+
+    ⚠️ WHAT IS **NOT** DEDUPLICATED, and must not be: two reports whose rows genuinely differ, and two
+    reports for DIFFERENT borrowers on a joint file (``belongs_to`` is part of the identity). Those
+    are two documents about two things; the tests in
+    ``tests/verification/snapshot/test_list_row_dedup_bug025.py`` pin both.
+    """
     row = {"creditor_name": "PENNYMAC", "balance": "582417"}
     subjects = enumerate_subjects(
         _KEY, _snapshot(documents=[_tradeline_doc("cr1", [row]), _tradeline_doc("cr2", [row])])
     )
-    assert len(subjects) == 2
+    assert len(subjects) == 1, "the duplicate report listed the same debt again"
+    assert subjects[0][0] == "cr1-row0", (
+        "the survivor is the lowest content_id's copy, not the first"
+    )
     assert {_source(t) for _, t in subjects} == {"credit_report_reported"}

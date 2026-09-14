@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+import yaml
 from app.scripts import generate_fact_tags
 from app.verification.rules.projection import (
     ProjectionError,
@@ -12,6 +13,7 @@ from app.verification.rules.projection import (
     load_desired_tag_dependencies,
     load_desired_tags,
 )
+from app.verification.rules.specs import _SPECS_DIR
 
 
 def test_generated_csvs_are_committed_and_current() -> None:
@@ -136,6 +138,117 @@ def test_committed_files_are_consistent() -> None:
         rule_tags=load_desired_rule_tags(),
         tag_dependencies=load_desired_tag_dependencies(),
     )
+
+
+# --------------------------------------------------------------------------- #
+# bug-027 — the edge table vs the specs that actually declare the dependencies
+# --------------------------------------------------------------------------- #
+#: Tags a spec names that are NOT vocabulary tags, so `check_consistency` would REJECT an edge for
+#: them: `document.document_type` is a dispatch predicate, and `liability.source` is a synthetic
+#: marker attached at enumeration time (ADR-374). `test_desired_state_shape` above records the same
+#: decision from the other side — "structural subject markers … are deliberately NOT edges".
+_NOT_EDGE_TAGS = frozenset({"document.document_type", "liability.source"})
+
+#: Keys under which a spec names a tag it READS. `output_tag` is excluded because it is WRITTEN, and
+#: `explain_by` because it selects guidance wording rather than feeding a verdict.
+_TAG_LIST_KEYS = frozenset({"load_bearing_tags", "gated_tags", "reasoned_over"})
+_TAG_SCALAR_KEYS = frozenset({"tag", "loan_tag", "gather_tag"})
+
+
+def _tags_a_spec_reads(node: object, found: set[str]) -> None:
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key in _TAG_LIST_KEYS and isinstance(value, list):
+                found.update(v for v in value if isinstance(v, str))
+            elif key in _TAG_SCALAR_KEYS and isinstance(value, str):
+                found.add(value)
+            elif key != "output_tag":
+                _tags_a_spec_reads(value, found)
+    elif isinstance(node, list):
+        for item in node:
+            _tags_a_spec_reads(item, found)
+
+
+def _spec_vs_csv() -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+    """``(edges a spec needs that the CSV lacks, edges the CSV has that no spec reads)``."""
+    edges = load_desired_rule_tags()
+    by_rule: dict[str, set[str]] = {}
+    for rule_id, tag_id in edges:
+        by_rule.setdefault(rule_id, set()).add(tag_id)
+
+    missing: set[tuple[str, str]] = set()
+    spurious: set[tuple[str, str]] = set()
+    for path in sorted(_SPECS_DIR.glob("*.yaml")):
+        declared: set[str] = set()
+        _tags_a_spec_reads(yaml.safe_load(path.read_text(encoding="utf-8")), declared)
+        declared = {t for t in declared if "." in t} - _NOT_EDGE_TAGS
+        listed = by_rule.get(path.stem, set())
+        missing |= {(path.stem, t) for t in declared - listed}
+        spurious |= {(path.stem, t) for t in listed - declared}
+    return missing, spurious
+
+
+#: bug-027 — WHAT THE TABLE GETS WRONG TODAY, pinned so it can only shrink.
+#:
+#: `rule_tags.csv` records which fact tags each rule depends on. Measured against what the specs
+#: actually declare: 63 of the 84 specs disagree — 101 dependencies the table does not record, and 68
+#: it records that the spec never reads, out of 214 edges. Nothing in the repo could catch that:
+#: `test_desired_state_shape` asserts the row COUNT (214), which passes whether the rows are right or
+#: wrong, and `check_consistency` only checks that each named tag EXISTS in the vocabulary — so a
+#: wrong edge pointing at a real tag satisfies every check.
+#:
+#: This is a BASELINE, not an approval. It fails when the numbers move in EITHER direction: a new
+#: spec drifting from the table is what it exists to catch, and a correction that shrinks the gap
+#: should come with this number, so nobody can quietly widen it back afterwards.
+#:
+#: The table's own history is why the population matters more than the instances: LP-490 corrected
+#: seven edges, LP-491 three more ("three live rules wired to dead vocabulary"), LP-509-A1 one. Three
+#: tickets fixed instances; none measured how many were left.
+#:
+#: ⚠️ THESE TWO NUMBERS DIFFER FROM THE TICKET'S HEADLINE, and both are right — reconciled here so
+#: nobody reads the pair as a contradiction:
+#:
+#:   * missing 96 = the ticket's 101 - 5. The five are `liability.source` on CR-1/CR-6/CR-8/
+#:     CR-12 and DT-8. `_NOT_EDGE_TAGS` drops it because it is not a vocabulary tag, so
+#:     `check_consistency` would REJECT those rows — they are unauthorable, and a guard that
+#:     demanded them would be asking for an impossible edit. The ticket counts them because it
+#:     describes the gap between specs and table; this counts what could actually be fixed.
+#:   * spurious 69 = the ticket's 68 + 1. The extra is `(OC-2, occupancy.reasonable)`, OC-2's
+#:     own `output_tag` — a WRITTEN tag, so a different relation rather than a wrong row. The
+#:     ticket gives it its own line; this counts raw, because a guard that special-cased one
+#:     row would stop noticing if a second appeared.
+_KNOWN_MISSING_EDGES = 96
+_KNOWN_SPURIOUS_EDGES = 69
+
+
+def test_rule_tags_csv_drift_from_the_specs_does_not_grow() -> None:
+    missing, spurious = _spec_vs_csv()
+
+    assert (len(missing), len(spurious)) == (_KNOWN_MISSING_EDGES, _KNOWN_SPURIOUS_EDGES), (
+        "rule_tags.csv's disagreement with the specs has MOVED (bug-027).\n"
+        f"  dependencies the table lacks:      {len(missing)} (was {_KNOWN_MISSING_EDGES})\n"
+        f"  entries no spec reads:             {len(spurious)} (was {_KNOWN_SPURIOUS_EDGES})\n"
+        "If a spec changed, the table is generated from docs/snapshot-fact-tags.xlsx and is the "
+        "domain expert's artifact — see bug-027 for why the edges should be generated from the "
+        "specs instead. If you CORRECTED the table, lower the baselines here in the same commit."
+    )
+
+
+def test_the_flagship_rules_dependency_is_recorded_wrongly() -> None:
+    """⚠️ bug-027's deciding case, pinned so a fix to it cannot go unnoticed.
+
+    AS-1 is live and runs on every file, and the table is wrong about it in BOTH directions: it
+    records `income.qualifying_monthly`, which LP-516 calls "known-degraded and is not in live use
+    for this purpose" and whose own recipe docstring flags its vocabulary row STALE — and it OMITS
+    `txn.source_strength`, which AS-1 genuinely reads.
+
+    When AS-1's row is corrected this test fails, which is the point: it is the one row whose
+    wrongness is most likely to mislead somebody reading dependencies out of the projection.
+    """
+    missing, spurious = _spec_vs_csv()
+
+    assert ("AS-1", "txn.source_strength") in missing
+    assert ("AS-1", "income.qualifying_monthly") in spurious
 
 
 def test_consistency_rejects_unknown_required_tag() -> None:

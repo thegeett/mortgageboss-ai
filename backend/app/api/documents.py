@@ -54,10 +54,13 @@ from app.services.document_versioning import supersede_document
 from app.services.documents import (
     MAX_FILE_SIZE_BYTES,
     DocumentValidationError,
+    DuplicateDocumentError,
     build_document_detail,
     build_document_response,
     build_document_responses,
+    content_digest,
     create_document,
+    find_duplicate,
     get_current_extraction,
     get_document_for_company,
     get_version_group_documents,
@@ -333,15 +336,45 @@ async def upload(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files provided")
 
     # Stage 1 — read + validate every file first (all-or-nothing).
+    #
+    # LP-1000 — THE DUPLICATE CHECK BELONGS HERE, not only in `create_document`. That one is the
+    # backstop every route shares, but it fires in stage 2, after `storage.save` has already written
+    # bytes — so a duplicate in a ten-file batch would leave up to ten orphaned objects behind a
+    # request that stored nothing. Checking in stage 1 keeps the all-or-nothing promise this
+    # docstring makes and costs one indexed lookup per file.
     staged: list[tuple[UUID, UploadFile, bytes, str]] = []
+    seen: dict[str, str] = {}
     for upload_file in files:
         try:
             content = await _read_capped(upload_file, max_bytes=MAX_FILE_SIZE_BYTES)
             mime_type = validate_upload(
                 content=content, declared_content_type=upload_file.content_type or ""
             )
+            digest = content_digest(content)
+            # The same file selected twice in ONE request. Neither copy is in the database yet, so
+            # only the batch itself can catch this — and it is the likeliest duplicate of all.
+            twin = seen.get(digest)
+            if twin is not None:
+                raise DocumentValidationError(
+                    f"{upload_file.filename or 'This file'} is the same file as {twin!r}, "
+                    "selected twice in one upload. Remove one of them.",
+                    http_status=status.HTTP_409_CONFLICT,
+                )
+            already = await find_duplicate(db, loan_file_id=loan_file.id, digest=digest)
+            if already is not None:
+                raise DuplicateDocumentError(
+                    f"{upload_file.filename or 'This file'} is already on the loan as "
+                    f"{already.original_filename!r} (uploaded "
+                    f"{already.created_at.strftime('%b')} {already.created_at.day}, "
+                    f"{already.created_at.year}). Remove it from this upload, or replace the "
+                    "existing document if this one supersedes it.",
+                    existing=already,
+                )
         except DocumentValidationError as exc:
+            # `DuplicateDocumentError` is a `DocumentValidationError`, so it maps through here too,
+            # carrying its own 409 rather than the 413/415 a size or type failure carries.
             raise HTTPException(status_code=exc.http_status, detail=exc.message) from exc
+        seen[digest] = upload_file.filename or "upload"
         staged.append((uuid4(), upload_file, content, mime_type))
 
     # Stage 2 — store bytes + create records (the request already passed validation).
@@ -361,6 +394,7 @@ async def upload(
             loan_file=loan_file,
             document_id=document_id,
             filename=filename,
+            content=content,
             mime_type=mime_type,
             size=len(content),
             storage_path=storage_path,
@@ -853,16 +887,64 @@ async def replace(
         filename=filename,
         content=content,
     )
-    new_document = await create_document(
-        db,
-        loan_file=loan_file,
-        document_id=new_id,
-        filename=filename,
-        mime_type=mime_type,
-        size=len(content),
-        storage_path=storage_path,
-        uploaded_by_user_id=current_user.id,
+    # LP-1000 — replacing a document with the SAME bytes is refused, and the reason is stronger than
+    # "it would change nothing". A replace exists to supersede what is there with something
+    # different: this one marks the old version historical, re-opens the need it satisfied, and
+    # re-runs the pipeline over identical bytes.
+    #
+    # ⚠️ AND RE-READING IDENTICAL BYTES IS NOT GUARANTEED TO RETURN IDENTICAL VALUES. Extraction is a
+    # model call, and LP-1000's own investigation measured the proof: two byte-identical bank
+    # statements extracted once as 20 rows and once as 21. So an identical replace can MOVE a finding
+    # while the document has not changed — an unexplainable diff in a file a human has to defend.
+    # That is the harm; the wasted pipeline run is only the cost.
+    #
+    # ⚠️ LP-1000 review — AND THE REFUSAL MUST NOT NAME THE DOCUMENT BEING REPLACED. `create_document`
+    # runs BEFORE `supersede_document`, so at this moment `old` is still current and not deleted —
+    # which is to say ACTIVE, and exactly what `find_duplicate` looks for. Left to the backstop, an
+    # identical replace collided with its own target and told the processor "this file is already on
+    # the loan as <old name> … replace the existing document if this one supersedes it": advice to do
+    # the thing they had just done. The check runs here instead, against everything EXCEPT the target,
+    # which is what `find_duplicate`'s `exclude_id` is for — and then the sentence is about the
+    # replacement being pointless rather than about a collision with a third document.
+    same_as_target = content_digest(content) == old.content_sha256
+    other = await find_duplicate(
+        db, loan_file_id=loan_file.id, digest=content_digest(content), exclude_id=old.id
     )
+    if same_as_target:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This is the same file as the document you are replacing. Replacing it would "
+                "supersede the current version and read the file again from scratch, which can "
+                "return slightly different values from identical bytes — so it may move a finding "
+                "without changing the document. To have the system read this document again, use "
+                "“Re-read this document”. To change it, upload a different version."
+            ),
+        )
+    if other is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"This file is already on the loan as {other.original_filename!r} (uploaded "
+                f"{other.created_at.strftime('%b')} {other.created_at.day}, "
+                f"{other.created_at.year}). Replace that document instead, or upload a "
+                "different version of this one."
+            ),
+        )
+    try:
+        new_document = await create_document(
+            db,
+            loan_file=loan_file,
+            document_id=new_id,
+            filename=filename,
+            content=content,
+            mime_type=mime_type,
+            size=len(content),
+            storage_path=storage_path,
+            uploaded_by_user_id=current_user.id,
+        )
+    except DocumentValidationError as exc:  # pragma: no cover - the checks above pre-empt it
+        raise HTTPException(status_code=exc.http_status, detail=exc.message) from exc
     await supersede_document(db, old_document=old, new_document=new_document)
 
     await log_activity(

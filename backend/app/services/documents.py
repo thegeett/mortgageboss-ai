@@ -19,10 +19,12 @@ extension is sanitized there too (defense in depth). Services ``flush``; the
 endpoint commits. Soft-delete preserves the stored bytes (audit).
 """
 
+import hashlib
 from uuid import UUID
 
 from fastapi import status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -81,6 +83,63 @@ class DocumentValidationError(Exception):
         self.http_status = http_status
 
 
+class DuplicateDocumentError(DocumentValidationError):
+    """The same bytes are already on this loan file (LP-1000).
+
+    A subclass of :class:`DocumentValidationError` so every route that already maps that exception
+    to an HTTP status maps this one too, with ``409 Conflict`` — the upload is refused because of
+    the file's relationship to what is already there, not because the file itself is bad.
+
+    Carries the document it collided with so the caller can NAME it. "Duplicate rejected" with no
+    referent is worse than accepting the duplicate: the processor cannot tell which of their files
+    was refused, or find the one already on the loan.
+    """
+
+    def __init__(self, message: str, *, existing: Document) -> None:
+        super().__init__(message, http_status=status.HTTP_409_CONFLICT)
+        self.existing = existing
+
+
+def content_digest(content: bytes) -> str:
+    """The SHA-256 of the uploaded bytes, hex — the document's content identity (LP-1000)."""
+    return hashlib.sha256(content).hexdigest()
+
+
+async def find_duplicate(
+    db: AsyncSession, *, loan_file_id: UUID, digest: str, exclude_id: UUID | None = None
+) -> Document | None:
+    """An ACTIVE document on this loan file with the same bytes, or ``None``.
+
+    SCOPED TO THE LOAN FILE, never wider. The same document legitimately appears on different loan
+    files (a lender's blank form, a borrower with two applications), and a global check would also
+    leak across companies — `Document` has no `company_id` of its own, so the loan file IS the
+    tenant boundary here (ADR-052). Scoping to it is what makes this tenant-safe by construction.
+
+    SOFT-DELETED ROWS DO NOT COUNT (`only_active`). A processor who deletes a bad upload must be
+    able to upload it again; matching against deleted rows would make that impossible and give them
+    no way out.
+
+    ⚠️ THIS SELECT ALONE IS NOT MUTUAL EXCLUSION — THE DATABASE IS. Two requests can both run this
+    and both see nothing: the INSERT lands in a later stage, after an object-storage write per file,
+    and only the caller's commit makes the row visible. `uq_documents_loan_file_content_sha256`
+    (`b8e2f5a91c73`) refuses the loser, and `create_document` turns that refusal back into the same
+    `DuplicateDocumentError` this check raises — so which of the two refused a processor is not
+    something they can tell, or need to.
+
+    BOTH ARE NEEDED, for different reasons. Without this check a duplicate costs an orphaned storage
+    object, because the bytes are written before the INSERT that would have been refused; without
+    the constraint a double-click creates the row twice. This is the fast, friendly path; the index
+    is the guarantee.
+    """
+    stmt = select(Document).where(
+        Document.loan_file_id == loan_file_id,
+        Document.content_sha256 == digest,
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(Document.id != exclude_id)
+    return (await db.scalars(only_active(stmt, Document))).first()
+
+
 def _detect_content_type(content: bytes) -> str | None:
     """The content type proven by the leading magic bytes, or ``None``."""
     for signature, content_type in _MAGIC:
@@ -122,12 +181,56 @@ def validate_upload(*, content: bytes, declared_content_type: str) -> str:
 # --------------------------------------------------------------------------- #
 
 
+#: The partial unique index that makes the duplicate check mutual exclusion (`b8e2f5a91c73`). Named
+#: here because a violation arrives as a driver error whose TEXT is the only thing identifying which
+#: constraint refused the row — so this string is load-bearing and must match the migration and the
+#: model declaration exactly.
+_UNIQUE_DIGEST_INDEX = "uq_documents_loan_file_content_sha256"
+
+
+def _is_our_digest_violation(exc: IntegrityError) -> bool:
+    """Whether this violation is OUR unique index — keyed on the field the driver fills in.
+
+    asyncpg maps Postgres' error field ``'n'`` to ``constraint_name``
+    (``asyncpg/exceptions/_base.py:44``) and the server populates it for a unique INDEX violation as
+    well as a named constraint, so the attribute is EXACT where a substring of the message is
+    incidental. That matters more than it looks: if the match ever stops working, every lost race
+    becomes a 500 instead of the 409 the pre-check raises — worse than the bug this closes. The
+    message test stays as a fallback for a driver that does not carry the field, and the dialect's
+    wrapper is unwrapped first because SQLAlchemy's ``orig`` may be the adapter's own exception with
+    the asyncpg one on ``__cause__``.
+    """
+    orig = getattr(exc, "orig", None)
+    for candidate in (orig, getattr(orig, "__cause__", None)):
+        name = getattr(candidate, "constraint_name", None)
+        if name is not None:
+            return bool(name == _UNIQUE_DIGEST_INDEX)
+    return _UNIQUE_DIGEST_INDEX in str(orig if orig is not None else exc)
+
+
+def _already_on_the_loan(existing: Document) -> str:
+    """The refusal sentence, in ONE place, because two different mechanisms raise it.
+
+    `find_duplicate` seeing the twin is the common case; the unique index catching a twin that landed
+    between that SELECT and the INSERT is the race. A processor must not be able to tell which one
+    refused them — the fact is the same and so is what they should do about it — so the wording
+    cannot live at either site.
+    """
+    return (
+        f"This file is already on the loan as {existing.original_filename!r} "
+        f"(uploaded {existing.created_at.strftime('%b')} {existing.created_at.day}, "
+        f"{existing.created_at.year}). Upload a different file, or replace the existing "
+        f"document if this one supersedes it."
+    )
+
+
 async def create_document(
     db: AsyncSession,
     *,
     loan_file: LoanFile,
     document_id: UUID,
     filename: str,
+    content: bytes,
     mime_type: str,
     size: int,
     storage_path: str,
@@ -139,20 +242,89 @@ async def create_document(
     ``document_id`` is the UUID already used to build the storage path (LP-35),
     so the record and the stored bytes share one id. The processing pipeline
     (LP-42) later advances the status. Uses ``flush``; the endpoint commits.
+
+    LP-1000 — THE DUPLICATE CHECK LIVES HERE, and here is the whole point. Four routes create
+    documents — the bulk upload, the replace, the email triage accept, and the borrower upload link
+    — and every one of them already holds the bytes and calls this function. A check in any of them
+    would have to be written four times and would be missed once; a check here covers all four by
+    construction, including whatever route is added next.
+
+    It raises rather than flags. Byte-identical content on the same loan file carries no information
+    the first copy does not already carry, so accepting it only creates work: a second row for every
+    per-document rule to answer, a second set of extracted rows for every aggregate to gather. The
+    caller gets the colliding document back on the exception so it can say WHICH file it collided
+    with, which is the difference between a refusal a processor can act on and one they cannot.
     """
+    digest = content_digest(content)
+    existing = await find_duplicate(db, loan_file_id=loan_file.id, digest=digest)
+    if existing is not None:
+        raise DuplicateDocumentError(_already_on_the_loan(existing), existing=existing)
     document = Document(
         id=document_id,
         loan_file_id=loan_file.id,
         original_filename=filename,
         mime_type=mime_type,
         file_size_bytes=size,
+        content_sha256=digest,
         storage_path=storage_path,
         status=DocumentStatus.PENDING,
         upload_source=upload_source,
         uploaded_by_user_id=uploaded_by_user_id,
     )
-    db.add(document)
-    await db.flush()
+    # ⚠️ THE CHECK ABOVE IS NOT MUTUAL EXCLUSION — the database is (`b8e2f5a91c73`). That SELECT and
+    # this INSERT are separated by an object-storage write PER FILE and the caller's commit, so two
+    # requests for one loan file can both read clean and both insert. A double-click does it; so does
+    # the email-triage worker racing a manual upload. The unique index refuses the loser, and this
+    # block turns its refusal back into the same 409 the pre-check raises.
+    #
+    # INSIDE `begin_nested()` BECAUSE A FAILED FLUSH POISONS THE SESSION. Without the SAVEPOINT the
+    # caller's transaction is unusable after the violation and their commit raises
+    # PendingRollbackError — taking the activity log and every other document in the batch with it.
+    # `verification_run.py` records the same lesson in its own words: "A SQLAlchemy error poisons the
+    # session ... contained with begin_nested()".
+    try:
+        async with db.begin_nested():
+            db.add(document)
+            await db.flush()
+    except IntegrityError as exc:
+        if not _is_our_digest_violation(exc):
+            raise
+        # NO EXPUNGE IS NEEDED HERE, and the first cut of this guarded for one — wrongly, in a way
+        # worth recording because the guard LOOKED prudent. Rolling back a SAVEPOINT runs
+        # `_restore_snapshot` (sqlalchemy/orm/session.py:1098), which expunges everything added
+        # inside it TO TRANSIENT before this line runs; `Session.__contains__` (:4297) is True only
+        # for a PENDING or PERSISTENT instance, so a `document in session` test can never be True
+        # here. The autoflush-reinsert that guard was written to prevent cannot happen: a transient
+        # object is not in `session._new`, so the SELECT below has nothing to flush.
+        winner = await find_duplicate(db, loan_file_id=loan_file.id, digest=digest)
+        if winner is None:
+            # ⚠️ THIS BRANCH IS LOAD-BEARING, NOT DEFENSIVE, and it has TWO causes. A comment naming
+            # only the first sends the next reader to the wrong conclusion about whether it can fire.
+            #
+            #   1. The colliding row was committed by ANOTHER transaction and soft-deleted before
+            #      this SELECT ran — the index saw it, `only_active` does not.
+            #   2. A caller that soft-deletes a document and creates its replacement IN ONE
+            #      TRANSACTION: the twin's `deleted_at` was still NULL when the INSERT hit the index,
+            #      and is set by the time this query filters on it.
+            #
+            # (2) HAS NO INSTANCE IN APP CODE — scoped deliberately, because an unscoped claim fails
+            # the first grep that checks it. `soft_delete_document` has exactly one caller there
+            # (`api/documents.py:1302`, the delete endpoint), which creates nothing. Five TEST call
+            # sites exist, and two do delete-then-create on one session
+            # (`test_document_dedup_lp1000.py:183` and `:418`) — cause (2)'s SHAPE without its
+            # outcome: `soft_delete_document` flushes, so the pre-check's `only_active` already
+            # returns None and the INSERT never violates a predicate the twin is excluded from. And
+            # REPLACE is
+            # not an instance of it, for two independent reasons — the API pre-checks with
+            # `exclude_id=old.id` and raises before `create_document` runs, AND `supersede_document`
+            # only flips `is_current`, retaining both rows (`document_versioning.py:39`), so the old
+            # document stays visible to `only_active` regardless.
+            #
+            # Whoever writes the first create-and-delete-in-one-transaction flow lands here and gets
+            # a 500 where a 409 naming a document on its way out would be the honest answer. Until
+            # then a 500 naming the constraint beats a 409 pointing at nothing.
+            raise
+        raise DuplicateDocumentError(_already_on_the_loan(winner), existing=winner) from exc
     # A document changed → the cross-source verification is out of date (LP-78).
     # Covers upload and replace (replace creates its new document through here).
     await mark_verification_stale(db, loan_file_id=loan_file.id)

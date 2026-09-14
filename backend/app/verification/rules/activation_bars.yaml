@@ -356,6 +356,14 @@ AS-7:
     servicing disclosures. The decisive test: 55 "Total Overdraft/NSF Fees" lines carry an amount and
     EVERY ONE IS $0.00; posted fee lines with a non-zero amount: 0. So this is not an ingestion gap that
     loading more documents would close.
+    ⚠️ BEFORE ACTIVATING, ALSO KNOW (bug-025 review): stmt.nsf_count is a COUNT over transaction
+    SUBJECTS, and a statement filed twice used to double it — one NSF line, two subjects, because
+    assign_content_ids folds an occurrence index so duplicate copies receive DISTINCT ids. Guarded now in
+    _stmt_nsf_count on a fully-determined (amount, date, description) identity; two lines with NO amount
+    or date still both count, because this recipe never undercounts. There was no live exposure — by (2)
+    there is no NSF event in the corpus to double — but the count AS-7 compares against a tolerance is
+    only ever as trustworthy as the file's duplicate handling, and that is worth knowing at activation
+    rather than discovering from a finding.
     NO TOLERANCE IS ENCODED. Priya ruled NSF an internal policy, not an agency rule, and the research
     confirms the Selling Guide sets no NSF or overdraft count tolerance. None was invented; AS-7 reports
     the count, and any tolerance must arrive as a declared lender-policy value.

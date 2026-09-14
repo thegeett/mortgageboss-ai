@@ -31,7 +31,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Float, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin, utcnow
@@ -196,6 +196,34 @@ class Document(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     """An uploaded file attached to a loan file (metadata + storage path)."""
 
     __tablename__ = "documents"
+    # LP-1000 — the duplicate lookup is always (this loan file, this digest), so the index carries
+    # both, and it is UNIQUE over exactly the rows that lookup considers.
+    #
+    # ⚠️ LP-1000 DECLARED A UNIQUE INDEX IMPOSSIBLE HERE, and that reasoning was wrong. It read: "the
+    # existing rows already hold duplicates (22 groups on staging), so a unique index cannot be
+    # created until they are reconciled". Every row predating LP-1000 has `content_sha256 IS NULL`
+    # and this index is PARTIAL on `content_sha256 IS NOT NULL`, so none of them are in it at all —
+    # and those 22 groups were found by PROXY, `(loan file, type, byte size)`, carrying no digests to
+    # collide. The cleanup treated as a prerequisite was not one.
+    #
+    # THE PREDICATE MATCHES `only_active` EXACTLY (`deleted_at IS NULL`, `models/helpers.py`), which
+    # is what `find_duplicate` filters on — so the index and the service agree on what a duplicate
+    # IS. It deliberately omits `is_current`: a replaced document stays ACTIVE and merely historical,
+    # which is why `find_duplicate` needed an `exclude_id` at all.
+    #
+    # DECLARED HERE AS WELL AS IN THE MIGRATION because tests and CI build the schema with
+    # `create_all`; without it the race test would run against a database that cannot refuse, and
+    # pass by proving nothing. The 409 survives: `create_document` catches the violation inside a
+    # SAVEPOINT and re-raises `DuplicateDocumentError` naming the row that won (`b8e2f5a91c73`).
+    __table_args__ = (
+        Index(
+            "uq_documents_loan_file_content_sha256",
+            "loan_file_id",
+            "content_sha256",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL AND content_sha256 IS NOT NULL"),
+        ),
+    )
 
     # --- Ownership (owned child of the loan file, ADR-052) -----------------
     loan_file_id: Mapped[UUID] = mapped_column(
@@ -211,6 +239,20 @@ class Document(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # Path/key in the storage backend, not the bytes. LongStr (1024) because S3
     # keys and nested local paths can exceed the 256 of MediumStr.
     storage_path: Mapped[LongStr] = mapped_column(nullable=False)
+    # LP-1000 — SHA-256 of the uploaded BYTES, hex. The identity "is this the same document?"
+    # that nothing in the system could express before: no hash, no checksum, no digest existed
+    # anywhere, so the only way to ask was to compare `file_size_bytes` and hope.
+    #
+    # NULLABLE, and it stays nullable. Every document uploaded before this column existed has no
+    # digest and there is nothing to backfill from without re-reading every blob out of storage —
+    # so a NULL means "uploaded before LP-1000", never "this file has no content". The duplicate
+    # check treats NULL as no-match rather than as a match, which is the fail-open direction on
+    # purpose: refusing an upload because an old row happens to be unhashed would be a worse error
+    # than accepting a duplicate.
+    #
+    # `String(64)` and the name follow `InboundAttachment.sha256`, which has hashed attachment
+    # bytes since LP-806 — one convention for the same fact, not two.
+    content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # --- Classification (set by the classifier, Epic 5 / Phase 2) ----------
     # Flexible string slug, NOT an enum: the ~100-type set is finalized in
