@@ -100,7 +100,15 @@ export default function CommunicationPage() {
   // is the honest answer for a link to something that is gone. A DELETE is different: the processor
   // just did it on purpose, and an error message for their own successful action is the one case
   // where that answer is wrong.
-  const deleted = deletedIds.has(chosen ?? "") ? null : chosen;
+  // LP-859 REVIEW — NAMED FOR WHAT IT HOLDS. This was `deleted`, and it holds the opposite: the
+  // chosen id when it is still LIVE, and null once the processor has deleted it. `selected =
+  // deleted ?? autoSelected` therefore read as "the deleted one, or the auto-selected one" in the
+  // one expression that decides whether the pane can show a row that is gone.
+  //
+  // It stays separate from `liveDrafts` deliberately: `chosen` can be a SENT message, which is not
+  // in `openDrafts` at all, so testing membership of the live drafts would drop a sent row out of
+  // the pane the moment a processor clicked one.
+  const chosenIfLive = deletedIds.has(chosen ?? "") ? null : chosen;
   // LP-859 §4 — ONE LIST OF WHAT IS STILL SELECTABLE, derived once.
   //
   // The timeline refetch is not instant, so for the frame between the 204 and the new list a
@@ -110,7 +118,7 @@ export default function CommunicationPage() {
   // after the LAST draft was deleted, over a rail about to have nothing to select.
   const liveDrafts = openDrafts.filter((draft) => !deletedIds.has(draft.id));
   const autoSelected = narrow || closed ? null : (liveDrafts[0]?.id ?? null);
-  const selected = deleted ?? autoSelected;
+  const selected = chosenIfLive ?? autoSelected;
 
   const compose = useComposeDraft(id);
   function startCompose() {
@@ -208,9 +216,24 @@ export default function CommunicationPage() {
                 setClosed(true);
               }}
             />
+          ) : isPending ? (
+            // LP-859 REVIEW — NEITHER EMPTY STATE IS TRUE BEFORE THE LIST ARRIVES.
+            //
+            // `isPending` gates only the full-width branch above, so a file that HAS drafts fell
+            // through here on every visit with `entries` still empty, and the pane rendered "No
+            // drafts on this file" for a frame — the exact sentence this section exists to stop it
+            // saying, arriving by the one route the section did not look at. Measured, not
+            // inferred: rendering the page with `isPending: true` finds that heading in the
+            // document.
+            //
+            // SO IT SAYS NOTHING IT DOES NOT KNOW. Both branches below are claims about a list
+            // that has not loaded; the honest answer for that frame is the one the rail is already
+            // giving — that it is still arriving.
+            <p className="py-16 text-center text-sm text-muted-foreground">Loading this file…</p>
           ) : liveDrafts.length === 0 ? (
             // §2.1 rule 4's second half: sent history with nothing open carries the same empty
-            // state INSIDE the right pane. THIS ONE IS TRUE — there really are no drafts.
+            // state INSIDE the right pane. THIS ONE IS TRUE — there really are no drafts, and it
+            // is reached only once the list has actually arrived (see the branch above).
             <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
               <h2 className="text-base font-semibold text-foreground">No drafts on this file</h2>
               <p className="text-sm text-muted-foreground">

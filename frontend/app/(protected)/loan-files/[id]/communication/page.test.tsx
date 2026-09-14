@@ -347,9 +347,14 @@ describe("the landing state", () => {
     expect(screen.queryByText("No draft selected")).toBeNull();
   });
 
-  it("says no draft is selected after the last draft is deleted only if others remain", () => {
+  it("says the file has no drafts when the last one is deleted", () => {
     // THE TWO EMPTY STATES MEET HERE. Delete the only draft and the file has none left, so the old
     // words are the true ones — even though the pane also became empty by an action.
+    //
+    // LP-859 REVIEW — RENAMED. This was called "…only if others remain" and never exercised the
+    // "others remain" half; its body is the no-others case alone. A name that claims a case the
+    // body does not run is worse than no test for it, because the next reader stops looking. The
+    // half it promised is the test below.
     entries([{ id: "d-only" }, { id: "s-1", status: "sent" }]);
     render(<CommunicationPage />);
 
@@ -357,6 +362,39 @@ describe("the landing state", () => {
 
     expect(screen.getByText("No drafts on this file")).toBeTruthy();
     expect(screen.queryByText("No draft selected")).toBeNull();
+  });
+
+  it("re-selects another draft when one is deleted and others remain", () => {
+    // THE HALF THE NAME ABOVE USED TO CLAIM. Deleting a draft while others are live is not an empty
+    // state at all — rule 2 picks the next one — so NEITHER sentence should appear. A change that
+    // showed "No draft selected" here would have left the old test green under a title saying it
+    // was covered.
+    entries([{ id: "d-new" }, { id: "d-old" }, { id: "s-1", status: "sent" }]);
+    render(<CommunicationPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "delete-pane" }));
+
+    expect(screen.queryByText("No draft selected")).toBeNull();
+    expect(screen.queryByText("No drafts on this file")).toBeNull();
+    // AND THE PANE IS SHOWING ONE, which is what makes the two absences meaningful rather than
+    // passing on a page that rendered nothing at all.
+    expect(screen.getByTestId("pane")).toBeTruthy();
+  });
+
+  it("claims neither empty state while the timeline is still loading", () => {
+    // LP-859 REVIEW — THE SENTENCE THIS SECTION REMOVES, ARRIVING BY THE ROUTE IT DID NOT LOOK AT.
+    //
+    // `isPending` gated only the full-width branch, so a file that HAS drafts fell through to the
+    // split with `entries` empty and the pane rendered "No drafts on this file" for a frame, on
+    // every visit. Measured before the fix: this assertion found that heading in the document.
+    mockTimeline.mockReturnValue({ data: undefined, isPending: true });
+    render(<CommunicationPage />);
+
+    expect(screen.queryByText("No drafts on this file")).toBeNull();
+    expect(screen.queryByText("No draft selected")).toBeNull();
+    // THE CONTROL: something IS on screen, so the two absences are about the claims rather than
+    // about a page that failed to render.
+    expect(screen.getByText("Loading this file…")).toBeTruthy();
   });
 
   it("selecting a row swaps the pane and leaves the layout alone", () => {
