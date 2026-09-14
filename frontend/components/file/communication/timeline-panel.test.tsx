@@ -194,10 +194,17 @@ describe("a row", () => {
     // ASSERTED OVER THE RENDERED CLASS NAMES, not over the source, so it holds for whatever the row
     // renders rather than for what this file happens to grep. It is a weaker check than a browser
     // and it is not a substitute for one — §2 is verified on screen or not at all.
+    // AN INBOUND ROW WITH ITS REPLY BOX OPEN, because the scan can only see what rendered.
+    // `ReplyBox` is a whole subtree inside the `li` that renders only while a row is open, and the
+    // one-sent-row fixture never opened one: measured by putting `whitespace-nowrap shrink-0` on
+    // ReplyBox's error line, and this test stayed green. An inbound row also carries the Reply
+    // button, which an outbound row does not.
     loaded([
       { ...MESSAGE, id: "s1", direction: "outbound", status: "sent", actor_name: "Geet Thaker" },
+      MESSAGE,
     ]);
     const { container } = render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+    fireEvent.click(screen.getByRole("button", { name: "Reply" }));
 
     // EXACT TOKENS, NOT SUBSTRINGS. The first version matched `[&_svg]:shrink-0` inside the shared
     // Button base class and reported the reply button as an offender — a variant selector that
@@ -206,11 +213,26 @@ describe("a row", () => {
     // AND ONLY ELEMENTS CARRYING TEXT, because text is the thing that overflows. An icon button is
     // nowrap and unshrinkable and should be: 24px that cannot wrap is not what put 274px of status
     // line outside a 300px rail.
+    // `truncate` IS NOWRAP, and it is how this file actually spells it. Tailwind's `truncate` is
+    // `white-space: nowrap` + `overflow: hidden` + ellipsis, so `truncate shrink-0` reproduces the
+    // defect exactly: the box sizes to max-content and refuses to shrink, and `overflow: hidden`
+    // clips nothing because the box is already big enough for its own text. Measured: adding
+    // `shrink-0` to line 3's `truncate` span left the whole file green against the nowrap-only list.
+    // There is no `whitespace-nowrap` anywhere in this component today, so that list alone was a
+    // rule about a token nothing uses.
+    //
+    // UNLESS THE WIDTH IS STATED. `PartyCell` is `w-[5.6rem] shrink-0 truncate` and is correct: a
+    // box with an explicit width is neither max-content nor unbounded, which is the whole property
+    // the rule is about. Exempting it by NAME would make the guard about that one element; exempting
+    // it by the width token makes it about the reason.
+    const NOWRAP = ["whitespace-nowrap", "truncate"];
+    const hasStatedWidth = (tokens: string[]) => tokens.some((t) => /^w-/.test(t));
     const offenders = Array.from(container.querySelectorAll<HTMLElement>("li *"))
       .filter((el) => (el.textContent ?? "").trim() !== "")
       .filter((el) => {
         const tokens = (typeof el.className === "string" ? el.className : "").split(/\s+/);
-        return tokens.includes("whitespace-nowrap") && tokens.includes("shrink-0");
+        if (hasStatedWidth(tokens)) return false;
+        return NOWRAP.some((t) => tokens.includes(t)) && tokens.includes("shrink-0");
       })
       .map((el) => el.className);
 
@@ -395,6 +417,33 @@ describe("the per-row actions", () => {
   });
 });
 
+describe("the importance flag", () => {
+  it("shows one star on a flagged message, not two", () => {
+    // LP-859 §2 REVIEW — TWO RENDERERS, ONE STATE. `MessageActions` has always drawn a filled `Star`
+    // for `is_important`; §2 moved the standalone indicator out of the summary text — where it was
+    // visually far from that button — into the slot immediately before it. A flagged row then showed
+    // two identical filled stars about 8px apart, and a screen reader read "Important" and then
+    // "Remove the flag" about one flag.
+    loaded([{ ...MESSAGE, id: "m1", is_important: true }]);
+    const { container } = render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(container.querySelectorAll("li .fill-warning")).toHaveLength(1);
+  });
+
+  it("says which state the one star is in", () => {
+    // THE CONTROL on the count above: "exactly one" is also satisfied by keeping the WRONG one. The
+    // survivor has to be the interactive, labelled control — the flag is something a processor acts
+    // on, and a decorative glyph with no button is a worse answer than two stars.
+    loaded([{ ...MESSAGE, id: "m1", is_important: true }]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+    expect(screen.getByRole("button", { name: "Remove the flag" })).toBeTruthy();
+
+    loaded([{ ...MESSAGE, id: "m2", is_important: false }]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+    expect(screen.getAllByRole("button", { name: "Mark important" }).length).toBeGreaterThan(0);
+  });
+});
+
 describe("the reply box", () => {
   it("opens on the row and says a save is a draft, not a send", () => {
     // A button labelled "Reply" that silently transmitted would be the one outbound message with no
@@ -469,10 +518,18 @@ describe("TimelinePanel — the icon is the second channel beside the words", ()
     ]);
     const { container } = render(<TimelinePanel fileId="f1" />, { wrapper });
 
-    // The icon is the first child of line 1 now rather than of the row — the row stacks.
-    const icons = container.querySelectorAll("li svg");
-    expect(icons.length).toBeGreaterThanOrEqual(2);
+    // ONE ICON PER ROW, NOT THE FIRST TWO IN THE LIST. `li svg` is every icon in the panel, and
+    // `MessageActions` puts three of its own on each row — star, read toggle, reply. So `icons[0]`
+    // and `icons[1]` were the sent row's `EntryIcon` and the sent row's STAR: two icons from the
+    // same row, which differ whatever `EntryIcon` does. Measured by deleting the `failed` branch so
+    // a bounce rendered the send's envelope: this test still passed. It is the row's FIRST svg that
+    // is the `EntryIcon`, and there has to be one per row for the comparison to be about status.
+    const icons = Array.from(container.querySelectorAll("li")).map((li) => li.querySelector("svg"));
+    expect(icons).toHaveLength(2);
     expect(icons[0]?.getAttribute("class")).not.toEqual(icons[1]?.getAttribute("class"));
+    // THE CONTROL: `not.toEqual` is also satisfied by two nulls. Both rows have an icon, and it
+    // carries a class to compare.
+    expect(icons.every((icon) => (icon?.getAttribute("class") ?? "") !== "")).toBe(true);
   });
 });
 /**
@@ -657,7 +714,10 @@ describe("when it happened (LP-838)", () => {
 
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
-    expect(screen.getByText(/ago$|^\d+[smhd]$/)).toBeTruthy();
+    // `messageTimeShort` is `formatDistanceToNow(..., { addSuffix: true })`, so everything it can
+    // return ends in "ago". The `^\d+[smhd]$` alternative this carried matched nothing it can
+    // produce — a second branch that can never be taken reads as tolerance and is dead.
+    expect(screen.getByText(/ago$/)).toBeTruthy();
   });
 });
 
@@ -716,7 +776,7 @@ describe("the party column", () => {
     // group to expand.
     const rows = [
       ...Array.from({ length: 9 }, (_, i) =>
-        entry({ id: `b${i}`, party: "borrower", summary: `Borrower request ${i}` }),
+        entry({ id: `b${i}`, party: "borrower", subject: `Borrower request ${i}` }),
       ),
       entry({ id: "t1", party: "title", subject: "Title commitment request" }),
     ];
@@ -748,7 +808,7 @@ describe("the party column", () => {
     // An inbound message from an address nobody on the file recognises belongs to no party (LP-841
     // decided that deliberately). Dropping its cell would slide its subject into the party column
     // and break the alignment the column exists for.
-    loaded([entry({ id: "x1", party: null, summary: "A message arrived" })]);
+    loaded([entry({ id: "x1", party: null, subject: "A message arrived" })]);
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
     expect(screen.getByText("—")).toBeTruthy();
@@ -757,7 +817,7 @@ describe("the party column", () => {
   it("renders a party the vocabulary does not know as itself", () => {
     // LP-841's rule, kept: a party we have no word for is still a party the processor must be told
     // about. Rendering nothing would be the invisibility this ticket is about, with a new cause.
-    loaded([entry({ id: "z1", party: "escrow", summary: "Something" })]);
+    loaded([entry({ id: "z1", party: "escrow", subject: "Something" })]);
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
     expect(screen.getByText("escrow")).toBeTruthy();

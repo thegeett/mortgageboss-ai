@@ -85,21 +85,6 @@ function PartyCell({ party }: { party: string | null }) {
 }
 
 /**
- * Column three — what happened to it, said as a word and attributed (LP-852).
- *
- * `Draft · edited · 2m` / `Marked sent by Priya · Mon 16:41`.
- *
- * "MARKED SENT BY PRIYA", NEVER "SENT". Nothing in this version observed a send — `mail_transport`
- * has no provider — so what the record holds is a processor's claim that they sent it from their
- * own mail client. `Sent` reads as something the system did and watched happen, which is the
- * confusion this whole epic is fencing off. When the actor is unknown the claim is still a claim,
- * so it reads "Marked sent" rather than acquiring a name it does not have.
- *
- * THE WORD IS ALWAYS THERE. The Ledger's rule is that a state is colour AND glyph AND word; the
- * glyph is `EntryIcon` and this is the word, so deleting the colour mentally still leaves the row
- * readable.
- */
-/**
  * A draft WE wrote and have not addressed.
  *
  * THE DIRECTION IS PART OF IT. `counterparty` is the sender on an inbound row, and an inbound
@@ -151,6 +136,20 @@ function insideLine(entry: TimelineEntry): string {
  * line 2, where it has the width of the rail. Nothing in the row is nowrap and unshrinkable at
  * once — that is the rule §2 adds, and it is the rule rather than a set of widths, because the rail
  * will be a different width on a different screen.
+ *
+ * "MARKED SENT BY PRIYA", NEVER "SENT" (LP-852). Nothing in this version observed a send —
+ * `mail_transport` has no provider — so what the record holds is a processor's claim that they sent
+ * it from their own mail client. `Sent` reads as something the system did and watched happen, which
+ * is the confusion this whole epic is fencing off. When the actor is unknown the claim is still a
+ * claim, so it reads "Marked sent" rather than acquiring a name it does not have.
+ *
+ * THE WORD IS ALWAYS THERE. The Ledger's rule is that a state is colour AND glyph AND word; the
+ * glyph is `EntryIcon` and this is the word, so deleting the colour mentally still leaves the row
+ * readable.
+ *
+ * LP-859 §2 REVIEW — this block was `statusLine`'s, and §2 deleted `statusLine` without moving it:
+ * it was left stranded above `isOutboundDraft`, where it read as that function's documentation. Its
+ * one stale line was the format example `Draft · edited · 2m`, which §2 split across two lines.
  */
 function stateWord(entry: TimelineEntry): string {
   if (entry.status === "draft") {
@@ -208,16 +207,16 @@ function stateWord(entry: TimelineEntry): string {
  */
 function EntryIcon({ entry }: { entry: TimelineEntry }) {
   if (entry.status === "failed")
-    return <TriangleAlert className="h-4 w-4 text-danger" aria-hidden />;
+    return <TriangleAlert className="h-4 w-4 shrink-0 text-danger" aria-hidden />;
   // LP-852 REVIEW — THE PEN IS THE DRAFT'S, and `queued` is not a draft. See `statusLine`: an
   // automated nudge wearing the compose pen tells a processor there is something here to write.
   // A queued message is outbound and on its way, so it takes the outbound envelope below.
   if (entry.status === "draft") {
-    return <PenLine className="h-4 w-4 text-muted-foreground" aria-hidden />;
+    return <PenLine className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />;
   }
   if (entry.direction === "inbound")
-    return <MailOpen className="h-4 w-4 text-success" aria-hidden />;
-  return <Mail className="h-4 w-4 text-primary" aria-hidden />;
+    return <MailOpen className="h-4 w-4 shrink-0 text-success" aria-hidden />;
+  return <Mail className="h-4 w-4 shrink-0 text-primary" aria-hidden />;
 }
 
 /**
@@ -385,15 +384,6 @@ function ReplyBox({
     </div>
   );
 }
-
-/** What a processor calls each disposition. An unknown value renders as itself rather than as
- *  nothing — a manifest that silently drops the answer is what this exists to stop. */
-const ATTACHMENT_DISPOSITION: Record<string, string> = {
-  pending: "not yet accepted",
-  accepted: "accepted",
-  correspondence: "kept as correspondence",
-  rejected: "rejected",
-};
 
 export function TimelinePanel({
   fileId,
@@ -574,12 +564,18 @@ export function TimelinePanel({
                 <span className="ml-auto truncate text-xs tabular-nums text-muted-foreground">
                   {messageTimeShort(entry.at)}
                 </span>
-                {entry.is_important ? (
-                  <Star
-                    className="h-3.5 w-3.5 shrink-0 fill-warning text-warning"
-                    aria-label="Important"
-                  />
-                ) : null}
+                {/* LP-859 §2 REVIEW — THE INDICATOR IS GONE, because `MessageActions` below already
+                    draws a filled `Star` for `is_important` and labels its button "Remove the flag".
+                    §2 moved this from the end of the summary text — where it was visually far from
+                    that button — into the slot immediately before it, so a flagged row showed two
+                    identical filled stars about 8px apart and a screen reader read "Important" and
+                    then "Remove the flag" about one flag.
+
+                    NOT "MessageActions COVERS THE MESSAGE CASE". `TimelineKind` has had exactly one
+                    member since LP-825, so every row here IS a message and the action bar is on all
+                    of them. A `kind !== "message"` guard would have been unreachable code, and the
+                    test that seemed to justify it could only pass by inventing a `kind` the server
+                    cannot emit. If a second kind ever lands, it arrives with its own glyph. */}
                 {entry.kind === "message" ? (
                   <MessageActions
                     fileId={fileId}
@@ -602,7 +598,7 @@ export function TimelinePanel({
                   // it — without waiting for a refetch to tell them what they just did.
                   setAcknowledged((seen) => new Set(seen).add(entry.id));
                 }}
-                className="flex min-w-0 flex-col gap-0.5 text-left"
+                className="flex min-w-0 flex-col gap-0.5 text-left hover:underline"
               >
                 {/* LINE 2 — the state, as a word, with the width of the rail. The attribution
                     ("Marked sent by Geet Thaker") is the longest string this screen can produce and

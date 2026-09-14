@@ -455,13 +455,18 @@ describe("DraftPane", () => {
   });
 
   it("shows what arrived, and what became of it", () => {
+    // LP-859 §2 REVIEW — `pending`, WHICH IS WHAT THE SERVER ACTUALLY SENDS. This fixture said
+    // `not_yet_accepted`, a value `AttachmentDisposition` has never had: the assertion below passed
+    // because `replaceAll("_", " ")` turned the invented string into the sentence it was looking
+    // for. On a real row the column holds `pending` and the line read "· pending". A fixture that
+    // invents its input tests the fixture.
     mockUseMessageDetail.mockReturnValue(
       state(
         detail({
           direction: "inbound",
           attachments: [
             { name: "March_statement.pdf", disposition: "accepted" },
-            { name: "selfie.heic", disposition: "not_yet_accepted" },
+            { name: "selfie.heic", disposition: "pending" },
           ],
         }),
       ),
@@ -553,6 +558,35 @@ describe("DraftPane", () => {
     render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
     expect(screen.getByText(/Created 1 Sep 2026/)).toBeTruthy();
+  });
+
+  it("says who the message is with, and which way it went", () => {
+    // LP-859 §2 REVIEW — THE THIRD THING THE ROW LOST. §2 moved the counterparty off the rail into
+    // this header, correctly: a rail that shows everything is a rail nobody scans. The attachment
+    // manifest and the quarantine wording moved with it and landed on tests here. The counterparty
+    // did not. Measured by replacing `data.counterparty ?? "nobody yet"` with the bare fallback, so
+    // the pane could not name anybody: all 107 tests across this file, the row and the inbound card
+    // stayed green. A guarantee that evaporates because its markup moved is a regression with a
+    // green suite, and this was one.
+    //
+    // THE DIRECTION IS HALF OF IT. `counterparty` is the other party either way, so the word in
+    // front of it is the whole difference between mail we sent them and mail they sent us — the
+    // same asymmetry `isOutboundDraft` exists for on the row.
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ direction: "inbound", counterparty: "jane@borrower.example" })),
+    );
+    const { unmount } = render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    expect(screen.getByText(/From jane@borrower\.example/)).toBeTruthy();
+    unmount();
+
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ direction: "outbound", counterparty: "jane@borrower.example" })),
+    );
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    expect(screen.getByText(/To jane@borrower\.example/)).toBeTruthy();
+    // THE CONTROL for the pair above: "From" and "To" are asserted against a header that really did
+    // change with the direction, not against two renders that both said the same word.
+    expect(screen.queryByText(/From jane@borrower\.example/)).toBeNull();
   });
 
   it("renders nothing when no message is open", () => {

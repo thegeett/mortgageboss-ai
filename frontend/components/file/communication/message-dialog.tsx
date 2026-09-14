@@ -97,6 +97,23 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * mailed the borrower believing they had contacted the title company. `send_draft` takes a draft id
  * and has never cared which template rendered it; the missing piece was always a screen.
  */
+/**
+ * What a processor calls each disposition (LP-825), moved here by the LP-859 §2 review because this
+ * is where the manifest is now. An unknown value renders as itself rather than as nothing — a
+ * manifest that silently drops the answer is what this exists to stop, and `quarantined` and
+ * `duplicate` are already readable English, so they take that path deliberately.
+ */
+const ATTACHMENT_DISPOSITION: Record<string, string> = {
+  pending: "not yet accepted",
+  accepted: "accepted",
+  correspondence: "kept as correspondence",
+  rejected: "rejected",
+};
+
+function dispositionWord(disposition: string): string {
+  return ATTACHMENT_DISPOSITION[disposition] ?? disposition.replaceAll("_", " ");
+}
+
 export function DraftPane({
   fileId,
   messageId,
@@ -750,10 +767,18 @@ export function DraftPane({
                 <ul className="list-inside list-disc text-muted-foreground">
                   {/* The disposition travels with the name (LP-825): "accepted" and "not yet
                       accepted" are the difference between a document in the file and one still
-                      waiting for somebody. */}
+                      waiting for somebody.
+
+                      LP-859 §2 REVIEW — AND THE WORDING HAS TO COME WITH IT. This read
+                      `disposition.replaceAll("_", " ")`, which is the raw column: the server sends
+                      `pending` (`AttachmentDisposition`), so the line said "March_statement.pdf ·
+                      pending" while the comment above it promised "not yet accepted". The map that
+                      turned one into the other lived on the row's manifest, and §2 deleted the
+                      manifest without moving the map — it was left referenced by nothing. The
+                      guarantee is the WORDS, not the markup that used to carry them. */}
                   {data.attachments.map((attachment) => (
                     <li key={attachment.name}>
-                      {attachment.name} · {attachment.disposition.replaceAll("_", " ")}
+                      {attachment.name} · {dispositionWord(attachment.disposition)}
                     </li>
                   ))}
                 </ul>
