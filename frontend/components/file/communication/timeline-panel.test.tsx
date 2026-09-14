@@ -12,7 +12,7 @@
  * to keep.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -183,6 +183,45 @@ describe("the empty states", () => {
 });
 
 describe("a row", () => {
+  it("renders the actions it is given, on the header line", () => {
+    // LP-859 §5.6 — "Request documents" and "+ Compose" were a filled primary and a bare outline
+    // sharing an edge, in a strip ABOVE the header rather than on it: two button languages
+    // touching, which reads as two unrelated controls that happen to be adjacent.
+    //
+    // THE PAGE STILL OWNS THEM — it owns compose, and passing them in rather than moving them keeps
+    // the rail from acquiring a dependency on the page's compose mutation to lay out its header.
+    // What this pins is that the slot is rendered at all: a prop quietly dropped is a header that
+    // silently loses its only actions, and the page's own count test would then pass on two
+    // buttons that are nowhere.
+    loaded([MESSAGE]);
+    render(
+      <TimelinePanel fileId="LF-JR4T" actions={<button type="button">Request documents</button>} />,
+      { wrapper },
+    );
+
+    const header = screen.getByRole("heading", { name: "Drafts & messages" }).closest("header");
+    expect(header).not.toBeNull();
+    expect(
+      within(header as HTMLElement).getByRole("button", { name: "Request documents" }),
+    ).toBeTruthy();
+  });
+
+  it("keeps the file's address copyable, and never as a link", () => {
+    // LP-859 §5.5 — the address moved out of the header line and under the pills, on one line.
+    // It is a BEARER CAPABILITY: anyone holding it can post documents into this file, so it is
+    // shown and copied and never linked. The move must not have quietly turned it into an anchor
+    // or dropped the copy control.
+    loaded([MESSAGE]);
+    const { container } = render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    const shown = screen.getByText("lf-tok3n@inbox.example.com");
+    // POSITIVE: it is a `code` element. "No anchor in the tree" alone is a not-in over a component
+    // that renders no anchors anywhere, which would pass on an address that had vanished.
+    expect(shown.tagName).toBe("CODE");
+    expect(screen.getByRole("button", { name: "Copy this file's address" })).toBeTruthy();
+    expect(container.querySelectorAll("a")).toHaveLength(0);
+  });
+
   it("has nothing that is both nowrap and unshrinkable", () => {
     // LP-859 §2 — THE RULE, WHICH IS THE ONE PART OF THIS SECTION A TEST CAN HOLD.
     //

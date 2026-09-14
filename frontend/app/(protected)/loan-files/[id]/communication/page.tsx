@@ -31,6 +31,20 @@ import { useState } from "react";
  * upload link, reply email and all."* A processor cannot tell a feature that is broken from one
  * that was never wired.
  */
+/**
+ * LP-859 §5.7 — THE EMPTY PANE KEEPS ITS SURFACE.
+ *
+ * It was ~1000px of white with one centred sentence and no container, so the right half of the tab
+ * stopped looking like a pane at all and read as the page having failed to render. A pane that is
+ * empty is still a pane: same border and radius as when it holds a draft, and the content centred
+ * inside it rather than floating on the page.
+ *
+ * NOT APPLIED TO THE FULL-WIDTH STATE (§2.1 rule 4), which is a different thing — a file with no
+ * drafts renders no split at all, so there is no pane for it to be the surface of.
+ */
+const EMPTY_PANE =
+  "flex min-h-[16rem] flex-col items-center justify-center gap-3 rounded-md border border-border px-6 py-16 text-center";
+
 export default function CommunicationPage() {
   const { id } = useParams<{ id: string }>();
   const receiving = useCapabilities().data?.receiving ?? false;
@@ -178,17 +192,33 @@ export default function CommunicationPage() {
           the rail is a fixed 300px: wide enough for party, subject preview, document count and
           time. A narrower rail that can only hold a name and a timestamp is what makes a full-width
           list tempting, and the fix is the width rather than the pattern. */}
-      <div className="flex flex-col gap-6 md:flex-row md:items-start">
-        <div className="flex w-full shrink-0 flex-col gap-2 md:w-[300px]">
-          <div className="flex items-center justify-end">
-            {/* LP-833 — asking for a document no rule flagged. LP-856 — a draft with no documents
-                behind it, outline to "Request documents"' primary. */}
-            <ComposeRequestButton fileId={id} />
-            {composeButton}
-          </div>
-          <TimelinePanel fileId={id} selectedId={selected} onSelect={setChosen} />
+      <div className="flex flex-col gap-6 md:flex-row md:items-start md:gap-0">
+        {/* LP-859 §5.2 — A HAIRLINE, SO THE RAIL READS AS A RAIL. The two panes were two columns of
+            text on one white field and the 300px boundary was invisible. The Ledger's rule is a
+            hairline rather than a filled block, and it is a border on the rail rather than a sunk
+            background on one side — one of the two, not both.
+
+            `md:` ONLY. Below the breakpoint the panes stack, and a right border on a full-width
+            block is a line down the middle of nothing. */}
+        <div className="flex w-full shrink-0 flex-col gap-2 md:w-[300px] md:border-r md:border-border md:pr-4">
+          <TimelinePanel
+            fileId={id}
+            selectedId={selected}
+            onSelect={setChosen}
+            actions={
+              /* LP-859 §5.6 — ONE ROW WITH THE HEADER, AND ONE HIERARCHY. These were a filled
+                 primary and a bare outline sharing an edge, in a strip ABOVE the header rather
+                 than on it — two button languages touching, which reads as two unrelated
+                 controls that happen to be adjacent. Passed into the rail so they sit on its
+                 header line; the rail owns its own header. */
+              <div className="flex items-center gap-2">
+                <ComposeRequestButton fileId={id} />
+                {composeButton}
+              </div>
+            }
+          />
         </div>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 md:pl-6">
           {selected ? (
             <DraftPane
               fileId={id}
@@ -234,7 +264,7 @@ export default function CommunicationPage() {
             // §2.1 rule 4's second half: sent history with nothing open carries the same empty
             // state INSIDE the right pane. THIS ONE IS TRUE — there really are no drafts, and it
             // is reached only once the list has actually arrived (see the branch above).
-            <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+            <div className={EMPTY_PANE}>
               <h2 className="text-base font-semibold text-foreground">No drafts on this file</h2>
               <p className="text-sm text-muted-foreground">
                 Request documents from a finding, or write a message.
@@ -262,7 +292,7 @@ export default function CommunicationPage() {
             // THE BEHAVIOUR IS UNCHANGED. It would be easy to "fix" this by re-selecting a draft on
             // close, which trades a false sentence for a pane that cannot be dismissed. The fix is
             // the words.
-            <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+            <div className={EMPTY_PANE}>
               <h2 className="text-base font-semibold text-foreground">No draft selected</h2>
               <p className="text-sm text-muted-foreground">
                 Pick one from the list, or start a new message.

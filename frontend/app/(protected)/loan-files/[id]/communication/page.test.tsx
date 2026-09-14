@@ -47,11 +47,17 @@ vi.mock("@/components/file/communication/timeline-panel", () => ({
   TimelinePanel: ({
     selectedId,
     onSelect,
+    actions,
   }: {
     selectedId: string | null;
     onSelect: (id: string) => void;
+    actions?: React.ReactNode;
   }) => (
     <div data-testid="rail" data-selected={selectedId ?? ""}>
+      {/* LP-859 §5.6 — the buttons render INSIDE the rail's header now, passed as `actions`. A stub
+          that dropped them would make the page's own "exactly two ways to start a message" test
+          pass by rendering neither. */}
+      {actions}
       <button type="button" onClick={() => onSelect("m-other")}>
         select-other
       </button>

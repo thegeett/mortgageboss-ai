@@ -22,6 +22,7 @@ import { isNewSince, readLastSeen, writeLastSeen } from "@/lib/communication/las
 import { messageTimeLabel, messageTimeShort } from "@/lib/message-time";
 import type { TimelineEntry, TimelineFilter } from "@/lib/types/timeline";
 import { Check, Copy, Mail, MailOpen, PenLine, Reply, Star, TriangleAlert } from "lucide-react";
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 
 const PILLS: { value: TimelineFilter; label: string }[] = [
@@ -60,9 +61,15 @@ const PARTY_LABEL: Record<string, string> = {
  * The party cell.
  *
  * FIXED WIDTH so the subjects line up and the column reads as a column rather than as a prefix.
- * The borrower is petrol because they are the party a processor is chasing on almost every file;
- * everybody else is muted, which is what makes a title-company row catch the eye in a list of
- * borrower rows — the exact scan this ticket exists to make possible.
+ *
+ * LP-859 §5.4 — A LABEL, NOT A HEADING. The borrower's cell was `text-primary`: uppercase petrol,
+ * the loudest thing in the row, sitting above the message it belongs to in the reading order AND in
+ * contrast. A row's subject is what a processor is looking for; the party is how they narrow it.
+ *
+ * THE DISTINCTION SURVIVES, which is what the petrol was for. LP-852's argument holds — a
+ * title-company row must catch the eye in a list of borrower rows — so the borrower keeps a
+ * different weight from everybody else, one step up rather than an accent: `foreground-2` against
+ * `muted-foreground`. Neither is louder than the state on line 2 or the subject on line 3.
  *
  * A MESSAGE WITH NO PARTY STILL GETS A CELL. An inbound message from an address nobody on the file
  * recognises belongs to no party (LP-841 says so deliberately), and leaving the cell out would
@@ -74,7 +81,7 @@ function PartyCell({ party }: { party: string | null }) {
     <span
       className={
         party === "borrower"
-          ? "w-[5.6rem] shrink-0 truncate text-[11px] uppercase tracking-wide text-primary"
+          ? "w-[5.6rem] shrink-0 truncate text-[11px] uppercase tracking-wide text-foreground-2"
           : "w-[5.6rem] shrink-0 truncate text-[11px] uppercase tracking-wide text-muted-foreground"
       }
       title={label}
@@ -389,12 +396,22 @@ export function TimelinePanel({
   fileId,
   selectedId = null,
   onSelect,
+  actions,
 }: {
   fileId: string;
   /** LP-858 §2 — which row is the right pane showing. Owned by the page, not by the list. */
   selectedId?: string | null;
   /** Selecting a row swaps the right pane's content and moves nothing. */
   onSelect?: (messageId: string) => void;
+  /**
+   * LP-859 §5.6 — what starts a message, rendered ON the header line.
+   *
+   * The page owns these buttons — it owns compose, and `ComposeRequestButton` is its import — but
+   * they belong beside this header rather than in a strip above it. Passed in rather than moved,
+   * so the rail does not acquire a dependency on the page's compose mutation to lay out its own
+   * header.
+   */
+  actions?: ReactNode;
 }) {
   const [filter, setFilter] = useState<TimelineFilter>("all");
   const { data, isPending, isError } = useTimeline(fileId, filter);
@@ -441,7 +458,7 @@ export function TimelinePanel({
     <section className="flex flex-col gap-3">
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             {/* LP-858 §10 — the literal string. "History" described a read-only record; this
                 list's first job is the drafts that still need doing. */}
             <h2 className="text-base font-semibold text-foreground">Drafts &amp; messages</h2>
@@ -457,27 +474,8 @@ export function TimelinePanel({
               </span>
             ) : null}
           </div>
-          {data ? (
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                This file&apos;s address
-              </span>
-              <code className="rounded bg-muted px-2 py-0.5 font-mono text-xs">
-                {data.inbox_address}
-              </code>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => void copyAddress(data.inbox_address)}
-              >
-                {copied ? (
-                  <Check className="h-3.5 w-3.5" aria-hidden />
-                ) : (
-                  <Copy className="h-3.5 w-3.5" aria-hidden />
-                )}
-              </Button>
-            </div>
-          ) : null}
+          {/* LP-859 §5.6 — the actions, ON the header line. */}
+          {actions}
         </div>
         {/* LP-852 — THE PARTY TAB STRIP IS GONE. It was the reported defect: a tab is a region a
             processor can leave unclicked, so a draft to the title company sat behind one and was
@@ -502,6 +500,38 @@ export function TimelinePanel({
             </button>
           ))}
         </div>
+
+        {/* LP-859 §5.5 — THE ADDRESS, ON ONE LINE, UNDER THE PILLS.
+
+            It was a grey mono slab between "Drafts & messages" and the filter pills, heavier than
+            either and wrapping to two lines inside a 300px rail — the loudest thing in a header it
+            was not the subject of. It is referenced rarely and never read aloud.
+
+            STILL COPYABLE AND STILL NEVER A LINK. It is a bearer capability: anyone holding it can
+            post documents into this file, so it is shown and copied, never linked. The mono face
+            stays HERE and only here — §5.3 takes it off the rows, and an address is the one thing
+            on this screen a person reads character by character. */}
+        {data ? (
+          <div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+            <span className="shrink-0">This file&apos;s address</span>
+            <code className="min-w-0 flex-1 truncate font-mono" title={data.inbox_address}>
+              {data.inbox_address}
+            </code>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 shrink-0 px-1"
+              aria-label="Copy this file's address"
+              onClick={() => void copyAddress(data.inbox_address)}
+            >
+              {copied ? (
+                <Check className="h-3.5 w-3.5" aria-hidden />
+              ) : (
+                <Copy className="h-3.5 w-3.5" aria-hidden />
+              )}
+            </Button>
+          </div>
+        ) : null}
       </header>
 
       {isPending ? (
@@ -545,10 +575,19 @@ export function TimelinePanel({
               // It was correct before LP-858 and LP-858 did not break it: it moved the container.
               // The contract set the rail to 300px and said what it must hold without saying that
               // it stacks, and the row was left alone.
+              //
+              // LP-859 §5.1 — ON A 4px GRID, AND NO GAP BETWEEN THE LINES. `py-2` is 8px top and
+              // bottom; the `gap-0.5` this replaces was 2px, which is off the grid the section
+              // asks for. The three lines carry their own leading (16 / 20 / 16), so the arithmetic
+              // is 16 + 56 = 72px against §5's "≤ 72px per row at 300px".
+              //
+              // THAT IS ARITHMETIC, NOT A MEASUREMENT. jsdom has no CSS and no browser has looked
+              // at this — the real number depends on how line 1 resolves against the icon's 16px,
+              // and it wants the screen. Recorded as computed rather than as checked.
               className={
                 entry.id === selectedId
-                  ? "flex flex-col gap-0.5 border-t border-border border-l-2 border-l-primary bg-primary/5 px-2 py-2 text-sm first:border-t-0"
-                  : "flex flex-col gap-0.5 border-t border-border border-l-2 border-l-transparent px-2 py-2 text-sm first:border-t-0"
+                  ? "flex flex-col border-t border-border border-l-2 border-l-primary bg-primary/5 px-2 py-2 text-sm first:border-t-0"
+                  : "flex flex-col border-t border-border border-l-2 border-l-transparent px-2 py-2 text-sm first:border-t-0"
               }
             >
               {/* LINE 1 — who it is to, when, and the controls. The ONLY horizontal line in the
