@@ -183,39 +183,110 @@ describe("the empty states", () => {
 });
 
 describe("a row", () => {
-  it("shows the subject, the counterparty and the manifest", () => {
-    loaded([MESSAGE]);
-    render(<TimelinePanel fileId="f1" />, { wrapper });
-
-    expect(screen.getByText("A message arrived")).toBeDefined();
-    expect(screen.getByText("Statements attached")).toBeDefined();
-    expect(screen.getByText(/From jane@borrower.example/)).toBeDefined();
-    expect(screen.getByText("March_statement.pdf")).toBeDefined();
-  });
-
-  it("renders a filename as text and never as a link", () => {
-    // Sender-written text. React escapes by default; what this pins is that nothing builds a URL,
-    // a title or an href out of it.
-    loaded([{ ...MESSAGE, attachments: [{ name: "../../etc/passwd", disposition: "pending" }] }]);
-    const { container } = render(<TimelinePanel fileId="f1" />, { wrapper });
-
-    expect(screen.getByText("../../etc/passwd")).toBeDefined();
-    expect(container.querySelectorAll("a")).toHaveLength(0);
-  });
-
-  it("distinguishes a bounce from a send", () => {
-    // "Sent" and "sent, and bounced" are not the same event, and a column of identical envelopes
-    // hides the one that did not arrive.
+  it("has nothing that is both nowrap and unshrinkable", () => {
+    // LP-859 §2 — THE RULE, WHICH IS THE ONE PART OF THIS SECTION A TEST CAN HOLD.
+    //
+    // jsdom loads no CSS, so no box has a width and nothing can collapse: the DEFECT is unreachable
+    // from this suite and the ticket says so. What is reachable is the rule that caused it —
+    // `whitespace-nowrap` on an element that also cannot shrink is what put ~438px of fixed content
+    // inside a 300px rail and squeezed the one flexible column to one word per line.
+    //
+    // ASSERTED OVER THE RENDERED CLASS NAMES, not over the source, so it holds for whatever the row
+    // renders rather than for what this file happens to grep. It is a weaker check than a browser
+    // and it is not a substitute for one — §2 is verified on screen or not at all.
     loaded([
-      { ...MESSAGE, id: "s", direction: "outbound", status: "sent", attachments: [] },
-      { ...MESSAGE, id: "f", direction: "outbound", status: "failed", attachments: [] },
+      { ...MESSAGE, id: "s1", direction: "outbound", status: "sent", actor_name: "Geet Thaker" },
     ]);
-    const { container } = render(<TimelinePanel fileId="f1" />, { wrapper });
+    const { container } = render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
-    // Two rows, and their icons differ — the icon is the second channel beside the words.
-    const icons = container.querySelectorAll("li > span:first-child svg");
-    expect(icons).toHaveLength(2);
-    expect(icons[0]?.getAttribute("class")).not.toEqual(icons[1]?.getAttribute("class"));
+    // EXACT TOKENS, NOT SUBSTRINGS. The first version matched `[&_svg]:shrink-0` inside the shared
+    // Button base class and reported the reply button as an offender — a variant selector that
+    // applies to an icon, not to the button.
+    //
+    // AND ONLY ELEMENTS CARRYING TEXT, because text is the thing that overflows. An icon button is
+    // nowrap and unshrinkable and should be: 24px that cannot wrap is not what put 274px of status
+    // line outside a 300px rail.
+    const offenders = Array.from(container.querySelectorAll<HTMLElement>("li *"))
+      .filter((el) => (el.textContent ?? "").trim() !== "")
+      .filter((el) => {
+        const tokens = (typeof el.className === "string" ? el.className : "").split(/\s+/);
+        return tokens.includes("whitespace-nowrap") && tokens.includes("shrink-0");
+      })
+      .map((el) => el.className);
+
+    expect(offenders).toEqual([]);
+    // THE CONTROL: the scan read the row, and read elements WITH TEXT in it. An empty list of
+    // elements reports no offenders, and so does a filter that excluded everything.
+    expect(
+      Array.from(container.querySelectorAll<HTMLElement>("li *")).filter(
+        (el) => (el.textContent ?? "").trim() !== "",
+      ).length,
+    ).toBeGreaterThan(2);
+  });
+
+  it("is three lines: who and when, the state, and what is inside", () => {
+    // LP-859 §2 — THE ROW STACKS, and this replaces "shows the subject, the counterparty and the
+    // manifest". It stacked the summary, the subject, the documents, the counterparty AND the
+    // attachment manifest — five possible lines inside a column squeezed to one word per line. Five
+    // entries filled 800px (`04-empty-state-over-a-full-rail.png`).
+    //
+    // THE COUNTERPARTY AND THE MANIFEST ARE NOT GONE, they moved one click away to the pane, where
+    // they are asserted in `message-dialog.test.tsx` — the manifest with its dispositions, which is
+    // LP-825's guarantee and the thing that must not evaporate because the markup moved.
+    loaded([
+      {
+        ...MESSAGE,
+        summary: "A message arrived",
+        subject: "Here are my documents",
+        counterparty: "jane@borrower.example",
+        attachments: [{ name: "statement.pdf", disposition: "accepted" }],
+      },
+    ]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    // Line 1's when, line 2's state, line 3's subject — the most specific thing this row has.
+    expect(screen.getByText("Here are my documents")).toBeTruthy();
+    // Not on the row any more.
+    expect(screen.queryByText(/jane@borrower\.example/)).toBeNull();
+    expect(screen.queryByText(/statement\.pdf/)).toBeNull();
+  });
+
+  it("puts the documents on line three when there are any, not the subject", () => {
+    // LP-852's reason, preserved: four rows reading "A document request is being prepared" and
+    // differing only by a timestamp is the screenshot that started that ticket. The documents are
+    // the most specific thing a request row can say, so they win the one line available.
+    loaded([
+      {
+        ...MESSAGE,
+        direction: "outbound",
+        status: "draft",
+        subject: "Documents we need",
+        documents: ["Bank statements", "Pay stub"],
+      },
+    ]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(screen.getByText(/2 documents · Bank statements, Pay stub/)).toBeTruthy();
+    expect(screen.queryByText("Documents we need")).toBeNull();
+  });
+
+  it("falls to the summary when a row has neither documents nor a subject", () => {
+    // A blank compose draft has neither, and LP-859 §3 made its summary say so. Without this the
+    // line-three rule would leave the one row that most needs a word on it empty.
+    loaded([
+      {
+        ...MESSAGE,
+        direction: "outbound",
+        status: "draft",
+        subject: null,
+        documents: [],
+        nothing_written: true,
+        summary: "Nothing written yet",
+      },
+    ]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(screen.getByText("Nothing written yet")).toBeTruthy();
   });
 });
 
@@ -384,38 +455,26 @@ describe("the reply box's context fetch", () => {
  * and the manifest carried only filenames, so an accepted document rendered identically to one
  * nobody had looked at.
  */
-describe("TimelinePanel — the attachment manifest says what happened to each file", () => {
-  it("distinguishes an accepted document from one still waiting", () => {
+describe("TimelinePanel — the icon is the second channel beside the words", () => {
+  it("distinguishes a bounce from a send", () => {
+    // RESTORED after LP-859 §2 cut it with the manifest tests. This one is about `EntryIcon`, which
+    // is still on line 1 of the row — the manifest moved to the pane, the icon did not, and cutting
+    // it was my error rather than a consequence of the layout.
+    //
+    // "Sent" and "sent, and bounced" are not the same event, and a column of identical envelopes
+    // hides the one that did not arrive.
     loaded([
-      {
-        ...MESSAGE,
-        attachments: [
-          { name: "March_statement.pdf", disposition: "accepted" },
-          { name: "selfie.heic", disposition: "pending" },
-        ],
-      },
+      { ...MESSAGE, id: "s", direction: "outbound", status: "sent", attachments: [] },
+      { ...MESSAGE, id: "f", direction: "outbound", status: "failed", attachments: [] },
     ]);
-    render(<TimelinePanel fileId="f1" />, { wrapper });
+    const { container } = render(<TimelinePanel fileId="f1" />, { wrapper });
 
-    const accepted = screen.getByText("March_statement.pdf").closest("li");
-    const waiting = screen.getByText("selfie.heic").closest("li");
-
-    expect(accepted?.textContent).toContain("accepted");
-    // The half that makes the first assertion mean something: the two rows must not read alike.
-    expect(waiting?.textContent).toContain("not yet accepted");
-    expect(waiting?.textContent).not.toContain("· accepted");
-  });
-
-  it("renders an unrecognised disposition as itself rather than as nothing", () => {
-    // A manifest that silently drops the answer is the defect this exists to stop, so a value this
-    // build does not know must still say something.
-    loaded([{ ...MESSAGE, attachments: [{ name: "x.pdf", disposition: "quarantined" }] }]);
-    render(<TimelinePanel fileId="f1" />, { wrapper });
-
-    expect(screen.getByText("x.pdf").closest("li")?.textContent).toContain("quarantined");
+    // The icon is the first child of line 1 now rather than of the row — the row stacks.
+    const icons = container.querySelectorAll("li svg");
+    expect(icons.length).toBeGreaterThanOrEqual(2);
+    expect(icons[0]?.getAttribute("class")).not.toEqual(icons[1]?.getAttribute("class"));
   });
 });
-
 /**
  * LP-858 §2 — THE ?draft DEEP LINK MOVED TO THE PAGE, with the selection it drives.
  *
@@ -436,7 +495,7 @@ describe("when it happened (LP-838)", () => {
         id: "d1",
         direction: "outbound",
         status: "draft",
-        summary: "Documents we need",
+        subject: "Documents we need",
       },
       {
         ...MESSAGE,
@@ -450,8 +509,8 @@ describe("when it happened (LP-838)", () => {
 
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
-    expect(screen.getByText(/^Draft · /)).toBeTruthy();
-    expect(screen.getByText(/^Marked sent by Priya · /)).toBeTruthy();
+    expect(screen.getByText("Draft")).toBeTruthy();
+    expect(screen.getByText("Marked sent by Priya")).toBeTruthy();
     // AND NEVER THE BARE WORD. This is the assertion that would fail if somebody "tidied" the
     // status line back to `Sent`.
     expect(screen.queryByText(/^Sent /)).toBeNull();
@@ -464,7 +523,7 @@ describe("when it happened (LP-838)", () => {
 
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
-    expect(screen.getByText(/^Marked sent · /)).toBeTruthy();
+    expect(screen.getByText("Marked sent")).toBeTruthy();
   });
 
   it("does not call a queued message a draft", () => {
@@ -479,10 +538,10 @@ describe("when it happened (LP-838)", () => {
     loaded([{ ...MESSAGE, id: "q1", direction: "outbound", status: "queued", body_edited: false }]);
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
-    expect(screen.getByText(/^Queued · /)).toBeTruthy();
+    expect(screen.getByText("Queued")).toBeTruthy();
     // Scoped to the STATUS LINE's shape — a bare /^Draft/ also matches the "Drafts" filter pill,
     // which is a button that is always on screen and has nothing to do with this row.
-    expect(screen.queryByText(/^Draft · /)).toBeNull();
+    expect(screen.queryByText(/^Draft$|^Draft · /)).toBeNull();
   });
 
   it("still calls a draft a draft", () => {
@@ -491,13 +550,13 @@ describe("when it happened (LP-838)", () => {
     loaded([{ ...MESSAGE, id: "d1", direction: "outbound", status: "draft", body_edited: false }]);
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
-    expect(screen.getByText(/^Draft · /)).toBeTruthy();
+    expect(screen.getByText("Draft")).toBeTruthy();
   });
 
   it("says a draft has been edited when it has", () => {
     loaded([{ ...MESSAGE, id: "d1", direction: "outbound", status: "draft", body_edited: true }]);
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
-    expect(screen.getByText(/^Draft · edited · /)).toBeTruthy();
+    expect(screen.getByText("Draft · edited")).toBeTruthy();
   });
 
   it("says an unaddressed draft cannot be sent yet", () => {
@@ -518,7 +577,7 @@ describe("when it happened (LP-838)", () => {
     ]);
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
-    expect(screen.getByText(/^Draft · cannot be sent yet · /)).toBeTruthy();
+    expect(screen.getByText("Draft · cannot be sent yet")).toBeTruthy();
   });
 
   it("says New message on a draft nobody has written into", () => {
@@ -534,13 +593,16 @@ describe("when it happened (LP-838)", () => {
         status: "draft",
         counterparty: null,
         party: null,
+        // NO SUBJECT — a blank compose draft has none, which is the case this is about, and line 3
+        // shows the subject when there is one. The shared fixture carries a subject by default.
+        subject: null,
         nothing_written: true,
         summary: "Nothing written yet",
       },
     ]);
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
-    expect(screen.getByText(/^New message · /)).toBeTruthy();
+    expect(screen.getByText("New message")).toBeTruthy();
     expect(screen.queryByText(/cannot be sent yet/)).toBeNull();
     // The contract pairs the two strings (§6, §10); the subtitle comes from the server.
     expect(screen.getByText("Nothing written yet")).toBeTruthy();
@@ -564,7 +626,7 @@ describe("when it happened (LP-838)", () => {
     ]);
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
-    expect(screen.getByText(/^Draft · cannot be sent yet · /)).toBeTruthy();
+    expect(screen.getByText("Draft · cannot be sent yet")).toBeTruthy();
     expect(screen.queryByText(/New message/)).toBeNull();
   });
 
@@ -576,7 +638,7 @@ describe("when it happened (LP-838)", () => {
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
     expect(screen.queryByText(/cannot be sent yet/)).toBeNull();
-    expect(screen.getByText(/^Draft · /)).toBeTruthy();
+    expect(screen.getByText("Draft")).toBeTruthy();
   });
 
   it("does not say it about a draft that has a recipient", () => {
@@ -595,7 +657,7 @@ describe("when it happened (LP-838)", () => {
 
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
-    expect(screen.getByText(/^Draft · .*ago$/)).toBeTruthy();
+    expect(screen.getByText(/ago$|^\d+[smhd]$/)).toBeTruthy();
   });
 });
 
@@ -619,8 +681,8 @@ describe("the party column", () => {
 
   it("offers no party tabs at all", () => {
     loaded([
-      entry({ id: "b1", party: "borrower", summary: "Documents we need" }),
-      entry({ id: "t1", party: "title", summary: "Title commitment request" }),
+      entry({ id: "b1", party: "borrower", subject: "Documents we need" }),
+      entry({ id: "t1", party: "title", subject: "Title commitment request" }),
     ]);
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
@@ -633,9 +695,9 @@ describe("the party column", () => {
 
   it("names the party on EVERY row, with nothing to click first", () => {
     loaded([
-      entry({ id: "b1", party: "borrower", summary: "Documents we need" }),
-      entry({ id: "t1", party: "title", summary: "Title commitment request" }),
-      entry({ id: "l1", party: "lender", summary: "Credit report request" }),
+      entry({ id: "b1", party: "borrower", subject: "Documents we need" }),
+      entry({ id: "t1", party: "title", subject: "Title commitment request" }),
+      entry({ id: "l1", party: "lender", subject: "Credit report request" }),
     ]);
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
@@ -656,7 +718,7 @@ describe("the party column", () => {
       ...Array.from({ length: 9 }, (_, i) =>
         entry({ id: `b${i}`, party: "borrower", summary: `Borrower request ${i}` }),
       ),
-      entry({ id: "t1", party: "title", summary: "Title commitment request" }),
+      entry({ id: "t1", party: "title", subject: "Title commitment request" }),
     ];
     loaded(rows);
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
@@ -672,7 +734,7 @@ describe("the party column", () => {
     // The party cell is the first thing in the row after the icon, so it is first in the
     // accessibility tree too. Asserted on document order rather than on a label, because that is
     // what a screen reader actually follows.
-    loaded([entry({ id: "t1", party: "title", summary: "Title commitment request" })]);
+    loaded([entry({ id: "t1", party: "title", subject: "Title commitment request" })]);
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
 
     const row = screen.getByText("Title commitment request").closest("li");
@@ -787,7 +849,7 @@ describe("the since-you-last-looked dot", () => {
       id: "d1",
       direction: "outbound",
       status: "draft",
-      summary: "Documents we need",
+      subject: "Documents we need",
       party: "title",
       ...over,
     };

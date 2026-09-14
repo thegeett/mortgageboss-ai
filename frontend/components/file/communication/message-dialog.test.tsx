@@ -472,6 +472,44 @@ describe("DraftPane", () => {
     expect(screen.getByText(/selfie\.heic · not yet accepted/)).toBeTruthy();
   });
 
+  it("renders a filename as text and never as a link", () => {
+    // MOVED FROM `timeline-panel.test.tsx` BY LP-859 §2. The manifest was a sub-line on the rail's
+    // row; the row is three lines now and the manifest lives here, one click away. The GUARANTEE
+    // must not evaporate because the markup moved — this is LP-825's, and it is about a filename
+    // being sender-written text.
+    //
+    // React escapes by default; what this pins is that nothing builds a URL, a title or an href
+    // out of it.
+    mockUseMessageDetail.mockReturnValue(
+      state(
+        detail({
+          direction: "inbound",
+          attachments: [{ name: "../../etc/passwd", disposition: "pending" }],
+        }),
+      ),
+    );
+    const { container } = render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    expect(screen.getByText(/\.\.\/\.\.\/etc\/passwd/)).toBeTruthy();
+    expect(container.querySelectorAll("a")).toHaveLength(0);
+  });
+
+  it("renders an unrecognised disposition as itself rather than as nothing", () => {
+    // ALSO MOVED FROM THE RAIL. A manifest that silently drops the answer is the defect LP-825
+    // exists to stop, so a value this build does not know must still say something.
+    mockUseMessageDetail.mockReturnValue(
+      state(
+        detail({
+          direction: "inbound",
+          attachments: [{ name: "x.pdf", disposition: "quarantined" }],
+        }),
+      ),
+    );
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    expect(screen.getByText(/x\.pdf · quarantined/)).toBeTruthy();
+  });
+
   it("says a failed send failed", () => {
     mockUseMessageDetail.mockReturnValue(
       state(detail({ status: "failed", error_detail: "550 5.1.1 user unknown" })),

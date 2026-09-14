@@ -110,8 +110,49 @@ function isOutboundDraft(entry: TimelineEntry): boolean {
   return entry.direction === "outbound";
 }
 
-function statusLine(entry: TimelineEntry): string {
-  const when = messageTimeShort(entry.at);
+/**
+ * LP-859 §2 — LINE 3: the most specific thing this row can say about itself, in one line.
+ *
+ * The row used to stack the summary, the subject, the documents, the counterparty and the
+ * attachment manifest — five possible lines, each truncating, inside a column squeezed to one word.
+ * Screenshot `04-empty-state-over-a-full-rail.png` is five entries filling 800px.
+ *
+ * THE ORDER IS MOST-SPECIFIC-FIRST, and each answers the same question — *is this the message I am
+ * looking for?*
+ *
+ *   1. the documents, because LP-852 added them for exactly this: four rows reading "A document
+ *      request is being prepared" differing only by a timestamp is the screenshot that started it;
+ *   2. the subject, which is what a processor recognises a message by when there are no documents;
+ *   3. the summary, which is the server's sentence and the only thing a blank compose draft has —
+ *      LP-859 §3 made it say "Nothing written yet" rather than claiming to be a request.
+ *
+ * The counterparty and the attachment manifest are NOT here. Both are in the right pane, one click
+ * away, and a rail that shows everything is a rail nobody scans — which is the complaint §2 and §3
+ * are two ends of.
+ */
+function insideLine(entry: TimelineEntry): string {
+  if (entry.documents.length > 0) {
+    const named = entry.documents.slice(0, 3).join(", ");
+    const more = entry.documents.length > 3 ? ` and ${entry.documents.length - 3} more` : "";
+    return `${entry.documents.length} document${entry.documents.length === 1 ? "" : "s"} · ${named}${more}`;
+  }
+  return entry.subject || entry.summary;
+}
+
+/**
+ * LP-859 §2 — THE STATE AS A WORD, WITHOUT THE TIME.
+ *
+ * This was `statusLine`, which returned `Marked sent by Geet Thaker · 1 day ago` — 274px of
+ * `whitespace-nowrap` inside a 300px rail, sitting in a `shrink-0` column. That pair is what put
+ * text outside the rail and squeezed the one flexible column past zero, so every row's summary
+ * wrapped one word per line. Both symptoms, one cause.
+ *
+ * The time is its own thing on line 1 now, where it has a right edge to sit against; the word is
+ * line 2, where it has the width of the rail. Nothing in the row is nowrap and unshrinkable at
+ * once — that is the rule §2 adds, and it is the rule rather than a set of widths, because the rail
+ * will be a different width on a different screen.
+ */
+function stateWord(entry: TimelineEntry): string {
   if (entry.status === "draft") {
     // LP-857 — CANNOT BE SENT YET, AND THE ROW SAYS SO. A party draft is created even when the file
     // has no address for that party (LP-841 — "the message is the part a processor wants"), and
@@ -131,12 +172,12 @@ function statusLine(entry: TimelineEntry): string {
     // "Cannot be sent yet" is the NO-ADDRESS warning. Saying it about a draft nobody has written
     // yet makes it mean two things, and a warning that means two things is read as neither.
     if (entry.nothing_written) {
-      return `New message · ${when}`;
+      return "New message";
     }
     if (isOutboundDraft(entry) && entry.counterparty === null) {
-      return `Draft · cannot be sent yet · ${when}`;
+      return "Draft · cannot be sent yet";
     }
-    return entry.body_edited ? `Draft · edited · ${when}` : `Draft · ${when}`;
+    return entry.body_edited ? "Draft · edited" : "Draft";
   }
   // LP-852 REVIEW — `queued` IS NOT A DRAFT, AND THIS SAID IT WAS. The two were grouped here, so
   // the one thing that produces a queued row — `auto_reply.record_auto_reply`, an automated nudge
@@ -149,15 +190,13 @@ function statusLine(entry: TimelineEntry): string {
   // this becomes a live mislabel with nothing to catch it. Before LP-852 the fall-through said
   // "Created", which is vague and true; grouping it with `draft` made it specific and false.
   if (entry.status === "queued") {
-    return `Queued · ${when}`;
+    return "Queued";
   }
   if (entry.status === "sent" || entry.status === "delivered") {
-    return entry.actor_name
-      ? `Marked sent by ${entry.actor_name} · ${when}`
-      : `Marked sent · ${when}`;
+    return entry.actor_name ? `Marked sent by ${entry.actor_name}` : "Marked sent";
   }
   // Everything else keeps LP-838's label, which already says what it is in a processor's words.
-  return `${messageTimeLabel(entry)} ${when}`;
+  return messageTimeLabel(entry);
 }
 
 /**
@@ -507,115 +546,40 @@ export function TimelinePanel({
               // bar rather than a fill: it reads as a position in a list, and the Ledger's hairline
               // rule means a background block here would compete with the row's own borders.
               aria-current={entry.id === selectedId ? "true" : undefined}
+              // LP-859 §2 — A STACK, NOT FOUR COLUMNS. The row was `flex items-start gap-3` over
+              // four children of which three could not shrink: icon, party (89.6px) and a nowrap
+              // status line (~274px). ~438px of fixed content inside a 300px rail, so the one
+              // flexible column was squeezed to its min-content width — one word per line — and the
+              // status line ran out of the rail entirely and collided with the right pane.
+              //
+              // It was correct before LP-858 and LP-858 did not break it: it moved the container.
+              // The contract set the rail to 300px and said what it must hold without saying that
+              // it stacks, and the row was left alone.
               className={
                 entry.id === selectedId
-                  ? "flex items-start gap-3 border-t border-border border-l-2 border-l-primary bg-primary/5 py-2 pl-2 text-sm first:border-t-0"
-                  : "flex items-start gap-3 border-t border-border border-l-2 border-l-transparent py-2 pl-2 text-sm first:border-t-0"
+                  ? "flex flex-col gap-0.5 border-t border-border border-l-2 border-l-primary bg-primary/5 px-2 py-2 text-sm first:border-t-0"
+                  : "flex flex-col gap-0.5 border-t border-border border-l-2 border-l-transparent px-2 py-2 text-sm first:border-t-0"
               }
             >
-              <span className="mt-0.5 shrink-0">
+              {/* LINE 1 — who it is to, when, and the controls. The ONLY horizontal line in the
+                  row, and the time sits against the right edge with `ml-auto` rather than in a
+                  fixed column, so it has somewhere to go when the party label is long. */}
+              <div className="flex items-center gap-2">
                 <EntryIcon entry={entry} />
-              </span>
-              {/* LP-852 — COLUMN ONE. On every row, before the subject, and therefore read before
-                  the subject by a screen reader too. */}
-              <PartyCell party={entry.party} />
-              <div className="flex min-w-0 flex-1 flex-col">
-                {/* LP-829 — THE SUMMARY IS THE HANDLE. A whole-row click would swallow the reply and
-                    flag controls beside it, and a separate "open" affordance would be a second thing
-                    to find; the line naming the message is what a processor is already reading when
-                    they want to see it. A button, not a div with a handler, so it is reachable from
-                    the keyboard and announced as something that does anything at all. */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    onSelect?.(entry.id);
-                    // The dot is about this processor's attention, so it clears the moment they
-                    // give it — without waiting for a refetch to tell them what they just did.
-                    setAcknowledged((seen) => new Set(seen).add(entry.id));
-                  }}
-                  className="text-left hover:underline"
-                >
-                  <span
-                    className={entry.unread ? "font-semibold text-foreground" : "text-foreground"}
-                  >
-                    {/* LP-852 — "SINCE YOU LAST LOOKED", NOT "UNREAD". Nothing is received in this
-                        version, so unread would be a claim about somebody else's behaviour; this is
-                        a claim about this processor. Labelled, because a bare coloured dot says
-                        nothing to a screen reader and the Ledger's rule is that a state is a word
-                        as well as a colour. */}
-                    {isNewSince(entry.created_at, lastSeen) && !acknowledged.has(entry.id) ? (
-                      <span
-                        className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-primary align-middle"
-                        aria-label="New since you last looked"
-                      />
-                    ) : null}
-                    {entry.summary}
-                    {entry.is_important ? (
-                      <Star
-                        className="ml-1 inline h-3.5 w-3.5 fill-warning text-warning"
-                        aria-label="Important"
-                      />
-                    ) : null}
-                  </span>
-                </button>
-                {entry.subject ? (
-                  <span className="truncate text-xs text-muted-foreground">{entry.subject}</span>
-                ) : null}
-                {/* LP-852 — WHAT IS INSIDE, WITHOUT OPENING IT. Four rows reading "A document
-                    request is being prepared", identical but for a timestamp, is the screenshot
-                    that started this ticket. Names AND a count: the count says how much is in an
-                    email, the names say whether it is the one they are looking for. Capped, because
-                    a request for nine documents would otherwise be nine lines of prose in a list
-                    whose whole job is to be scanned. */}
-                {entry.documents.length > 0 ? (
-                  <span className="truncate text-xs text-muted-foreground">
-                    {entry.documents.length} document{entry.documents.length === 1 ? "" : "s"} ·{" "}
-                    {entry.documents.slice(0, 3).join(", ")}
-                    {entry.documents.length > 3 ? ` and ${entry.documents.length - 3} more` : ""}
-                  </span>
-                ) : null}
-                {entry.counterparty ? (
-                  <span className="truncate text-xs text-muted-foreground">
-                    {entry.direction === "inbound" ? "From" : "To"} {entry.counterparty}
-                  </span>
-                ) : null}
-                {entry.attachments.length > 0 ? (
-                  // THE MANIFEST. Sender-written text, rendered as text — no title, no href, and
-                  // nothing built into a URL from it.
-                  <ul className="mt-1 flex flex-wrap gap-1">
-                    {entry.attachments.map((attachment) => (
-                      <li
-                        key={attachment.name}
-                        className="max-w-full truncate rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
-                      >
-                        {attachment.name}
-                        {/* LP-825 REVIEW — WHAT BECAME OF IT, beside the name. The manifest was
-                            names alone, which reads the same whether a document was accepted into
-                            the file or is still sitting there unlooked-at. The sentence that used
-                            to answer it ("A document arrived by email and was accepted") was an
-                            activity row, and LP-825 stopped this timeline reading activity. */}
-                        <span className="ml-1 text-[11px] text-foreground-2">
-                          ·{" "}
-                          {ATTACHMENT_DISPOSITION[attachment.disposition] ?? attachment.disposition}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                {open === entry.id ? (
-                  <ReplyBox fileId={fileId} entry={entry} onDone={() => setOpen(null)} />
-                ) : null}
-              </div>
-              <div className="flex shrink-0 items-center gap-1">
-                {/* LP-838 — THE LABEL, because a bare timestamp is ambiguous in exactly the way
-                    that matters. A draft composed on Monday and sent on Thursday shows Thursday,
-                    and "Thursday" alone does not say whether the borrower has heard from us.
-                    LP-852 — AND IT IS ATTRIBUTED. Nothing in this version observed a send: what a
-                    processor pressed was a claim that they sent it from their own mail client, so
-                    the record names them. `Sent` alone reads as something the system did. */}
-                <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">
-                  {statusLine(entry)}
+                {/* LP-852 — COLUMN ONE. Read before the subject by a screen reader too. Keeps its
+                    `shrink-0`: it is 90px of a line that now has the whole rail. */}
+                <PartyCell party={entry.party} />
+                {/* LP-838 — A BARE TIMESTAMP IS AMBIGUOUS in exactly the way that matters; the
+                    LABEL is on line 2 with the state it belongs to. This is the when. */}
+                <span className="ml-auto truncate text-xs tabular-nums text-muted-foreground">
+                  {messageTimeShort(entry.at)}
                 </span>
+                {entry.is_important ? (
+                  <Star
+                    className="h-3.5 w-3.5 shrink-0 fill-warning text-warning"
+                    aria-label="Important"
+                  />
+                ) : null}
                 {entry.kind === "message" ? (
                   <MessageActions
                     fileId={fileId}
@@ -625,6 +589,57 @@ export function TimelinePanel({
                   />
                 ) : null}
               </div>
+
+              {/* LINES 2 AND 3 — the handle. LP-829's rule holds: a whole-row click would swallow
+                  the reply and flag controls, which is why they are on line 1 and outside this.
+                  A button, not a div with a handler, so it is reachable from the keyboard and
+                  announced as something that does anything at all. */}
+              <button
+                type="button"
+                onClick={() => {
+                  onSelect?.(entry.id);
+                  // The dot is about this processor's attention, so it clears the moment they give
+                  // it — without waiting for a refetch to tell them what they just did.
+                  setAcknowledged((seen) => new Set(seen).add(entry.id));
+                }}
+                className="flex min-w-0 flex-col gap-0.5 text-left"
+              >
+                {/* LINE 2 — the state, as a word, with the width of the rail. The attribution
+                    ("Marked sent by Geet Thaker") is the longest string this screen can produce and
+                    this is where it fits. */}
+                <span
+                  className={
+                    entry.unread
+                      ? "truncate font-semibold text-foreground"
+                      : "truncate text-foreground"
+                  }
+                >
+                  {/* LP-852 — "SINCE YOU LAST LOOKED", NOT "UNREAD". Nothing is received in this
+                      version, so unread would be a claim about somebody else's behaviour. Labelled,
+                      because a bare coloured dot says nothing to a screen reader. */}
+                  {isNewSince(entry.created_at, lastSeen) && !acknowledged.has(entry.id) ? (
+                    <span
+                      className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-primary align-middle"
+                      aria-label="New since you last looked"
+                    />
+                  ) : null}
+                  {stateWord(entry)}
+                </span>
+
+                {/* LINE 3 — WHAT IS INSIDE, and the most specific thing the row has. LP-852 added
+                    the documents sub-line because four rows reading "A document request is being
+                    prepared", identical but for a timestamp, is the screenshot that started that
+                    ticket — and the subject is more specific still. One line, not four: the rail is
+                    scanned, and a row that lists everything is a row nobody reads.
+
+                    NAMES AND A COUNT: the count says how much is in an email, the names say whether
+                    it is the one they are looking for. */}
+                <span className="truncate text-xs text-muted-foreground">{insideLine(entry)}</span>
+              </button>
+
+              {open === entry.id ? (
+                <ReplyBox fileId={fileId} entry={entry} onDone={() => setOpen(null)} />
+              ) : null}
             </li>
           ))}
         </ul>
