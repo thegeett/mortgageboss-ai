@@ -302,6 +302,47 @@ describe("DraftPane", () => {
     expect(text).toContain("March statement");
   });
 
+  it("shows a row corrupted by the old double escape as it is stored, not repaired", async () => {
+    // LP-859 §1, THE LIMIT OF THE FIX — found in review, and it is the reason the browser pass on
+    // LF-XMB2 must not be read as a verdict on §1.
+    //
+    // Under the broken build the editor held the DOUBLE-escaped document, so the first keystroke
+    // autosaved that — `<p>&lt;p&gt;Hi Sarah,&lt;/p&gt;…</p>` with `body_format = "html"`. Those
+    // rows now take the html branch, which renders stored markup as-is and is correct for every
+    // body a person actually wrote. So they still show literal tags, and re-editing re-saves the
+    // same escaped text. STABLE, NOT SELF-HEALING.
+    //
+    // This is the shape of screenshot `01-edited-draft-shows-tags.png` — draft "fdgdfgdfg". A
+    // reviewer loading that file after §1 will see tags and may conclude the fix did not land.
+    // It did; the ROW is corrupt. Repairing those rows is recorded in the ticket's "Still open"
+    // as its own piece of work, because it is a data migration over borrower-facing message
+    // bodies and this ticket says "Migration: none".
+    mockUseMessageDetail.mockReturnValue(
+      state(
+        detail({
+          is_editable: true,
+          is_open_draft: true,
+          status: "draft",
+          body_format: "html",
+          body: "<p>&lt;p&gt;Hi Sarah,&lt;/p&gt;</p>",
+        }),
+      ),
+    );
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    await vi.waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
+    // The tags ARE on screen as text, and that is the stored content faithfully rendered.
+    expect(document.querySelector(".ProseMirror")?.textContent).toContain("<p>Hi Sarah,</p>");
+    expect(document.querySelector(".ProseMirror p")).toBeTruthy();
+
+    // THIS TEST DOES NOT CATCH §1 RETURNING, and saying so is the point of the sentence.
+    // Measured: restoring the double conversion leaves it green, because an `html` body takes the
+    // same branch either way — §1 only ever touched the plain path. Its job is to RECORD that a
+    // corrupt row renders like this, so the next person to see tags on LF-XMB2 has something
+    // naming which of the two it is rather than a screenshot and a guess. The tests that catch §1
+    // returning are the two above it, and they do.
+  });
+
   it("gives the processor the rich editor, not a textarea", async () => {
     // THE WIRING, and it is the fifth time in this run that something was built correctly and
     // nothing asserted it was connected. Every other test in this file reads `body` from the seeded
