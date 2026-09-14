@@ -62,14 +62,26 @@ const PARTY_LABEL: Record<string, string> = {
  *
  * FIXED WIDTH so the subjects line up and the column reads as a column rather than as a prefix.
  *
- * LP-859 §5.4 — A LABEL, NOT A HEADING. The borrower's cell was `text-primary`: uppercase petrol,
- * the loudest thing in the row, sitting above the message it belongs to in the reading order AND in
- * contrast. A row's subject is what a processor is looking for; the party is how they narrow it.
+ * LP-859 §5.4 — REVERTED, AND THE MEASUREMENT IS WHY. This was changed to `foreground-2` to make
+ * the borrower's cell quieter, and computing the WCAG ratios from the tokens says it did the
+ * opposite on both counts. Against `--card`:
  *
- * THE DISTINCTION SURVIVES, which is what the petrol was for. LP-852's argument holds — a
- * title-company row must catch the eye in a list of borrower rows — so the borrower keeps a
- * different weight from everybody else, one step up rather than an accent: `foreground-2` against
- * `muted-foreground`. Neither is louder than the state on line 2 or the subject on line 3.
+ *     LIGHT   primary 8.53:1 → foreground-2 8.21:1     3.8% quieter. Essentially unchanged.
+ *     DARK    primary 7.31:1 → foreground-2 9.43:1     29% LOUDER.
+ *
+ * So the change gave away the HUE — petrol to neutral, which is the channel doing LP-852's work —
+ * and kept almost all of the weight §5.4 wanted removed; in dark mode it added weight. A change
+ * measured as worse on the axis the item is about does not ship.
+ *
+ * WHY THE OBVIOUS FIX IS NOT APPLIED EITHER. `muted-foreground` (5.32:1 light, 5.83:1 dark) is the
+ * quietest text tone, so §5.4's "never louder than the summary" can only be met by using exactly
+ * that — for BOTH parties, which deletes the distinction LP-852 argued for: *"the borrower is
+ * petrol… which is what makes a title-company row catch the eye in a list of borrower rows"*.
+ * Carrying that on a channel which is not loudness (weight is the obvious one) is a redesign, and
+ * §5 says not to widen into one.
+ *
+ * §5.4 AND LP-852 ARE IN GENUINE TENSION and the resolution needs eyes. Recorded in the ticket's
+ * "Still open" rather than settled by whichever of the two was read last.
  *
  * A MESSAGE WITH NO PARTY STILL GETS A CELL. An inbound message from an address nobody on the file
  * recognises belongs to no party (LP-841 says so deliberately), and leaving the cell out would
@@ -81,7 +93,7 @@ function PartyCell({ party }: { party: string | null }) {
     <span
       className={
         party === "borrower"
-          ? "w-[5.6rem] shrink-0 truncate text-[11px] uppercase tracking-wide text-foreground-2"
+          ? "w-[5.6rem] shrink-0 truncate text-[11px] uppercase tracking-wide text-primary"
           : "w-[5.6rem] shrink-0 truncate text-[11px] uppercase tracking-wide text-muted-foreground"
       }
       title={label}

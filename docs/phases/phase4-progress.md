@@ -283,7 +283,19 @@ Five commits, reviewed between each. `docs/tickets/figures/lp859/` holds the fou
 | 2 | §3 — the blank compose draft's words | AWAITING_REVIEW | `f58cd1eb` |
 | 3 | §4 — the empty state that lies | AWAITING_REVIEW | `3bc611f0` |
 | 4 | §2 — the rail row layout | AWAITING_REVIEW — **unverified on screen, no browser available** | `47404f5e` |
-| 5 | §5 — the finish pass | AWAITING_REVIEW — **unverified on screen, judged by eye by design** | `e3904b1a` |
+| 5 | §5 — the finish pass | REVIEWED (`8b9b6a12`) — **unverified on screen; item 4 reverted and unmet** | `e3904b1a` |
+
+**LP-859 is built. Two sections are UNVERIFIED and one item is unmet, and none of that is a CI
+failure — it is the ticket's own premise.** §2 and §5 are judged on a 300px rail on LF-XMB2 and
+nobody has looked at one. Measured, not assumed: no Playwright/Puppeteer/Cypress in
+`frontend/package.json` or `node_modules/.bin`; `./scripts/deploy staging query` refuses on an
+expired SSO; and `infra/envs/staging/terraform.tfvars` pins staging to `staging-3e38b5f1`, the
+commit **before** §1 — so a check today would test the broken bundle regardless.
+
+**To unblock, in order:** re-run the deploy stage, `aws sso login --sso-session mbai`, then load
+LF-XMB2's Communication tab at 1280px and 700px against `docs/tickets/figures/lp859/`. That closes
+§2's and §5's done-when clauses, settles Still-open item 8 (the party cell's contrast), and lets
+somebody size the corrupt-row population from `readonly.communications`.
 
 **The rule this ticket family earned:** a ticket that changes what a screen looks like is not done on
 green CI. LP-858 ran 31 requirements, 9 acceptance commands and 11 named tests, all passing, with all
