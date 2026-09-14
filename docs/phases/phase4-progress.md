@@ -279,7 +279,7 @@ Five commits, reviewed between each. `docs/tickets/figures/lp859/` holds the fou
 
 | # | Section | Status | SHA |
 |---|---|---|---|
-| 1 | §1 — the double HTML escape (one line + tests) | AWAITING_REVIEW | `PENDING` |
+| 1 | §1 — the double HTML escape (one line + tests) | AWAITING_REVIEW | `5dc756ce` |
 | 2 | §3 — the blank compose draft's words | PENDING | — |
 | 3 | §4 — the empty state that lies | PENDING | — |
 | 4 | §2 — the rail row layout | PENDING | — |
