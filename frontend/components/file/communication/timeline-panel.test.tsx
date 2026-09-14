@@ -220,6 +220,20 @@ describe("a row", () => {
     expect(shown.tagName).toBe("CODE");
     expect(screen.getByRole("button", { name: "Copy this file's address" })).toBeTruthy();
     expect(container.querySelectorAll("a")).toHaveLength(0);
+
+    // LP-859 §5 REVIEW — AND UNDER THE PILLS, WHICH IS THE HALF §5.5 IS ACTUALLY ABOUT. The
+    // assertions above are true of the address wherever it sits: measured by moving the whole block
+    // back onto the header line beside the heading — undoing §5.5 — and all 52 tests passed. The
+    // sibling test for the actions pins position with `within(header)`; this one described a move it
+    // did not check. Document order against the pills is the claim: the address comes after them.
+    const pills = screen.getByRole("tablist", { name: "Filter the history" });
+    expect(pills.compareDocumentPosition(shown) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // THE CONTROL: `compareDocumentPosition` returns a bitmask, and reading the wrong bit is true of
+    // any two distinct nodes. The heading precedes the pills, so the same test on it must be true —
+    // and the reverse direction on the address must not.
+    const heading = screen.getByRole("heading", { name: "Drafts & messages" });
+    expect(heading.compareDocumentPosition(pills) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(shown.compareDocumentPosition(pills) & Node.DOCUMENT_POSITION_FOLLOWING).toBeFalsy();
   });
 
   it("has nothing that is both nowrap and unshrinkable", () => {

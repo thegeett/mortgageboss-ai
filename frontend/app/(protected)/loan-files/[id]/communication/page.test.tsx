@@ -403,6 +403,65 @@ describe("the landing state", () => {
     expect(screen.getByText("Loading this file…")).toBeTruthy();
   });
 
+  it("gives every right-pane state the pane's surface, loading included", () => {
+    // LP-859 §5.7 REVIEW — §5.7 gave the two empty states a border and a radius so the right half
+    // stops reading as a page that failed to render. The `isPending` branch sits between them in the
+    // same ternary chain and was left as bare centred text — and it is the state a processor sees
+    // FIRST on every visit, so the frame §5.7 exists to fix was the frame it missed.
+    //
+    // ALL THREE, NOT THE ONE THAT WAS WRONG. Two of three carrying a rule is how the third goes
+    // unnoticed, so this asserts the class rather than the instance.
+    const surfaced = (text: string) => {
+      const node = screen.getByText(text).closest("div");
+      // `rounded-lg` specifically: `--radius` (5px) is the CONTROL radius and `--radius-container`
+      // (8px) is the one `globals.css` labels "cards, panels, tables". This is a panel, and §5.7
+      // shipped it at the control step.
+      expect(node?.className).toContain("rounded-lg");
+      expect(node?.className).toContain("border");
+      cleanup();
+    };
+
+    mockTimeline.mockReturnValue({ data: undefined, isPending: true });
+    render(<CommunicationPage />);
+    surfaced("Loading this file…");
+
+    // Sent history, nothing open: the list arrived and really has no drafts.
+    entries([{ id: "m-other", status: "sent" }]);
+    render(<CommunicationPage />);
+    surfaced("No drafts on this file");
+
+    // A draft exists but the pane was closed.
+    entries([{ id: "d-new" }]);
+    render(<CommunicationPage />);
+    fireEvent.click(screen.getByRole("button", { name: "close-pane" }));
+    surfaced("No draft selected");
+  });
+
+  it("leaves the rail 300px of content after its gutter", () => {
+    // LP-859 §5 REVIEW — THE NUMBER §2's BUDGET IS SPENT AGAINST. Tailwind's preflight is
+    // `box-sizing: border-box`, so §5.2's `md:pr-4` and `md:border-r` came out of the 300px the
+    // contract promises rather than out of the space beside it: 283px of usable rail, on the one
+    // line §2 had to stack because ~438px of fixed content did not fit in 300.
+    //
+    // DERIVED, NOT PINNED. Asserting the literal `md:w-[316px]` would pass on 316 with the padding
+    // deleted, which is a different rail with the same class. This reads the three numbers out of
+    // the className and checks the subtraction, so changing any one of them alone fails.
+    entries([{ id: "d-new" }]);
+    const { container } = render(<CommunicationPage />);
+
+    const rail = container.querySelector<HTMLElement>('[class*="md:w-["]');
+    expect(rail).not.toBeNull();
+    const cls = rail?.className ?? "";
+    const declared = Number(/md:w-\[(\d+)px\]/.exec(cls)?.[1]);
+    const padding = Number(/md:pr-(\d+)/.exec(cls)?.[1]) * 4;
+    const border = /md:border-r/.test(cls) ? 1 : 0;
+    // THE CONTROL: all three were actually found. A failed match is NaN, and NaN arithmetic would
+    // report "not 300" for a rail whose classes this test could not read at all.
+    expect(Number.isFinite(declared)).toBe(true);
+    expect(Number.isFinite(padding)).toBe(true);
+    expect(declared - padding - border).toBe(300);
+  });
+
   it("selecting a row swaps the pane and leaves the layout alone", () => {
     // §2 — "Selecting a row swaps the right pane's content and moves nothing." The rail is present
     // before and after, which is the half a list that collapsed on selection would fail.

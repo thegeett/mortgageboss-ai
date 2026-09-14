@@ -578,12 +578,20 @@ export function TimelinePanel({
               //
               // LP-859 §5.1 — ON A 4px GRID, AND NO GAP BETWEEN THE LINES. `py-2` is 8px top and
               // bottom; the `gap-0.5` this replaces was 2px, which is off the grid the section
-              // asks for. The three lines carry their own leading (16 / 20 / 16), so the arithmetic
-              // is 16 + 56 = 72px against §5's "≤ 72px per row at 300px".
+              // asks for.
               //
-              // THAT IS ARITHMETIC, NOT A MEASUREMENT. jsdom has no CSS and no browser has looked
-              // at this — the real number depends on how line 1 resolves against the icon's 16px,
-              // and it wants the screen. Recorded as computed rather than as checked.
+              // LP-859 §5 REVIEW — AND THE ARITHMETIC WAS 16 + 56 = 72, WHICH IS WRONG TWICE.
+              // Line 1 is not 16px of text leading: it holds `MessageActions`, whose three controls
+              // are `size="sm"` — `h-6`, 24px — so the flex line is as tall as its tallest child and
+              // the icon never governed it. And `gap-0.5` survived on the handle below, 2px off the
+              // same grid this paragraph invokes, which §5 removed from the `li` and not from here.
+              // With the gap gone the row is 16 + 24 + 20 + 16 = 76px, still 4px over §5's ceiling
+              // of "≤ 72px per row at 300px" — and that ceiling was set against a 300px rail, which
+              // §5.2's `md:pr-4` and `md:border-r` have since reduced to 283px of content.
+              //
+              // THAT IS STILL ARITHMETIC, NOT A MEASUREMENT. jsdom has no CSS and no browser has
+              // looked at this. Recorded as computed rather than as checked — the correction is to
+              // the number, not to its standing.
               className={
                 entry.id === selectedId
                   ? "flex flex-col border-t border-border border-l-2 border-l-primary bg-primary/5 px-2 py-2 text-sm first:border-t-0"
@@ -637,7 +645,7 @@ export function TimelinePanel({
                   // it — without waiting for a refetch to tell them what they just did.
                   setAcknowledged((seen) => new Set(seen).add(entry.id));
                 }}
-                className="flex min-w-0 flex-col gap-0.5 text-left hover:underline"
+                className="flex min-w-0 flex-col text-left hover:underline"
               >
                 {/* LINE 2 — the state, as a word, with the width of the rail. The attribution
                     ("Marked sent by Geet Thaker") is the longest string this screen can produce and

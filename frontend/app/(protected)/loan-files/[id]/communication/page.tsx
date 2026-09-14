@@ -36,14 +36,25 @@ import { useState } from "react";
  *
  * It was ~1000px of white with one centred sentence and no container, so the right half of the tab
  * stopped looking like a pane at all and read as the page having failed to render. A pane that is
- * empty is still a pane: same border and radius as when it holds a draft, and the content centred
- * inside it rather than floating on the page.
+ * empty is still a pane: a surface with the content centred inside it rather than floating on the
+ * page.
+ *
+ * LP-859 §5 REVIEW — NOT "THE SAME BORDER AND RADIUS AS WHEN IT HOLDS A DRAFT", which is what this
+ * said and is false. `DraftPane`'s root is `flex min-h-0 flex-1 flex-col` with no border and no
+ * radius; only its inner header carries a `border-b`. So the frame appears when the pane is EMPTY
+ * and vanishes when it fills, which signals the inverse of the intent: press Compose and the frame
+ * goes, press the close control and it comes back. Resolving that means either giving `DraftPane`
+ * its own surface or dropping this one, and both are judged on a screen — carried to §5's browser
+ * pass rather than guessed at here. What is fixed is the claim, which was measurably untrue.
+ *
+ * `rounded-lg`, NOT `rounded-md`. `--radius` (5px) is the control radius and `--radius-container`
+ * (8px) is the one `globals.css` labels "cards, panels, tables". This is a panel.
  *
  * NOT APPLIED TO THE FULL-WIDTH STATE (§2.1 rule 4), which is a different thing — a file with no
  * drafts renders no split at all, so there is no pane for it to be the surface of.
  */
 const EMPTY_PANE =
-  "flex min-h-[16rem] flex-col items-center justify-center gap-3 rounded-md border border-border px-6 py-16 text-center";
+  "flex min-h-[16rem] flex-col items-center justify-center gap-3 rounded-lg border border-border px-6 py-16 text-center";
 
 export default function CommunicationPage() {
   const { id } = useParams<{ id: string }>();
@@ -191,7 +202,10 @@ export default function CommunicationPage() {
       {/* BELOW ~720px THE PANES STACK, list first, draft under it — `flex-col` until `md`. Above it
           the rail is a fixed 300px: wide enough for party, subject preview, document count and
           time. A narrower rail that can only hold a name and a timestamp is what makes a full-width
-          list tempting, and the fix is the width rather than the pattern. */}
+          list tempting, and the fix is the width rather than the pattern.
+
+          300px IS THE CONTENT BOX, not the declared width — see §5.2's gutter below, which is why
+          the class reads 316. The number the row budget is spent against is this one. */}
       <div className="flex flex-col gap-6 md:flex-row md:items-start md:gap-0">
         {/* LP-859 §5.2 — A HAIRLINE, SO THE RAIL READS AS A RAIL. The two panes were two columns of
             text on one white field and the 300px boundary was invisible. The Ledger's rule is a
@@ -199,8 +213,27 @@ export default function CommunicationPage() {
             background on one side — one of the two, not both.
 
             `md:` ONLY. Below the breakpoint the panes stack, and a right border on a full-width
-            block is a line down the middle of nothing. */}
-        <div className="flex w-full shrink-0 flex-col gap-2 md:w-[300px] md:border-r md:border-border md:pr-4">
+            block is a line down the middle of nothing.
+
+            LP-859 §5 REVIEW — 316px, SO THE CONTENT BOX IS STILL 300. Tailwind's preflight sets
+            `box-sizing: border-box` on everything, so `w-[300px]` with `pr-4` and a `border-r` is
+            300 − 16 − 1 = 283px of usable rail. §2 of this ticket exists BECAUSE ~438px of fixed
+            content was put inside a 300px rail, and line 1 still carries fixed columns — the state
+            glyph, `PartyCell` at 89.6px, and three `size="sm"` buttons — with only the timestamp
+            able to give way. Taking 17px out of that line without re-deriving the budget is the
+            single change most likely to re-open the defect §2 was for. The gutter is real and
+            wanted; it is paid for by the declared width rather than out of the contract below.
+
+            317 = 300 + 16 (`pr-4`) + 1 (the hairline). The border counts: it is inside the box too,
+            and 316 leaves 299.
+
+            `md:self-stretch` FOR THE SAME REASON THE BORDER EXISTS. The row is `md:items-start`, so
+            the rail sizes to its own content and the hairline is exactly as tall as the list — on a
+            file with one draft that is a line stopping a third of the way down beside a 500px pane,
+            which reads as a rendering artefact rather than as a column boundary. §5.2 asks for a
+            divider; a divider that ends mid-pane is not one. The rail's children stay top-aligned
+            because it is a column. Still to be confirmed by eye. */}
+        <div className="flex w-full shrink-0 flex-col gap-2 md:w-[317px] md:self-stretch md:border-r md:border-border md:pr-4">
           <TimelinePanel
             fileId={id}
             selectedId={selected}
@@ -259,7 +292,14 @@ export default function CommunicationPage() {
             // SO IT SAYS NOTHING IT DOES NOT KNOW. Both branches below are claims about a list
             // that has not loaded; the honest answer for that frame is the one the rail is already
             // giving — that it is still arriving.
-            <p className="py-16 text-center text-sm text-muted-foreground">Loading this file…</p>
+            // LP-859 §5 REVIEW — AND IT KEEPS THE PANE'S SURFACE. §5.7 gave the two empty states a
+            // border and a radius so the right half stops reading as a page that failed to render;
+            // this branch sits between them and was left as bare centred text. It is the state a
+            // processor sees FIRST on every visit to the tab, so the frame §5.7 exists to fix is
+            // the frame it did not reach.
+            <div className={EMPTY_PANE}>
+              <p className="text-sm text-muted-foreground">Loading this file&hellip;</p>
+            </div>
           ) : liveDrafts.length === 0 ? (
             // §2.1 rule 4's second half: sent history with nothing open carries the same empty
             // state INSIDE the right pane. THIS ONE IS TRUE — there really are no drafts, and it
