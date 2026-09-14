@@ -90,6 +90,42 @@ Selection rules, in order:
 6. **After deleting the selected draft**, select the next newest open draft, or fall to the empty
    state. Never leave the pane showing a deleted row.
 
+7. **A CLOSED PANE IS NOT AN EMPTY FILE — ADDED 2026-09-13, after LP-859.** Closing with ✕ sets a
+   closed state and auto-selection must not undo it (or the pane cannot be dismissed). But the pane
+   must not then borrow rule 4's words: a screen reading *"No drafts on this file"* beside a rail
+   listing four is a contradiction, and the wrong half is the one in larger type. Three states:
+
+   | Condition | Right pane |
+   |---|---|
+   | no entries at all | full-width **"No drafts on this file"** |
+   | no open drafts, but sent history | in-pane **"No drafts on this file"** — true, keep it |
+   | **open drafts exist, pane closed** | **"No draft selected"** / *"Pick one from the list, or start a new message."* |
+
+   Do not re-select on close. That trades a false sentence for a pane nobody can dismiss.
+
+## 2.2 The row itself — ADDED 2026-09-13, after LP-859
+
+§2 said the rail is 300px and named what a row must hold. **It did not say the row stacks**, and the
+row it inherited was a four-column horizontal layout built for a full-width list. Three of those four
+columns could not shrink, so at 300px the only flexible one collapsed to one word per line and the
+status line ran outside the rail. An unstated layout is the same defect class as an unstated
+component, and §3 is the rule for components. This is the rule for the row.
+
+```
+┌─ 300px ───────────────────────────────┐
+│ ✎ BORROWER              1 day ago     │  line 1 — party, then time
+│ Draft · edited                        │  line 2 — the state, as a word
+│ 3 documents · Insurance, Licence, …   │  line 3 — what is inside, truncated
+└───────────────────────────────────────┘
+```
+
+- **Three lines at most.** A row taller than three lines is a row the list cannot be scanned through.
+- **Nothing may be `whitespace-nowrap` and `shrink-0` at the same time.** That pair is what put text
+  outside the rail; either the text wraps or the box gives way.
+- Attribution (*"Marked sent by Geet Thaker"*) belongs on line 2, which has the width for it. It is
+  the longest string this screen can produce and it is what to test against.
+- The party cell may stay fixed at `5.6rem` — it is 90px of a line that is now 300px long.
+
 ## 3. Components — named, including the wrong one
 
 | Surface | Build with | **Do not use** |
@@ -146,6 +182,7 @@ the picker shows, on the first editable draft of a session. Delete that coupling
 | party has no address | `Draft · cannot be sent yet` + `no address` chip | inline name/email/Save block above the body; `Copy & open` disabled, `Copy message` **enabled** |
 | new compose, nothing typed | `New message` / `Nothing written yet` | empty To, Subject, body |
 | marked sent | `Marked sent by Priya · Tue 16:41` | read-only |
+| **pane closed, drafts still in the list** | unchanged | **`No draft selected`** — never rule 4's words (§2.1 rule 7) |
 
 ---
 
@@ -269,4 +306,7 @@ rg -n "_clear_finding_markers" backend/app/services/email_draft.py              
 "Which mail app should this open?"      picker title
 "Asked once. You can change it in preferences."
 "Delete this draft?" / "You edited it. Your first change was:"
+"No drafts on this file"                 pane/tab empty state — only when there are none
+"No draft selected"                      pane closed while drafts remain in the list
+"Pick one from the list, or start a new message."   the line under it
 ```
