@@ -283,7 +283,7 @@ Five commits, reviewed between each. `docs/tickets/figures/lp859/` holds the fou
 | 2 | §3 — the blank compose draft's words | AWAITING_REVIEW | `f58cd1eb` |
 | 3 | §4 — the empty state that lies | AWAITING_REVIEW | `3bc611f0` |
 | 4 | §2 — the rail row layout | AWAITING_REVIEW — **unverified on screen, no browser available** | `47404f5e` |
-| 5 | §5 — the finish pass | AWAITING_REVIEW — **unverified on screen, judged by eye by design** | `e8c3604e` |
+| 5 | §5 — the finish pass | AWAITING_REVIEW — **unverified on screen, judged by eye by design** | `e3904b1a` |
 
 **The rule this ticket family earned:** a ticket that changes what a screen looks like is not done on
 green CI. LP-858 ran 31 requirements, 9 acceptance commands and 11 named tests, all passing, with all
