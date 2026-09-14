@@ -12,6 +12,7 @@
  * Called()` passes against a dialog with no autosave at all, against a broken import, and against
  * a stub that never fires — so "an edit IS saved" is asserted first, through the same stub.
  */
+import { emailBodyToHtml } from "@/lib/markdown/email-body";
 import type { MessageDetail } from "@/lib/types/communication";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -64,14 +65,28 @@ vi.mock("@/lib/api/communications", async (importOriginal) => ({
 // editor's whole contract as far as this dialog is concerned. `next/dynamic` resolves through the
 // module registry, so mocking the module is enough.
 vi.mock("@/components/file/communication/message-editor", () => ({
-  MessageEditor: ({ value, onChange }: { value: string; onChange: (html: string) => void }) => (
+  MessageEditor: ({
+    value,
+    format,
+    onChange,
+  }: { value: string; format?: "plain" | "html"; onChange: (html: string) => void }) => (
     <>
       <button type="button" onClick={() => onChange("<p>March statement only.</p>")}>
         simulate-typing
       </button>
-      {/* UNDO, which is `onChange` with the body the editor was handed — the exact case the
-          `openedAs` comparison in `message-dialog.tsx` says it covers. */}
-      <button type="button" onClick={() => onChange(value)}>
+      {/* UNDO, which is `onChange` with the DOCUMENT the editor holds — the exact case the
+          `openedAs` comparison in `message-dialog.tsx` says it covers.
+
+          LP-859 §1 — AND THE STUB HAD TO LEARN THE CONVERSION, because the caller stopped doing it.
+          `onChange` is "called with HTML, always" (the editor's own prop contract), and the real
+          editor converts a plain body on the way in. This stub echoed `value` untouched, which was
+          HTML only because the caller was pre-converting — the double conversion that was §1's
+          defect. So the stub was accidentally correct, and correct BECAUSE of the bug: with the
+          caller fixed it started reporting a plain body as an edit, and this test caught it. */}
+      <button
+        type="button"
+        onClick={() => onChange(format === "html" ? value : emailBodyToHtml(value))}
+      >
         simulate-undo
       </button>
     </>

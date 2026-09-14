@@ -161,10 +161,18 @@ describe("✦ polish", () => {
     const button = await open();
     // EXACTLY means byte-identical, so the comparison is against what the editor was actually
     // handed — not against a re-derivation of it, which would agree with itself however the seed
-    // changed. The seed carries the processor's paragraph breaks as `<p>` elements, and asserting
-    // that here is what makes "including formatting" a claim rather than a word in a comment.
+    // changed. Asserting the seed's SHAPE here is what makes "including formatting" a claim rather
+    // than a word in a comment.
+    //
+    // LP-859 §1 — THE SHAPE CHANGED, AND THAT IS THE FIX RATHER THAN A REGRESSION. The editor is
+    // handed the STORED body now; it used to be handed `emailBodyToHtml(body)` together with the
+    // flag saying it was plain, and converted it a second time. So the paragraph break that was
+    // asserted here as a `<p>` element is the blank line it has always been in the stored body —
+    // the editor turns it into a paragraph on the way in, which `message-dialog.test.tsx` asserts
+    // against the real ProseMirror document.
     const seed = screen.getByTestId("editor").innerHTML;
-    expect(seed).toContain("&lt;p&gt;Could you send the March statement.&lt;/p&gt;");
+    expect(seed).toContain("Could you send the March statement.");
+    expect(seed).toMatch(/Hi Sarah,\s*\n\s*\n/);
 
     fireEvent.click(button);
     answer({ polished: POLISHED, refusal: null });

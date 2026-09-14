@@ -228,6 +228,80 @@ describe("DraftPane", () => {
     expect(sent.body).toContain("March statement");
   });
 
+  it("renders a plain body as real elements, not as the text of its own tags", async () => {
+    // LP-859 §1 — THE DEFECT THE WHOLE SUITE MISSED, and the reason it missed it is in the second
+    // assertion. The caller converted the body to HTML and handed the editor the RESULT together
+    // with the flag saying it was not HTML; the editor converted it again, and `emailBodyToHtml`
+    // escapes before it wraps, so the first pass's own `<p>` became four characters on screen.
+    //
+    // A TEXT-PRESENCE ASSERTION PASSES ON THAT. Escaped markup still contains every word of the
+    // message, so `getByText(/Please send/)` is green while the processor reads `<p>Please send…`.
+    // That is exactly how this shipped: 31 requirements, 9 acceptance commands, 11 named tests, all
+    // passing, on a screen that was unreadable.
+    mockUseMessageDetail.mockReturnValue(
+      state(
+        detail({
+          is_editable: true,
+          is_open_draft: true,
+          status: "draft",
+          body_format: "plain",
+          body: "Hello Felicia,\n\nPlease send the documents.",
+        }),
+      ),
+    );
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    await vi.waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
+    // THE TAGS BECAME ELEMENTS.
+    expect(document.querySelector(".ProseMirror p")).toBeTruthy();
+    // AND ARE NOT ALSO SITTING THERE AS TEXT. This is the line that fails on the shipped build.
+    expect(document.querySelector(".ProseMirror")?.textContent).not.toContain("<p>");
+    // The words did arrive, so the two above are about their FORM rather than passing on an empty
+    // editor — the control the original assertion was, on its own.
+    expect(document.querySelector(".ProseMirror")?.textContent).toContain(
+      "Please send the documents",
+    );
+
+    // TWO PARAGRAPHS, because the body has a blank line between them — and this is the assertion
+    // that separates the right fix from the one the ticket forbids.
+    //
+    // Passing `format="html"` here would also stop the double escape: the editor would take the
+    // plain body as content and Tiptap would wrap it in ONE paragraph, so "the tags became
+    // elements" and "no `<p>` in the text" both pass while every paragraph break the processor
+    // wrote is silently gone. Measured: that mutant survived both assertions above.
+    //
+    // It is also the wrong fix for the reason the caller's comment gives — it makes `body_format`
+    // mean "what this string is" here and "whether a person wrote it" everywhere else, which is
+    // the root cause in different clothes.
+    expect(document.querySelectorAll(".ProseMirror p")).toHaveLength(2);
+  });
+
+  it("renders an authored HTML body as elements too, without escaping it", async () => {
+    // THE OTHER `body_format`, same assertion. Only one path was ever exercised, and the two are
+    // different branches in both the caller and the editor — so a fix that got one right and the
+    // other wrong would look identical from here without this.
+    mockUseMessageDetail.mockReturnValue(
+      state(
+        detail({
+          is_editable: true,
+          is_open_draft: true,
+          status: "draft",
+          body_format: "html",
+          body: "<p>March statement <strong>only</strong>, please.</p>",
+        }),
+      ),
+    );
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+
+    await vi.waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
+    expect(document.querySelector(".ProseMirror p")).toBeTruthy();
+    expect(document.querySelector(".ProseMirror strong")).toBeTruthy();
+    const text = document.querySelector(".ProseMirror")?.textContent ?? "";
+    expect(text).not.toContain("<p>");
+    expect(text).not.toContain("<strong>");
+    expect(text).toContain("March statement");
+  });
+
   it("gives the processor the rich editor, not a textarea", async () => {
     // THE WIRING, and it is the fifth time in this run that something was built correctly and
     // nothing asserted it was connected. Every other test in this file reads `body` from the seeded

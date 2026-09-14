@@ -270,6 +270,26 @@ makes every draft reachable; LP-835 makes the party path end in one.
 | Ticket | What | Status |
 |---|---|---|
 | [LP-839](../tickets/LP-839.md) | The request button does not say what a request did — a VOE goes to the EMPLOYER, so the borrower draft is correctly unchanged, and the governed rows still show the pre-LP-826 hedge that cannot say so | Specified |
+| [LP-858](../tickets/LP-858.md) | The draft screen did not behave like the decision document says — picker preempting the draft, ✦ polish refusing instead of hidden, modal instead of two panes, no delete | **COMPLETE** — 4 sections, each reviewed by a second session. §4 (HTML tags) deferred for want of a reproduction; it is LP-859 §1 |
+| [LP-859](../tickets/LP-859.md) | Four rendering defects and a finish pass, reported from screenshots of LF-XMB2. **Every one was live through LP-858's audit and every check passed** — see below | **IN PROGRESS** |
+
+### LP-859 sections
+
+Five commits, reviewed between each. `docs/tickets/figures/lp859/` holds the four screenshots.
+
+| # | Section | Status | SHA |
+|---|---|---|---|
+| 1 | §1 — the double HTML escape (one line + tests) | AWAITING_REVIEW | `PENDING` |
+| 2 | §3 — the blank compose draft's words | PENDING | — |
+| 3 | §4 — the empty state that lies | PENDING | — |
+| 4 | §2 — the rail row layout | PENDING | — |
+| 5 | §5 — the finish pass | PENDING | — |
+
+**The rule this ticket family earned:** a ticket that changes what a screen looks like is not done on
+green CI. LP-858 ran 31 requirements, 9 acceptance commands and 11 named tests, all passing, with all
+four of these defects live. Two are invisible to the suite by construction — escaped markup still
+contains every word, so text assertions pass on it, and jsdom loads no CSS, so nothing has a width
+and nothing can collapse. **A browser-level check runs, or a person looks.**
 
 ---
 

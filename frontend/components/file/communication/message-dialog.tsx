@@ -567,8 +567,23 @@ export function DraftPane({
                       second copy of the message. */}
                   {proposal === null ? (
                     <>
+                      {/* LP-859 §1 — THE STORED BODY, UNCONVERTED. This passed
+                          `emailBodyToHtml(data.body)` while ALSO passing `format="plain"`, so the
+                          editor — whose own contract is *"`value`: the stored body; `format` says
+                          which language it arrived in"* — converted it a second time. And
+                          `emailBodyToHtml` escapes before it wraps, so the first pass's own `<p>`
+                          came out as four characters of text. Every draft nobody had edited took
+                          that path, because `body_format` is `plain` until a person writes into it:
+                          it was the DEFAULT state of the screen, not an edge.
+
+                          THE FIX IS THAT THE CALLER MUST NOT PRE-CONVERT A VALUE IT IS ALSO
+                          LABELLING. Passing `format="html"` here would also have stopped the double
+                          escape, and would have been the wrong fix: it makes the flag mean "what
+                          this string is" in one place and "whether a person wrote it" in another,
+                          which is the root cause wearing different clothes. LP-853 spent a ticket
+                          making that column mean exactly one thing. */}
                       <MessageEditor
-                        value={data.body_format === "html" ? data.body : emailBodyToHtml(data.body)}
+                        value={data.body}
                         format={data.body_format}
                         onChange={onEdit}
                       />
