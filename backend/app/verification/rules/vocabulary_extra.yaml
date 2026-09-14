@@ -367,6 +367,20 @@ tags:
       OR W-2s (lets IN-6 reach not_applicable); "unknown" an employer name is unreadable. Matches with
       IN-5's measured normalizers (no new judgment); the AI fuzzy-residue is a documented refinement.
     produced_by: derived
+  # bug-016 — IN-7's scope, which it declared in prose and never tested for.
+  income.has_job_change:
+    entity: borrower
+    value_type: enum
+    allowed_values: ["yes", "no", "unknown"]
+    description: >-
+      PER BORROWER: has this borrower moved between jobs? Scopes IN-7. "yes" the application states BOTH
+      an ended and a current employer; "no" every record is current (no move) or every record has ended
+      with nothing current (a termination — IN-15's question, not a change of line of work); "unknown"
+      the application states no employment for this borrower (fail-closed, so IN-7 abstains rather than
+      judging a borrower whose history is not on the file). Read from the application's own employment
+      records, never from documents: a pay stub says who pays the borrower now, and only the 1003 says
+      what came before. No AI, no threshold.
+    produced_by: derived
 
   # --- LP-323-IN-B — the income JUDGMENT verdict tags (the rule_judgment output the judgment evaluator
   #     writes; NOT materialized by a producer, so declared here only, like id.residency_eligible). ---- #

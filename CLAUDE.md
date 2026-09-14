@@ -78,11 +78,22 @@ lives under `backend/app/` (`core`, `models`, `schemas`, `api`, `ai`, `services`
   needed.
 - **Biome** for lint + format (2-space, double quotes; config in
   `frontend/biome.json`).
-- **Design tokens** live in `frontend/app/globals.css` and that file is the source of truth.
-  Primary is a deep teal (`--primary: 187.9 67.9% 22.0%`), neutrals are cool with a slight green
-  bias, and the radius is split — 5px controls, 8px containers. (LP-5's original blue `#2563EB` is
-  long gone; this line said otherwise until 2026-09-13.) Semantic success/warning/danger/info and a
-  system font stack are defined there too — use the tokens, never ad-hoc colors.
+- **Colour is two layers** (ADR-389, ADR-402). **Palettes** in
+  `app/palettes/*.css` hold raw colours only (a 12-step neutral ramp, `brand`,
+  and red/green/amber/violet, each for light and dark); **roles** in
+  `app/globals.css` (`--primary: var(--brand)`) say what each colour is for, and
+  `tailwind.config.ts` exposes the roles. Components use role classes
+  (`bg-primary`, `text-warning`) and never a palette name, a Tailwind palette
+  scale, or a hex value. Recolour the app by editing or switching a palette;
+  change which colour plays which part by editing a role.
+  `app/palettes/palettes.test.ts` computes WCAG contrast for every palette in
+  both themes. The default palette is Petrol; switching palette or dark theme is
+  **dev-only** (account menu, LP-902) — a production build ignores it.
+- **The radius is split** — 5px controls, 8px containers (`--radius` /
+  `--radius-container`). A panel is not a button: `rounded-md` is the control
+  radius, and reaching for it on a card is the mistake it invites. (Kept from
+  `phase4-with-ui` at the merge — the palette rewrite above replaced the
+  paragraph that carried this and did not carry it forward.)
 
 **Data model principles** (apply as Epic 2+ lands)
 
@@ -97,7 +108,8 @@ lives under `backend/app/` (`core`, `models`, `schemas`, `api`, `ai`, `services`
 
 Every ticket gets a `docs/tickets/LP-XXX.md` recording what was done, assumptions,
 and decisions. Architectural decisions go in [`decisions.md`](decisions.md) as a
-new ADR. CI (ruff/mypy/pytest, biome/tsc/build) must stay green; install
+new ADR. CI (ruff/mypy/pytest, biome/tsc/vitest/build) must stay green — the
+frontend suite runs locally as CI does with `CI=true TZ=UTC pnpm test`; install
 pre-commit hooks for local feedback (see
 [`docs/development-workflow.md`](docs/development-workflow.md)).
 

@@ -45,6 +45,10 @@ const FADED_TEXT = /(?<![\w-])!?text-[a-z][a-z0-9-]*\/\d+/g;
  * A token's real ratio depends on what is behind it, which no static scan knows —
  * so the scan bans the shape and a person measures the exception, rather than the
  * scan trying to guess a surface.
+ *
+ * Each ratio is Petrol light's. app/palettes/palettes.test.ts reads this list and
+ * recomputes every entry for every palette in both themes (LP-902 review), so
+ * keep the `"text-x/NN": "N:1 on bg-y …"` shape it parses.
  */
 const MEASURED_SAFE: Record<string, string> = {
   // Used only inside `TooltipContent`, which is `bg-foreground`. Fading the

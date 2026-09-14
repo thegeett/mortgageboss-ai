@@ -24,7 +24,11 @@ from app.verification.snapshot.fields import Field
 from app.verification.snapshot.model import DocumentEntry, Snapshot
 from app.verification.snapshot.pii import PiiField
 from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
-from app.verification.snapshot.traversal import all_list_rows, all_transactions
+from app.verification.snapshot.traversal import (
+    all_list_rows,
+    all_transactions,
+    unclassified_documents,
+)
 from app.verification.tag_materialization.declarations import TagDeclaration
 from app.verification.tag_materialization.subjects import (
     LOAN_SUBJECT,
@@ -503,6 +507,30 @@ def _qualifying_income_monthly(
     )
 
 
+#: bug-018 review — THE DOCUMENT TYPES WHOSE `start_date` / `end_date` ARE EMPLOYMENT DATES.
+#:
+#: `income.employment_start` is declared `{mode: parsed, subject: document, data: start_date}` with NO
+#: `document_type` filter, though `declarations.py` supports one for exactly this reason ("a field-name
+#: is not unique"). Four extraction schemas declare a field named precisely `start_date` — `voe`,
+#: `employment_offer_letter`, `alimony_income` and `child_support_income` — so a child-support order
+#: produces an `income.employment_start` tag carrying the date the SUPPORT began.
+#:
+#: That is not a cosmetic mismatch here: each end pairs with the EARLIEST start after it, so a support
+#: date falling inside a real employment gap SHRINKS it. A VOE ending 2026-01-31 against a job starting
+#: 2026-06-01 is a 121-day gap that IN-4 must fire on; a child-support start of 2026-02-10 makes it read
+#: 10 days and IN-4 SATISFIES — the rule silently clearing the thing it exists to catch.
+#:
+#: The mis-scoping predates this ticket (LP-382 / LP-454), but bug-018 is what makes it reachable: a
+#: file with no VOE used to have no pair at all and abstained, and now the application supplies one.
+#: Filtering here rather than in `tag_production.yaml` because the declaration takes a SINGLE
+#: document_type, an offer letter's start date is a legitimate employment start, and IN-7 reads the same
+#: tag for its own purposes — so the arithmetic that can be silently wrong is fixed where it is done.
+#:
+#: Unclassified (`None` / "unknown") is EXCLUDED too: including a date that may not be employment can
+#: only mask a gap, and masking is the one failure this recipe must not have.
+_EMPLOYMENT_DATE_DOC_TYPES = frozenset({"voe", "employment_offer_letter"})
+
+
 def _income_max_employment_gap(
     snapshot: Snapshot, _subject_id: str, _subject_raw: object
 ) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
@@ -515,39 +543,81 @@ def _income_max_employment_gap(
     with no belongs_to share one group), each group's consecutive (end → next start) gaps are measured,
     and the loan-level tag is the LARGEST gap across the groups. Abstains when no group has two dated
     records (a single job cannot have a gap)."""
-    if snapshot.tags.absent or snapshot.documents.absent:
-        return _UNKNOWN, "fewer than two dated employment records — no gap to measure"
     # (starts, ends) keyed by the document's borrower attribution — records only pair WITHIN a group,
     # so a gap is never spanned across two different borrowers' timelines.
     # LP-647 §1 group A — each date carries the RECORD it was read from, so the gap can name the two
     # documents it spans: the job that ended and the job that started after it. Those are the two a
     # processor opens to check the claim; the borrower's other records are not what the sentence is
-    # about.
-    groups: dict[object, tuple[list[tuple[date, str]], list[tuple[date, str]]]] = {}
-    for entry in snapshot.documents.entries:
-        tags = snapshot.tags.by_subject.get(entry.content_id)
-        if not tags:
-            continue
-        key = (
-            frozenset(str(ref.borrower_id) for ref in entry.belongs_to)
-            if entry.belongs_to
-            else None
-        )
-        starts, ends = groups.setdefault(key, ([], []))
-        for tag_id, bucket in (
-            ("income.employment_start", starts),
-            ("income.employment_end", ends),
-        ):
-            tag = tags.get(tag_id)
-            if tag is None or str(tag.value) == _UNKNOWN:
+    # about. bug-018 — a record read from the APPLICATION carries None: it has no document to name.
+    groups: dict[object, tuple[list[tuple[date, str | None]], list[tuple[date, str | None]]]] = {}
+    if not (snapshot.tags.absent or snapshot.documents.absent):
+        for entry in snapshot.documents.entries:
+            # bug-018 review — see `_EMPLOYMENT_DATE_DOC_TYPES`: an alimony or child-support order also
+            # produces `income.employment_start`, and its date would shrink a real gap to nothing.
+            if entry.document_type not in _EMPLOYMENT_DATE_DOC_TYPES:
                 continue
-            parsed = coerce_date(str(tag.value))
-            if parsed is not None:
-                bucket.append((parsed, entry.content_id))
+            tags = snapshot.tags.by_subject.get(entry.content_id)
+            if not tags:
+                continue
+            key = (
+                frozenset(str(ref.borrower_id) for ref in entry.belongs_to)
+                if entry.belongs_to
+                else None
+            )
+            starts, ends = groups.setdefault(key, ([], []))
+            for tag_id, bucket in (
+                ("income.employment_start", starts),
+                ("income.employment_end", ends),
+            ):
+                tag = tags.get(tag_id)
+                if tag is None or str(tag.value) == _UNKNOWN:
+                    continue
+                parsed = coerce_date(str(tag.value))
+                if parsed is not None:
+                    bucket.append((parsed, entry.content_id))
+
+    # bug-018 — AND THE APPLICATION'S OWN EMPLOYMENT RECORDS. `income.employment_start` / `_end` are
+    # read from VOE fields and nothing else, so a file with no VOE had fewer than two dated records and
+    # IN-4 abstained — on LF-XMB2 while the 1003 stated PNC ending 2026-03-03 and FNB starting
+    # 2026-03-09 for the same borrower, a six-day gap sitting in plain sight. The 1003 has carried these
+    # dates since LP-624 and nothing read them.
+    #
+    # Merged into the SAME group as that borrower's documents (`frozenset({borrower_id})` is the key a
+    # belongs_to-attributed document produces), so a VOE end pairs with a stated start and vice versa
+    # rather than the two sources forming rival timelines.
+    if not snapshot.mismo.absent:
+        borrower_ids: dict[str, str] = {}
+        for name, field in snapshot.mismo.facts.items():
+            if (
+                name.startswith("borrower.")
+                and name.endswith(".borrower_id")
+                and isinstance(field, Field)
+                and field.is_present
+            ):
+                borrower_ids[name.split(".")[1]] = str(field.value)
+        for name, field in snapshot.mismo.facts.items():
+            parts = name.split(".")
+            if len(parts) != 5 or parts[0] != "borrower" or parts[2] != "employer":
+                continue
+            if parts[4] not in ("start_date", "end_date"):
+                continue
+            if not isinstance(field, Field) or not field.is_present:
+                continue
+            parsed = coerce_date(str(field.value))
+            if parsed is None:
+                continue
+            # A borrower the application does not link to an id cannot be grouped with their own
+            # documents, and grouping them under None would pool them with unattributed documents —
+            # manufacturing a gap across two people, which is the one thing this recipe forbids.
+            stated_id = borrower_ids.get(parts[1])
+            if stated_id is None:
+                continue
+            starts, ends = groups.setdefault(frozenset({stated_id}), ([], []))
+            (starts if parts[4] == "start_date" else ends).append((parsed, None))
     # Each end pairs with the NEXT start in its OWN group (the earliest start after it), NOT every later
     # start — else the max would span intervening jobs (end of job A → start of job C) and overstate a
     # gap that job B actually fills. The largest of those consecutive per-borrower gaps is the answer.
-    gaps: list[tuple[int, str, str]] = []  # (days, ended-record, next-started-record)
+    gaps: list[tuple[int, str | None, str | None]] = []  # (days, ended-record, next-started-record)
     for starts, ends in groups.values():
         for end_date, end_cid in ends:
             later = [(s, cid) for s, cid in starts if s > end_date]
@@ -555,13 +625,28 @@ def _income_max_employment_gap(
                 next_start, start_cid = min(later, key=lambda pair: pair[0])
                 gaps.append(((next_start - end_date).days, end_cid, start_cid))
     if not gaps:
-        return _UNKNOWN, "fewer than two dated employment records — no gap to measure"
+        # bug-018 — TWO DIFFERENT ABSENCES, and one sentence was serving both. "fewer than two dated
+        # employment records" is what a processor reads, and it is wrong whenever the records exist but
+        # none of them pair (a single position, or every start before every end): they were told to
+        # upload dates they have already provided.
+        dated = sum(len(starts) + len(ends) for starts, ends in groups.values())
+        if dated < 2:
+            return _UNKNOWN, "fewer than two dated employment records — no gap to measure"
+        return _UNKNOWN, (
+            "no employment record starts after another one ends, so there is no gap between "
+            "positions to measure"
+        )
     max_gap, ended_at, resumed_at = max(gaps, key=lambda g: g[0])
-    return (
-        str(max_gap),
-        f"largest gap between consecutive employment records (per borrower) is {max_gap} day(s)",
-        tuple(dict.fromkeys((ended_at, resumed_at))),  # one record may state both
+    # bug-018 — NAME ONLY DOCUMENTS. A date read from the application has no document behind it, and a
+    # gap measured from stated dates alone names nothing rather than pointing at a file that does not
+    # evidence it.
+    named = tuple(dict.fromkeys(cid for cid in (ended_at, resumed_at) if cid is not None))
+    reason = (
+        f"largest gap between consecutive employment records (per borrower) is {max_gap} day(s)"
     )
+    if named:
+        return str(max_gap), reason, named  # one record may state both
+    return str(max_gap), reason
 
 
 def _income_days_since_recent_pay(
@@ -1674,7 +1759,25 @@ def _borrower_id_expiration(
         raw = str(tag.value)
         values[coerce_date(raw) or raw] = raw
     if not values:
-        return _UNKNOWN, "this borrower: no driver's licence found for this borrower"
+        # bug-020 — SAY WHETHER THE FILE MIGHT ALREADY HAVE IT. `_GOVERNMENT_ID_DOC_TYPES` skips a
+        # document nobody has classified, so a licence sitting in the file untyped reads exactly like no
+        # licence at all: on LF-XMB2 ID-5 told the processor to upload an ID while their driver's licence
+        # was on the file, unclassified. Counted FILE-WIDE rather than per borrower on purpose — an
+        # untyped document usually has no belongs_to either, so scoping the count to this borrower would
+        # hide the very documents being pointed at.
+        #
+        # The trailing "for this borrower" went with it: every branch here already opens "this borrower:".
+        #
+        # bug-023 — the predicate moved to `traversal.unclassified_documents`, because ID-3 needs the
+        # same sentence and `_UNKNOWN_DOC_TYPE` was already declared in three modules. One definition,
+        # two callers; the inline copy this replaced was the start of a fourth.
+        untyped = len(unclassified_documents(snapshot))
+        if untyped:
+            return _UNKNOWN, (
+                f"this borrower: no driver's licence has been identified — {untyped} document(s) in "
+                "the file are not identified yet and may include it; identify those first"
+            )
+        return _UNKNOWN, "this borrower: no driver's licence found"
     if len(values) > 1:
         return _UNKNOWN, (
             f"this borrower: the borrower's ID documents disagree on the expiration date "
@@ -6125,7 +6228,7 @@ def _stmt_continuity(
 
 def _income_employer_coverage(
     snapshot: Snapshot, subject_id: str, subject_raw: object
-) -> tuple[JsonValue, str]:
+) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """income.employer_coverage — PER BORROWER: do this borrower's PAY-STUB employers and W-2 employers
     cover each other (every pay-stub employer has a matching W-2 and vice-versa)? Unblocks IN-6.
 
@@ -6176,6 +6279,13 @@ def _income_employer_coverage(
         str, str
     ] = {}  # normalized -> an original rendering (for a human-readable reason)
     w2: dict[str, str] = {}
+    # bug-017 — WHICH DOCUMENTS THIS READ. `produce_derived_tags` puts a third element on the tag's
+    # `source_facts`, which is what carries a finding's document links; a recipe returning two elements
+    # falls back to the subject, and a borrower id resolves to no document. So IN-6's finding named
+    # nothing on LF-XMB2 while AS-8's named its two statements — the difference is entirely here.
+    stated_by: dict[str, list[str]] = {}  # normalized employer -> the documents stating it
+    compared: list[str] = []  # every pay stub / W-2 whose employer was read
+    unreadable: list[str] = []  # bug-017 review — the ones whose employer name could NOT be read
     paystub_docs = w2_docs = 0
     any_unreadable = False
     for entry in _borrower_attributed_documents(snapshot, subject_id):
@@ -6189,9 +6299,13 @@ def _income_employer_coverage(
         tag = snapshot.tags.by_subject.get(entry.content_id, {}).get("income.employer_normalized")
         if tag is None or str(tag.value) == _UNKNOWN:
             any_unreadable = True
+            unreadable.append(entry.content_id)  # bug-017 review — WHICH one could not be read
             continue
         original = str(tag.value)
-        bucket[_normalize(original, norm)] = original
+        key = _normalize(original, norm)
+        bucket[key] = original
+        stated_by.setdefault(key, []).append(entry.content_id)
+        compared.append(entry.content_id)
 
     if paystub_docs == 0 or w2_docs == 0:
         return "one_sided", (
@@ -6199,18 +6313,132 @@ def _income_employer_coverage(
             "between the two"
         )
     if any_unreadable or not paystub or not w2:
-        return _UNKNOWN, (
-            "an employer name on one of this borrower's income documents could not be read — cannot "
-            "confirm coverage"
+        return (
+            _UNKNOWN,
+            (
+                "an employer name on one of this borrower's income documents could not be read — "
+                "cannot confirm coverage"
+            ),
+            # bug-017 review — THE UNREADABLE DOCUMENT LEADS, and this branch must name one. It is
+            # reached ONLY when a name could not be read (with both sides present and every name
+            # readable, both buckets are non-empty), so the recipe knows exactly which document that
+            # was — and that is the one a processor has to open. Returning nothing here left IN-6
+            # saying "an employer name on ONE of this borrower's income documents could not be read"
+            # with no way to tell which: the processor's original complaint, surviving in the branch
+            # that needs the link most. `unknown` does reach a finding — IN-6's applicability routes it
+            # to couldnt_check (§8 Tab 1) and that path carries the load-bearing tags, so these ids
+            # travel to `source_content_ids` exactly as the uncovered ones do.
+            tuple(dict.fromkeys([*unreadable, *compared])),
         )
     uncovered = sorted((set(paystub) - set(w2)) | (set(w2) - set(paystub)))
     if uncovered:
-        shown = (paystub | w2)[uncovered[0]]
-        return "uncovered", (
-            f"employer '{shown}' appears on one of the borrower's pay stubs / W-2s but not the other"
+        key = uncovered[0]
+        shown = (paystub | w2)[key]
+        # NAME THE SIDE. "appears on one of the borrower's pay stubs / W-2s but not the other" left a
+        # processor to work out which was missing before they could act. On LF-XMB2 the answer is the
+        # whole finding: 'Commonwealth Of Pennsylvania' is on the W-2 and the pay stubs say
+        # 'COPA Exec Off', a naming variance the normalizer cannot reduce rather than a missing document.
+        on_paystub = key in paystub
+        side = "pay stubs" if on_paystub else "W-2s"
+        counterpart = "a W-2" if on_paystub else "a pay stub"
+        return (
+            "uncovered",
+            (
+                f"employer '{shown}' appears on this borrower's {side} but not on {counterpart} — "
+                "confirm it is the same employer named differently, or obtain the missing document"
+            ),
+            # THE UNCOVERED EMPLOYER'S OWN DOCUMENTS FIRST. The first id becomes the finding's
+            # `source_document_id`, the single document the UI opens (bug-013 review), and that must be
+            # the one carrying the employer the sentence names — not whichever was read first.
+            tuple(dict.fromkeys([*stated_by[key], *compared])),
         )
-    return "covered", (
-        "every employer on this borrower's pay stubs also appears on a W-2 and vice-versa"
+    return (
+        "covered",
+        "every employer on this borrower's pay stubs also appears on a W-2 and vice-versa",
+        tuple(dict.fromkeys(compared)),
+    )
+
+
+def _income_has_job_change(
+    snapshot: Snapshot, subject_id: str, subject_raw: object
+) -> tuple[JsonValue, str]:
+    """income.has_job_change — PER BORROWER: has this borrower changed jobs? Scopes IN-7 (bug-016).
+
+    IN-7 asks whether a job change keeps the borrower in the same line of work. Its spec has always SAID
+    "every borrower on the loan with a job change", but nothing tested for one, so it ran on every
+    borrower — and on LF-XMB2 it asked a borrower who has held one job since 2021 for "an offer letter
+    or contract" for a "new position" that does not exist. The AI tag it reasons over cannot scope it:
+    `income.same_line_of_work`'s own prompt says to answer "yes" when there is one employer throughout,
+    so a no-change borrower and a same-field mover are indistinguishable at that tag.
+
+    Read from the APPLICATION's own employment records (`borrower.{n}.employer.{m}`), which is where a
+    job change is stated — a start date, an end date and an is_current flag per employer. DESCRIPTIVE
+    enum, no threshold, no AI:
+
+      * "yes"     — the borrower has BOTH an ended employer and a current one: a move between jobs.
+      * "no"      — every record is current (no move), or every record has ended with nothing current
+                    (a TERMINATION, which is IN-15's question and not a change of line of work).
+      * "unknown" — the application states no employment for this borrower → fail-closed, so IN-7
+                    abstains rather than judging a borrower whose employment history is not on the file.
+
+    Deliberately NOT derived from documents. A pay stub says who pays the borrower now; only the
+    application says what came before, and IN-7's question is precisely about the before-and-after.
+    """
+    if not isinstance(subject_raw, BorrowerSubject):
+        return _UNKNOWN, "a job change is a per-borrower recipe (needs a borrower subject)"
+    if snapshot.mismo.absent:
+        return _UNKNOWN, "the application's employment records are not on the file"
+
+    prefix = f"borrower.{subject_raw.index}.employer."
+    rows = {
+        name[len(prefix) :].split(".", 1)[0]
+        for name in snapshot.mismo.facts
+        if name.startswith(prefix)
+    }
+    if not rows:
+        return _UNKNOWN, "the application states no employment history for this borrower"
+
+    def _stated(row: str, field_name: str) -> str | None:
+        field = snapshot.mismo.facts.get(f"{prefix}{row}.{field_name}")
+        if not isinstance(field, Field) or not field.is_present:
+            return None
+        text = str(field.value).strip()
+        return text or None
+
+    current = ended = 0
+    for row in sorted(rows):
+        is_current = (_stated(row, "is_current") or "").lower() in ("true", "yes", "y", "1")
+        # ENDED is either flag: an end date is the fact, and `is_current: false` is the same fact said
+        # the other way. Neither alone is reliable — a MISMO export may carry one and not the other.
+        if _stated(row, "end_date") is not None or (
+            not is_current and _stated(row, "is_current") is not None
+        ):
+            ended += 1
+        else:
+            # bug-016 review — NOT `elif is_current`. A row stating NEITHER flag counted as neither
+            # current nor ended and vanished from both totals, so an ended employer beside a flagless one
+            # read "no" and IN-7 skipped a REAL job change in silence — the failure this rule's scope
+            # exists to prevent, inverted. Every employment record on a 1003 is either former or current,
+            # and "not stated as ended" is the honest reading of one that does not say.
+            #
+            # No such row exists on staging today (18 employer records, every one stating `is_current` —
+            # the parser has set it from EmploymentStatusType since LP-624), but the pre-LP-624 rows that
+            # column's comment describes are exactly this shape, and so is the repo's own LF-6T3N
+            # fixture, whose employer rows carry a name and nothing else.
+            current += 1
+
+    if ended and current:
+        return "yes", (
+            f"the application lists {ended} previous and {current} current employment record(s) for "
+            "this borrower — a job change"
+        )
+    if ended:
+        return "no", (
+            "the application lists only employment that has ended for this borrower, with nothing "
+            "current — not a move between jobs"
+        )
+    return "no", (
+        "the application lists no previous employer for this borrower — no job change to judge"
     )
 
 
@@ -7138,6 +7366,7 @@ _RECIPES: dict[str, Recipe] = {
     "loan_sales_price": _loan_sales_price,
     "housing_taxes_monthly": _housing_taxes_monthly,
     "housing_hoa_monthly": _housing_hoa_monthly,
+    "income_has_job_change": _income_has_job_change,  # bug-016 — scopes IN-7
 }
 
 KNOWN_RECIPES = frozenset(_RECIPES)

@@ -53,6 +53,33 @@ def _template_fields(template: str) -> set[str]:
     }
 
 
+def _unknown_operand_fields(fields: set[str], operands: dict[str, Operand]) -> list[str]:
+    """The referenced names a deterministic outcome template CANNOT resolve at eval time.
+
+    bug-014 review — THE COMPANION IS ONLY SUPPLIED FOR A DECIMAL, so accepting it for any operand
+    validated a placeholder the evaluator does not provide. `_reason_fields` adds `{name}_percent` under
+    `isinstance(value, Decimal)`; a `date` operand gets no companion, so `{end_date_percent}` passed the
+    load check by having its suffix stripped and then raised KeyError mid-run — the precise failure the
+    load-time check exists to prevent, surviving inside it. Non-decimal types are only ever valid on a
+    `tag`/`loan_tag` operand (reference / calc / product are decimal by construction), so this rejects
+    exactly the date case.
+
+    A DIRECT HIT WINS OVER THE SUFFIX, which the strip-first form got wrong: an operand genuinely NAMED
+    `foo_percent` resolves as itself, rather than being read as the companion of a `foo` that need not
+    exist.
+    """
+    unknown: list[str] = []
+    for name in sorted(fields):
+        if name in operands:
+            continue
+        base = name.removesuffix("_percent")
+        companion = operands.get(base) if base != name else None
+        if companion is not None and companion.type == "decimal":
+            continue
+        unknown.append(name)
+    return unknown
+
+
 class RuleSpecError(Exception):
     """Base for every rule-spec load failure (all fail loud, never silent)."""
 
@@ -131,6 +158,22 @@ class ReferenceValues(BaseModel):
 # spec scoping itself on this tag actually enumerates per_document (else its predicate is always
 # absent → the rule silently never applies). Not a vocabulary tag (never in fact_tags.csv).
 DOC_TYPE_TAG = "document.document_type"
+
+# bug-020 — tags whose value is derived from NOTHING BUT the document's own type, so abstaining on one
+# is abstaining on the document type by another name.
+#
+# LO-2 cannot scope itself on DOC_TYPE_TAG: the applicability DSL has only eq/ne and its scope is EIGHT
+# document types, so it reads a proxy (`loe.is_explanation_letter`) that a recipe computes from the type
+# alone — "yes" for a letter type, "no" for any other, "unknown" for an unclassified document. That last
+# case is the same abstention as an unidentified document, with the same remedy ("identify this file"),
+# but `undetermined_by_document_type` saw a tag id it did not recognise and kept the row out of the
+# consolidated finding: on LF-XMB2 four untyped documents became four extra LO-2 rows beside the one
+# UNIDENTIFIED-DOCUMENTS row that already covered them.
+#
+# A tag belongs here ONLY if an unclassified document is the sole way it reads "unknown". A tag that can
+# abstain for any other reason would fold a different problem into "identify these documents" and send a
+# processor after the wrong thing.
+DOC_TYPE_PROXY_TAGS = frozenset({"loe.is_explanation_letter"})
 
 _PERCENT = re.compile(r"(\d+(?:\.\d+)?)\s*%")
 
@@ -480,13 +523,25 @@ class DeterministicEval(BaseModel):
             # the identifier scrub. It resolves to a real operand, so it is accepted here; the suffix
             # is stripped before the membership test rather than added to `operand_names`, so a
             # genuinely unknown `{foo_percent}` still fails loud.
-            referenced = {f.removesuffix("_percent") for f in fields}
-            unknown = referenced - operand_names
-            if unknown:
+            if unknown := _unknown_operand_fields(fields, self.operands):
                 raise ValueError(
-                    f"outcome reasoning references unknown operand(s) {sorted(unknown)} "
+                    f"outcome reasoning references unknown operand(s) {unknown} "
                     f"(operands: {sorted(operand_names)})"
                 )
+            # bug-014 — `how_to_fix` IS FORMATTED TOO, and was not validated because it was not
+            # formatted: MI-1 shipped "at or below {mi_threshold}% the requirement falls away" to a
+            # processor. Now that the evaluator fills it, an unknown placeholder would raise mid-run
+            # inside a Celery task, so it is held to exactly the same standard as `reasoning`.
+            if outcome.how_to_fix:
+                try:
+                    fix_fields = _template_fields(outcome.how_to_fix)
+                except ValueError as exc:
+                    raise ValueError(f"outcome how_to_fix template is malformed: {exc}") from exc
+                if unknown_fix := _unknown_operand_fields(fix_fields, self.operands):
+                    raise ValueError(
+                        f"outcome how_to_fix references unknown operand(s) {unknown_fix} "
+                        f"(operands: {sorted(operand_names)})"
+                    )
         return self
 
     # LP-563 — the structured change this rule's finding declares (see ApplySpec).
@@ -1000,16 +1055,26 @@ class ConsistencyEval(BaseModel):
         ):
             if outcome is None:
                 continue
-            try:
-                fields = _template_fields(outcome.reasoning)
-            except ValueError as exc:
-                raise ValueError(f"{name} reasoning template is malformed: {exc}") from exc
-            unknown = fields - _CONSISTENCY_TEMPLATE_FIELDS
-            if unknown:
-                raise ValueError(
-                    f"{name} reasoning references unknown placeholder(s) {sorted(unknown)} "
-                    f"(allowed: {sorted(_CONSISTENCY_TEMPLATE_FIELDS)})"
-                )
+            # bug-014 — `how_to_fix` is checked beside `reasoning` because the evaluator now formats
+            # both. No consistency spec references a placeholder in a fix today; the deterministic side
+            # is where that gap shipped a literal `{mi_threshold}%`, and leaving this half unguarded
+            # would let the same thing arrive here the first time someone writes one.
+            for field, template in (
+                ("reasoning", outcome.reasoning),
+                ("how_to_fix", outcome.how_to_fix),
+            ):
+                if not template:
+                    continue
+                try:
+                    fields = _template_fields(template)
+                except ValueError as exc:
+                    raise ValueError(f"{name} {field} template is malformed: {exc}") from exc
+                unknown = fields - _CONSISTENCY_TEMPLATE_FIELDS
+                if unknown:
+                    raise ValueError(
+                        f"{name} {field} references unknown placeholder(s) {sorted(unknown)} "
+                        f"(allowed: {sorted(_CONSISTENCY_TEMPLATE_FIELDS)})"
+                    )
         return self
 
 
@@ -1079,6 +1144,21 @@ class RuleSpec(BaseModel):
     # bug-005 — collapse a uniform conclusion to one row. Absent means "show every subject", which
     # stays the default: most per-subject rules are worth seeing per subject.
     collapse_uniform: CollapseUniform | None = None
+    # bug-024 — this rule enumerates per STATEMENT but its answer is about the ACCOUNT, so N statements
+    # of one account should say it once. Opt-in, and it must be, because no code can derive it: the
+    # subject is a bank statement either way, and only the author knows what the sentence is ABOUT.
+    #
+    # AS-6 ("this is a joint account with a non-borrower co-holder") is about the account. AS-9
+    # ("declares 3 pages, 2 present") is about the statement, and it is the reason the default is off
+    # rather than a list of rules to exclude: its two load-bearing tags are not extracted today, so
+    # every AS-9 row is a couldnt_check whose fact set is identically EMPTY on every statement of an
+    # account — an ungated collapse merges them now. When the extraction lands it gets worse, not
+    # better: three statements each declaring 3 pages with 2 present carry identical values, and three
+    # separate incomplete statements would become one row naming one of them.
+    #
+    # The same shape as `collapse_uniform.unresolved` one field above, for the same reason — declare it
+    # where the sentence summarises the set, leave it off everywhere else, and the default stays safe.
+    answers_per_account: bool = False
     subject_key_fields: tuple[str, ...] = PydField(min_length=1)
     evidence_required: str = PydField(min_length=1)
     guideline_reference: str = PydField(min_length=1)

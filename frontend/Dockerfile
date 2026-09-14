@@ -1,7 +1,7 @@
 # Frontend image (C1) — Next.js 15 App Router, pnpm, Node 20.
 #
 # Node 20 matches CI, the only place the version is pinned
-# (.github/workflows/frontend-ci.yml:38). pnpm comes from corepack (shipped with Node)
+# (.github/workflows/frontend-ci.yml:54). pnpm comes from corepack (shipped with Node)
 # rather than `npm i -g pnpm`, so the package manager is provisioned the supported way
 # and its version is pinned here instead of floating with the registry.
 #

@@ -178,11 +178,31 @@ async def test_an_own_account_transfer_is_not_exempt() -> None:
 
 
 async def test_an_undetermined_category_never_exempts() -> None:
-    """Fail-closed (§8): an unknown category is data-missing, not scope-false. It must never clear."""
-    evaluation, _ = await _evaluate("unknown", "no")
+    """Fail-closed (§8): an unknown category is data-missing, not scope-false. It must never clear.
 
-    assert evaluation.verdict is not Verdict.SATISFIED
-    assert evaluation.verdict is Verdict.COULDNT_CHECK
+    bug-019 — THE INTENT IS UNCHANGED; THE MECHANISM MOVED. This asserted the clearing (never
+    `satisfied`) AND the route it took to avoid it (`couldnt_check`, because `txn.apparent_category`
+    was load-bearing, so the gate abstained before the model was asked). The tag left the gate: AS-12's
+    question is whether the money was BORROWED, `txn.has_identified_source` answers that and is still
+    gated, and on LF-XMB2 the category's veto silenced the rule on an $8,000 deposit whose source was
+    already matched and verified.
+
+    So an unknown category now reaches the model and comes back ratification-pending, and it still never
+    clears. The first assertion is the invariant and is untouched.
+
+    THIS FOLLOWS LP-516'S OWN DECISION rather than bending it (established in bug-019's review). LP-516
+    §A7 posed the fork in as many words — "scope-before-asking (cheaper, but forfeits the guide's own
+    escape hatch) or ask-then-suppress-a-no (costs an AI call per deposit, but honours it)" — and Phase B
+    took ask-then-suppress. Gating the category before asking IS scope-before-asking. The
+    "category unknown -> couldnt_check" row sometimes read the other way sits under "Phase C — proof",
+    which records what the tests observed, not what was decided.
+    """
+    evaluation, reasoner = await _evaluate("unknown", "no")
+
+    assert evaluation.verdict is not Verdict.SATISFIED  # THE INVARIANT — unchanged by bug-019
+    assert evaluation.verdict is Verdict.NEEDS_REVIEW
+    assert evaluation.ratification_pending is True
+    assert reasoner.contexts, "asked, then not cleared — rather than never asked"
 
 
 async def test_the_model_now_receives_the_amount_and_date_its_prompt_asks_for() -> None:

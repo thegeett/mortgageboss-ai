@@ -47,7 +47,6 @@ function customProperties(selector: string): Record<string, string> {
 }
 
 const ROOT = customProperties(":root");
-const DARK = customProperties(".dark");
 
 /** Every `--x` the resolved theme's colours point at. */
 function referencedColourVars(): string[] {
@@ -156,21 +155,12 @@ describe("the tokens the redesign adds", () => {
     expect(ROOT[name]).toBeDefined();
   });
 
-  it.each(referencedColourVars())("`%s` is defined in .dark", (name) => {
-    // Colour tokens must be re-stated for the dark theme; one left out inherits
-    // the light value and is wrong rather than missing, which is harder to spot.
-    expect(DARK[name]).toBeDefined();
-  });
-
-  it("keeps `border` and `input` as two different colours", () => {
-    // `border` is the decorative hairline; `input` is the control border held to
-    // WCAG 1.4.11's 3:1. Collapsing them back into one value would silently drop
-    // every control border below the contrast floor. Compared by VALUE: the
-    // resolved theme gives back two different `hsl(var(--x))` strings whatever
-    // the variables say, so comparing those can never fail.
-    expect(ROOT["--border"]).not.toBe(ROOT["--input"]);
-    expect(DARK["--border"]).not.toBe(DARK["--input"]);
-  });
+  // The dark theme, and `border` ≠ `input`, used to be checked here against a
+  // `.dark` block in globals.css. Since LP-901 a role is written once and the
+  // dark theme is the palette's dark values flowing through it, so both checks
+  // moved to app/palettes/palettes.test.ts — where they run against the
+  // RESOLVED colour of every palette in both themes, which is the only place a
+  // wrong or duplicated value can actually be seen.
 });
 
 describe("the shell padding is single-sourced", () => {

@@ -79,7 +79,7 @@ cd frontend && pnpm install && cd ..
 `COMPOSE_PROJECT_NAME` in the root `.env` means a plain `docker compose up -d` selects
 the right project — there is no `-p` flag to remember.
 
-Node is not pinned in the repo; CI uses 20 (`.github/workflows/frontend-ci.yml:38`).
+Node is not pinned in the repo; CI uses 20 (`.github/workflows/frontend-ci.yml:54`).
 
 ### Cross-talk — the two defaults that will silently wire you to the other worktree
 

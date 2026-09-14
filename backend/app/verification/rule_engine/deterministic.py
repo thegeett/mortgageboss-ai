@@ -118,12 +118,19 @@ def _named_documents(load_bearing: tuple[LoadBearingTag, ...]) -> tuple[str, ...
     only ids present in `document_id_by_content_id`, so anything that is not a current document on
     this file is DROPPED rather than written as a dangling or wrong link. The two vocabularies cannot
     collide either: content ids are prefixed (`doc` / `txn`), so a transaction id can never resolve
-    as a document.
+    as a document — SAFE FROM A WRONG LINK, BUT NOT FROM NO LINK AT ALL, which is what bug-013 below
+    turned out to be: for a per-transaction subject every id this returns is a transaction, so the
+    drop that protects against a dangling link took the whole set.
 
     AND IT SURFACES ONLY WHAT A RECIPE DELIBERATELY NAMED. The 77 recipes that return two elements
     fall back to `(subject_id,)`, which for a loan subject is the string "loan" and resolves to
     nothing; for a per-document subject it is that document's own id, which the subject path already
     supplies. So this adds links exactly where a producer chose to name them.
+
+    bug-013 — FOR A PER-TRANSACTION SUBJECT THAT FALLBACK IS A TRANSACTION ID, and "a transaction id
+    can never resolve as a document" is exactly what went wrong: AS-1 and AS-2 carried `("txn…",)`,
+    `_attach_document_provenance` treated that as the rule's own answer, and the finding named no
+    statement. That step now translates a carried id nested inside a document to the document.
     """
     return tuple(
         dict.fromkeys(cid for tag in load_bearing for cid in tag.source_facts)  # order-preserving
@@ -557,7 +564,9 @@ def evaluate_deterministic_rule(
         # 4. The ordered outcomes — first match wins (the fire condition via satisfies()).
         for outcome in det.outcomes:
             if _outcome_matches(outcome, subject_tags, operands):
-                reasoning = outcome.reasoning.format(**_reason_fields(operands))
+                # One field map for both templates — they render the same operands into the same card.
+                fields = _reason_fields(operands)
+                reasoning = outcome.reasoning.format(**fields)
                 results.append(
                     _result(
                         spec,
@@ -567,7 +576,13 @@ def evaluate_deterministic_rule(
                         subject_tags,
                         verdict_confidence=gate.verdict_confidence,
                         threshold_used=threshold_used,
-                        how_to_fix=outcome.how_to_fix,
+                        # bug-014 — FORMATTED, like `reasoning` on the line above. It was passed through
+                        # raw, so MI-1's fix reached a processor reading "at or below {mi_threshold}% the
+                        # requirement falls away" — the one number the sentence exists to give. MI-4
+                        # ({required}) and IN-15 ({end_date}) carry the same latent defect.
+                        how_to_fix=(
+                            outcome.how_to_fix.format(**fields) if outcome.how_to_fix else None
+                        ),
                     )
                 )
                 break

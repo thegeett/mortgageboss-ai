@@ -1,5 +1,6 @@
 "use client";
 
+import { DevThemeItems } from "@/components/layout/dev-theme-items";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,6 +14,7 @@ import { useDensity } from "@/hooks/use-density";
 import { logout } from "@/lib/api/auth";
 import { DENSITY_LABEL, ROW_DENSITIES } from "@/lib/api/preferences";
 import type { User } from "@/lib/auth/types";
+import { THEME_SWITCHING } from "@/lib/theme";
 import { Check, ChevronDown, LogOut, Rows3, Settings, UserRound } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -94,6 +96,8 @@ export function UserMenu({ user }: { user: User }) {
             {DENSITY_LABEL[option]}
           </DropdownMenuItem>
         ))}
+        {/* Development builds only (LP-902); dead code in production. */}
+        {THEME_SWITCHING ? <DevThemeItems /> : null}
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onSelect={(event) => {

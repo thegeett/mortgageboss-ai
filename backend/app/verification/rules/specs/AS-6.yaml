@@ -31,6 +31,11 @@ reference_values:
   priya_validated: false
   threshold_needs_signoff: false
 subject_enumeration: per_document
+# bug-024 — the subject is a statement, but every outcome below is a sentence about the ACCOUNT: whose
+# it is, whether a co-holder is on it. LF-XMB2 holds three statements of PNC ****1943 and asked the
+# same co-holder question three times. Statements of ONE account, agreeing on the holder facts, answer
+# once; two accounts, or two different answers, still speak for themselves.
+answers_per_account: true
 subject_key_fields:
   - content_id
 evidence_required: the account holder name(s) and whether they resolve to a borrower on the loan

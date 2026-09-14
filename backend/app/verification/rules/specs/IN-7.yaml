@@ -31,6 +31,14 @@ evidence_required: the borrower's job change (new vs prior role) and the stabili
 guideline_reference: "Fannie Mae Selling Guide B3-3.1-01 (continuity of income / job changes)."
 judgment:
   subject: per_borrower
+  # bug-016 — THE SCOPE THIS RULE ALWAYS CLAIMED. `applicability.scope` above reads "every borrower on
+  # the loan with a job change" and nothing tested for one, so IN-7 ran on every borrower: on LF-XMB2 it
+  # asked a borrower who has held one job since 2021 for an offer letter for a "new position". The tag it
+  # reasons over cannot scope it — `income.same_line_of_work`'s prompt answers "yes" for a single employer
+  # throughout, so no-change and same-field-move are the same answer there. Resolved BEFORE the gate and
+  # before any AI call (judgment.py): a borrower who has not changed jobs is not_applicable and costs
+  # nothing; a borrower whose employment the application does not state is couldnt_check, never judged.
+  applicability: {tag: income.has_job_change, op: eq, value: "yes"}
   load_bearing_tags: [income.same_line_of_work]
   reasoned_over: [income.same_line_of_work, income.employment_start]
   output_tag: income.job_change_acceptable
@@ -50,6 +58,17 @@ judgment:
       unknown: "Establish whether the borrower's new role continues their previous line of work."
     explain_by: income.same_line_of_work
     explain:
+      # bug-016 — "yes" had no entry, so the SAME-FIELD move fell to `default` and was told to "document
+      # the new position", the wording written for a borrower who changed field. The two need different
+      # asks: a same-line move needs the income evidenced in the new role, not an explanation of it.
+      "yes":
+        why: >-
+          The borrower has changed jobs but stayed in the same line of work, so the history behind the
+          income still supports it. What underwriting needs is the income evidenced in the new role.
+        how_to_fix: >-
+          Obtain a pay stub from the current employer covering a full pay period, or a verification of
+          employment stating the start date and pay. Where the role began too recently to have one, the
+          offer letter or contract showing the pay structure carries it until a pay stub exists.
       "no":
         why: >-
           The borrower has moved to a different line of work. Continuity of income rests on the

@@ -86,6 +86,7 @@ from app.verification.rule_engine.enumerators import (
     LOAN_SUBJECT,
     enumerate_subjects,
     per_liability_source_is_degraded,
+    resolve_accounts,
 )
 from app.verification.rule_engine.judgment import Reasoner as Oc2Reasoner
 from app.verification.rule_engine.registry import ACTIVE_RULE_IDS, evaluate_rules
@@ -681,6 +682,265 @@ def _ordered_union(sequences: Iterable[Sequence[Any]]) -> tuple[Any, ...]:
     return tuple(out)
 
 
+def _collapse_per_account_duplicates(
+    results: list[RuleEvaluation],
+    snapshot: Snapshot,
+    *,
+    humanly_resolved_rule_ids: frozenset[str] = frozenset(),
+) -> list[RuleEvaluation]:
+    """A rule that asks about an ACCOUNT but enumerates per STATEMENT says it once (bug-024).
+
+    AS-6's question is whose account this is, and its answer is a property of the account: "this is a
+    joint account with an additional holder who is not a borrower" is true of the account, not of one
+    statement of it. It enumerates `per_document`, so three statements of PNC ****1943 on LF-XMB2
+    produced three identical needs_review rows. Across staging that shape accounts for 22 rows on 9
+    files.
+
+    WHY NOT `collapse_uniform`, which exists for "N subjects, one sentence": it groups per RULE per
+    FILE and abandons the collapse at the first dissenting verdict. On LF-XMB2 — five satisfied and
+    three needs_review — it does nothing at all, and on a file with co-holders on TWO accounts it would
+    produce one row naming neither. The grouping has to be the account, because that is what the
+    sentence is about.
+
+    THE KEY IS (rule, account, verdict, facts), and every part of it is load-bearing:
+
+    * **account** — two accounts are two answers, whatever they say;
+    * **verdict** — a satisfied statement and a needs_review statement of one account disagree about
+      something real;
+    * **facts** — the decisive one, and the data proves it. LF-AYK4 has five rows under a single
+      outcome but two fact sets: four about a co-holder, and one about a misspelled holder name, which
+      is a different question with a different remedy. A collapse keyed on the account alone folds that
+      row away silently.
+
+    OPT-IN PER RULE (`answers_per_account`), and it cannot be otherwise. A statement subject does not
+    say what the sentence is ABOUT, and exactly two rules take one: AS-6, whose answer is about the
+    account, and AS-9 ("declares 3 pages, 2 present"), whose answer is about the statement. AS-9 is why
+    the default is off rather than a hard-coded exclusion — its load-bearing page counts are not
+    extracted today, so every one of its rows is a couldnt_check with an identically EMPTY fact set on
+    every statement of an account, and an ungated collapse merges them today. Applying this to a rule
+    whose subject really is the statement hides real per-statement problems behind one row.
+
+    A rule a processor has already answered per subject is left alone entirely — `_collapse_uniform_passes`
+    settled that principle (bug-007) and bug-021 adopted it: re-keying retires their answer into fresh
+    OPEN work, and the safe direction is showing more rows, not fewer.
+    """
+    accounts, _unresolvable = resolve_accounts(snapshot)
+    account_of: dict[str, str] = {
+        content_id: key for key, content_ids in accounts.items() for content_id in content_ids
+    }
+    if not account_of:
+        return results
+
+    opted_in: dict[str, bool] = {}
+
+    def _answers_per_account(rule_id: str) -> bool:
+        if rule_id not in opted_in:
+            try:
+                opted_in[rule_id] = load_rule_spec(rule_id).answers_per_account
+            except RuleSpecNotFound:
+                opted_in[rule_id] = False  # no spec, no declaration, no collapse
+        return opted_in[rule_id]
+
+    groups: dict[tuple[str, str, str, tuple[tuple[str, str], ...]], list[int]] = {}
+    for index, result in enumerate(results):
+        account = account_of.get(result.subject_id)
+        if account is None or result.rule_id in humanly_resolved_rule_ids:
+            continue
+        if not _answers_per_account(result.rule_id):
+            continue
+        facts = tuple(sorted((tag.tag_id, str(tag.value)) for tag in result.load_bearing_tags))
+        groups.setdefault((result.rule_id, account, result.verdict.value, facts), []).append(index)
+
+    merged_into: dict[int, list[int]] = {}
+    dropped: set[int] = set()
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        # bug-024 review — THE SURVIVOR IS CHOSEN BY A STABLE KEY, not by list order. The surviving row
+        # keeps its own `subject_id`, and that becomes the finding's `subject_key`: if a later run picks
+        # a different member, the reconciler sees a subject it has never met, mints a fresh finding and
+        # retires the old one — taking its history, and any disposition short of "resolved" with it.
+        # `results` order is NOT stable for this purpose: documents load ordered by
+        # `(document_type, created_at, id)`, so classifying an untyped statement — or a re-extraction
+        # that changes a type — moves a row within its group and silently re-keys the finding. A
+        # content id is stable per document by construction (LP-312), so the lowest one is the same
+        # choice on every run over the same set. A NEW statement whose id sorts lower still moves it,
+        # which no local rule can prevent; this removes the reordering class, which is the reachable one.
+        keep, *rest = sorted(members, key=lambda i: results[i].subject_id)
+        merged_into[keep] = rest
+        dropped.update(rest)
+
+    if not dropped:
+        return results
+
+    collapsed: list[RuleEvaluation] = []
+    for index, result in enumerate(results):
+        if index in dropped:
+            continue
+        twins = merged_into.get(index)
+        if not twins:
+            collapsed.append(result)
+            continue
+        # Every statement the answer covers stays named, so the row a processor opens still lists them
+        # — the same reason bug-021's collapse unions its sources rather than keeping the first.
+        carried = tuple(
+            dict.fromkeys(
+                (
+                    *result.source_content_ids,
+                    *(cid for i in twins for cid in results[i].source_content_ids),
+                )
+            )
+        )
+        collapsed.append(replace(result, source_content_ids=carried))
+
+    logger.info(
+        "per_account_duplicates_collapsed",
+        findings_dropped=len(dropped),
+        accounts_merged=len(merged_into),
+    )
+    return collapsed
+
+
+def _transaction_identity(snapshot: Snapshot) -> dict[str, tuple[str, str, str, str]]:
+    """Each transaction's content id → the identity it shares with its copies (bug-021).
+
+    (account, date, amount, description) — the account resolved through the STATEMENT the transaction
+    is on, so two accounts at the same bank can never collide. A transaction on a statement whose
+    account cannot be identified (no institution or no masked number) is absent from this map and
+    therefore never merges: no identity, no duplicate.
+    """
+    accounts, _unresolvable = resolve_accounts(snapshot)
+    account_of: dict[str, str] = {
+        content_id: key for key, content_ids in accounts.items() for content_id in content_ids
+    }
+
+    def _text(field: object) -> str | None:
+        value = getattr(field, "value", None)
+        if not getattr(field, "is_present", False) or value is None:
+            return None
+        return str(value).strip() or None
+
+    identities: dict[str, tuple[str, str, str, str]] = {}
+    for entry in () if snapshot.documents.absent else snapshot.documents.entries:
+        # bug-021 review — LOOKED UP DIRECTLY. This read `parents.get(entry.content_id, ...)` through
+        # `source_document_by_subject`, which maps a document to ITSELF, so the indirection was a no-op
+        # that read as though `entry` might be a child of something. `resolve_accounts` keys on the
+        # statement's own content id; the txn -> statement direction is still needed below, where it
+        # is not a no-op.
+        account = account_of.get(entry.content_id)
+        if account is None:
+            continue
+        for txn in entry.transactions or ():
+            date, amount = _text(txn.date), _text(txn.amount)
+            if date is None or amount is None:
+                continue  # a line the extractor could not date or price identifies nothing
+            identities[txn.content_id] = (account, date, amount, _text(txn.description) or "")
+    return identities
+
+
+def _collapse_duplicate_transactions(
+    results: list[RuleEvaluation],
+    snapshot: Snapshot,
+    *,
+    humanly_resolved_rule_ids: frozenset[str] = frozenset(),
+) -> list[RuleEvaluation]:
+    """One statement uploaded twice must not judge every deposit on it twice (bug-021).
+
+    A transaction's content id is scoped to its document by construction (`build_transactions` hashes
+    `{"doc": document_content_id, **content}`, so ids stay stable per document and the duplicate
+    tiebreak works within one). Upload the same statement twice and every line mints a second id, the
+    reconciler keys findings on `(rule_id, subject_key)`, and LF-XMB2 showed one $19,039.08 deposit as
+    two AS-1 findings and two AS-12 findings — while the two files were byte-identical, same account,
+    same period, extracted once as 20 rows and once as 21.
+
+    WHY HERE AND NOT IN THE ENUMERATOR. `Subject = tuple[str, Mapping[str, Tag]]` is everything an
+    enumerator may return, so a subject merged there has no channel to carry the twin's id onward and
+    the second statement's link would be lost — the exact provenance loss bug-013 and bug-017 exist to
+    repair. At emission a `RuleEvaluation` already carries `source_content_ids`, so the surviving row
+    names BOTH uploads, which is also what makes the duplication visible to the processor.
+
+    THE SURVIVING ROW IS KEPT WHOLE, never rebuilt. `_collapse_uniform_passes` constructs its summary
+    field by field and its own comments record two defects from doing so (bug-006 lost
+    `ratification_pending`; bug-007 lost the tags naming the subjects). This keeps the first twin's
+    evaluation and replaces one field, so nothing can be dropped by omission.
+
+    WHAT DOES NOT MERGE, each for its own reason:
+
+    * rows whose verdict or load-bearing tag VALUES differ — the 20-vs-21 extraction proves the copies
+      are not identical, and a disagreement is a signal for a human, not something to average away;
+    * two transactions on the SAME statement — identical lines within one statement are two real
+      payments, and merging them would hide one;
+    * a rule a processor has already APPLIED or OVERRIDDEN on this file (`humanly_resolved_rule_ids`) —
+      re-keying retires their answer into fresh OPEN work, and `_collapse_uniform_passes` settled the
+      principle this follows: the safe direction is showing more rows, not fewer.
+    """
+    identities = _transaction_identity(snapshot)
+    if not identities:
+        return results
+    parents = source_document_by_subject(snapshot)
+
+    groups: dict[tuple[str, str, str, str, str], list[int]] = {}
+    for index, result in enumerate(results):
+        identity = identities.get(result.subject_id)
+        if identity is None or result.rule_id in humanly_resolved_rule_ids:
+            continue
+        groups.setdefault((result.rule_id, *identity), []).append(index)
+
+    merged_into: dict[int, list[int]] = {}
+    dropped: set[int] = set()
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        documents = [parents.get(results[i].subject_id) for i in members]
+        if len(set(documents)) != len(documents) or None in documents:
+            continue  # two copies of one line, or a line whose statement is unknown — leave both
+        if len({results[i].verdict for i in members}) > 1:
+            continue
+        fingerprints = {
+            tuple(sorted((tag.tag_id, str(tag.value)) for tag in results[i].load_bearing_tags))
+            for i in members
+        }
+        if len(fingerprints) > 1:
+            continue  # the copies were read differently; say so twice rather than pick one
+        # bug-024 review — STABLE SURVIVOR, and this is a correction to bug-021's review, which let
+        # list order decide. The survivor's `subject_id` becomes the finding's `subject_key`, so a run
+        # that picks a different twin re-keys the finding: the reconciler retires the old row and mints
+        # a new one, losing its history. Document order is `(document_type, created_at, id)`, so typing
+        # a previously unclassified statement reshuffles the group. A transaction content id is stable
+        # per document (it hashes `{"doc": ..., **content}`), so the lowest is the same every run.
+        keep, *rest = sorted(members, key=lambda i: results[i].subject_id)
+        merged_into[keep] = rest
+        dropped.update(rest)
+
+    if not dropped:
+        return results
+
+    collapsed: list[RuleEvaluation] = []
+    for index, result in enumerate(results):
+        if index in dropped:
+            continue
+        twins = merged_into.get(index)
+        if not twins:
+            collapsed.append(result)
+            continue
+        carried = tuple(
+            dict.fromkeys(
+                (
+                    *result.source_content_ids,
+                    *(c for i in twins for c in results[i].source_content_ids),
+                )
+            )
+        )
+        collapsed.append(replace(result, source_content_ids=carried))
+
+    logger.info(
+        "duplicate_transactions_collapsed",
+        findings_dropped=len(dropped),
+        subjects_merged=len(merged_into),
+    )
+    return collapsed
+
+
 def _collapse_uniform_passes(
     results: list[RuleEvaluation],
     *,
@@ -894,12 +1154,33 @@ def _attach_document_provenance(
     A subject with no document in the map — a borrower, the loan, a MISMO-stated liability — gets
     NOTHING, and the finding says nothing. Attributing it to a document it did not come from would
     send a processor to the wrong page with the system's confidence behind it.
+
+    bug-013 — WHAT THE RULE CARRIED CAN BE A TRANSACTION, NOT A DOCUMENT. LP-647 made the deterministic
+    evaluator carry the ids its tags NAMED, and a per-transaction tag names its own transaction
+    (`source_facts=(subject_id,)`). So AS-1 and AS-2 arrived here carrying `("txn…",)`, took the
+    "rule knew better" branch, and `_source_document_ids` then dropped the transaction id because it is
+    not a document: LF-XMB2's AS-1 findings named no statement, and 203 of staging's 368 AS-1 findings
+    were the same. A carried id NESTED inside a document is therefore translated to that document —
+    the same parent link the subject path uses — while a carried DOCUMENT id, or any id this map does
+    not know, passes through untouched, so a consistency rule's included/excluded sources still stand.
+
+    ORDER IS THE CARRIED ORDER, which is the spec's `load_bearing_tags` order, and it is load-bearing
+    itself: `rule_findings._update_finding` writes `source_ids[0]` to `source_document_id`, the one
+    document the UI opens. A per-transaction rule's own statement leads only because every `per_deposit`
+    spec lists a tag on the subject first — not because anything here puts it there.
     """
     parents = source_document_by_subject(snapshot)
     attached: list[RuleEvaluation] = []
     for result in results:
         if result.source_content_ids:  # the rule knew better than the subject does
-            attached.append(result)
+            carried = tuple(
+                dict.fromkeys(parents.get(cid, cid) for cid in result.source_content_ids)
+            )
+            attached.append(
+                result
+                if carried == result.source_content_ids
+                else replace(result, source_content_ids=carried)
+            )
             continue
         parent = parents.get(result.subject_id)
         attached.append(
@@ -1132,10 +1413,23 @@ async def run_verification(
             Degradation("document_provenance", f"findings carry no document links: {exc}")
         )
     results = _attach_document_provenance(results, snapshot)
-    results = _collapse_uniform_passes(
-        results,
-        humanly_resolved_rule_ids=await _rules_with_resolved_subjects(db, loan_file_id),
+    # Resolved ONCE and shared: both collapses re-key findings, and both must leave a rule alone on a
+    # file where a processor has already answered per subject (bug-007's guard, bug-021 adopting it).
+    humanly_resolved = await _rules_with_resolved_subjects(db, loan_file_id)
+    # bug-021 — duplicates FIRST, so the uniform-pass collapse counts each transaction once. Ordered
+    # this way deliberately: a rule whose subjects are a statement's deposits plus its duplicates could
+    # otherwise read as "N subjects agreeing" on a set that is really N/2 transactions counted twice.
+    results = _collapse_duplicate_transactions(
+        results, snapshot, humanly_resolved_rule_ids=humanly_resolved
     )
+    # bug-024 — then the statements themselves: a rule whose answer is about an ACCOUNT should say it
+    # once, however many statements of that account the file holds. After the transaction collapse and
+    # before the uniform-pass one, for the same reason that one runs first — each pass should see a set
+    # already free of the duplication the previous pass understands.
+    results = _collapse_per_account_duplicates(
+        results, snapshot, humanly_resolved_rule_ids=humanly_resolved
+    )
+    results = _collapse_uniform_passes(results, humanly_resolved_rule_ids=humanly_resolved)
     reconciliation = await _persist(
         db,
         document_id_by_content_id=document_ids,

@@ -54,6 +54,7 @@ from app.verification.rules.specs import (
 )
 from app.verification.snapshot.model import DocumentEntry, Snapshot
 from app.verification.snapshot.tag import Tag
+from app.verification.snapshot.traversal import unclassified_documents
 
 logger = get_logger(__name__)
 
@@ -411,7 +412,10 @@ def _outcome_result(
         outcome.reasoning.format(**fields) + reason_suffix,
         gathered,
         verdict_confidence=verdict_confidence,
-        how_to_fix=outcome.how_to_fix,
+        # bug-014 — the same fields `reasoning` is formatted over, for the same reason. No consistency
+        # spec references one today; passing it through raw is what let MI-1 ship a literal
+        # `{mi_threshold}%` on the deterministic side, and this is the other half of that gap.
+        how_to_fix=(outcome.how_to_fix.format(**fields) if outcome.how_to_fix else None),
         ratification_pending=ratification_pending,
     )
 
@@ -460,6 +464,27 @@ async def _judge_residue(
     if judgment.value == con.judge.inconsistent_value:
         return "disagree", judgment.confidence
     return "cannot_tell", judgment.confidence  # an in-domain "unknown"
+
+
+def _unidentified_note(snapshot: Snapshot) -> str:
+    """bug-023 — say whether the missing second source might already be in the file.
+
+    A gather skips an unclassified document exactly as if it were absent, so "only 1 document states the
+    date of birth" is true of what could be READ and not of what the file HOLDS: on LF-XMB2 the second
+    source was the borrower's driver's licence, sitting there untyped. ID-5 got this clause in bug-020;
+    this is the same sentence for the consistency side.
+
+    ⚠️ THE MESSAGE ONLY, never `requested_documents`. That string is borrower-facing (its own comment
+    records that Phase 4 shows it verbatim) and deliberately names no document type — "identify the
+    untyped files" is an instruction to the processor, and the borrower cannot act on it.
+    """
+    count = len(unclassified_documents(snapshot))
+    if not count:
+        return ""
+    return (
+        f"; {count} document(s) in the file are not identified yet and may state it — "
+        "identify those first"
+    )
 
 
 async def evaluate_consistency_rule(
@@ -561,7 +586,7 @@ async def evaluate_consistency_rule(
                     Verdict.COULDNT_CHECK,
                     f"only {len(gathered)} document(s) in the file state the "
                     f"{fact_label(con.gather_tag)}{of_type} — a consistency check needs at least two "
-                    f"to compare" + excluded_note,
+                    f"to compare" + _unidentified_note(snapshot) + excluded_note,
                     gathered,
                     # LP-620 — THE RULE'S OWN ANSWER TO "request or read?". A spec's
                     # `requires_documents` is a presence test, so it reports nothing missing the moment

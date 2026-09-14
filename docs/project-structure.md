@@ -62,7 +62,8 @@ frontend/
 │   ├── api/              # Next.js route handlers (proxy to backend when needed)
 │   ├── layout.tsx        # Root layout (metadata, fonts, providers)
 │   ├── page.tsx          # Home page
-│   └── globals.css       # Tailwind layers + design-token CSS variables
+│   ├── palettes/         # Raw colours, one file per palette, light + dark (LP-901, ADR-402)
+│   └── globals.css       # Tailwind layers + design tokens; colour ROLES point into a palette
 ├── components/
 │   ├── ui/               # shadcn/ui components (owned, in-repo)
 │   └── providers.tsx     # Client providers (TanStack Query, Toaster)
@@ -100,7 +101,7 @@ docs/
 .github/
 ├── workflows/
 │   ├── backend-ci.yml    # ruff, mypy, pytest, uv.lock check
-│   └── frontend-ci.yml   # biome, tsc, next build
+│   └── frontend-ci.yml   # biome, tsc, vitest, next build
 ├── CODEOWNERS
 ├── pull_request_template.md
 └── ISSUE_TEMPLATE/{bug_report,feature_request}.md

@@ -13,7 +13,9 @@ docs/design/ledger/
 ├── ledger-screens.html        the 16 screens — open in a browser
 ├── screens/*.png              one still per screen, for pasting into tickets
 └── assets/
-    ├── globals.css            drop-in replacement for app/globals.css
+    ├── globals.css            → app/globals.css — colour ROLES only since LP-901,
+    │                            so not a drop-in without the palette below
+    ├── palettes/petrol.css    → app/palettes/petrol.css (raw colours, light + dark)
     ├── tailwind.config.ts     drop-in replacement for tailwind.config.ts
     ├── fonts.ts               → lib/fonts.ts (IBM Plex via next/font)
     ├── lib/status.ts          → lib/status.ts (one status vocabulary)
