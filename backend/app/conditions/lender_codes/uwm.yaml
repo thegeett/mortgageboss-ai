@@ -7,6 +7,16 @@
 # that matches nothing. The loader refuses an unquoted code for exactly this reason — YAML would
 # read `0006` as the integer 6 and the mistake would surface months later as a failed match.
 #
+# ⚠️ QUOTE ANY LABEL CONTAINING A COLON, AND THE ERROR YOU GET WILL NOT TELL YOU THAT. `6378`'s
+# label is `Title: loan number on checks to lender`; unquoted, YAML reads `Title` as a KEY and the
+# label becomes a mapping. The loader then refuses the row for having "no label" — pointing the next
+# reader at the label rather than at the punctuation that caused it. That is why this one is quoted
+# and why this note exists rather than only the rule.
+#
+# The same silent retyping happens to a value that starts with `-`, `[`, `{`, `>`, `|`, `*`, `&`,
+# `!`, `%` or `@`, and to the bare words yes/no/on/off/true/false. When in doubt, quote it: a quoted
+# string is never wrong here, and an unquoted one is wrong in a way that reads as correct.
+#
 # ⚠️ `canonical_type_id` IS NULL ON EVERY ROW, AND THE SPEC'S TABLE IS NOT. Spec §6 LP-910's UWM
 # table populates its Type column on **14 rows** (13 distinct ids — `CR-02` appears on both 5868 and
 # 7383): 0471 AS-11, 1228 PA-03, 1594 ID-05, 1741 PA-08, 1812 IE-03, 4235 IE-05, 5868 CR-02, 6132

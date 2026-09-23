@@ -8,6 +8,13 @@
 # loader requires a string, so a future `034` cannot silently become 34, and the rule is one rule
 # rather than one per file.
 #
+# ⚠️ AND QUOTE ANY LABEL CONTAINING A COLON — see the longer note in `uwm.yaml`, where `6378`'s
+# label needs it. Unquoted, YAML reads the text before the colon as a KEY and the label becomes a
+# mapping; the loader then refuses the row for having "no label", which points at the label rather
+# than at the punctuation. The same silent retyping catches a value starting with `-`, `[`, `{`,
+# `>`, `|`, `*`, `&`, `!`, `%` or `@`, and the bare words yes/no/on/off/true/false. When in doubt,
+# quote it.
+#
 # `canonical_type_id` is NULL throughout — see the note in `uwm.yaml`; the taxonomy is not in this
 # repository and Stage 3 supplies it.
 #
