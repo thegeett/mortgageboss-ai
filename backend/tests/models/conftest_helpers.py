@@ -30,6 +30,7 @@ from app.models.condition_round import (
 )
 from app.models.lender import Lender
 from app.models.loan_file import LoanFile
+from app.services.loan_files import create_loan_file
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -53,10 +54,24 @@ async def make_lender(db: AsyncSession, *, company: Company, name: str = "UWM") 
 
 
 async def make_loan_file(db: AsyncSession, *, company: Company) -> LoanFile:
-    loan_file = LoanFile(company_id=company.id)
-    db.add(loan_file)
-    await db.flush()
-    return loan_file
+    """Create a loan file the way the application does (LP-904 review fix).
+
+    ⚠️ THROUGH `create_loan_file`, NEVER `LoanFile(...)` DIRECTLY. `display_id` and `inbox_token` are
+    both NOT NULL with no server default — confirmed in the live schema, not just the model — and
+    ADR-036/ADR-050 put their generation in `app/services/loan_files.py`. A bare construction raises
+    `NotNullViolationError` at flush, so the test dies in SETUP before a single assertion runs.
+
+    THAT IS HOW LP-904'S GUARDS SAT GREEN WITHOUT EVER EXECUTING. Six tests — the four tenancy ones
+    and two append-only ones — failed this way on their first real run, through two review rounds and
+    a suite that looked healthy, because the machine had no database and could only COLLECT them.
+    Collection is not execution. "One company cannot see another's rounds" had never been
+    demonstrated once.
+
+    The service already flushes ("Uses `flush` rather than `commit` so the caller controls the
+    transaction"), so this helper adds none of its own. Twelve other model-test files build loan
+    files exactly this way; this is existing practice, not a new decision.
+    """
+    return await create_loan_file(db, company_id=company.id)
 
 
 async def make_round(
