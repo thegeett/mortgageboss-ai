@@ -16264,11 +16264,19 @@ the repository.**
 endings, employers and addresses — *"Provide an additional consecutive month bank statement from
 Capital One #9912"* is a real shape. The header names the borrowers and the property.
 
-Column-level encryption was considered first and ruled out on a property of the mechanism rather than a
-preference. `EncryptedString` (LP-14) is deliberately non-deterministic — a fresh IV per write — so, as
-its own docstring states, an encrypted column cannot be used in a `WHERE` equality, an `ORDER BY`, an
-index or a unique constraint. Condition text is compared between rounds, searched, and fingerprinted
-for identity. Encrypting it would make the feature's central operation impossible.
+Column-level encryption was considered and ruled out, though **not** for the reason that first
+suggested itself. `EncryptedString` (LP-14) is deliberately non-deterministic — a fresh IV per write —
+so, as its own docstring states, an encrypted column cannot be used in a `WHERE` equality, an
+`ORDER BY`, an index or a unique constraint. The tempting next sentence is that condition text must
+therefore stay plain because it is matched and diffed. **That sentence is wrong, and it inverts the
+design.** Matching runs on `text_fingerprint` — a separate, plain `String(64)` sha256 with its own
+index — which exists precisely so the text itself never has to be compared in SQL; diffing happens in
+Python over rows already retrieved. Encryption would cost the matching nothing.
+
+It is ruled out on the operational ground instead: a column that cannot be indexed, compared or
+ordered is a trap laid for whichever later feature first needs to do one of those to it, and the
+protection it would add is already supplied at rest by storage-level encryption. The force of this ADR
+is 16 CFR 314.4(c)(3) plus the readonly exclusion below, not the column type.
 
 *Decision.* Condition text, raw sheet text, header snapshots, draft rows, unassigned lines and
 `condition_events.detail` are stored as ordinary columns, protected by storage-level encryption and

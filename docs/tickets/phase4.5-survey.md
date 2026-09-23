@@ -506,6 +506,16 @@ Fixtures build their own `Company` / `Lender` inline with `uuid4()`-suffixed slu
   `def downgrade(` only (see §4).
 - **`tests/test_unwired_services.py`** — worth knowing before adding services nothing calls yet.
 
+**One enum value Stage 1 and Stage 3 do *not* have to add** (found during LP-903's review):
+`NeedsItemOrigin.CONDITION = "condition"` already exists at `app/models/needs_item.py:91`, reserved
+for this phase, with **zero branches on it** in `backend/app/`. Crucially its value is **already in
+the stored constraint** — present in the original `create_needs_items` migration
+(`20260611_1003_4db01a03523e:69`) and again in the LP-68 swap
+(`20260619_1600_93a861456e2f:46`, `_ORIGIN_OLD = ("manual", "finding", "condition", "template")`). So
+when Stage 3 creates needs from conditions it needs **no constraint-swap migration** for the origin.
+Checked rather than assumed, because the reverse case — an enum member the CHECK does not permit — is
+the exact defect `test_activity_type_migrations.py` was written for.
+
 ---
 
 ## 14. Differences from the spec — what the code says instead

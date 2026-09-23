@@ -88,7 +88,10 @@ it is marked **(verify with domain expert)** so the resident expert can confirm.
 ### Conditions
 
 - **Condition** — an item the underwriter requires before the loan can proceed.
-  The file's to-do list coming out of underwriting.
+  From Phase 4.5 this means the lender's own **verbatim demand** on a condition
+  sheet (ADR-403) — not our checklist. The document we chase in order to satisfy
+  one is a **need**: a separate record, in our words, that we may rewrite and
+  close. A condition is closed only by the lender.
 - **PTD — Prior to Docs** — a condition that must be satisfied before closing
   documents are drawn.
 - **PTF — Prior to Funding** — a condition that must be satisfied before the loan
