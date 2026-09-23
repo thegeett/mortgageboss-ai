@@ -12,9 +12,11 @@ from __future__ import annotations
 
 from datetime import date
 
+import pymupdf
 import pytest
-from app.conditions.readers import lines_from_text
-from app.conditions.readers.uwm import read_uwm
+from app.conditions.readers import lines_from_pdf, lines_from_text
+from app.conditions.readers.model import UnderwriterNote
+from app.conditions.readers.uwm import _notes, _split_loan_facts, read_uwm
 from app.models.condition import BucketKind, OwnerHint, OwnerHintSource
 from app.models.condition_round import ConditionSheetFormat
 from tests.conditions.fixture_helpers import (
@@ -136,6 +138,12 @@ def test_round1_lender_team_and_the_empty_closer() -> None:
     assert team["UW Team"]["name"] == "Tigers"
     assert team["AE"]["name"] == "Sam Moreno"
     assert team["AE"]["phone_ext"] == "5120"
+
+    # ⚠️ `Closer:` IS PRINTED WITH NO VALUE, AND THE ROLE IS STILL KEPT. The lender is asserting the
+    # role exists and is unfilled. Omitting it would make "no closer assigned yet" indistinguishable
+    # from "this letter has no closer field", and LP-909's UI cannot recover that difference later.
+    assert team["Closer"]["name"] == ""
+    assert team["Closer"]["phone_ext"] is None
 
 
 def test_round1_loan_facts() -> None:
@@ -350,6 +358,116 @@ def test_pagebreak_warns_once_per_duplicate_and_once_for_the_missing_header() ->
     assert "header not found" in sheet.warnings
     assert sum("duplicate" in w for w in sheet.warnings) == 2
     assert sheet.date_printed is None
+
+
+# --------------------------------------------------------------------------- #
+# Review fixes — four branches the three fixtures cannot reach
+# --------------------------------------------------------------------------- #
+
+
+def test_a_label_word_inside_a_value_is_not_a_label() -> None:
+    """⚠️ THE DEFECT THAT LOST A BORROWER'S NAME.
+
+    The scan was a free `str.find` over the line, so a label word appearing inside a VALUE matched.
+    Measured before the fix: `Borrower  Termaine Willis` produced `{"Term": "aine Willis"}` and the
+    `Borrower` key was GONE — a real surname silently deleting the field that owns the line. All
+    three §7 fixtures use clean synthetic values, so none of them can catch this.
+    """
+    facts, _ = _split_loan_facts(
+        lines_from_text(
+            " Borrower                   Termaine Willis                    "
+            "Loan Program        Conventional"
+        )
+    )
+    assert facts == {"Borrower": "Termaine Willis", "Loan Program": "Conventional"}
+
+    facts, _ = _split_loan_facts(
+        lines_from_text(
+            " Property                   118 Status Road                    Occupancy           Primary"
+        )
+    )
+    assert facts == {"Property": "118 Status Road", "Occupancy": "Primary"}
+
+    facts, _ = _split_loan_facts(
+        lines_from_text(
+            " Loan Program               Conventional Escrows Waived        FICO                742"
+        )
+    )
+    assert facts == {"Loan Program": "Conventional Escrows Waived", "FICO": "742"}
+
+
+def test_a_pdf_sheet_is_refused_loudly_rather_than_misread() -> None:
+    """⚠️ THE DEFECT SECTION 1'S OWN FIX CREATED.
+
+    `indent` is None for PDF-built lines, so `_is_heading` returned False for EVERY line and the
+    continuation branch — which treats None as "indented" — glued each bucket heading onto the
+    preceding condition. Row starts still matched, so a PDF produced the right number of rows, under
+    stale buckets, one carrying words the lender never wrote. Silence is the whole problem; until
+    section 3 calibrates a points threshold, this raises.
+    """
+    document = pymupdf.open()
+    page = document.new_page()
+    page.insert_text((72.0, 100.0), "LOAN APPROVAL CONDITIONS - X - 1", fontsize=9)
+    pdf_lines = lines_from_pdf(bytes(document.tobytes()))
+
+    with pytest.raises(NotImplementedError, match="column threshold in points"):
+        read_uwm(pdf_lines)
+
+
+def test_unassigned_lines_are_collected_never_dropped() -> None:
+    """⚠️ THE §9.2 INVARIANT, EXERCISED RATHER THAN ASSUMED.
+
+    All three §7 fixtures read cleanly, so every existing assertion is `unassigned_lines == []` and
+    the branch that APPENDS to it had never executed — a property asserted everywhere and
+    demonstrated nowhere, which is exactly the shape LP-904's guards turned out to have. Two lines
+    the reader cannot place: one before any heading or row, one too shallow to be a continuation.
+    """
+    sheet = read_uwm(
+        lines_from_text(
+            "\n".join(
+                [
+                    " LOAN APPROVAL CONDITIONS - TEST - 1",
+                    "",
+                    " LOAN INFORMATION",
+                    " Borrower                   Test Borrower",
+                    "",
+                    "CONDITIONS",
+                    "          a line before any heading or row",
+                    " Closing (PTF)",
+                    " 0006         Invoice                       Provide copy of invoice.",
+                    "          too shallow to be a continuation",
+                    "",
+                    "EXPIRATION DATES",
+                ]
+            )
+        )
+    )
+
+    assert sheet.unassigned_lines == [
+        "a line before any heading or row",
+        "too shallow to be a continuation",
+    ]
+    assert [row.lender_code for row in sheet.rows] == ["0006"]
+    assert sheet.rows[0].verbatim_text == "Provide copy of invoice."
+
+
+def test_a_note_dated_after_the_sheet_rolls_back_a_year() -> None:
+    """⚠️ DATE ARITHMETIC THAT NO FIXTURE RUNS.
+
+    Round 1's note is 8/28 on a sheet printed 8/28 — equal, not greater, so no rollback. The
+    page-break fixture has no header, so `date_printed` is None and its notes stay unresolved. The
+    rollback branch had therefore never executed, and an unexecuted date branch is where off-by-ones
+    live. A note dated 12/30 on a letter printed 5 January is the PRECEDING December.
+    """
+    assert _notes("**12/30 Not in Upload", date(2026, 1, 5)) == [
+        UnderwriterNote(date=date(2025, 12, 30), text="Not in Upload")
+    ]
+    # Equal is not greater: the sheet's own year stands.
+    assert _notes("**8/28 Not in Upload", date(2026, 8, 28)) == [
+        UnderwriterNote(date=date(2026, 8, 28), text="Not in Upload")
+    ]
+    # No reference date — the page-break fixture's case — resolves to None rather than guessing.
+    assert _notes("**8/31 Provide note", None) == [UnderwriterNote(date=None, text="Provide note")]
 
 
 @pytest.mark.parametrize("fixture", [UWM_ROUND_1, UWM_ROUND_2, UWM_PAGEBREAK])

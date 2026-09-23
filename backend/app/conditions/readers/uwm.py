@@ -150,6 +150,20 @@ _LOAN_LABELS: tuple[str, ...] = (
     "Mortgage Insurance",
 )
 
+#: ⚠️ RULE 2'S SCAN, ANCHORED — and an unanchored version of this was a real defect. A label counts
+#: only at line start or after two or more spaces, AND only when two or more spaces (or the line end)
+#: follow it. Without the anchors this was a free `str.find` over the whole line, so a label word
+#: inside a VALUE matched: a borrower named "Termaine Willis" produced `{"Term": "aine Willis"}` and
+#: LOST the `Borrower` key entirely; "118 Status Road" produced `{"Status": "Road"}`. Range-marking
+#: could not fix it — that stops a shorter label overlapping a longer MATCH, and does nothing about a
+#: label matching inside a value. This is the same `\s{2,}` shape `_split_header`'s pair regex uses,
+#: which is exactly why the header never had this bug.
+_LOAN_LABEL_SCAN = re.compile(
+    r"(?:^\s*|\s{2,})("
+    + "|".join(re.escape(label) for label in sorted(_LOAN_LABELS, key=len, reverse=True))
+    + r")(?=\s{2,}|$)"
+)
+
 #: Rule 1: the lender's own team, which becomes `header["lender_team"]`.
 _TEAM_LABELS: tuple[str, ...] = ("Senior UW", "UW II", "UW Team", "AE", "Closer")
 
@@ -185,9 +199,25 @@ def _heading_kind(text: str) -> tuple[BucketKind, bool]:
 
 
 def _is_heading(line: Line) -> bool:
-    """A heading has <= 3 leading spaces, no leading 4-digit code, and matches the pattern."""
+    """A heading has <= 3 leading spaces, no leading 4-digit code, and matches the pattern.
+
+    ⚠️ PDF INPUT RAISES RATHER THAN ANSWERING `False`, and answering `False` was a real defect.
+    `indent` is None for every PDF-built line (section 1), so `indent is None or indent > 3` made
+    this return False for EVERY line of every uploaded sheet — and the caller's next branch treats
+    `indent is None` as a continuation, so each bucket heading was silently glued onto the preceding
+    condition's text. The damage was invisible: row starts still matched, so the sheet produced the
+    right number of rows, all filed under a stale bucket, one carrying words the lender never wrote.
+
+    A points-based column threshold is what this needs, and it cannot be calibrated until section 3
+    authors the first real PDF fixture. Until then the absence is loud.
+    """
     indent = line.indent
-    if indent is None or indent > 3:
+    if indent is None:
+        raise NotImplementedError(
+            "UWM heading detection needs a column threshold in points for PDF-built lines; "
+            "section 3 calibrates it against the first authored PDF fixture"
+        )
+    if indent > 3:
         return False
     text = line.text.strip()
     if not text or _ROW_START.match(line.text):
@@ -247,9 +277,18 @@ def _owner_hint(
 def _fingerprint_text(text: str) -> str:
     """The text with note spans removed, lower-cased, whitespace collapsed (rule 5's input).
 
-    Used here only for DEDUPLICATION (rule 6). The stored `text_fingerprint` is computed at import;
-    what matters for this reader is that two rows whose only difference is a note still compare
-    equal, so a page-overlap duplicate is caught even when the underwriter annotated one copy.
+    Used here only for DEDUPLICATION (rule 6). The stored `text_fingerprint` is computed at import.
+
+    ⚠️ THIS DOES NOT MAKE AN ANNOTATED COPY EQUAL TO A CLEAN ONE, and an earlier version of this
+    docstring claimed it did. Rule 6's key is "the same code, fingerprint AND notes", so the notes are
+    compared as a third element and the stripping here is cancelled by it. That is the SPEC'S rule and
+    it is kept deliberately: the alternative — dropping the notes from the key — would discard a copy
+    the underwriter annotated in favour of one they did not, losing the annotation.
+
+    The consequence, stated rather than hidden: a page-overlap duplicate whose two copies differ —
+    annotated on one page only, or split mid-sentence so the text itself differs — SURVIVES as two
+    rows. Both are visible to the processor on the review screen, which is the safe direction to
+    fail; silently dropping a row the lender printed is not.
     """
     return " ".join(_NOTE.sub(" ", text).lower().split())
 
@@ -262,7 +301,17 @@ def _split_header(lines: Sequence[Line]) -> tuple[dict[str, object], date | None
     warnings: list[str] = []
 
     pairs = re.compile(r"([A-Za-z][A-Za-z /]*?):\s{2,}(.*?)(?=\s{2,}[A-Za-z][A-Za-z /]*?:|$)")
+    # ⚠️ A ROLE PRINTED WITH NO VALUE IS STILL A ROLE. `Closer:` with nothing after it is the lender
+    # asserting the role exists and is unfilled; the pair regex above cannot match it (it requires a
+    # value), so it is picked up here. Omitting the entry would make "no closer assigned yet"
+    # indistinguishable from "this letter has no closer field", and LP-909's UI cannot recover the
+    # difference afterwards.
+    empty_role = re.compile(r"([A-Za-z][A-Za-z /]*?):\s*$")
     for line in lines:
+        if (unfilled := empty_role.search(line.text)) is not None:
+            role = unfilled.group(1).strip()
+            if role in _TEAM_LABELS:
+                team.append({"role": role, "name": "", "phone_ext": None})
         for label, value in pairs.findall(line.text):
             label, value = label.strip(), value.strip()
             if label in _TEAM_LABELS:
@@ -293,7 +342,6 @@ def _split_loan_facts(lines: Sequence[Line]) -> tuple[dict[str, str], list[str]]
     Longest label first, so `Loan Amount (Base/Total)` is not truncated to `Loan Amount`, and
     `Property Type` is not read as `Property`.
     """
-    by_length = sorted(_LOAN_LABELS, key=len, reverse=True)
     facts: dict[str, str] = {}
     warnings: list[str] = []
 
@@ -301,26 +349,17 @@ def _split_loan_facts(lines: Sequence[Line]) -> tuple[dict[str, str], list[str]]
         text = line.text
         if not text.strip():
             continue
-        found: list[tuple[int, str]] = []
-        taken: list[tuple[int, int]] = []
-        for label in by_length:
-            start = 0
-            while (at := text.find(label, start)) != -1:
-                if not any(a <= at < b for a, b in taken):
-                    found.append((at, label))
-                    taken.append((at, at + len(label)))
-                start = at + 1
-        if not found:
+        matches = list(_LOAN_LABEL_SCAN.finditer(text))
+        if not matches:
             if text.strip().startswith("*"):
                 continue  # the "* Note rate is subject to change" footnote — lender boilerplate
             warnings.append(f"unrecognised loan-information line: {text.strip()[:60]!r}")
             continue
-        found.sort()
-        for index, (at, label) in enumerate(found):
-            end = found[index + 1][0] if index + 1 < len(found) else len(text)
-            value = text[at + len(label) : end].strip()
+        for index, match in enumerate(matches):
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+            value = text[match.end() : end].strip()
             if value:
-                facts[label] = value
+                facts[match.group(1)] = value
     return facts, warnings
 
 
@@ -378,6 +417,18 @@ def _expiry(lines: Sequence[Line]) -> tuple[dict[str, date | None], list[str]]:
 def read_uwm(lines: Sequence[Line]) -> ParsedSheet:
     """Read a UWM approval letter into a `ParsedSheet` (spec §6 rules 1-8)."""
     sheet = ParsedSheet(sheet_format=ConditionSheetFormat.UWM_APPROVAL_LETTER)
+
+    # ⚠️ REFUSED LOUDLY ON PDF INPUT, because reading it quietly produced a plausible wrong answer.
+    # Every rule below that separates a heading from a continuation measures `indent`, which is None
+    # for PDF-built lines — so a PDF parsed to the right number of rows under the wrong buckets with
+    # headings glued into the text. Section 3 authors the first PDF fixture and calibrates a
+    # points-based threshold; LP-905, which is the first caller to hand this real PDFs, comes after
+    # it in the spec's own order (§4), so nothing downstream depends on this gap being filled yet.
+    if any(line.from_pdf for line in lines):
+        raise NotImplementedError(
+            "the UWM reader cannot yet read PDF-built lines: heading and continuation detection "
+            "need a column threshold in points, which section 3 calibrates against a real PDF"
+        )
 
     def index_of(marker: str) -> int | None:
         return next(
