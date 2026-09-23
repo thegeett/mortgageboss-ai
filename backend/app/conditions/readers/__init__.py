@@ -15,7 +15,9 @@ even then it only SPLITS — it never interprets. A reader that returned approxi
 would defeat the entire point of storing the lender's wording verbatim.
 """
 
+from app.conditions.readers.champions import read_champions
 from app.conditions.readers.detect import detect_format, first_content_line
+from app.conditions.readers.generic import read_generic
 from app.conditions.readers.lines import (
     NON_BREAKING_SPACE,
     SOFT_HYPHEN,
@@ -49,5 +51,7 @@ __all__ = [
     "lines_from_pdf",
     "lines_from_text",
     "normalise",
+    "read_champions",
+    "read_generic",
     "read_uwm",
 ]
