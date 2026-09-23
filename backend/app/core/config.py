@@ -186,6 +186,12 @@ class Settings(BaseSettings):
     # ONLY — extraction still reads the whole document (it needs the substantive pages); large-doc extraction
     # is the splitter's problem, not this cap.
     classification_max_pages: int = 15
+    # LP-905 — the ceiling on an uploaded condition sheet, in bytes (default 20 MB, per spec
+    # §LP-905). Enforced by a CHUNKED read that aborts at the limit rather than by reading the body
+    # and measuring it afterwards: the point of a cap is to refuse before the bytes are in memory.
+    # Larger than the 10 MB MISMO cap because a two-page UWM letter rasterised by the lender's own
+    # pipeline is routinely several megabytes, and a scan of one more so.
+    condition_sheet_max_bytes: int = 20 * 1024 * 1024
     # LP-463: Tier 3 scoped free extraction also reads the document natively, so it hits the SAME
     # 100-page/32 MB document-block limit (a 177-page condo declaration would be rejected). Free extraction
     # surfaces mortgage-relevant facts for a human + AI reasoning (moderate stakes), and those cluster in the

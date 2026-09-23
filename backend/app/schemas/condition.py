@@ -15,7 +15,8 @@ rather than reusing `ConditionPublic` because the two differ in the way that mat
 a confidence and the source line numbers it came from, and no identity of its own until import.
 """
 
-from datetime import date, datetime
+from datetime import date as date_type
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -51,7 +52,7 @@ class UnderwriterNotePublic(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    date: date | None = None
+    date: date_type | None = None
     text: str
     first_seen_round_id: UUID | None = None
 
@@ -180,8 +181,8 @@ class ConditionRoundPublic(BaseModel):
     completeness: ConditionRoundCompleteness
     sheet_format: ConditionSheetFormat
     sources: list[ConditionSourcePublic] = Field(default_factory=list)
-    date_printed: date | None
-    round_date: date
+    date_printed: date_type | None
+    round_date: date_type
     expiry_dates: dict[str, Any] | None = None
     #: Present on a DRAFT and cleared on import — the review screen's rows.
     draft_rows: list[DraftRowPublic] | None = None
@@ -233,7 +234,7 @@ class ConditionPasteRequest(BaseModel):
 
     text: str = Field(min_length=1, max_length=MAX_PASTE_CHARS)
     completeness: ConditionRoundCompleteness
-    round_date: date | None = None
+    round_date: date_type | None = None
 
 
 class ConditionDraftUpdate(BaseModel):
@@ -245,7 +246,7 @@ class ConditionDraftUpdate(BaseModel):
 
     draft_rows: list[DraftRowPublic]
     completeness: ConditionRoundCompleteness | None = None
-    round_date: date | None = None
+    round_date: date_type | None = None
     expected_updated_at: datetime | None = None
 
 

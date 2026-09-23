@@ -94,6 +94,11 @@ class ActivityType(StrEnum):
     # opening anything.
     COMMUNICATION_FAILED = "communication_failed"
     NOTE_ADDED = "note_added"
+    # LP-905 — a lender's condition sheet arrived, by upload or forwarded from the inbox. Its own
+    # type rather than a DOCUMENT_UPLOADED detail, because a condition sheet is NOT a borrower
+    # document: it never enters classify → extract → needs (ADR-403), and a timeline that filed it
+    # under "document uploaded" would invite exactly the confusion the boundary exists to prevent.
+    CONDITION_SHEET_RECEIVED = "condition_sheet_received"
 
 
 class ActivityLog(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
