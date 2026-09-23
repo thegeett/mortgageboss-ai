@@ -146,6 +146,42 @@ def test_tokens_come_back_in_left_to_right_order() -> None:
     assert line.text == "first second"
 
 
+def test_pdf_lines_report_no_indentation_rather_than_zero() -> None:
+    """⚠️ NONE IS NOT ZERO, AND THAT IS THE POINT (section 1 review).
+
+    `text` for a PDF line is the tokens joined by single spaces, so it carries no indentation at all.
+    An `int` return would hand every reader a confident 0 — and the spec's heading test (<= 3 spaces)
+    would then match EVERY line of every uploaded sheet. Silently available, always wrong, and
+    invisible to a suite whose fixtures are all text. The type now forces a reader to handle it.
+    """
+    (pdf_line,) = lines_from_pdf(_pdf_with([(72.0, 100.0, "Master")]))
+
+    assert pdf_line.from_pdf is True
+    assert pdf_line.indent is None
+
+    (text_line,) = lines_from_text("   Master")
+
+    assert text_line.from_pdf is False
+    assert text_line.indent == 3
+
+
+def test_clustering_does_not_depend_on_word_arrival_order() -> None:
+    """⚠️ THE DEFECT THE REVIEW FOUND BY TRACING RATHER THAN REASONING.
+
+    Clustering greedily in ARRIVAL order made the output depend on whatever `words_for` returned
+    first: the same geometry could group into one line or two. A layout reader whose result depends
+    on word order is untestable in the way that matters, and no fixture would have caught it —
+    sorting by vertical centre first makes the grouping a function of the geometry alone.
+    """
+    geometry = [(72.0, 100.0, "alpha"), (300.0, 100.0, "beta"), (72.0, 130.0, "gamma")]
+
+    forward = lines_from_pdf(_pdf_with(geometry))
+    backward = lines_from_pdf(_pdf_with(list(reversed(geometry))))
+
+    assert [line.text for line in forward] == [line.text for line in backward]
+    assert [line.text for line in forward] == ["alpha beta", "gamma"]
+
+
 def test_a_pdf_line_carries_its_page_number() -> None:
     document = pymupdf.open()
     for index in range(2):

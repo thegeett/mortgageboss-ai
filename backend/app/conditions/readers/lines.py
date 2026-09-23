@@ -87,14 +87,35 @@ class Line:
     y: float
     text: str
     tokens: tuple[Token, ...]
+    #: True when this line came from a PDF's word boxes rather than from text. Then `text` is the
+    #: tokens joined by single spaces, so it carries NO indentation and `indent` is None.
+    from_pdf: bool = False
 
     @property
     def is_blank(self) -> bool:
         return not self.text.strip()
 
     @property
-    def indent(self) -> int:
-        """Leading spaces. The UWM reader's heading-vs-continuation test."""
+    def indent(self) -> int | None:
+        """Leading spaces, or None when the line came from a PDF.
+
+        ⚠️ NONE IS NOT ZERO, AND THE TYPE SAYS SO DELIBERATELY (LP-906 section 1 review). `text` for
+        a PDF line is `" ".join(tokens)`, which has no leading spaces — so an `int` return would hand
+        every reader a confident 0 and the spec's heading test (<= 3 spaces) would match EVERY line
+        of every uploaded sheet. That is the worst shape of bug: silently available, always wrong,
+        and invisible to a test suite whose fixtures are all text.
+
+        The two rejected alternatives, and why. Reconstructing spacing in `text` from x0 gaps INVENTS
+        CHARACTERS THE DOCUMENT DOES NOT CONTAIN, and `text` is what `verbatim_text` is built from —
+        that collides head-on with spec §9.1, and proportional fonts make gap-to-spaces lossy and
+        font-size dependent anyway. Picking a points threshold now cannot be calibrated, because no
+        PDF fixture exists until section 3 authors one.
+
+        So the absence is made VISIBLE IN THE TYPE: a reader must handle None explicitly, and section
+        3 adds the real points-based branch once there is a PDF to measure it against.
+        """
+        if self.from_pdf:
+            return None
         return len(self.text) - len(self.text.lstrip(" "))
 
 
@@ -138,7 +159,20 @@ def lines_from_pdf(content: bytes) -> tuple[Line, ...]:
     with pymupdf.open(stream=content, filetype="pdf") as document:  # type: ignore[no-untyped-call]
         for page_number, page in enumerate(document, start=1):
             rows: dict[float, list[tuple[float, float, str]]] = {}
-            for x0, y0, _x1, y1, word in words_for(page):
+            # ⚠️ SORTED BY VERTICAL CENTRE FIRST (LP-906 section 1 review). Clustering greedily in
+            # ARRIVAL order makes the result depend on what `words_for` happens to return first: the
+            # same three centres (100.0, 101.5, 103.5) cluster into 1 group or 2 depending only on
+            # ordering. A layout reader whose output depends on word order is untestable in the way
+            # that matters, and no fixture would catch it. Sorting costs one pass and makes the
+            # grouping a function of the geometry alone.
+            #
+            # This does NOT make the tolerance safe on its own: two real lines 4pt apart can still
+            # merge, because a centre within 3.0 of an OPENING word joins its cluster. Merging is
+            # the direction the tolerance comment below wrongly called harmless — it puts two rows'
+            # text on one line, which no later rule recovers. Section 3 calibrates the tolerance
+            # against a real PDF; until then this is deterministic but not yet proven correct.
+            by_geometry = sorted(words_for(page), key=lambda w: ((w[1] + w[3]) / 2.0, w[0]))
+            for x0, y0, _x1, y1, word in by_geometry:
                 centre = (y0 + y1) / 2.0
                 key = next(
                     (k for k in rows if abs(k - centre) < _SAME_LINE_TOLERANCE_POINTS),
@@ -157,6 +191,7 @@ def lines_from_pdf(content: bytes) -> tuple[Line, ...]:
                         y=centre,
                         text=" ".join(token.text for token in tokens),
                         tokens=tokens,
+                        from_pdf=True,
                     )
                 )
     return tuple(out)
