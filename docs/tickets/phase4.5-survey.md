@@ -572,6 +572,28 @@ the fallback rather than replaced.
 `### Conditions` heading (line 88) under "Domain Terms". The new terms extend it rather than starting
 a new section.
 
+### 15.2 — The UI tickets' "Visual check": answered, and it is a real limit
+
+`docs/design/phase4.5-conditions/README.md` says to build a screen, **run the app**, open that state
+with fixture data at 1600 px, screenshot it, and compare against the PNG. Two things make that
+impossible from this session, both measured rather than assumed:
+
+- **The app cannot run here.** No local Postgres and no Docker — the same gap that leaves LP-904's
+  migration unexecuted and every DB-backed test collect-only.
+- **There is no browser driver, and adding one is forbidden by the README** ("the repo has no
+  Playwright, so don't add one just for this"). LP-859 independently measured the same absence.
+
+✅ **ANSWERED 2026-09-23 — "the way LP-859".** LP-905, LP-907 and LP-909 carry their **Visual check**
+sections marked **UNVERIFIED ON SCREEN**, with the blockers named, exactly as LP-859 §2 and §5 did.
+What *is* done for each screen: build it to the PNG (which is readable from here — the PNGs open
+directly), and work through its *Must match* list item by item against the built component, recording
+each result. What is **not** done is the screenshot-beside-PNG comparison.
+
+This matters because LP-859 is the ticket that established the rule it is being applied to: *"a
+ticket that changes what a screen looks like is not done on green CI. Either a browser-level check
+runs, or a person looks."* Under this answer, **a person looks** — the product owner, when the three
+screens land — and the tickets say so plainly instead of implying CI covered it.
+
 ---
 
 ## 16. Summary — what Stage 1 can build on, unchanged

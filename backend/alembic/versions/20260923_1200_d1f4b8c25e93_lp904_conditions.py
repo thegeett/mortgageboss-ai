@@ -256,13 +256,27 @@ def upgrade() -> None:
     op.create_index(
         "ix_condition_rounds_file_status", "condition_rounds", ["loan_file_id", "status"]
     )
-    # ONE ROUND NUMBER PER FILE, among IMPORTED and undeleted rows only. Partial because drafts have
-    # no number (NULL, and NULLs do not conflict anyway) and a discarded or deleted round must not
-    # hold its number hostage — the next import would then skip a number for no visible reason.
+    # ONE ROUND NUMBER PER FILE, for the life of the row. Partial because drafts have no number at
+    # all — it is assigned on import — so they neither need the constraint nor conflict under it.
+    #
+    # ⚠️ `status = 'imported'` WAS IN THIS PREDICATE AND WAS WRONG, found in review. DISCARDED is a
+    # live status, not a deletion: an imported round that is later discarded keeps its number but
+    # would drop out of the index, freeing that number for reuse. `condition_events` is append-only,
+    # so the discarded round's ROUND_IMPORTED event survives forever — leaving two different sheets
+    # both recorded as "round 2" in an immutable history, with nothing able to tell them apart.
+    #
+    # And it bought nothing: the case the clause was written for is a discarded DRAFT, whose
+    # `round_number` IS NULL and which therefore never conflicts anyway. Nothing constrains the
+    # import → discard transition (there is no state machine and no service layer yet), so this
+    # predicate IS the rule.
+    #
+    # `deleted_at IS NULL` STAYS. A soft delete is an explicit act by a person, so releasing the
+    # number there is a visible consequence of a deliberate decision rather than a side effect of a
+    # status change.
     op.execute(
         "CREATE UNIQUE INDEX uq_condition_rounds_file_number "
         "ON condition_rounds (loan_file_id, round_number) "
-        "WHERE round_number IS NOT NULL AND deleted_at IS NULL AND status = 'imported'"
+        "WHERE round_number IS NOT NULL AND deleted_at IS NULL"
     )
 
     op.create_table(
