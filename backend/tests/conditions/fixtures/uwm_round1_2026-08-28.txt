@@ -1,0 +1,86 @@
+ LOAN APPROVAL CONDITIONS - RIVERA - 1226500417
+                                           Prepared For:        MI9001 {SHY} NORTHSTAR HOME LOANS LLC
+                                           Contact Name:        Priya Raman                                       Senior UW:        Dana Okafor ext. 85210
+                                           NMLS ID:             1000001                                           UW II:            Lena Brennan ext. 87044
+                                           Email:               files@example-processing.com                      UW Team:          Tigers
+                                           Phone:               (555) 010{SHY}0175                                    AE:               Sam Moreno ext. 5120
+                                           Date Printed:        08/28/2026                                        Closer:
+
+ LOAN INFORMATION
+
+ Borrower                   Alex Rivera
+
+ Property                   100 EXAMPLE LN, COLUMBIA, South Carolina 29201
+
+ Transaction Type                 Purchase Home                                        Occupancy           Primary Residence
+
+ Property Type                    Planned Unit Development                             Loan Program        Conforming Conventional 30 Year Fixed
+
+ Loan Amount (Base/Total)         $242,199.00 / $242,199.00                            Status              Approved With Conditions         07/17/2026
+
+ Appraised Value           $270,000.00                      AUS                      Desktop Underwriter          Submission Date               07/17/2026
+
+ Purchase Price            $269,111.00                      FICO                     689                          Must Fund By
+
+ LTV / CLTV                90.000% / 90.000%                Term                     360                          Must Not Close Before         09/30/2026
+
+ Note Rate                 6.374%                           Compensation Type        Lender Paid                  Rate Lock Exp
+
+ Housing / Debt Ratios     32.51% / 40.36%                  Esign                    Orig State/Fed               Max Funds to Close            $11,062.18
+
+ Max PITI                  $1,851.54                        Verified Income          $5,741.32                    Verified Assets               $11,062.18
+
+ Escrows                   No Waiver                        Down Payment             $26,912.00                   Earnest Money Deposit         $2,850.00
+
+ Non Borrowing Ind         No                               Debts to Be Paid         $0.00                        Max Seller Concessions        $0.00
+
+                                                    * Note rate is subject to change unless it has been locked.
+
+CONDITIONS
+ UW {SHY} Prior To Final Approval (PTD)
+ 1228         Appraisal                     Final inspection is required (and possibly a Change of Circumstance) to confirm the following has been
+                                            completed: being completed to match the plans and specs provided. (On new construction transactions this
+                                            condition can be moved to closing at the request of the client.)
+
+ 7086         Assets                        Short funds to close and/or reserves. Document sufficient funds for the closing of this transaction. Total funds
+                                            required are $38,210.40 (Includes $38,210.40 in funds to close and $0.00 in reserves plus any unverified POC
+                                            items). This must be verified by most recent 2 months bank statement. $11,062.18 currently verified.
+
+ 6132         Assets                        Provide an additional consecutive month bank statement from Capital One® #9912. A total of two full monthly
+                                            statements or 60 days of transaction history is required. **8/28 Not in Upload
+
+ 6637         Assets                        Provide the following for the earnest money deposit in the amount of $2,850.00: source, evidence of receipt and
+                                            evidence of clearance. **8/28 Not in Upload
+
+ 6178         HOI                           Provide updated homeowners insurance declarations page reflecting: the HOI policy provided is not effective
+                                            until 09/30/2026. If closing is prior to this date, the current HOI policy must be provided reflecting current
+                                            coverage.
+
+ Compliance {SHY} Prior To Closing (PTD)
+ 0132         Disclosure                    SC Attorney and Insurance Preference Disclosure signed by Borrower(s) and Loan Officer. (Broker/Correspondent LO
+                                            NMLS ID Required on Signature Page) ***NOTE*** Please submit original disclosure with a licensed Attorney or Law
+                                            Firm listed. The attorney listed (EXAMPLE REAL ESTATE{SHY} LAW FIRM) is not on our approved list. Borrower(s) to
+                                            initial all changes. ***NOTE*** Please upload wire instructions that match Attorney on the SC {SHY} Attorney &
+                                            Insurance Preference disclosure.
+
+ Closing (PTF)
+ 1947         Closing Disclosure            TC: Title to provide final Seller Closing Disclosure with final closing package
+
+ 1582         Invoice                       Provide a copy of the Third Party Processing Invoice.
+
+ 0006         Invoice                       Provide copy of invoice for credit report.
+
+ 0007         Invoice                       Provide copy of invoice for final inspection.
+
+ 6378         TC                            TC: Title company to include lender loan number on all checks sent to lender.
+
+EXPIRATION DATES
+
+ Close By     Appraisal         Asset         CPL            Credit       Income     Insurance        Other       Payoff       Short Sale       Title          VOB
+
+ 10/30/2026   11/23/2026    10/30/2026                     11/10/2026   11/03/2026   09/30/2027
+
+         * If a document expires before closing, a new document must be submitted and may result in additional requirements or conditions.
+
+
+                 Mortgagee Clause: United Wholesale Mortgage ISAOA, ATIMA PO BOX 202175 FLORENCE, SC 29502 Phone: (800) 981-8898

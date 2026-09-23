@@ -1,0 +1,73 @@
+ LOAN APPROVAL CONDITIONS - ELLIS - 1226500999
+   (header omitted in this fixture — same layout as the round fixtures)
+
+CONDITIONS
+ Master
+ 0562         Credit                        A restructure of this loan is required as of 9/8 due to LTV exceeds 75% on investment rate and term. Provide
+                                            documentation and/or submit a Change of Circumstance in EASE to resolve the restructure. If no action is taken
+                                            to resolve the restructure request within 7 business days, the loan will be denied for Value or Type of
+                                            Collateral Not Sufficient.
+
+ UW {SHY} Prior To Final Approval (PTD)
+ 7086         Assets                        Short funds to close and/or reserves. Document sufficient funds for the closing of this transaction. Total funds
+                                            required are $155,453.32 (Includes $117,961.56 in funds to close and $37,491.76 in reserves plus any unverified
+                                            POC items). This must be verified by most recent 1 month bank statement. $106,040.58 currently verified.
+
+ 7383         Assets                        There are deductions on the bank statement not reflected on the credit report. Provide a letter of explanation
+                                            regarding the following deductions noted on the bank statement and documentation to support the property
+                                            affiliated with the expense: $931.12 07/07/2026 Proprtypay from Chase ending in 3318.
+
+ 1594         Borrower                      Provide proof of non{SHY}ownership in the following addresses found within third party data which were not
+                                            disclosed on the initial 1003: 12 Sample Way, Naples, Fl**8/31 Provide note as mortgage statement alone cannot
+                                            verify non{SHY}ownership**
+
+ 5868         Credit                        Liability(s) are missing from the credit report. Acceptable documentation must be provided to support the
+                                            balance and payment for the following liabilities: Lakeside Credit Union 4410.
+
+ 6140         Credit                        The contingent liability is being excluded due to being paid by others. Provide documentation that the party
+                                            making the payments is obligated on the account(s) and that the last 12 payments have been made by the co{SHY}
+                                            obligor for the following liability: Lakeside Credit Union 4410.
+
+ 4235         Income                        Provide a W2 (if applicable), Final Paystub, or a Written Verification of Employment from Example Tech LLC for
+                                            2026 and 2025 for Jordan Ellis. SR to Review. **8/31 Need clarification on this prior employer as K{SHY}1 from
+                                            business returns show borrower is 0% owner is 2025
+
+ 0471         Property                      Provide documentation such as a preliminary CD or noncontingent purchase agreement to support that the parcel
+                                            #00000000000 is being sold.
+
+ 5853         REO                           For the property located at 88 Example Crossing Lane, provide a current mortgage statement to document that
+                                            taxes and insurance are escrowed. If not escrowed, most recent homeowner's insurance policy and tax bill and
+                                            documentation for HOA dues.
+
+ Underwriter To Obtain And Clear
+ 1760         Appraisal                     Appraisal Desk Review was ordered on 09/03/2026. Allow 1{SHY}2 days for completion. Additional appraisal
+                                            conditions may apply once reviewed.
+
+ 0571         Credit                        Underwriter to approve the change of circumstance requested for Base Loan Amount From: 487500.00 To: 622500.00.
+
+ 0571         Credit                        Underwriter to approve the change of circumstance requested for Appraised Value From: 830000.00 To: 815000.00,
+                                            Base Loan Amount From: 622500.00 To: 611250.00.
+
+ 0571         Credit                        Underwriter to approve the change of circumstance requested for Appraised Value From: 815000.00 To: 805000.00.
+                 Mortgagee Clause: United Wholesale Mortgage ISAOA, ATIMA PO BOX 202175 FLORENCE, SC 29502 Phone: (800) 981-8898
+ Closing (PTF)
+ 1582         Invoice                       Provide a copy of the Third Party Processing Invoice.
+ 0571         Credit                        Underwriter to approve the change of circumstance requested for Appraised Value From: 815000.00 To: 805000.00.
+
+ Closing (PTF)
+ 1582         Invoice                       Provide a copy of the Third Party Processing Invoice.
+
+ 0006         Invoice                       Provide copy of invoice for credit report.
+
+ 6378         TC                            TC: Title company to include lender loan number on all checks sent to lender.
+
+EXPIRATION DATES
+
+ Close By     Appraisal      Asset        CPL          Credit      Income       Insurance       Other    Payoff     Short Sale     Title      VOB
+
+ 11/15/2026   12/27/2026   11/15/2026                11/30/2026   11/30/2026   06/03/2027
+
+         * If a document expires before closing, a new document must be submitted and may result in additional requirements or conditions.
+
+
+                 Mortgagee Clause: United Wholesale Mortgage ISAOA, ATIMA PO BOX 202175 FLORENCE, SC 29502 Phone: (800) 981-8898
