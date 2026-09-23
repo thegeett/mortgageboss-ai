@@ -140,6 +140,21 @@ def test_stage_1_cannot_express_a_clearing_event() -> None:
     stop being true: a `condition_cleared` member added "for later" would be writable immediately,
     by anything, with no verdict recorded and no UI showing it. Stage 2 adds the member together with
     the comparison that earns it.
+
+    THE TEST TO APPLY BEFORE ADDING AN EVENT KIND — and it is a question, not a category:
+    **could a reader of this row infer that the lender answered?**
+
+      * `condition_cleared` / `condition_removed` — yes, it STATES one.
+      * `round_compared` — yes, it MANUFACTURES one. Comparison is the mechanism that produces
+        "this one is gone, so it probably cleared", so the row's existence is evidence the inference
+        ran.
+      * `ROUND_ENRICHED` — no. It says a second arrival merged into a round, and merging provenance
+        cannot be read as the lender speaking. That is why it is legitimately in the enum while
+        nothing in Stage 1 writes it (LP-907 does).
+
+    An earlier version of this reasoning said the forbidden kinds were "verdicts about a condition's
+    fate". That rule fails on its own list: `round_compared` is not a verdict about any condition's
+    fate, which is exactly how it would have slipped in.
     """
     kinds = {kind.value for kind in ConditionEventKind}
 

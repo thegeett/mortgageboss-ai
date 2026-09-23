@@ -594,6 +594,24 @@ ticket that changes what a screen looks like is not done on green CI. Either a b
 runs, or a person looks."* Under this answer, **a person looks** — the product owner, when the three
 screens land — and the tickets say so plainly instead of implying CI covered it.
 
+⚠️ **And "built to its PNG and walked through the Must-match list" is itself a claim someone will
+read as verification, so what the walk-through CANNOT catch is named here rather than left implied.**
+Reading a Must-match list against the code confirms that an element exists, carries the right words,
+uses the right token and sits in the right order. It cannot see:
+
+- **spacing and rhythm** — whether the card padding, the gaps and the line heights read as the PNG
+  does, which is most of what "looks finished" means (LP-859 §5 is entirely this, and is why that
+  ticket says the section "is judged by eye, on purpose");
+- **overflow and collapse** — jsdom loads no CSS, so no box has a width and nothing can be squeezed
+  past zero. That is precisely how LP-859 §2's unreadable 300px rail passed every test in the suite;
+- **real-data widths** — the longest string a screen can actually produce (a wrapped condition, a
+  nine-line UWM row, a lender team with four names) rather than the fixture's convenient one;
+- **any viewport that was never rendered** — including the 1600px the README specifies and the
+  1280px floor ADR-394 commits to.
+
+So the honest form in each ticket is two statements, not one: *these Must-match items were checked
+against the built component*, and *no screen was rendered, so nothing above was checked*.
+
 ---
 
 ## 16. Summary — what Stage 1 can build on, unchanged
