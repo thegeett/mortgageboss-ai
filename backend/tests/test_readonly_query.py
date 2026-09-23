@@ -397,7 +397,26 @@ EXCLUDED: dict[str, frozenset[str]] = {
             "mail_client",
         }
     ),
-    "lenders": frozenset({"contact_email", "contact_phone"}),
+    # LP-904 adds `condition_handling_notes`: free-form prose an admin typed about how a lender
+    # works, which is where a person's name arrives in a shape no scrubber predicts — the same
+    # reason `lender_contacts.notes` is dropped two entries down. The other three new columns ARE
+    # exposed: `mortgagee_clause` is the lender's own published mailing identity printed on every
+    # condition sheet, `canonical_lender_key` is a fixed slug an admin chooses, and
+    # `condition_upload_cutoff` is a time of day.
+    "lenders": frozenset({"contact_email", "contact_phone", "condition_handling_notes"}),
+    # LP-904, ADR-405. The lender's WORDS are dropped rather than scrubbed, because `readonly.scrub`
+    # matches identifier SHAPES and a condition quoting an employer, a street or an account ending
+    # is not digit-shaped — it would cross a scrubbed view intact. What each view exposes instead is
+    # the analytic question answered as counts and booleans derived in the view: which reader ran,
+    # how much it found, how much it left over, how often a condition recurred.
+    #
+    # `text_fingerprint` is deliberately NOT excluded: it is a sha256, and it is what lets the
+    # readonly layer answer "did this condition come back?" without reproducing a word of it.
+    "condition_rounds": frozenset({"raw_text", "header", "draft_rows", "parse_report"}),
+    "conditions": frozenset({"verbatim_text", "underwriter_notes"}),
+    # Unlike `finding_events.detail`, which is documented PII-safe, this one holds WHAT CHANGED —
+    # an edited wording, an appended note — which is the lender's text.
+    "condition_events": frozenset({"detail"}),
     # LP-821 — the evidence table holds a SECOND COPY of exactly the four columns
     # `readonly.communications` already drops, plus the composed draft, plus a manifest of filenames
     # a sender chose. Excluded on identical reasoning: an audit record is not a reason to reproduce
@@ -501,6 +520,32 @@ NEVER_EXPOSED: tuple[tuple[str, str], ...] = (
     # remembers it so regeneration is lossless — and a scrub cannot help, because a scrubbed token is
     # either still usable or is not a token.
     ("communications", "upload_link_url"),
+    # LP-904, ADR-405 — the strong form, for the same reason `documents.full_text` has it: this is
+    # the lender's prose, quoting amounts, account endings, employers and addresses, and a scrub
+    # matching identifier SHAPES would let a name or a street cross a view intact. Asserted against
+    # EVERY view rather than only `readonly.conditions`, so a later join or a second view over the
+    # same base table cannot carry it past a per-table check.
+    #
+    # ONE COLUMN, NOT SIX, AND EACH OMISSION IS A DECISION. This check reads the select-list TEXT, so
+    # any mention trips it — including a derived scalar over the column itself. `style_profiles`
+    # records the same trade two entries up ("`cardinality(exemplars)` would trip the NEVER_EXPOSED
+    # text check, so the migration chose the guarantee over the metric").
+    #
+    #   * `verbatim_text` — the guarantee wins. It is the lender's prose, the class
+    #     `findings.source_snippet` is in, and `length()` of it answers almost nothing.
+    #   * `condition_rounds.raw_text` / `header` / `draft_rows` and `conditions.underwriter_notes` —
+    #     the metric wins, as it does for `communication_evidence.attachment_manifest`, which is
+    #     EXCLUDED and counted rather than listed here. "Did the parse find a header", "how many
+    #     rows await review" and "how often do conditions come back" are the questions these views
+    #     exist to answer, and each needs its column named in a predicate.
+    #   * `condition_events.detail` — CANNOT be listed here at all. The check is a global name
+    #     search, and `activity_logs.detail` is a different table's column, legitimately exposed in
+    #     its own view. Listing it would assert something untrue about a view it has no bearing on.
+    #
+    # All five of the omitted columns are in EXCLUDED above, so `test_no_model_column_drifts` still
+    # forces a decision on each, and `tests/test_condition_readonly_npi.py` asserts their absence
+    # from the OUTPUT columns of their own views — which is the property that actually matters.
+    ("conditions", "verbatim_text"),
     # LP-810 — the same content one step earlier, and here for the same strong-form reason: an email
     # body is prose about a named person, which no scrub matches.
     ("email_draft_prose", "body"),
