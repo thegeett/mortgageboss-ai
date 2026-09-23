@@ -353,7 +353,14 @@ def _split_loan_facts(lines: Sequence[Line]) -> tuple[dict[str, str], list[str]]
         if not matches:
             if text.strip().startswith("*"):
                 continue  # the "* Note rate is subject to change" footnote — lender boilerplate
-            warnings.append(f"unrecognised loan-information line: {text.strip()[:60]!r}")
+            # ⚠️ THE POSITION, NEVER THE LINE ITSELF. A loan-information line carries the borrower's
+            # name, the property address and the figures — reproducing 60 characters of it put NPI
+            # into `parse_report.warnings`, a column LP-904 declares NON-NPI and which is therefore
+            # not excluded from the readonly layer the way `raw_text` and `unassigned_lines` are.
+            # The line number identifies the problem for whoever is debugging; the content does not
+            # need to travel with it. (The readonly view only ever exposes the warning COUNT, so
+            # nothing escaped that way — but the value was still stored in a field declared clean.)
+            warnings.append(f"unrecognised loan-information line at line {int(line.y)}")
             continue
         for index, match in enumerate(matches):
             end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
