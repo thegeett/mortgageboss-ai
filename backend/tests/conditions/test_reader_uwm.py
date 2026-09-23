@@ -470,6 +470,26 @@ def test_a_note_dated_after_the_sheet_rolls_back_a_year() -> None:
     assert _notes("**8/31 Provide note", None) == [UnderwriterNote(date=None, text="Provide note")]
 
 
+def test_two_asterisks_without_a_date_are_not_a_note() -> None:
+    """⚠️ IT IS THE DIGITS THAT SAVE THIS LINE, NOT THE ASTERISKS.
+
+    Champions §7.4 row 171 begins `**AM to pull SSN Verification.` — two asterisks, exactly the
+    marker `_NOTE` looks for, and it must stay lender text. What rejects it is the required date
+    immediately after; the asterisks alone prove nothing, and a reader that keyed on them would
+    attribute the lender's own line to the underwriter.
+
+    The pair below is the distinction no fixture draws: the same opening, one with a date and one
+    without. Section 3's Champions reader shares this regex, so the guard belongs with the regex
+    rather than with the fixture that happens to contain the line.
+    """
+    assert _notes("**AM to pull SSN Verification.", date(2026, 9, 11)) == []
+    assert _notes("**8/28 AM to pull SSN Verification.", date(2026, 9, 11)) == [
+        UnderwriterNote(date=date(2026, 8, 28), text="AM to pull SSN Verification.")
+    ]
+    # `***NOTE***` is the same trap from the other side: three asterisks, no date, lender text.
+    assert _notes("***NOTE*** Please submit original disclosure.", date(2026, 8, 28)) == []
+
+
 @pytest.mark.parametrize("fixture", [UWM_ROUND_1, UWM_ROUND_2, UWM_PAGEBREAK])
 def test_every_fixture_reads_without_needing_ai(fixture: str) -> None:
     """`needs_ai` means the RULES could not split the text. A sheet with warnings is still a
