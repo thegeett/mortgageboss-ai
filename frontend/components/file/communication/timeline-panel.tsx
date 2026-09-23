@@ -597,9 +597,15 @@ export function TimelinePanel({
               // are `size="sm"` — `h-6`, 24px — so the flex line is as tall as its tallest child and
               // the icon never governed it. And `gap-0.5` survived on the handle below, 2px off the
               // same grid this paragraph invokes, which §5 removed from the `li` and not from here.
-              // With the gap gone the row is 16 + 24 + 20 + 16 = 76px, still 4px over §5's ceiling
+              // With the gap gone the row is 16 + 24 + 19.2 + 16.8 = 76px, still 4px over §5's ceiling
               // of "≤ 72px per row at 300px" — and that ceiling was set against a 300px rail, which
               // §5.2's `md:pr-4` and `md:border-r` have since reduced to 283px of content.
+              //
+              // 19.2 AND 16.8 ARE LP-901's SCALE, not round numbers. `text-sm` is 0.8125rem on
+              // 1.2rem and `text-xs` is 0.71875rem on 1.05rem — the merge of `raspberrypi-work`
+              // replaced the stock ramp, and the total is 76px either way only by coincidence: the
+              // pre-merge scale's 20 + 16 came to the same 36. Do not "tidy" these back to round
+              // numbers; they are read off `tailwind.config.ts`, which pins the set.
               //
               // THAT IS STILL ARITHMETIC, NOT A MEASUREMENT. jsdom has no CSS and no browser has
               // looked at this. Recorded as computed rather than as checked — the correction is to
