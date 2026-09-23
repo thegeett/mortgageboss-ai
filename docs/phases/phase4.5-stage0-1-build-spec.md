@@ -9,6 +9,8 @@
 **Parent plan:** `docs/phases/phase4.5-build-plan.md` (v3) — this file is the executable slice of its
 Stage 0 and Stage 1.
 **Tickets:** LP-903 (Stage 0) · LP-904 … LP-910 (Stage 1) · **ADRs:** 403 … 407
+**Screens:** `docs/design/phase4.5-conditions/` — 13 reference screens (PNG + HTML) with a
+*Must match* checklist each. Every UI ticket is checked against them (§6 LP-909, §11).
 
 ---
 
@@ -509,6 +511,9 @@ across a page) yields 28 rows with exact text.
 **Forward.** In inbound triage, a PDF attachment on a message routed to a file gets a
 **"Use as condition sheet"** action: `POST /api/inbound/attachments/{attachment_id}/condition-round`
 (`loan_file_id` in the body if the message is unrouted) → same round creation with source `EMAIL`.
+Optional `attach_to_round_id`: when the file's newest round was pasted and has no PDF source, the UI
+asks "attach to that round or start a new one"; attaching runs the LP-907 merge instead of creating a
+round (screen S1-13).
 The attachment keeps its `CORRESPONDENCE` disposition. **STOP AND ASK** if `CORRESPONDENCE` does not
 keep the file retrievable.
 
@@ -584,7 +589,9 @@ into six rows with exact wording, and a response containing text not in the inpu
   optimistic concurrency (version or `updated_at`) so two tabs can't overwrite each other.
 - `POST /api/condition-rounds/{round_id}/import` — see below.
 - `POST /api/condition-rounds/{round_id}/discard`.
-- `GET /api/loan-files/{id}/conditions` — imported conditions for the minimal list.
+- `GET /api/loan-files/{id}/conditions` — imported conditions for the minimal list, each with
+  `round_numbers: int[]` (the rounds it appeared on, from its `CONDITION_CREATED` /
+  `CONDITION_SEEN_AGAIN` events) for the `R1 R2` chips.
 - `POST /api/loan-files/{id}/conditions` — add one by hand: goes into the latest imported round, or
   creates round 1 with source `MANUAL` if there is none.
 
@@ -604,7 +611,9 @@ into six rows with exact wording, and a response containing text not in the inpu
    apply `info_only`, `canonical_type_id` and the owner hint when no prefix/bucket hint was found.
 5. Event `ROUND_IMPORTED`; timeline entry "Conditions imported: N new, M seen again".
 
-**UI** (Ledger tokens and existing components only; hooks in `frontend/lib/api/` per the survey):
+**UI** (Ledger tokens and existing components only; hooks in `frontend/lib/api/` per the survey).
+**Reference screens:** `docs/design/phase4.5-conditions/README.md` — build each screen to its PNG
+and go through its *Must match* list; record the result under "Visual check" in the ticket file.
 1. **Empty state** on the Conditions tab — four ways in: *Upload the approval letter* (primary,
    "recommended"), *Paste conditions*, *Forward the email* (shows the file's inbox address), *Add one
    by hand*.
@@ -620,9 +629,16 @@ into six rows with exact wording, and a response containing text not in the inpu
      rate lock, mortgagee clause — and the expiry dates;
    - actions: **Import N conditions** (requires ticking "I checked the flagged rows" when any row is
      below 0.8 or any line is unassigned) and **Discard**.
-5. **After import** — a minimal read-only list grouped by round then bucket, with a round strip
-   (round number, date, source, completeness, counts). Stage 2 replaces it with the list and board.
-6. **Inbound triage** — the "Use as condition sheet" action from LP-905.
+5. **After import** — a minimal read-only list grouped by the lender's heading (sheet order), with a
+   round strip above it ("All rounds" + one card per round: number, date, source chips,
+   completeness, counts) and `R1 R2` chips per condition. A round with no PDF source shows
+   **Attach the lender's PDF** (LP-907 `attach-pdf`); "Letter details" opens a **round-details
+   sheet** (header, expiry dates, mortgagee clause, event history). Stage 2 replaces the list with
+   the list and board. (S1-05, S1-08, S1-09)
+6. **Inbound triage** — the "Use as condition sheet" action from LP-905, first and primary on a
+   pending PDF attachment; the existing Accept / Correspondence / Reject stay. (S1-13)
+7. **Add a condition** dialog — lender's wording (required, serif), optional code and category, a
+   heading select; says which round it goes into. (S1-12)
 
 Never show "cleared" or any status control in Stage 1.
 
@@ -1014,4 +1030,6 @@ sample yet) · anything that changes `prep_status` or `lender_status`.
 - ADR-403…407 Accepted; glossary and `phase4.5-boundaries.md` in place;
 - a short `docs/phases/phase4.5-progress.md` in the style of `phase4-progress.md`, listing what shipped,
   what was deferred and any **STOP AND ASK** answers;
-- §8 passes; CI green.
+- §8 passes; CI green;
+- every screen in `docs/design/phase4.5-conditions/` checked, with the result under "Visual check"
+  in its ticket file.

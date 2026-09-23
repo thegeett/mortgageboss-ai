@@ -1,0 +1,190 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Conditions — review round 2 paste</title>
+<style>
+@font-face{font-family:"IBM Plex Sans";font-weight:100 700;src:url(fonts/26d4368bf94c0ec4-s.p.woff2) format("woff2");}
+@font-face{font-family:"IBM Plex Mono";font-weight:400;src:url(fonts/d3ebbfd689654d3a-s.p.woff2) format("woff2");}
+@font-face{font-family:"IBM Plex Mono";font-weight:500;src:url(fonts/98e207f02528a563-s.p.woff2) format("woff2");}
+@font-face{font-family:"IBM Plex Serif";font-weight:400;src:url(fonts/91c3caac73720166-s.p.woff2) format("woff2");}
+:root{
+  --background:180 14.3% 98.6%; --foreground:188.6 17.9% 7.6%; --foreground-2:168 6.6% 29.8%;
+  --card:0 0% 100%; --primary:187.9 67.9% 22%; --primary-fg:0 0% 100%;
+  --muted:180 9.1% 95.7%; --muted-fg:168 4.4% 41%; --accent:180 8.6% 93.1%;
+  --destructive:7.1 61.8% 43.1%; --success:159.8 60.6% 26.9%; --warning:37.8 89.4% 29.6%;
+  --info:187.9 67.9% 22%; --ai:248.1 36% 48.4%;
+  --border:165 7.7% 89.8%; --border-strong:170 6.4% 81.6%; --input:168 4.3% 54.5%; --skeleton:168 9.4% 89.6%;
+  --radius:.3125rem; --radius-lg:.5rem;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0}
+body{background:hsl(var(--background));color:hsl(var(--foreground));font-family:"IBM Plex Sans",system-ui,sans-serif;
+  font-size:13px;line-height:1.2rem;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4,p{margin:0} button{font:inherit;color:inherit}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+.serif{font-family:"IBM Plex Serif",Georgia,serif}
+.tab{font-variant-numeric:tabular-nums}
+.xs{font-size:11.5px;line-height:1.05rem} .sm{font-size:13px} .base{font-size:14px;line-height:1.3rem}
+.lg{font-size:16px;line-height:1.5rem;letter-spacing:-.01em} .xl{font-size:20px;line-height:1.6rem;letter-spacing:-.018em}
+.label{font-size:10.5px;line-height:1rem;letter-spacing:.09em;font-weight:600;text-transform:uppercase;color:hsl(var(--muted-fg))}
+.muted{color:hsl(var(--muted-fg))} .fg2{color:hsl(var(--foreground-2))} .b5{font-weight:500} .b6{font-weight:600}
+.warn{color:hsl(var(--warning))} .ok{color:hsl(var(--success))} .danger{color:hsl(var(--destructive))} .ai{color:hsl(var(--ai))} .prim{color:hsl(var(--primary))}
+.i12{width:12px;height:12px;flex:none} .i14{width:14px;height:14px;flex:none} .i16{width:16px;height:16px;flex:none} .i20{width:20px;height:20px;flex:none}
+.row{display:flex;align-items:center} .col{display:flex;flex-direction:column} .wrap{flex-wrap:wrap}
+.g1{gap:4px}.g15{gap:6px}.g2{gap:8px}.g3{gap:12px}.g4{gap:16px}.g6{gap:24px}
+.f1{flex:1;min-width:0} .between{justify-content:space-between} .start{align-items:flex-start} .base-al{align-items:baseline}
+.trunc{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* shell */
+.shell{display:flex;height:100vh;overflow:hidden}
+.rail{width:52px;flex:none;border-right:1px solid hsl(var(--border));background:hsl(var(--card));display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 0}
+.rail .logo{width:32px;height:32px;border-radius:6px;background:hsl(var(--primary));color:hsl(var(--primary-fg));display:flex;align-items:center;justify-content:center;margin-bottom:4px}
+.rail a{width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:hsl(var(--muted-fg))}
+.rail a.on{background:hsl(var(--primary)/.1);color:hsl(var(--primary))}
+.ctx{width:216px;flex:none;border-right:1px solid hsl(var(--border));background:hsl(var(--card));padding:8px}
+.ctx p{padding:4px 8px}
+.ctx a{display:flex;align-items:center;gap:8px;height:28px;padding:0 8px;border-radius:6px;color:hsl(var(--foreground-2))}
+.ctx a.on{background:hsl(var(--primary)/.1);color:hsl(var(--primary));font-weight:500}
+.center{flex:1;min-width:0;display:flex;flex-direction:column}
+.topbar{height:44px;flex:none;border-bottom:1px solid hsl(var(--border));background:hsl(var(--card));display:flex;align-items:center;justify-content:space-between;padding:0 12px}
+.avatar{width:26px;height:26px;border-radius:999px;background:hsl(var(--muted));border:1px solid hsl(var(--border));display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:hsl(var(--foreground-2))}
+.bodyrow{flex:1;min-height:0;display:flex}
+.work{flex:1;min-width:0;overflow:hidden;padding:16px;position:relative}
+.frail{width:288px;flex:none;border-left:1px solid hsl(var(--border));background:hsl(var(--card));overflow:hidden}
+.frail section{border-bottom:1px solid hsl(var(--border));padding:10px 12px}
+.frail h3{padding-bottom:4px}
+.metric{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0}
+.metric span:first-child{font-size:11.5px;color:hsl(var(--muted-fg))}
+.metric span:last-child{font-size:13px;font-weight:500;font-variant-numeric:tabular-nums}
+
+/* primitives */
+.chip{display:inline-flex;align-items:center;gap:4px;border:1px solid hsl(var(--border));background:hsl(var(--muted));border-radius:4px;padding:1px 6px;font-size:11.5px;line-height:1.05rem;color:hsl(var(--foreground-2));white-space:nowrap}
+.chip.clear{background:transparent}
+.chip.warnc{border-color:hsl(var(--warning)/.35);background:hsl(var(--warning)/.08);color:hsl(var(--warning))}
+.chip.aic{border-color:hsl(var(--ai)/.35);background:hsl(var(--ai)/.07);color:hsl(var(--ai))}
+.chip.okc{border-color:hsl(var(--success)/.3);background:hsl(var(--success)/.08);color:hsl(var(--success))}
+.chip.primc{border-color:hsl(var(--primary)/.3);background:hsl(var(--primary)/.07);color:hsl(var(--primary))}
+.token{display:inline-flex;align-items:center;gap:4px;border-radius:4px;padding:1px 6px;font-size:11.5px;font-weight:500}
+.token.att{background:hsl(var(--warning)/.1);color:hsl(var(--warning))}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;border-radius:6px;font-size:13px;font-weight:500;height:28px;padding:0 12px;border:1px solid transparent;background:hsl(var(--primary));color:hsl(var(--primary-fg))}
+.btn.outline{border-color:hsl(var(--input)/.6);background:hsl(var(--background));color:hsl(var(--foreground))}
+.btn.ghost{background:transparent;color:hsl(var(--foreground-2))}
+.btn.sm{height:24px;padding:0 8px;font-size:11.5px}
+.btn.lgb{height:32px;padding:0 16px}
+.btn[disabled]{opacity:.5}
+.btn.danger{background:transparent;color:hsl(var(--destructive))}
+.btn.icon{width:28px;padding:0}
+.card{background:hsl(var(--card));border:1px solid hsl(var(--border));border-radius:8px}
+.hr{height:1px;background:hsl(var(--border))}
+.input{border:1px solid hsl(var(--input)/.6);border-radius:6px;background:hsl(var(--card));height:28px;padding:0 8px;display:flex;align-items:center;font-size:13px}
+.textarea{border:1px solid hsl(var(--input)/.6);border-radius:6px;background:hsl(var(--card));padding:8px;font-size:12px;line-height:1.1rem;white-space:pre;overflow:hidden}
+.skel{background:hsl(var(--skeleton));border-radius:4px;height:10px}
+.callout{border-radius:6px;padding:8px 12px;display:flex;gap:8px;align-items:flex-start;font-size:11.5px;line-height:1.1rem;color:hsl(var(--foreground-2))}
+.callout.info{border:1px solid hsl(var(--info)/.3);background:hsl(var(--info)/.06)}
+.callout.warn{border:1px solid hsl(var(--warning)/.3);background:hsl(var(--warning)/.06)}
+.callout.ai{border:1px solid hsl(var(--ai)/.3);background:hsl(var(--ai)/.06)}
+.callout.err{border:1px solid hsl(var(--destructive)/.3);background:hsl(var(--destructive)/.05)}
+.seg{display:inline-flex;border:1px solid hsl(var(--input)/.6);border-radius:6px;overflow:hidden}
+.seg span{padding:3px 10px;font-size:11.5px;font-weight:500;color:hsl(var(--foreground-2))}
+.seg span.on{background:hsl(var(--primary));color:hsl(var(--primary-fg))}
+.chk{width:14px;height:14px;border:1px solid hsl(var(--input));border-radius:3px;background:hsl(var(--card));flex:none;display:inline-flex;align-items:center;justify-content:center}
+.chk.on{background:hsl(var(--primary));border-color:hsl(var(--primary));color:white}
+.radio{width:14px;height:14px;border:1px solid hsl(var(--input));border-radius:999px;flex:none;display:inline-flex;align-items:center;justify-content:center;margin-top:2px}
+.radio.on::after{content:"";width:6px;height:6px;border-radius:99px;background:hsl(var(--primary))}
+.radio.on{border-color:hsl(var(--primary))}
+.overlay{position:fixed;inset:0;background:hsl(188 18% 8%/.45);display:flex;align-items:flex-start;justify-content:center;padding-top:72px;z-index:20}
+.dialog{background:hsl(var(--card));border:1px solid hsl(var(--border));border-radius:8px;box-shadow:0 10px 30px hsl(188 18% 8%/.18);padding:20px}
+.sheet{position:fixed;top:0;right:0;bottom:0;width:440px;background:hsl(var(--card));border-left:1px solid hsl(var(--border));box-shadow:-10px 0 30px hsl(188 18% 8%/.15);z-index:21;padding:20px;overflow:hidden}
+.toast{position:fixed;right:304px;bottom:16px;z-index:30;background:hsl(var(--card));border:1px solid hsl(var(--border));border-radius:8px;box-shadow:0 6px 20px hsl(188 18% 8%/.14);padding:10px 14px;display:flex;gap:10px;align-items:flex-start;width:340px}
+.kv{display:grid;grid-template-columns:auto 1fr;column-gap:12px;row-gap:3px;font-size:11.5px;line-height:1.05rem}
+.kv dt{color:hsl(var(--muted-fg))} .kv dd{margin:0;text-align:right;font-variant-numeric:tabular-nums;color:hsl(var(--foreground))}
+.stripe{position:absolute;left:0;top:0;bottom:0;width:2px}
+
+/* condition rows */
+.bucket{display:flex;align-items:center;gap:8px;padding:8px 12px;background:hsl(var(--muted)/.6);border-bottom:1px solid hsl(var(--border))}
+.crow{position:relative;display:grid;grid-template-columns:44px 104px 1fr 132px;column-gap:12px;padding:10px 12px;border-bottom:1px solid hsl(var(--border))}
+.crow:last-child{border-bottom:0}
+.crow .code{font-family:"IBM Plex Mono",monospace;font-size:12px;font-weight:500;padding-top:1px}
+.crow .words{font-family:"IBM Plex Serif",Georgia,serif;font-size:13px;line-height:1.3rem;color:hsl(var(--foreground))}
+.crow.flag{background:hsl(var(--ai)/.035)}
+.crow .meta{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.note{display:inline-flex;gap:6px;align-items:baseline;border-left:2px solid hsl(var(--warning));background:hsl(var(--warning)/.07);padding:2px 8px;border-radius:0 4px 4px 0;font-size:11.5px;color:hsl(var(--foreground-2))}
+.note b{font-family:"IBM Plex Mono",monospace;font-weight:500;color:hsl(var(--warning))}
+.sticky{position:absolute;left:0;right:0;bottom:0;background:hsl(var(--card));border-top:1px solid hsl(var(--border));padding:10px 16px;display:flex;align-items:center;gap:12px;z-index:5}
+.doors{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.door{border:1px solid hsl(var(--border));border-radius:8px;background:hsl(var(--card));padding:14px 16px;display:flex;gap:12px}
+.door .dic{width:32px;height:32px;border-radius:6px;border:1px solid hsl(var(--border));background:hsl(var(--muted)/.5);display:flex;align-items:center;justify-content:center;color:hsl(var(--foreground-2));flex:none}
+.door.primary{border-color:hsl(var(--primary)/.45);box-shadow:inset 0 0 0 1px hsl(var(--primary)/.15)}
+.door.primary .dic{background:hsl(var(--primary)/.08);color:hsl(var(--primary));border-color:hsl(var(--primary)/.3)}
+.drop{border:1.5px dashed hsl(var(--input)/.6);border-radius:6px;padding:10px;display:flex;align-items:center;gap:10px;background:hsl(var(--muted)/.35)}
+.rstrip{display:flex;gap:8px}
+.rcard{border:1px solid hsl(var(--border));border-radius:8px;background:hsl(var(--card));padding:8px 12px;min-width:200px}
+.rcard.on{border-color:hsl(var(--primary)/.5);box-shadow:inset 0 0 0 1px hsl(var(--primary)/.2)}
+.spin{animation:none}
+</style></head><body>
+<div class="shell">
+  <nav class="rail"><div class="logo"><svg class="i16"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></svg></div><a class="on"><svg class="i16"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></a><a class=""><svg class="i16"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></a><a class=""><svg class="i16"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M22 8c0-2.3-.8-4.3-2-6"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/><path d="M4 2C2.8 3.7 2 5.7 2 8"/></svg></a><a class=""><svg class="i16"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></a><div style="flex:1"></div><a><svg class="i16"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg></a></nav>
+  <div class="ctx"><p class="label">File</p><a class=""><svg class="i14"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg><span>Overview</span></a><a class=""><svg class="i14"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg><span>Documents</span></a><a class=""><svg class="i14"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg><span>Verification</span></a><a class=""><svg class="i14"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg><span>Needs</span></a><a class=""><svg class="i14"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/></svg><span>Communication</span></a><a class="on"><svg class="i14"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></svg><span>Conditions</span></a><a class=""><svg class="i14"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><polyline points="3.29 7 12 12 20.71 7"/><path d="m7.5 4.27 9 5.15"/></svg><span>Lender package</span></a></div>
+  <div class="center">
+    <header class="topbar"><div class="sm fg2">Dashboard <span class='muted'>/</span> Alex Rivera <span class='muted'>/</span> <span class='b5'>Conditions</span></div><div class="avatar">PR</div></header>
+    <div class="bodyrow">
+      <main class="work" style=""><div class="col g4">
+<div class="row between start g6" style="min-height:54px">
+  <div class="f1">
+    <div class="row g3 wrap"><h1 class="xl b6">Alex Rivera</h1>
+      <span class="token att"><svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>In conditions</span></div>
+    <div class="row g15 wrap" style="margin-top:6px">
+      <span class="chip mono">LF-R7QK</span><span class="chip">Conventional</span>
+      <span class="chip">Purchase</span><span class="chip">United Wholesale Mortgage</span></div>
+  </div>
+  <div class="row start g3">
+    <div style="text-align:right"><p class="xl b6 tab">$242,199</p>
+      <p class="sm muted" style="margin-top:2px">100 Example Ln, Columbia, SC 29201</p></div>
+    <button class="btn outline icon"><svg class="i14"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button>
+  </div>
+</div><div class="row between start g4" style="padding-top:4px">
+  <div><h2 class="lg b6">Conditions</h2><p class="sm muted" style="margin-top:2px">The lender's conditions for this file, word for word.</p></div>
+  <div class="row g2"></div></div><div class="card" style="padding:12px 14px">
+  <div class="row between g4 wrap">
+    <div class="col g1"><div class="row g2"><span class="label" style="color:hsl(var(--warning))">Review · not imported yet</span></div>
+      <p class="base b6">UWM layout · recognised in the pasted text</p>
+      <div class="row g15 wrap"><span class="chip">Pasted</span><span class="chip">Just some</span><span class="xs muted">Read by rules (uwm v1) — no AI</span></div></div>
+    <div class="col g1" style="align-items:flex-end"><div class="row g2"><span class="xs muted">This sheet is</span><div class="seg"><span class="">Full list</span><span class="on">Just some</span></div></div>
+      <div class="row g2"><span class="xs muted">Round date</span><span class="input tab" style="height:24px;font-size:11.5px">09/10/2026 <svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg></span></div></div>
+  </div>
+  <div class="hr" style="margin:10px 0"></div>
+  <div class="row g4 xs fg2 wrap"><span class="b5">6 conditions</span><span>·</span><span>2 headings</span><span>·</span><span class="ok row g1"><svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>0 warnings · 0 lines left over</span></div>
+</div>
+<div class="callout info"><svg class="i14 prim"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg><div><span class="b5">Just some:</span> the 11 conditions already on this file are compared with these 6 when you import. Anything not in this paste stays exactly as it is.</div></div>
+<div style="display:grid;grid-template-columns:1fr 330px;gap:16px;align-items:start;padding-bottom:64px">
+  <div class="col g2"><div class="card" style="overflow:hidden"><div class="bucket"><span class="sm b6">UW - Prior To Final Approval (PTD)</span><span class="chip clear">Prior to docs</span>
+        <span class="xs muted" style="margin-left:auto">1</span></div><div class="crow"><div><span class="code">1228</span></div><div><span class="xs fg2">Appraisal</span></div>
+  <div><div class="words">Final inspection is required (and possibly a Change of Circumstance) to confirm the following has been completed: being completed to match the plans and specs provided. (On new construction transactions this condition can be moved to closing at the request of the client.)</div></div><div class="meta"><div class="row g1"><span class="xs muted">Owner not known</span></div><div class="row g1" style="margin-top:2px"><button class="btn icon sm ghost" title="Edit wording"><svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg></button><button class="btn icon sm ghost" title="Remove from this round"><svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div></div></div><div class="bucket"><span class="sm b6">Closing (PTF)</span><span class="chip clear">Prior to funding</span>
+        <span class="xs muted" style="margin-left:auto">5</span></div><div class="crow"><div><span class="code">1947</span></div><div><span class="xs fg2">Closing Disclosure</span></div>
+  <div><div class="words">TC: Title to provide final Seller Closing Disclosure with final closing package</div></div><div class="meta"><div class="row g1"><div class="col" style="align-items:flex-end;gap:2px"><span class="chip clear"><svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 12h4"/><path d="M10 8h4"/><path d="M14 21v-3a2 2 0 0 0-4 0v3"/><path d="M6 10H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-2"/><path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16"/></svg>Title</span><span class="xs muted" style="font-size:10.5px">from “TC:” prefix</span></div></div><div class="row g1" style="margin-top:2px"><button class="btn icon sm ghost" title="Edit wording"><svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg></button><button class="btn icon sm ghost" title="Remove from this round"><svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div></div></div><div class="crow"><div><span class="code">1582</span></div><div><span class="xs fg2">Invoice</span></div>
+  <div><div class="words">Provide a copy of the Third Party Processing Invoice.</div></div><div class="meta"><div class="row g1"><div class="col" style="align-items:flex-end;gap:2px"><span class="chip clear"><svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg>Processor</span><span class="xs muted" style="font-size:10.5px">from code map</span></div></div><div class="row g1" style="margin-top:2px"><button class="btn icon sm ghost" title="Edit wording"><svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg></button><button class="btn icon sm ghost" title="Remove from this round"><svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div></div></div><div class="crow"><div><span class="code">0006</span></div><div><span class="xs fg2">Invoice</span></div>
+  <div><div class="words">Provide copy of invoice for credit report.</div></div><div class="meta"><div class="row g1"><div class="col" style="align-items:flex-end;gap:2px"><span class="chip clear"><svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg>Processor</span><span class="xs muted" style="font-size:10.5px">from code map</span></div></div><div class="row g1" style="margin-top:2px"><button class="btn icon sm ghost" title="Edit wording"><svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg></button><button class="btn icon sm ghost" title="Remove from this round"><svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div></div></div><div class="crow"><div><span class="code">0007</span></div><div><span class="xs fg2">Invoice</span></div>
+  <div><div class="words">Provide copy of invoice for final inspection.</div></div><div class="meta"><div class="row g1"><div class="col" style="align-items:flex-end;gap:2px"><span class="chip clear"><svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg>Processor</span><span class="xs muted" style="font-size:10.5px">from code map</span></div></div><div class="row g1" style="margin-top:2px"><button class="btn icon sm ghost" title="Edit wording"><svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg></button><button class="btn icon sm ghost" title="Remove from this round"><svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div></div></div><div class="crow"><div><span class="code">6378</span></div><div><span class="xs fg2">TC</span></div>
+  <div><div class="words">TC: Title company to include lender loan number on all checks sent to lender.</div></div><div class="meta"><div class="row g1"><div class="col" style="align-items:flex-end;gap:2px"><span class="chip clear"><svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 12h4"/><path d="M10 8h4"/><path d="M14 21v-3a2 2 0 0 0-4 0v3"/><path d="M6 10H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-2"/><path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16"/></svg>Title</span><span class="xs muted" style="font-size:10.5px">from “TC:” prefix</span></div></div><div class="row g1" style="margin-top:2px"><button class="btn icon sm ghost" title="Edit wording"><svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg></button><button class="btn icon sm ghost" title="Remove from this round"><svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div></div></div></div></div><aside class="card" style="padding:12px 14px;align-self:start">
+  <p class="sm b6">Letter details</p>
+  <p class="xs fg2" style="margin-top:4px">A paste doesn't include the lender team, loan figures or document-expiry dates.</p>
+  <div class="drop" style="margin-top:10px"><svg class="i16 muted"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M12 12v6"/><path d="m15 15-3-3-3 3"/></svg><span class="xs fg2 f1">Attach the lender's PDF after import to fill them in. It merges into this round — no second round.</span></div>
+</aside>
+</div><div class="sticky"><span class="xs muted">Nothing is saved to the file until you import. Import never removes or clears a condition.</span><div style="flex:1"></div>
+  <button class="btn ghost danger"><svg class="i14"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Discard</button>
+  <button class="btn lgb">Import 6 conditions</button></div></div></main>
+
+<aside class="frail" aria-label="File context">
+  <section><h3 class="label">Status</h3><div style="padding:4px 0"><span class="token att"><svg class="i12"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>In conditions</span></div></section>
+  <section><h3 class="label">Loan</h3>
+    <div class="metric"><span>Amount</span><span>$242,199</span></div>
+    <div class="metric"><span>Program</span><span>Conventional</span></div>
+    <div class="metric"><span>Purpose</span><span>Purchase</span></div></section>
+  <section><h3 class="label">Ratios</h3>
+    <div class="metric"><span>Back-end DTI</span><span>40.4%</span></div>
+    <div class="metric"><span>Front-end DTI</span><span>32.5%</span></div>
+    <div class="metric"><span>LTV</span><span>90.0%</span></div>
+    <div class="metric"><span>Reserves</span><span>0.0 mo</span></div></section>
+  <section style="border-bottom:0"><h3 class="label">Recent activity</h3><ul style="list-style:none;margin:0;padding:4px 0"><li class="xs fg2" style="margin-bottom:6px"><span style="display:block" class="trunc">Loan approval received from UWM</span><span class="muted">Aug 28, 4:12 PM</span></li><li class="xs fg2" style="margin-bottom:6px"><span style="display:block" class="trunc">Verification run completed</span><span class="muted">Aug 27, 9:40 AM</span></li><li class="xs fg2" style="margin-bottom:6px"><span style="display:block" class="trunc">Bank statement uploaded</span><span class="muted">Aug 26, 2:05 PM</span></li></ul></section>
+</aside>
+    </div>
+  </div>
+</div>
+</body></html>
