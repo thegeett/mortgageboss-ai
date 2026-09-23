@@ -1,0 +1,163 @@
+# UWM condition codes — the template ids printed on a "Loan Approval Conditions" letter (LP-910).
+#
+# Codes observed on real sheets. They are UWM's OWN ids and mean nothing at another lender
+# (ADR-407), which is why this file is per lender and every row is matched as (lender, code).
+#
+# ⚠️ CODES ARE STRINGS AND KEEP THEIR LEADING ZEROS. UWM prints `0006`; `6` is a different thing
+# that matches nothing. The loader refuses an unquoted code for exactly this reason — YAML would
+# read `0006` as the integer 6 and the mistake would surface months later as a failed match.
+#
+# `canonical_type_id` is NULL on every row. The taxonomy it refers to
+# (`phase4.5-appendix-C-condition-taxonomy`) is NOT in this repository — the `AS-11`-style ids that
+# appear in `docs/rule-engine.md` are VERIFICATION RULE ids, a different vocabulary that happens to
+# look alike. Spec §LP-910 anticipates this: leave them null and note it. Stage 3 (LP-918) fills
+# them in when the library lands.
+#
+# `default_owner_hint` is a HINT and never a decision — Stage 3 decides who acts. It is the weakest
+# of the three hint sources (a `TC:` prefix the lender typed beats it, and the bucket beats it), and
+# `owner_hint_source: code_map` is what records that ranking on the condition.
+
+lender_key: uwm
+lender_label: United Wholesale Mortgage
+
+codes:
+  - code: "0006"
+    label: Credit report invoice
+    default_bucket_kind: prior_to_funding
+    default_owner_hint: processor
+
+  - code: "0007"
+    label: Final inspection invoice
+    default_bucket_kind: prior_to_funding
+    default_owner_hint: processor
+
+  - code: "0132"
+    label: SC attorney & insurance preference disclosure
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: broker
+
+  - code: "0471"
+    label: Evidence departing property is being sold
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: borrower
+
+  - code: "0562"
+    label: Loan restructure required (deadline)
+    default_bucket_kind: master
+    default_owner_hint: broker
+
+  - code: "0571"
+    label: Underwriter to approve change of circumstance
+    default_bucket_kind: lender_to_clear
+    default_owner_hint: lender
+
+  - code: "0973"
+    label: Appraisal waiver accepted
+    default_bucket_kind: master
+    default_owner_hint: lender
+    info_only: true
+
+  - code: "1228"
+    label: Final inspection (new construction)
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: unknown
+
+  - code: "1582"
+    label: Third-party processing invoice
+    default_bucket_kind: prior_to_funding
+    default_owner_hint: processor
+
+  - code: "1594"
+    label: Proof of non-ownership of undisclosed address
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: borrower
+
+  - code: "1741"
+    label: HOA dues documentation (appraisal waiver)
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: borrower
+
+  - code: "1760"
+    label: Appraisal desk review ordered
+    default_bucket_kind: lender_to_clear
+    default_owner_hint: lender
+
+  - code: "1812"
+    label: Verbal VOE before note date
+    default_bucket_kind: prior_to_funding
+    default_owner_hint: processor
+
+  - code: "1818"
+    label: Title to confirm seller pays county taxes on CD
+    default_bucket_kind: prior_to_funding
+    default_owner_hint: title
+
+  - code: "1947"
+    label: Title to provide final seller CD
+    default_bucket_kind: prior_to_funding
+    default_owner_hint: title
+
+  - code: "4235"
+    label: W-2 / final paystub / WVOE for prior employer
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: borrower
+
+  - code: "5853"
+    label: REO mortgage statement / escrow of taxes & insurance
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: borrower
+
+  - code: "5868"
+    label: Liability missing from credit report
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: borrower
+
+  - code: "6006"
+    label: Letter explaining source of funds for a payoff
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: borrower
+
+  - code: "6132"
+    label: Additional consecutive bank statement
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: borrower
+
+  - code: "6140"
+    label: Contingent liability paid by others
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: borrower
+
+  - code: "6174"
+    label: "Processor Assist: title commitment, CPL, wire, taxes"
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: lender
+
+  - code: "6178"
+    label: Updated HOI declarations (effective date)
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: insurance
+
+  - code: "6378"
+    label: Title to include loan number on checks to lender
+    default_bucket_kind: prior_to_funding
+    default_owner_hint: title
+
+  - code: "6457"
+    label: HOI declarations with mortgagee clause, replacement cost
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: insurance
+
+  - code: "6637"
+    label: "Earnest money: source, receipt, clearance"
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: borrower
+
+  - code: "7086"
+    label: Short funds to close / reserves
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: borrower
+
+  - code: "7383"
+    label: Bank statement deductions not on credit report
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: borrower

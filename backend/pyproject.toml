@@ -29,6 +29,13 @@ dependencies = [
     "pyjwt>=2.13.0",
     "pymupdf>=1.27.2.3",
     "lxml>=6.1.1",
+    # LP-910 — DECLARED RATHER THAN INHERITED. `yaml` was already importable and five loaders
+    # already used it (`distrust.py`, `specs.py`, `activation_bars.py`, `declarations.py`,
+    # `field_criticality.py`), but only because `fastapi[standard]` happens to pull it in. A
+    # first-party dependency resting on another package's dependency tree breaks on an unrelated
+    # bump, with an ImportError that names nothing about the cause. Already locked at 6.0.3, so
+    # this changes what is DECLARED, not what is installed.
+    "pyyaml>=6.0",
     # aioboto3 (NOT plain boto3): the StorageBackend interface is async, and the app
     # runs async end to end (asyncpg, async SQLAlchemy, the async AI wrapper). Wrapping
     # sync boto3 in asyncio.to_thread would work but costs a thread per call under

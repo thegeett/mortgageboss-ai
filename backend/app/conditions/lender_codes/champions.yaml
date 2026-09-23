@@ -1,0 +1,167 @@
+# Champions Funding condition numbers — printed on a "Conditional Approval Certificate" (LP-910).
+#
+# Champions numbers its conditions 34, 38, 45 … and those numbers are ITS OWN (ADR-407). `268` here
+# is short funds to close, which is `7086` at UWM; `45` means nothing at UWM at all. Matching is
+# always (lender, code).
+#
+# QUOTED FOR THE SAME REASON AS UWM'S, even though none of these carries a leading zero today. The
+# loader requires a string, so a future `034` cannot silently become 34, and the rule is one rule
+# rather than one per file.
+#
+# `canonical_type_id` is NULL throughout — see the note in `uwm.yaml`; the taxonomy is not in this
+# repository and Stage 3 supplies it.
+#
+# Several of these are INFORMATION ONLY: the lender is telling the processor something it will do
+# itself, or stating a policy, rather than asking for a document. Marking them keeps them off the
+# ask list in Stage 3 instead of generating a request nobody can satisfy.
+
+lender_key: champions
+lender_label: Champions Funding
+
+codes:
+  - code: "34"
+    label: Homeownership counseling certificate + invoice
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: borrower
+
+  - code: "38"
+    label: CD / closing request form + invoices
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: broker
+
+  - code: "45"
+    label: Lender in first lien position
+    default_bucket_kind: prior_to_funding
+    default_owner_hint: lender
+    info_only: true
+
+  - code: "54"
+    label: Limited review questionnaire + master policy
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: unknown
+
+  - code: "55"
+    label: Subject to condo approval
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: lender
+    info_only: true
+
+  - code: "66"
+    label: Document expiration dates
+    default_bucket_kind: prior_to_funding
+    default_owner_hint: lender
+    info_only: true
+
+  - code: "71"
+    label: Earnest money verification + escrow receipt
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: borrower
+
+  - code: "94"
+    label: Fully executed closing package
+    default_bucket_kind: prior_to_funding
+    default_owner_hint: lender
+
+  - code: "133"
+    label: Loan failing high-cost test
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: lender
+
+  - code: "171"
+    label: SSN verification / SSA-89 (lender pulls)
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: lender
+
+  - code: "179"
+    label: Appraisal delivered 3 days before closing / waiver
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: broker
+
+  - code: "193"
+    label: Appraisal from acceptable AMC, CU <= 2.5
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: lender
+
+  - code: "206"
+    label: Master insurance with loan number + mortgagee clause
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: insurance
+
+  - code: "209"
+    label: Hazard insurance with mortgagee clause + invoice
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: insurance
+
+  - code: "245"
+    label: Residence history discrepancy LOE / VOM
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: borrower
+
+  - code: "260"
+    label: Closer reviews occupancy certification
+    default_bucket_kind: prior_to_funding
+    default_owner_hint: lender
+
+  - code: "261"
+    label: E-sign certificate for purchase contract
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: broker
+
+  - code: "268"
+    label: Bank statements for reserves and cash to close
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: borrower
+
+  - code: "284"
+    label: "Title package: CPL, E&O, tax cert, wire, settlement statement"
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: title
+
+  - code: "285"
+    label: Title report with chain of title <= 90 days
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: title
+
+  - code: "286"
+    label: Unexpired government ID
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: borrower
+
+  - code: "291"
+    label: Purchase contract information
+    default_bucket_kind: prior_to_funding
+    default_owner_hint: lender
+    info_only: true
+
+  - code: "292"
+    label: Request doc review (catch-all upload)
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: processor
+    info_only: true
+
+  - code: "301"
+    label: Seller-paid closing cost limit
+    default_bucket_kind: prior_to_funding
+    default_owner_hint: lender
+    info_only: true
+
+  - code: "379"
+    label: Closer confirms initial CD 3 business days
+    default_bucket_kind: prior_to_funding
+    default_owner_hint: lender
+
+  - code: "380"
+    label: Closing documents not signed before their date
+    default_bucket_kind: prior_to_funding
+    default_owner_hint: lender
+    info_only: true
+
+  - code: "414"
+    label: Account Manager orders VOD
+    default_bucket_kind: prior_to_docs
+    default_owner_hint: lender
+
+  - code: "637"
+    label: Borrower signs final application at closing
+    default_bucket_kind: prior_to_funding
+    default_owner_hint: borrower
