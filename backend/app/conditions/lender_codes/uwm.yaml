@@ -7,11 +7,21 @@
 # that matches nothing. The loader refuses an unquoted code for exactly this reason — YAML would
 # read `0006` as the integer 6 and the mistake would surface months later as a failed match.
 #
-# `canonical_type_id` is NULL on every row. The taxonomy it refers to
-# (`phase4.5-appendix-C-condition-taxonomy`) is NOT in this repository — the `AS-11`-style ids that
-# appear in `docs/rule-engine.md` are VERIFICATION RULE ids, a different vocabulary that happens to
-# look alike. Spec §LP-910 anticipates this: leave them null and note it. Stage 3 (LP-918) fills
-# them in when the library lands.
+# ⚠️ `canonical_type_id` IS NULL ON EVERY ROW, AND THE SPEC'S TABLE IS NOT. Spec §6 LP-910's UWM
+# table populates its Type column on **14 rows** (13 distinct ids — `CR-02` appears on both 5868 and
+# 7383): 0471 AS-11, 1228 PA-03, 1594 ID-05, 1741 PA-08, 1812 IE-03, 4235 IE-05, 5868 CR-02, 6132
+# AS-01, 6140 CR-11, 6178 IN-01, 6457 IN-02, 6637 AS-04, 7086 AS-10, 7383 CR-02.
+#
+# They are DELIBERATELY NOT TRANSCRIBED, and the reason is the trap rather than the omission. Those
+# ids come from `phase4.5-appendix-C-condition-taxonomy`, which is NOT in this repository — while
+# `docs/rule-engine.md` and `docs/stage2-rule-classification.md` carry ids of exactly that shape
+# (`AS-11`, `IN-7`) that are VERIFICATION RULE ids, a different vocabulary. Pasting the spec's column
+# in would attach a DTI rule's identity to a lender condition, and nothing downstream could tell.
+#
+# So: null until the taxonomy lands (Stage 3, LP-918). If you are here because the spec shows values
+# and the YAML shows none, that gap is the decision, not a missed step.
+#
+# (Champions' table has no Type column at all — five columns, not six — so this applies to UWM only.)
 #
 # `default_owner_hint` is a HINT and never a decision — Stage 3 decides who acts. It is the weakest
 # of the three hint sources (a `TC:` prefix the lender typed beats it, and the bucket beats it), and
@@ -138,7 +148,7 @@ codes:
     default_owner_hint: insurance
 
   - code: "6378"
-    label: Title to include loan number on checks to lender
+    label: "Title: loan number on checks to lender"
     default_bucket_kind: prior_to_funding
     default_owner_hint: title
 

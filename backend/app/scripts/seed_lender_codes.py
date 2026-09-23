@@ -92,6 +92,14 @@ async def _upsert(db: AsyncSession, *, lender_id: UUID, row: LenderCodeRow) -> s
         await db.flush()
         return "inserted"
 
+    # ⚠️ THE ORDER HERE IS LOAD-BEARING, and it is a shape rather than a defect today. `before` is
+    # captured, every field is then ASSIGNED, and `after` is compared — so the "unchanged" return
+    # below hands back an object that has already been written to. That is harmless while equality
+    # is identity (SQLAlchemy sees no net change and emits no UPDATE), and stops being harmless the
+    # moment a field is compared non-trivially — a normalised label, a JSON blob, anything where
+    # `==` can be True for values that are not the same object. Then "unchanged" would leave a dirty
+    # instance for the caller's commit to write. Assign into locals and compare before mutating if
+    # that day comes; until then this comment is the warning.
     before = (
         existing.label,
         existing.canonical_type_id,

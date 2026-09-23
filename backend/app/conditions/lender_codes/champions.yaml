@@ -78,7 +78,7 @@ codes:
     default_owner_hint: broker
 
   - code: "193"
-    label: Appraisal from acceptable AMC, CU <= 2.5
+    label: Appraisal from acceptable AMC, CU ≤ 2.5
     default_bucket_kind: prior_to_docs
     default_owner_hint: lender
 
@@ -118,7 +118,7 @@ codes:
     default_owner_hint: title
 
   - code: "285"
-    label: Title report with chain of title <= 90 days
+    label: Title report with chain of title ≤ 90 days
     default_bucket_kind: prior_to_docs
     default_owner_hint: title
 
