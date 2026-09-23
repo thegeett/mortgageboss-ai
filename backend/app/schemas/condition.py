@@ -15,6 +15,23 @@ rather than reusing `ConditionPublic` because the two differ in the way that mat
 a confidence and the source line numbers it came from, and no identity of its own until import.
 """
 
+# ⚠️ ALIASED, AND `from __future__ import annotations` DOES NOT SUBSTITUTE FOR IT.
+#
+# `UnderwriterNotePublic` has a field NAMED `date` — the name is the API contract (spec §LP-904:
+# `underwriter_notes` is `[{date, text, first_seen_round_id}]`), so it cannot be renamed. Annotated
+# with the bare `date`, the class body binds the VALUE first and evaluates the ANNOTATION second, so
+# `date = None` lands in the class namespace and `date | None` becomes `None | None`:
+# `TypeError: unsupported operand type(s) for |: 'NoneType' and 'NoneType'`, raised on import, every
+# time. Nothing imported this module until LP-905's router did, so it shipped in LP-904 and 7964
+# tests passed over a module that could not be imported at all.
+#
+# DEFERRING THE ANNOTATIONS DOES NOT FIX IT, which is the part worth remembering. Pydantic evaluates
+# the deferred string with the CLASS namespace as `localns`, and that namespace still holds
+# `date = None` — deferral changes WHEN the name resolves, not WHICH namespace wins. The alias does,
+# because nothing is ever named `date_type`.
+#
+# Any field named after its own type hits this. This repo has `date`, `status`, `type` and `id`
+# fields throughout.
 from datetime import date as date_type
 from datetime import datetime
 from typing import Any

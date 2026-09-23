@@ -187,14 +187,45 @@ async def test_a_non_pdf_is_refused_with_a_reason(db_session: AsyncSession) -> N
     with pytest.raises(ConditionSheetRejected) as caught:
         await _round(db_session, content=png)
 
-    # ⚠️ ASSERT THE PROPERTY, NOT A WORD. An earlier version of this test looked for the literal
-    # "PDF" and failed — because `assess` rejects it EARLIER and better than this service would:
-    # since the upload declares application/pdf, the type-mismatch branch fires first and says
-    # "The file says it is application/pdf but its contents are image/png." What a processor needs
-    # is the type they actually sent, so that is what is asserted.
+    # ⚠️ ASSERT THE PROPERTY, NOT A WORD, AND NOT A HARDCODED CLAIM EITHER. This assertion has been
+    # wrong twice. First it looked for the literal "PDF", which the message never contained. Then it
+    # required "application/pdf" — true only while the service HARDCODED that as the declared type;
+    # once the declared type came from the caller (review Q1) this path stopped mentioning it at all.
+    #
+    # The durable property is the one a processor acts on: the message names what they ACTUALLY
+    # sent. Nothing is declared here, so `assess` cannot report a mismatch and the PDF-only check
+    # below it is what refuses.
     reason = caught.value.reason
     assert "image/png" in reason, reason
-    assert "application/pdf" in reason, reason
+
+
+async def test_the_refusal_quotes_what_the_sender_CLAIMED(db_session: AsyncSession) -> None:
+    """⚠️ THE DECLARED TYPE BELONGS TO THE CALLER (review Q1), and this is why it matters.
+
+    `assess`'s mismatch message is a claim about the SENDER — "this is not what it said it was". The
+    service used to hardcode `application/pdf` as the declared type, which made that sentence true
+    for an upload and false for a forwarded email: a real PDF attached as `application/octet-stream`
+    would have been told it "says it is application/pdf" when it said no such thing.
+
+    Same bytes, three declarations, three honest messages.
+    """
+    from app.services.condition_rounds import _reject_unless_pdf
+
+    png = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+        b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+    with pytest.raises(ConditionSheetRejected) as claimed_pdf:
+        _reject_unless_pdf(png, declared_content_type="application/pdf")
+    assert "says it is application/pdf" in claimed_pdf.value.reason
+
+    with pytest.raises(ConditionSheetRejected) as claimed_nothing_useful:
+        _reject_unless_pdf(png, declared_content_type="application/octet-stream")
+    # It never claimed to be a PDF, so it is not accused of having claimed one.
+    assert "says it is application/pdf" not in claimed_nothing_useful.value.reason
+    assert "image/png" in claimed_nothing_useful.value.reason
 
 
 async def test_rubbish_is_refused_rather_than_stored(db_session: AsyncSession) -> None:

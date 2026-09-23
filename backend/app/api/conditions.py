@@ -92,7 +92,13 @@ async def upload_condition_sheet(
         round_ = await create_round_from_sheet(
             db,
             loan_file=loan_file,
-            sheet=SheetBytes(content=content, source_kind=ConditionSourceKind.PDF_UPLOAD),
+            sheet=SheetBytes(
+                content=content,
+                source_kind=ConditionSourceKind.PDF_UPLOAD,
+                # What the BROWSER declared in the multipart part header. Passed through rather
+                # than assumed, so a mismatch message quotes what the sender actually claimed.
+                declared_content_type=file.content_type,
+            ),
             completeness=completeness,
             actor_user_id=current_user.id,
         )

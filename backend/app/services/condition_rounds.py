@@ -19,7 +19,6 @@ transaction, as every service in this repo does.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC
 from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -62,6 +61,13 @@ class SheetBytes:
 
     content: bytes
     source_kind: ConditionSourceKind
+    #: ⚠️ WHAT THE SENDER SAID THIS WAS — the browser's part header on an upload, the MIME header on
+    #: an emailed attachment, or None when nothing claimed anything. It belongs to the CALLER
+    #: because `assess`'s mismatch message is a claim about the sender: "this is not what it said it
+    #: was". Hardcoding `application/pdf` here made that sentence true for an upload and false for a
+    #: forward — a real PDF attached as `application/octet-stream` would be told it "says it is
+    #: application/pdf" when it said no such thing.
+    declared_content_type: str | None = None
     #: Set for an EMAIL arrival — the attachment the bytes were re-derived from.
     inbound_attachment_id: UUID | None = None
 
@@ -76,7 +82,7 @@ def _storage_path(*, company_id: UUID, loan_file_id: UUID) -> str:
     return f"condition-sheets/{company_id}/{loan_file_id}/{uuid4().hex}.pdf"
 
 
-def _reject_unless_pdf(content: bytes) -> None:
+def _reject_unless_pdf(content: bytes, *, declared_content_type: str | None = None) -> None:
     """Refuse anything that is not a readable, unencrypted PDF.
 
     ⚠️ THE STATE ALONE IS NOT ENOUGH, AND THIS IS THE TRAP. `assess` returns SAFE for an IMAGE too —
@@ -85,7 +91,7 @@ def _reject_unless_pdf(content: bytes) -> None:
     checked as well; relying on the state would accept a screenshot of a sheet and then fail deep in
     the reader, where the message means nothing to a processor.
     """
-    outcome = assess(content, declared_content_type=PDF_CONTENT_TYPE)
+    outcome = assess(content, declared_content_type=declared_content_type)
 
     if outcome.state is not AttachmentSafetyState.SAFE:
         raise ConditionSheetRejected(
@@ -111,7 +117,7 @@ async def create_round_from_sheet(
     Shared by both front doors — the upload endpoint and the inbox's "Use as condition sheet" — so
     that an emailed sheet and an uploaded one produce the same row, differing only in `sources`.
     """
-    _reject_unless_pdf(sheet.content)
+    _reject_unless_pdf(sheet.content, declared_content_type=sheet.declared_content_type)
 
     storage_path = _storage_path(company_id=loan_file.company_id, loan_file_id=loan_file.id)
     await get_storage_backend().save_at(storage_path=storage_path, content=sheet.content)
@@ -140,7 +146,11 @@ async def create_round_from_sheet(
         # is dated by arrival and `date_printed` stays null; the parse task fills it in and a
         # processor may edit it. Omitting it here fails the insert outright — the same shape as the
         # `display_id` defect that hid LP-904's guards.
-        round_date=now.astimezone(UTC).date(),
+        # `utcnow()` is `datetime.now(UTC)`, so this date is already UTC. An earlier version wrote
+        # `now.astimezone(UTC).date()` as an "assertion of intent" — a provable no-op, and the kind
+        # that later persuades a reader the value might NOT be UTC and earns a second conversion
+        # somewhere else. The intent belongs in this comment, where it cannot be mistaken for work.
+        round_date=now.date(),
         created_by_user_id=actor_user_id,
     )
     db.add(round_)
