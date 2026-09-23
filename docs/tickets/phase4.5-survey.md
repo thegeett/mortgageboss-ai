@@ -543,13 +543,20 @@ company* (ADR-045, `uq_lenders_company_id_slug`), chosen by each processing comp
 different `lender_id`s. A seed keyed on a slug will silently match nothing on some tenants and the
 wrong row on others.
 
-I have **not** chosen between the options; this is the question to answer before LP-910:
+Three options were put to the product owner:
 
 1. a nullable `canonical_lender_key` (e.g. `"uwm"`, `"champions"`) on `lenders`, set by an admin, with
    the seed keyed on it — explicit, one column, and the code map becomes reusable across tenants;
 2. seed per company for lenders whose slug matches a known pattern, and report the ones it skipped;
 3. ship the YAML files and a loader with **no** seeding, leaving every `(lender, code)` to arrive as
    `OBSERVED_UNMAPPED` on first import — the spec's own fallback for unknown codes.
+
+✅ **ANSWERED 2026-09-23 — option 1.** A nullable `canonical_lender_key` on `lenders`, admin-set, and
+the LP-910 seed matches on it. **Consequence for the build order:** the column is a `lenders` column,
+so it is added in **LP-904's** migration beside `mortgagee_clause`, `condition_upload_cutoff` and
+`condition_handling_notes` — not deferred to LP-910, which only reads it. A lender with the key unset
+is not an error: its codes arrive as `OBSERVED_UNMAPPED`, which is option 3's behaviour retained as
+the fallback rather than replaced.
 
 **Note also:** LP-903's vocabulary lands in an existing section — `docs/glossary.md` already has a
 `### Conditions` heading (line 88) under "Domain Terms". The new terms extend it rather than starting

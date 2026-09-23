@@ -16176,3 +16176,179 @@ runtime is development-only until there is a product decision to offer either to
 production build neither shows the switcher nor honours its cookies (LP-902). Extends ADR-389.
 
 *Status.* Accepted (LP-901, LP-902).
+
+---
+
+## ADR-403
+
+**A lender condition is its own entity. It is not a needs item, and the two are related in one
+direction only: a condition may create a need, never the reverse.**
+
+*Context.* `NeedsItem` (ADR-067) is the checklist of documents this product is waiting on, and
+`NeedsItemOrigin.CONDITION` has been reserved for Phase 4.5 since it was written. The cheap reading of
+that reservation is that a condition simply *is* a need with a different origin, and Stage 1 could be
+built by widening the needs table.
+
+It cannot. A lender condition has a lender, a round, a verbatim text owned by that lender, a lender's
+own template code, a bucket that says when it must be satisfied, and — eventually — a verdict from the
+underwriter. A need has none of those. It has a document type, a status and a satisfying document.
+More importantly they answer different questions: a need asks *"what are we still waiting for?"*, a
+condition asks *"what did the lender demand, in the lender's words, and has the lender accepted it?"*
+Those come apart constantly — one condition asks for three documents, another asks for no document at
+all ("Underwriter to approve the change of circumstance"), and a third is information only.
+
+*Decision.* A `conditions` table, with `condition_rounds` above it and `condition_events` beside it. A
+**condition** is the lender's demand. A **need** is our ask for a document. An **action** (Stage 3) is
+work that is not a document. Conditions create needs; nothing creates a condition except a sheet the
+lender issued or a processor typing one in.
+
+*Rationale.* The verbatim text is the part that forces the split. A need's text is ours and can be
+rewritten whenever the wording improves; a condition's text is evidence of what the lender asked for,
+and rewriting it destroys the only record of that. A table whose rows are sometimes ours to edit and
+sometimes not is a table nobody can reason about.
+
+*Consequences.* Two tables to keep coherent, and a join a processor never sees. The condition is the
+source of truth for its own status — a satisfied need does not clear a condition, because only the
+lender clears (ADR-404). The Stage 3 link (`NeedsItemOrigin.CONDITION`) is the one direction that
+exists, and it is deliberately one-way: a need satisfied by a document does not report upward that the
+lender is content, because it does not know.
+
+*Status.* Accepted (LP-903).
+
+---
+
+## ADR-404
+
+**Only the lender clears a condition. Two status tracks, and a partial source may add or update but
+may never remove or clear.**
+
+*Context.* The obvious model gives a condition one status that walks from open to done. It is wrong in
+a way that costs a processor real trust: the work this product does — collecting the document, checking
+it, packaging it, submitting it — is *our* progress, and it says nothing about whether the underwriter
+accepted anything. A condition can be fully prepared, submitted, and come back.
+
+The second half is about where information arrives from. Round 2 of a lender's sheet is authoritative:
+a condition that was on round 1 and is absent from round 2 has probably been cleared. But a processor
+pasting six lines out of a portal is not making that claim at all — she is adding what she happened to
+copy. Reading absence as clearance there would silently close conditions that are still open.
+
+*Decision.* Two fields, created in LP-904 with defaults and not moved during Stage 1: `prep_status`
+(ours) and `lender_status` (the lender's). Nothing sets a condition cleared except a **recorded
+verdict** — who said so, and where — or a comparison against a **full** new sheet that the processor
+confirms (Stage 2). A source marked **partial** may add conditions and update the ones it names; it may
+never remove, clear, or mark anything missing.
+
+*Rationale.* Absence is only evidence when the thing absent was in a list that claimed to be complete.
+That is the entire content of the `completeness` field, and it is why the paste dialog asks the
+question before it accepts the text rather than inferring it afterwards. Defaulting that dialog to
+*"just some"* follows from the same reasoning: the safe answer is the one that can never delete.
+
+*Consequences.* Stage 1 writes both fields once and never touches them again, which is what makes it
+safe to ship before the comparison exists — nothing in Stage 1 can lose a condition. A processor who
+knows the lender cleared something cannot say so until Stage 2, and that is the accepted cost.
+"Cleared" never appears anywhere in the Stage 1 UI, because a status control that cannot be trusted is
+worse than none.
+
+*Status.* Accepted (LP-903).
+
+---
+
+## ADR-405
+
+**Condition text, sheet headers and event details are NPI: ordinary queryable columns, protected at
+rest and in transit, and dropped from the `readonly.*` staging views. No real condition sheet enters
+the repository.**
+
+*Context.* 16 CFR 314.4(c)(3) requires customer information to be encrypted at rest and in transit, and
+314.4(c)(6) requires disposal within two years of last use. Condition text quotes amounts, account
+endings, employers and addresses — *"Provide an additional consecutive month bank statement from
+Capital One #9912"* is a real shape. The header names the borrowers and the property.
+
+Column-level encryption was considered first and ruled out on a property of the mechanism rather than a
+preference. `EncryptedString` (LP-14) is deliberately non-deterministic — a fresh IV per write — so, as
+its own docstring states, an encrypted column cannot be used in a `WHERE` equality, an `ORDER BY`, an
+index or a unique constraint. Condition text is compared between rounds, searched, and fingerprinted
+for identity. Encrypting it would make the feature's central operation impossible.
+
+*Decision.* Condition text, raw sheet text, header snapshots, draft rows, unassigned lines and
+`condition_events.detail` are stored as ordinary columns, protected by storage-level encryption and
+TLS, and **excluded from the `readonly.*` views** exactly as `documents.full_text` is. Account numbers
+are kept as last four only in any derived field. Legal hold and the disposal clock apply. **No real
+condition sheet is committed to this repository** — tests use synthetic look-alikes that copy the
+lenders' layout and boilerplate, which is not personal data, and replace every name, address, account
+ending, loan number and amount. A local-only smoke test may read real sheets from a path outside the
+repo and print counts alone.
+
+*Rationale.* The readonly views are where this becomes enforceable rather than aspirational: the
+staging query role has no privileges in `public` at all, so a column absent from a view is unreachable
+by that path, whatever anyone later remembers about it. That is a stronger guarantee than a naming
+convention, and it is checked by a test that reads the migrations as text.
+
+*Consequences.* Anyone diagnosing a parse failure on staging can see the reader name, the counts, the
+codes and the warnings, and cannot see a single word the lender wrote. That is the intended trade and
+it will occasionally be inconvenient. `communications.body` should follow the same rule and does not
+yet; recorded here as a follow-up rather than silently left. A fixture that ever needs to be "just the
+real one with the names changed" is the failure mode to watch: the synthetic sheets must be built from
+the layout, not from a redacted original.
+
+*Status.* Accepted (LP-903).
+
+---
+
+## ADR-406
+
+**A condition never becomes a finding. A finding raised by a condition's document links back to the
+condition.**
+
+*Context.* Both are "something that needs attention on this file", both appear in lists, and Stage 3
+will run verification over documents that arrive for conditions. The pull toward one table is real.
+
+*Decision.* Findings stay rule-derived — produced by the verification engine from the snapshot, owned
+by a rule id, reconciled across runs. A condition is never minted as a finding and a finding is never
+promoted to a condition. When a document brought in for a condition raises a finding, the finding
+carries a link back to the condition that occasioned it.
+
+*Rationale.* A finding's identity is `(rule, subject)` and its lifecycle is the reconciler's: it is
+carried forward, resolved, retired and revived as the file changes, and the engine owns all of that. A
+condition's identity is the lender's, its lifecycle is the lender's, and nothing in the engine may
+retire one. Merging them would put rows the reconciler must not touch into the table it sweeps — which
+is the shape of defect the retirement logic has already produced twice.
+
+*Consequences.* A processor may see a condition and a finding about the same document, and that is
+correct: one is what the lender asked for, the other is what our rules noticed. The link makes the
+relationship visible without making them the same row. Stage 3 owns the link column; Stage 1 adds
+nothing for it.
+
+*Status.* Accepted (LP-903).
+
+---
+
+## ADR-407
+
+**Lender condition codes are lender-scoped. Always `(lender, code)`, never a global code table.**
+
+*Context.* Every sheet carries codes that look canonical — UWM prints `7086` for short funds to close,
+Champions prints `268` for the same demand. They are each lender's own template identifiers, and they
+collide: `45` means one thing at Champions and nothing at UWM. Line numbers on a sheet mean even less,
+changing between rounds of the same loan.
+
+*Decision.* `lender_condition_codes` is keyed `(lender_id, code)` and is matched that way everywhere. A
+condition stores the code exactly as printed, **leading zeros kept** (`"0006"` is not `6`). Fannie DU
+message ids and Freddie LPA codes are the only genuinely cross-lender codes, and lenders usually
+rewrite them anyway.
+
+*Rationale.* A global table would be wrong on its first row and the error would be invisible: a lookup
+would return a plausible label for the wrong lender's template, and nothing downstream could tell. The
+leading zeros matter for the same reason — the code is an identifier printed on a document, not a
+number, and normalising it is a silent data loss that only shows up as a failed match months later.
+
+*Consequences.* Because `lenders` is itself company-scoped with a slug unique only per company
+(ADR-045), `(lender_id, code)` is per-company by construction and two processing companies each working
+with UWM keep separate code maps. That is correct for ownership and wrong for seeding: there is no
+reliable way to recognise "UWM" across tenants from a slug each company chose. So `lenders` gains a
+nullable **`canonical_lender_key`** (`"uwm"`, `"champions"`), set deliberately by an admin, which the
+LP-910 seed matches on. A lender with the key unset is not an error — its codes arrive as
+`OBSERVED_UNMAPPED` on first import and are reviewed later, which is the same path any unknown code
+takes.
+
+*Status.* Accepted (LP-903). Builds on ADR-045.

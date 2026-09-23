@@ -101,6 +101,38 @@ it is marked **(verify with domain expert)** so the resident expert can confirm.
 - **UW Round** — one cycle of underwriting review (submit → conditions →
   resubmit). Fewer rounds = faster, cheaper closings.
 
+Phase 4.5 works with the lender's own condition documents, which needs a few more
+terms (LP-903):
+
+- **Condition sheet** — the document the lender issues listing its conditions.
+  UWM calls it a "Loan Approval Conditions" letter; Champions Funding calls it a
+  "Conditional Approval Certificate". One sheet is one **round**.
+- **Round** — one condition sheet received for a file, and the unit this product
+  stores. Round 1 is the first approval; later rounds are re-issues after the
+  processor submits documents. This is the record of a **UW Round** above: the
+  cycle is the event, the round is the sheet it produced. A round records how it
+  arrived (**source**) and whether it is the lender's whole list
+  (**completeness**).
+- **Lender code** — the lender's own template ID for a condition, printed on the
+  sheet (UWM `7086` = short funds to close). **Meaningful only per lender** — the
+  same demand is `268` at Champions — so codes are always stored and matched as
+  (lender, code), with leading zeros kept (ADR-407).
+- **Bucket** — the heading a condition is listed under, which says *when* it must
+  be satisfied: Master, Prior to Docs (**PTD**), Prior to Funding (**PTF**),
+  lender-internal ("Underwriter To Obtain And Clear"), or trailing. The heading is
+  stored exactly as the lender printed it; the *kind* follows its parenthetical.
+- **Underwriter note** — a dated note the underwriter appends inside a condition's
+  text, e.g. `**8/28 Not in Upload`. It means the condition came back. The note
+  stays part of the lender's wording and is also extracted with its date; it is
+  excluded from the text fingerprint, so a condition that comes back is still
+  recognised as the same condition.
+- **Source** — how a round arrived: the lender's PDF, a forwarded email, text
+  pasted from the portal, or typed by hand. Shown on every round, because what a
+  round can be trusted to prove depends on it.
+- **Completeness** — whether a round is the lender's **full list** or **just
+  some** of it. Only a full list can support "this one is gone, so it probably
+  cleared"; a partial source may add and update, never remove or clear (ADR-404).
+
 ### Rules and verification
 
 - **Investor guidelines** — the baseline rulebooks: the Fannie Mae Selling Guide
