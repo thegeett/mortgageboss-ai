@@ -32,6 +32,7 @@ from app.conditions.readers.model import (
     ParsedSheet,
     UnderwriterNote,
 )
+from app.conditions.readers.uwm import read_uwm
 
 __all__ = [
     "NON_BREAKING_SPACE",
@@ -48,4 +49,5 @@ __all__ = [
     "lines_from_pdf",
     "lines_from_text",
     "normalise",
+    "read_uwm",
 ]
