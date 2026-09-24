@@ -19,20 +19,26 @@ transaction, as every service in this repo does.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.conditions.readers import READER_VERSION, read_pasted_text
+from app.conditions.readers.model import ParsedSheet
 from app.models.activity_log import ActivityType
 from app.models.base import utcnow
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_round import (
     ConditionRound,
     ConditionRoundCompleteness,
+    ConditionRoundStatus,
     ConditionSourceKind,
 )
 from app.models.inbound_attachment import AttachmentSafetyState
 from app.models.loan_file import LoanFile
+from app.schemas.condition import DraftRowPublic
 from app.services.activity_log import log_activity
 from app.services.attachment_safety import assess
 from app.storage import get_storage_backend
@@ -176,6 +182,153 @@ async def create_round_from_sheet(
         summary="Condition sheet received",
         actor_user_id=actor_user_id,
         detail={"round_id": str(round_.id), "source_kind": sheet.source_kind.value},
+    )
+    await db.flush()
+    return round_
+
+
+def parse_report_for(reader: str, sheet: ParsedSheet) -> dict[str, Any]:
+    """What the reader did. ⚠️ Counts, codes and names — no condition text except
+    `unassigned_lines`, which LP-904 classifies as NPI and excludes from the readonly layer.
+
+    Lives here rather than in the Celery task because BOTH doors write it now: the task after
+    reading a PDF, and the paste service after reading text in the request. Two copies of this dict
+    would drift the moment one gained a key — which is the same argument `draft_rows_json` makes
+    about `DraftRowPublic`, one level up.
+    """
+    return {
+        "reader": reader,
+        "reader_version": READER_VERSION,
+        "warnings": list(sheet.warnings),
+        "unassigned_lines": list(sheet.unassigned_lines),
+        "duplicates_dropped": sheet.duplicates_dropped,
+        "ai_used": False,
+        # The READER's verdict, carried through rather than recomputed. `ai_used` stays False until
+        # LP-908 actually runs a split; the pair is what makes "waiting for AI" a findable state.
+        "needs_ai": sheet.needs_ai,
+    }
+
+
+def draft_rows_json(sheet: ParsedSheet) -> list[dict[str, Any]]:
+    """The parsed rows as JSON, through the SAME schema the API returns.
+
+    ⚠️ NOT `dataclasses.asdict`. `ParsedRow` holds dates, enums and nested dataclasses, none of
+    which JSONB accepts — and a hand-rolled dict here would be a THIRD representation of a row,
+    free to drift from `DraftRowPublic`. Going through the response schema means what is stored is
+    exactly what is served, by construction.
+    """
+    return [
+        DraftRowPublic.model_validate(row, from_attributes=True).model_dump(mode="json")
+        for row in sheet.rows
+    ]
+
+
+async def create_round_from_paste(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    text: str,
+    completeness: ConditionRoundCompleteness,
+    round_date: date | None = None,
+    actor_user_id: UUID | None = None,
+) -> ConditionRound:
+    """Read conditions pasted from the lender's portal and open a round holding what was found.
+
+    ⚠️ SYNCHRONOUS, UNLIKE EVERY OTHER DOOR, AND THE DIFFERENCE IS REAL RATHER THAN STYLISTIC. An
+    upload has bytes to fetch from storage and pages to rasterise; a paste is already text in memory
+    and the rules over it are string work. Queuing it would buy nothing and would cost the processor
+    a "Reading…" screen for a result that was ready before the response was written.
+
+    ⚠️ ALWAYS `DRAFT`, EVEN WHEN THE RULES COULD NOT SPLIT THE TEXT — a deliberate departure from
+    spec §LP-907, which says to answer `PARSING` and queue the AI split. LP-908 does not exist, so
+    that branch would enqueue nothing and leave the round in `PARSING` with no worker and no exit:
+    the processor sits on screen S1-02 forever. LP-905 recorded a stranded `PARSING` round as the
+    one gap it left open; manufacturing that state deliberately would be worse than the honest
+    alternative, which is a DRAFT holding whatever the rules did find, with `needs_ai` recorded in
+    `parse_report` so LP-908 can find exactly these rounds and finish the job.
+
+    ⚠️ NO PDF, SO NOTHING IS STORED. There are no bytes — `raw_text` on the row IS the source, which
+    is why `_storage_path` in the parse task returns None for a pasted round and a re-parse of one
+    refuses rather than inventing a file.
+    """
+    sheet_format, reader, sheet = read_pasted_text(text)
+
+    now = utcnow()
+    source: dict[str, object] = {"kind": ConditionSourceKind.PASTE.value, "at": now.isoformat()}
+    if actor_user_id is not None:
+        source["user_id"] = str(actor_user_id)
+
+    round_ = ConditionRound(
+        company_id=loan_file.company_id,
+        loan_file_id=loan_file.id,
+        lender_id=loan_file.lender_id,
+        status=ConditionRoundStatus.DRAFT,
+        # ⚠️ REQUIRED FROM THE CALLER, never defaulted here (ADR-404). "Just some" can only ever add
+        # and update; "the full list" is what lets a later comparison mean anything. A service that
+        # guessed would decide the file's history on the processor's behalf.
+        completeness=completeness,
+        sheet_format=sheet_format,
+        sources=[source],
+        # ⚠️ NPI (ADR-405). Stored because it is the SOURCE for a pasted round — LP-908 splits the
+        # text the processor actually sent, never a reconstruction from rows the rules may have
+        # misread, and §9.3 checks every AI row is a substring of this.
+        raw_text=text,
+        date_printed=sheet.date_printed,
+        # The processor's date wins, then the sheet's if the paste carried a letterhead, then today.
+        round_date=round_date or sheet.date_printed or now.date(),
+        header=sheet.header or None,
+        expiry_dates={
+            key: value.isoformat() if value else None for key, value in sheet.expiry_dates.items()
+        },
+        draft_rows=draft_rows_json(sheet),
+        parse_report=parse_report_for(reader, sheet),
+        created_by_user_id=actor_user_id,
+    )
+    db.add(round_)
+    await db.flush()
+
+    # ⚠️ BOTH EVENTS, BECAUSE BOTH THINGS HAPPENED. An uploaded sheet arrives (ROUND_RECEIVED) and is
+    # read later by the task (ROUND_PARSED); a paste does both inside one request. Emitting only one
+    # would leave the round-details history (S1-09) reading differently depending on which door the
+    # round came through, for rounds that are otherwise identical.
+    for kind, detail in (
+        (
+            ConditionEventKind.ROUND_RECEIVED,
+            # Metadata only — never the pasted text, which is NPI and already on the row.
+            {"source_kind": ConditionSourceKind.PASTE.value, "chars": len(text)},
+        ),
+        (
+            ConditionEventKind.ROUND_PARSED,
+            {
+                "reader": reader,
+                "reader_version": READER_VERSION,
+                "rows": len(sheet.rows),
+                "needs_ai": sheet.needs_ai,
+            },
+        ),
+    ):
+        db.add(
+            ConditionEvent(
+                company_id=loan_file.company_id,
+                loan_file_id=loan_file.id,
+                round_id=round_.id,
+                kind=kind,
+                actor_user_id=actor_user_id,
+                detail=detail,
+            )
+        )
+
+    await log_activity(
+        db,
+        loan_file_id=loan_file.id,
+        activity_type=ActivityType.CONDITION_SHEET_RECEIVED,
+        summary="Conditions pasted",
+        actor_user_id=actor_user_id,
+        detail={
+            "round_id": str(round_.id),
+            "source_kind": ConditionSourceKind.PASTE.value,
+            "rows": len(sheet.rows),
+        },
     )
     await db.flush()
     return round_

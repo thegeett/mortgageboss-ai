@@ -102,6 +102,13 @@ class ParseReportPublic(BaseModel):
     unassigned_lines: list[str] = Field(default_factory=list)
     duplicates_dropped: int = 0
     ai_used: bool = False
+    #: ⚠️ NOT THE SAME FACT AS `ai_used`, AND THE PAIR IS READ TOGETHER. `needs_ai` is the READER's
+    #: verdict that the rules could not split this text; `ai_used` is whether an AI split actually
+    #: ran. Both false means the rules read it. `needs_ai` true with `ai_used` false means the round
+    #: is waiting for LP-908 — a state that has to be findable, or the gap is invisible to everyone
+    #: except whoever reads the warning. Never set merely because a read was imperfect: a sheet with
+    #: warnings is still a rule-read sheet.
+    needs_ai: bool = False
     #: Set only on PARSE_FAILED — the typed reason, never a bare exception string (spec §9.8).
     failure_kind: str | None = None
     failure_detail: str | None = None

@@ -763,16 +763,47 @@ def _expiry(lines: Sequence[Line]) -> tuple[dict[str, date | None], list[str]]:
     return dates, warnings
 
 
-def read_uwm(lines: Sequence[Line]) -> ParsedSheet:
-    """Read a UWM approval letter into a `ParsedSheet` (spec §6 rules 1-8)."""
+#: How many row starts a marker-less paste must carry before it is read as a UWM excerpt. Two,
+#: because ONE four-digit number followed by two columns occurs in ordinary prose — a year, an
+#: amount, a figure inside somebody else's sentence, all of which this reader has already been
+#: caught by once. Two of them on separate lines is a list. Measured on the round-2 conditions
+#: block: 6 row starts in 15 lines.
+_MIN_PASTED_ROW_STARTS = 2
+
+
+def uwm_block_start(lines: Sequence[Line]) -> int | None:
+    """Where the conditions block begins in text carrying no `CONDITIONS` marker, or ``None``.
+
+    ⚠️ A PROCESSOR COPYING FROM THE PORTAL COPIES THE ROWS, NOT THE WORD ABOVE THEM — so the marker
+    `read_uwm` bounds its block with is precisely what a paste loses. This answers the same question
+    from the rows themselves, and LP-907's paste reader hands the answer back as `conditions_from`.
+
+    THE TEST IS THIS READER'S OWN ROW RULE, not a looser "does that look like a code" regex. What
+    `_row_start` accepts is what the block will actually parse into rows, so a paste can never be
+    recognised as UWM and then read as nothing — the two decisions cannot disagree because they are
+    the same decision.
+    """
+    content = [line for line in lines if not line.is_blank]
+    if not content:
+        return None
+    threshold = _shallow_threshold(content)
+    starts = sum(1 for line in content if _row_start(line, threshold) is not None)
+    # Zero, because the block IS the whole paste: anything above the first row — a heading the
+    # processor copied with it, a stray portal line — is read by the same rules and ends up as a
+    # bucket heading or in `unassigned_lines`. Nothing is dropped for having been copied too (§9.2).
+    return 0 if starts >= _MIN_PASTED_ROW_STARTS else None
+
+
+def read_uwm(lines: Sequence[Line], *, conditions_from: int | None = None) -> ParsedSheet:
+    """Read a UWM approval letter into a `ParsedSheet` (spec §6 rules 1-8).
+
+    `conditions_from` is for text that has NO `CONDITIONS` marker — a paste of the rows alone. It
+    says where the conditions block starts and is ignored when the marker is present. Only LP-907's
+    paste reader passes it, and only once `uwm_block_start` has established that the rows are there;
+    a caller that guessed would simply get the marker-less refusal below.
+    """
     sheet = ParsedSheet(sheet_format=ConditionSheetFormat.UWM_APPROVAL_LETTER)
 
-    # ⚠️ REFUSED LOUDLY ON PDF INPUT, because reading it quietly produced a plausible wrong answer.
-    # Every rule below that separates a heading from a continuation measures `indent`, which is None
-    # for PDF-built lines — so a PDF parsed to the right number of rows under the wrong buckets with
-    # headings glued into the text. Section 3 authors the first PDF fixture and calibrates a
-    # points-based threshold; LP-905, which is the first caller to hand this real PDFs, comes after
-    # it in the spec's own order (§4), so nothing downstream depends on this gap being filled yet.
     def index_of(marker: str) -> int | None:
         return next(
             (i for i, line in enumerate(lines) if line.text.strip() == marker),
@@ -785,7 +816,11 @@ def read_uwm(lines: Sequence[Line]) -> ParsedSheet:
         index_of(_EXPIRATION_DATES),
     )
 
-    if conditions_at is None:
+    if conditions_at is not None:
+        block_start = conditions_at + 1
+    elif conditions_from is not None:
+        block_start = conditions_from
+    else:
         sheet.warnings.append("no CONDITIONS marker; nothing could be read")
         sheet.needs_ai = True
         return sheet
@@ -793,9 +828,12 @@ def read_uwm(lines: Sequence[Line]) -> ParsedSheet:
     # ⚠️ A MISSING HEADER IS A WARNING, NOT A FAILURE. The page-break fixture omits it entirely, and
     # the conditions are the part that matters — refusing the sheet because its letterhead is absent
     # would discard every condition on it.
-    if loan_at is None:
-        sheet.warnings.append("header not found")
-    else:
+    #
+    # ⚠️ BUT AN EXCERPT IS NOT WARNED ABOUT, because there the absence is the input's shape rather
+    # than a finding. A paste of the rows alone HAS no letterhead, and warning would put "header not
+    # found" on every pasted round — a warning that is always present is one a processor learns to
+    # skip, including on the sheet where it means something.
+    if loan_at is not None and conditions_at is not None:
         header, printed, header_warnings = _split_header(lines[1:loan_at])
         facts, fact_warnings = _split_loan_facts(lines[loan_at + 1 : conditions_at])
         header["loan_facts"] = facts
@@ -803,19 +841,21 @@ def read_uwm(lines: Sequence[Line]) -> ParsedSheet:
         sheet.date_printed = printed
         sheet.warnings.extend(header_warnings)
         sheet.warnings.extend(fact_warnings)
+    elif conditions_at is not None:
+        sheet.warnings.append("header not found")
 
     block_end = expiry_at if expiry_at is not None else len(lines)
     # Computed over the CONDITIONS BLOCK ONLY. The header and the loan-information table have their
     # own column structure — a two-column header would contribute a gap of its own and move the
     # split — so the threshold is derived from the lines it will actually be applied to.
     threshold = _shallow_threshold(
-        [line for line in lines[conditions_at + 1 : block_end] if not line.is_blank]
+        [line for line in lines[block_start:block_end] if not line.is_blank]
     )
     rows: list[_Row] = []
     current: _Row | None = None
     heading, kind = "", BucketKind.UNKNOWN
 
-    for offset, line in enumerate(lines[conditions_at + 1 : block_end], start=conditions_at + 1):
+    for offset, line in enumerate(lines[block_start:block_end], start=block_start):
         if line.is_blank:
             continue
 

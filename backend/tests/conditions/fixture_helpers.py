@@ -60,6 +60,24 @@ def sheet_lines(name: str) -> tuple[Line, ...]:
     return lines_from_text(sheet_text(name))
 
 
+#: The span of `uwm_round2` a mouse drag over the portal's conditions list selects: one line BELOW
+#: the `CONDITIONS` marker, stopping at `EXPIRATION DATES`.
+_ROUND_2_CONDITIONS_BLOCK = slice(39, 55)
+
+
+def portal_excerpt() -> str:
+    """What a processor actually pastes: the headings and the rows, and nothing else (LP-907).
+
+    ⚠️ NEITHER THE TITLE NOR THE `CONDITIONS` MARKER IS INCLUDED, which is the whole difficulty.
+    `detect_format` keys on the first content line and `read_uwm` bounds its block with the marker,
+    so a portal copy defeats both — it is recognised by its row shapes instead.
+
+    Sliced out of the fixture rather than retyped, so it cannot drift from the sheet every other
+    test reads, and the line range lives here rather than in each test that wants it.
+    """
+    return "\n".join(sheet_text(UWM_ROUND_2).splitlines()[_ROUND_2_CONDITIONS_BLOCK])
+
+
 UWM_ROUND_1 = "uwm_round1_2026-08-28.txt"
 UWM_ROUND_2 = "uwm_round2_2026-09-10.txt"
 UWM_PAGEBREAK = "uwm_master_pagebreak.txt"

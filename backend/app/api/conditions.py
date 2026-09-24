@@ -23,10 +23,11 @@ from app.api.dependencies import CurrentUser
 from app.core.config import settings
 from app.core.database import DbSession
 from app.models.condition_round import ConditionRoundCompleteness, ConditionSourceKind
-from app.schemas.condition import ConditionRoundPublic
+from app.schemas.condition import ConditionPasteRequest, ConditionRoundPublic
 from app.services.condition_rounds import (
     ConditionSheetRejected,
     SheetBytes,
+    create_round_from_paste,
     create_round_from_sheet,
 )
 from app.services.loan_files import get_loan_file
@@ -116,4 +117,50 @@ async def upload_condition_sheet(
 
     parse_condition_round.delay(str(round_.id))
 
+    return ConditionRoundPublic.from_model(round_)
+
+
+@router.post(
+    "/{loan_file_id}/condition-rounds/paste",
+    response_model=ConditionRoundPublic,
+    status_code=status.HTTP_201_CREATED,
+)
+async def paste_conditions(
+    loan_file_id: UUID,
+    payload: ConditionPasteRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionRoundPublic:
+    """Paste conditions copied from the lender's portal → a round holding what the rules read.
+
+    ⚠️ 201 AND A FINISHED ROUND, WHERE THE UPLOAD ANSWERS 202 AND A `PARSING` ONE. The two doors
+    differ because the work does: an upload has bytes to fetch and pages to rasterise, while a paste
+    is text already in memory. The processor goes straight to the review screen instead of watching
+    a progress state for work that finished inside the request.
+
+    ⚠️ `completeness` IS REQUIRED AND THE API REFUSES TO GUESS IT. The UI defaults the control to
+    "just some" — the answer that can never remove anything — but a default HERE would decide the
+    file's history on the processor's behalf, and ADR-404 lets only a FULL round's absences mean
+    anything later.
+
+    The 100,000-character ceiling is enforced by the request schema, so an oversized paste is refused
+    before it reaches a reader rather than after.
+    """
+    loan_file = await get_loan_file(
+        db, company_id=current_user.company_id, identifier=str(loan_file_id)
+    )
+    if loan_file is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan file not found.")
+
+    round_ = await create_round_from_paste(
+        db,
+        loan_file=loan_file,
+        text=payload.text,
+        completeness=payload.completeness,
+        round_date=payload.round_date,
+        actor_user_id=current_user.id,
+    )
+
+    await db.commit()
+    await db.refresh(round_)
     return ConditionRoundPublic.from_model(round_)

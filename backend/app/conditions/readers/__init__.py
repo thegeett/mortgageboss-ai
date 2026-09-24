@@ -36,7 +36,8 @@ from app.conditions.readers.model import (
     ParsedSheet,
     UnderwriterNote,
 )
-from app.conditions.readers.uwm import read_uwm
+from app.conditions.readers.paste import read_pasted_text
+from app.conditions.readers.uwm import read_uwm, uwm_block_start
 from app.models.condition_round import ConditionSheetFormat
 
 #: ⚠️ THE READERS ARE VERSIONED BECAUSE A RE-PARSE MUST BE REPRODUCIBLE (spec §9.6). It is recorded
@@ -82,5 +83,7 @@ __all__ = [
     "normalise",
     "read_champions",
     "read_generic",
+    "read_pasted_text",
     "read_uwm",
+    "uwm_block_start",
 ]

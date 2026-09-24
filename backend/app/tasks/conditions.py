@@ -45,7 +45,7 @@ from app.conditions.readers import (
 from app.conditions.readers.model import ParsedSheet
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_round import ConditionRound, ConditionRoundStatus
-from app.schemas.condition import DraftRowPublic
+from app.services.condition_rounds import draft_rows_json, parse_report_for
 from app.storage import StorageError, get_storage_backend
 from app.tasks.base import run_async, task_session
 from app.tasks.celery_app import celery_app
@@ -128,33 +128,6 @@ async def _read_sheet(round_: ConditionRound) -> tuple[str, ParsedSheet]:
     return name, read(lines)
 
 
-def _parse_report(reader: str, sheet: ParsedSheet) -> dict[str, Any]:
-    """What the reader did. ⚠️ Counts, codes and names — no condition text except
-    `unassigned_lines`, which LP-904 classifies as NPI and excludes from the readonly layer."""
-    return {
-        "reader": reader,
-        "reader_version": READER_VERSION,
-        "warnings": list(sheet.warnings),
-        "unassigned_lines": list(sheet.unassigned_lines),
-        "duplicates_dropped": sheet.duplicates_dropped,
-        "ai_used": False,
-    }
-
-
-def _draft_rows(sheet: ParsedSheet) -> list[dict[str, Any]]:
-    """The parsed rows as JSON, through the SAME schema the API returns.
-
-    ⚠️ NOT `dataclasses.asdict`. `ParsedRow` holds dates, enums and nested dataclasses, none of
-    which JSONB accepts — and a hand-rolled dict here would be a THIRD representation of a row,
-    free to drift from `DraftRowPublic`. Going through the response schema means what is stored is
-    exactly what is served, by construction.
-    """
-    return [
-        DraftRowPublic.model_validate(row, from_attributes=True).model_dump(mode="json")
-        for row in sheet.rows
-    ]
-
-
 async def _settle(
     db: AsyncSession,
     *,
@@ -232,6 +205,9 @@ async def parse_round(db: AsyncSession, round_id: UUID) -> None:
                     "unassigned_lines": [],
                     "duplicates_dropped": 0,
                     "ai_used": False,
+                    # A read that never reached a reader has no verdict to carry. False, not the
+                    # absence of the key, so the shape matches every other `parse_report`.
+                    "needs_ai": False,
                     "failure_kind": exc.failure_kind,
                     "failure_detail": exc.detail,
                 },
@@ -259,8 +235,8 @@ async def parse_round(db: AsyncSession, round_id: UUID) -> None:
                 key: value.isoformat() if value else None
                 for key, value in sheet.expiry_dates.items()
             },
-            "draft_rows": _draft_rows(sheet),
-            "parse_report": _parse_report(reader, sheet),
+            "draft_rows": draft_rows_json(sheet),
+            "parse_report": parse_report_for(reader, sheet),
         },
         kind=ConditionEventKind.ROUND_PARSED,
         detail={
