@@ -255,6 +255,90 @@ async def test_one_round_comes_back_with_its_parse_report(
     assert len(body["draft_rows"]) == 6
 
 
+async def test_the_card_counts_conditions_the_pdf_added_after_import(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """⚠️ THE HALF OF THE ENRICH BUG THAT NOTHING DEMONSTRATED (review).
+
+    The original defect had two halves: enrich-created conditions got no round chips, AND the round
+    undercounted itself by exactly the number added. The chips half is covered by composition — the
+    service test pins that enrich writes `CONDITION_CREATED`, the tests above pin that those events
+    become chips. The COUNT half was pinned nowhere: every count assertion here builds its
+    conditions by import.
+
+    So the property held with nothing showing it, which is the shape that let the bug exist in the
+    first place — a field with a producer for one writer, demonstrated only for that writer. §2 adds
+    a third writer, and the count will then rest on three.
+
+    Import two, attach the PDF that carries all six, and the card must read 6 rather than 2.
+    """
+    from app.services.condition_enrich import enrich_round_with_pdf
+    from tests.conditions.fixture_helpers import UWM_ROUND_2
+    from tests.conditions.uwm_pdf_fixture import render_uwm_pdf
+
+    company, token = await _user(db_session, slug="read-enrich-count")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    round_ = await create_round_from_paste(
+        db_session,
+        loan_file=loan_file,
+        text=portal_excerpt(),
+        completeness=ConditionRoundCompleteness.PARTIAL,
+    )
+
+    # Import only the first two rows, the way a partial paste would.
+    for index, row in enumerate(list(round_.draft_rows or [])[:2], start=1):
+        condition = Condition(
+            company_id=company.id,
+            loan_file_id=loan_file.id,
+            first_round_id=round_.id,
+            last_seen_round_id=round_.id,
+            sequence=index,
+            lender_code=row["lender_code"],
+            bucket_heading=row["bucket_heading"],
+            bucket_kind=BucketKind(row["bucket_kind"]),
+            verbatim_text=row["verbatim_text"],
+            text_fingerprint=fingerprint(row["verbatim_text"]),
+            underwriter_notes=[],
+        )
+        db_session.add(condition)
+        await db_session.flush()
+        db_session.add(
+            ConditionEvent(
+                company_id=company.id,
+                loan_file_id=loan_file.id,
+                round_id=round_.id,
+                condition_id=condition.id,
+                kind=ConditionEventKind.CONDITION_CREATED,
+                detail={"source": "import"},
+            )
+        )
+    round_.status = ConditionRoundStatus.IMPORTED
+    round_.round_number = 1
+    round_.draft_rows = None
+    await db_session.flush()
+
+    result = await enrich_round_with_pdf(
+        db_session, round_=round_, content=render_uwm_pdf(UWM_ROUND_2)
+    )
+    assert result.added == 4, "the PDF carries four this round had not imported"
+
+    (card,) = (
+        await client.get(
+            f"/api/v1/loan-files/{loan_file.id}/condition-rounds", headers=_auth(token)
+        )
+    ).json()
+
+    # 2 imported + 4 the PDF brought. Before enrich emitted CONDITION_CREATED this read 2.
+    assert card["condition_count"] == 6
+
+    # And every one of them carries the round's chip, including the four enrich created.
+    conditions = (
+        await client.get(f"/api/v1/loan-files/{loan_file.id}/conditions", headers=_auth(token))
+    ).json()
+    assert len(conditions) == 6
+    assert all(condition["round_numbers"] == [1] for condition in conditions)
+
+
 async def test_another_companys_rounds_are_invisible(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
