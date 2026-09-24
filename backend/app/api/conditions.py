@@ -32,9 +32,11 @@ from app.models.condition_round import (
     ConditionSourceKind,
 )
 from app.models.helpers import only_active
+from app.models.loan_file import LoanFile
 from app.schemas.condition import (
     ConditionEnrichResult,
     ConditionPasteRequest,
+    ConditionPublic,
     ConditionRoundPublic,
 )
 from app.services.condition_enrich import RoundNotEnrichable, enrich_round_with_pdf
@@ -43,6 +45,12 @@ from app.services.condition_rounds import (
     SheetBytes,
     create_round_from_paste,
     create_round_from_sheet,
+)
+from app.services.conditions import (
+    appearances_for_file,
+    list_conditions,
+    list_rounds,
+    rows_on_sheet,
 )
 from app.services.loan_files import get_loan_file
 
@@ -137,6 +145,40 @@ async def get_scoped_round(
 ScopedRound = Annotated[ConditionRound, Depends(get_scoped_round)]
 
 
+async def get_scoped_loan_file_by_id(
+    loan_file_id: UUID, db: DbSession, current_user: CurrentUser
+) -> LoanFile:
+    """The loan file in the path, scoped to the caller's company.
+
+    ⚠️ A DEPENDENCY RATHER THAN THE SAME SIX LINES IN EVERY HANDLER, which is what this router had.
+    Both POSTs opened by calling `get_loan_file` and raising 404 themselves; §1 adds three reads, and
+    five copies of a tenant gate is how one of them eventually ships without it. Every other nested
+    router in this repo declares `ScopedLoanFile` for exactly this reason — the file is fetched and
+    company-checked *before* the handler body runs, so a handler cannot forget.
+
+    ⚠️ IT IS NOT `ScopedLoanFile` ITSELF BECAUSE THIS ROUTER'S PATH IS DIFFERENT. That dependency
+    reads `file_identifier` from a `/loan-files/{file_identifier}/...` prefix; spec §LP-905/907 fix
+    these paths as `/loan-files/{loan_file_id}/condition-rounds/...`, LP-905 and LP-907 shipped them,
+    and three test files plus the tenancy test hardcode that shape. Renaming the segment to reuse the
+    dependency would churn shipped URLs to save a wrapper, so the wrapper is the smaller change.
+
+    `get_loan_file` takes a `str` identifier and accepts a UUID *or* a `display_id`; the path types it
+    as `UUID`, so only the first form can arrive here — narrower than the generic gate, and
+    deliberately so, because these ids come from the API's own responses rather than from a person.
+    """
+    loan_file = await get_loan_file(
+        db, company_id=current_user.company_id, identifier=str(loan_file_id)
+    )
+    if loan_file is None:
+        # The same 404 as a missing file: distinguishing them would confirm the id exists, an oracle
+        # over another tenant's rows.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan file not found.")
+    return loan_file
+
+
+ScopedLoanFileById = Annotated[LoanFile, Depends(get_scoped_loan_file_by_id)]
+
+
 async def _read_capped(upload: UploadFile, *, max_bytes: int) -> bytes:
     """Read an upload into memory, aborting (413) once it exceeds ``max_bytes``.
 
@@ -163,7 +205,7 @@ async def _read_capped(upload: UploadFile, *, max_bytes: int) -> bytes:
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def upload_condition_sheet(
-    loan_file_id: UUID,
+    loan_file: ScopedLoanFileById,
     db: DbSession,
     current_user: CurrentUser,
     file: Annotated[UploadFile, File(description="The lender's condition sheet, as a PDF")],
@@ -174,16 +216,10 @@ async def upload_condition_sheet(
     `completeness` defaults to FULL: a processor uploading the lender's letter is giving us the whole
     list unless they say otherwise. It is load-bearing rather than descriptive — ADR-404 lets only a
     FULL round's absences mean anything, and a PARTIAL one may add and update but never remove.
-    """
-    # `identifier` is a str accepting a UUID *or* a display_id — the repo's one scoped read for a
-    # loan file. It returns None when the file belongs to another company, so tenancy is enforced
-    # by the lookup rather than by a check after it.
-    loan_file = await get_loan_file(
-        db, company_id=current_user.company_id, identifier=str(loan_file_id)
-    )
-    if loan_file is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan file not found.")
 
+    Tenancy is the dependency's: the file is fetched company-scoped before this body runs, so a
+    mismatched (company, file) pair is unfetchable rather than rejected after the fact.
+    """
     content = await _read_capped(file, max_bytes=settings.condition_sheet_max_bytes)
     if not content:
         raise HTTPException(status_code=422, detail="No file provided.")
@@ -225,13 +261,74 @@ async def upload_condition_sheet(
     return ConditionRoundPublic.from_model(round_)
 
 
+@router.get("/{loan_file_id}/condition-rounds", response_model=list[ConditionRoundPublic])
+async def list_condition_rounds(
+    loan_file: ScopedLoanFileById, db: DbSession
+) -> list[ConditionRoundPublic]:
+    """Every round on this file, newest first — the round strip above the conditions list (S1-05).
+
+    ⚠️ `condition_count` GETS ITS FIRST PRODUCER HERE. It has defaulted to 0 since LP-904 with
+    nothing filling it, so a round card would have read "0 on sheet" for as long as anyone looked.
+    The count comes from a different place depending on status — a draft counts the rows it holds, an
+    imported round counts the conditions that appeared on it — which is what `rows_on_sheet` decides.
+
+    ONE events query for the whole strip, never one per card: `appearances_for_file` is the
+    `_completed_documents` shape ("loaded once, LP-109, no N+1").
+    """
+    rounds = await list_rounds(db, loan_file_id=loan_file.id)
+    _, per_round = await appearances_for_file(db, loan_file_id=loan_file.id)
+    return [
+        ConditionRoundPublic.from_model(round_, condition_count=rows_on_sheet(round_, per_round))
+        for round_ in rounds
+    ]
+
+
+@rounds_router.get("/{round_id}", response_model=ConditionRoundPublic)
+async def get_condition_round(round_: ScopedRound, db: DbSession) -> ConditionRoundPublic:
+    """One round: its draft rows or its imported count, header, expiry dates and parse report.
+
+    ⚠️ THE FIRST GET ON THIS ROUTER, and the schema it returns carries a trap worth naming at the
+    call site: `draft_rows` being PRESENT does not mean a processor may act on them. A `PARSING`
+    round awaiting the AI split carries the rules-read rows too, and screen S1-02 renders skeletons
+    and polls rather than showing them. Read `status`, never the presence of rows.
+
+    Scoped by `get_scoped_round`, which filters `company_id` inside the statement — so another
+    tenant's round is unfetchable rather than fetched and then refused.
+    """
+    _, per_round = await appearances_for_file(db, loan_file_id=round_.loan_file_id)
+    return ConditionRoundPublic.from_model(round_, condition_count=rows_on_sheet(round_, per_round))
+
+
+@router.get("/{loan_file_id}/conditions", response_model=list[ConditionPublic])
+async def list_file_conditions(
+    loan_file: ScopedLoanFileById, db: DbSession
+) -> list[ConditionPublic]:
+    """The file's imported conditions, in sheet order, each with the rounds it appeared on.
+
+    ⚠️ `round_numbers` GETS ITS FIRST PRODUCER HERE — the `R1 R2` chips, which have defaulted to `[]`
+    since LP-904. It is derived from each condition's `CONDITION_CREATED` / `CONDITION_SEEN_AGAIN`
+    events rather than from `first_round_id` / `last_seen_round_id`, because two columns cannot
+    express "appeared on R1 and R3 but not R2" — which is the whole point of the chips.
+
+    That derivation is only as good as the enumeration of who writes conditions, which is why every
+    writer emits `CONDITION_CREATED` (LP-907's enrich did not, and its conditions were chipless until
+    that was fixed).
+    """
+    conditions = await list_conditions(db, loan_file_id=loan_file.id)
+    numbers, _ = await appearances_for_file(db, loan_file_id=loan_file.id)
+    return [
+        ConditionPublic.from_model(condition, round_numbers=numbers.get(condition.id, []))
+        for condition in conditions
+    ]
+
+
 @router.post(
     "/{loan_file_id}/condition-rounds/paste",
     response_model=ConditionRoundPublic,
     status_code=status.HTTP_201_CREATED,
 )
 async def paste_conditions(
-    loan_file_id: UUID,
+    loan_file: ScopedLoanFileById,
     payload: ConditionPasteRequest,
     db: DbSession,
     current_user: CurrentUser,
@@ -251,12 +348,6 @@ async def paste_conditions(
     The 100,000-character ceiling is enforced by the request schema, so an oversized paste is refused
     before it reaches a reader rather than after.
     """
-    loan_file = await get_loan_file(
-        db, company_id=current_user.company_id, identifier=str(loan_file_id)
-    )
-    if loan_file is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan file not found.")
-
     round_ = await create_round_from_paste(
         db,
         loan_file=loan_file,
