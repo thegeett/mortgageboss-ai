@@ -31,6 +31,7 @@ would lose a lender's demand with nothing on screen to say so.
 
 from __future__ import annotations
 
+import itertools
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -61,6 +62,9 @@ _EXPIRATION_DATES = "EXPIRATION DATES"
 #: The category is non-greedy so a text beginning `TC:` is not swallowed into it — `6378 TC  TC: ...`
 #: is the row that proves it, and it is in every fixture.
 _ROW_START = re.compile(r"^\s{0,3}(\d{4})\s{2,}(\(PA\)\s+)?(.+?)\s{2,}(\S.*)$")
+
+#: The code alone, for the positional matcher below — a PDF line has no runs of spaces to anchor on.
+_CODE = re.compile(r"^\d{4}$")
 
 #: Rule 3's heading pattern, for a heading not in the table below.
 _HEADING = re.compile(r"^[A-Z][A-Za-z ]+( - [A-Za-z ]+)?( \((PTD|PTF|PTC|PTA)\))?$")
@@ -198,26 +202,152 @@ def _heading_kind(text: str) -> tuple[BucketKind, bool]:
     return BucketKind.UNKNOWN, True
 
 
-def _is_heading(line: Line) -> bool:
-    """A heading has <= 3 leading spaces, no leading 4-digit code, and matches the pattern.
+#: Below this, a block's first-token positions are one column and nothing is a continuation.
+#: Expressed in points and compared against the block's OWN spread, so it carries no font metric.
+_MIN_COLUMN_SEPARATION_POINTS = 24.0
 
-    ⚠️ PDF INPUT RAISES RATHER THAN ANSWERING `False`, and answering `False` was a real defect.
-    `indent` is None for every PDF-built line (section 1), so `indent is None or indent > 3` made
-    this return False for EVERY line of every uploaded sheet — and the caller's next branch treats
-    `indent is None` as a continuation, so each bucket heading was silently glued onto the preceding
-    condition's text. The damage was invisible: row starts still matched, so the sheet produced the
-    right number of rows, all filed under a stale bucket, one carrying words the lender never wrote.
 
-    A points-based column threshold is what this needs, and it cannot be calibrated until section 3
-    authors the first real PDF fixture. Until then the absence is loud.
+def _shallow_threshold(lines: Sequence[Line]) -> float | None:
+    """The x below which a PDF line starts at the margin rather than in the text column.
+
+    ⚠️ DERIVED FROM THE SHEET, NEVER HARDCODED. On text input indentation IS the answer; on a PDF
+    there are no leading spaces, only positions, and the positions depend on the lender's font. The
+    structure that survives both is that a UWM conditions block has exactly TWO first-token columns —
+    headings and row codes at the margin, continuations at the text column — so the split is the
+    largest gap between consecutive first-token positions.
+
+    Measured on `uwm_round1` rendered at Courier 8pt: headings and row starts at {54.0, 58.8},
+    continuations at [260.4, 303.6]. The reader must not learn those numbers; it must find the gap.
+
+    Returns None when there is no gap worth calling a column break — a block whose rows are all
+    one-liners has no continuations, and inventing a threshold there would make the first slightly
+    indented line a continuation of nothing.
+    """
+    starts = sorted({line.tokens[0].x0 for line in lines if line.tokens})
+    if len(starts) < 2:
+        return None
+
+    gap, lower = max(((b - a, a) for a, b in itertools.pairwise(starts)), key=lambda pair: pair[0])
+    if gap < _MIN_COLUMN_SEPARATION_POINTS:
+        return None
+    return lower + gap / 2.0
+
+
+def _is_shallow(line: Line, threshold: float | None) -> bool:
+    """Is this line at the margin (a heading or a row start) rather than a continuation?
+
+    The one question both callers ask, answered from `indent` on text and from `x0` on a PDF, so the
+    two inputs share a single rule instead of two that can drift.
     """
     indent = line.indent
-    if indent is None:
-        raise NotImplementedError(
-            "UWM heading detection needs a column threshold in points for PDF-built lines; "
-            "section 3 calibrates it against the first authored PDF fixture"
+    if indent is not None:
+        return indent <= 3
+    if not line.tokens:
+        return False
+    # No column break in this block means no continuations, so every line is at the margin.
+    return threshold is None or line.tokens[0].x0 < threshold
+
+
+def _is_continuation(line: Line, threshold: float | None) -> bool:
+    """Does this line continue the row above it?
+
+    ⚠️ THREE-WAY ON TEXT, NOT TWO, AND COLLAPSING IT WAS A REAL REGRESSION. The spec gives a heading
+    at <= 3 spaces and a continuation at >= 20 — and the BAND BETWEEN THEM is neither, so it lands in
+    `unassigned_lines`. That band is the §9.2 invariant's whole subject. An earlier version of this
+    change answered both questions with one predicate (`not _is_shallow`), so a line at indent 10 was
+    swallowed as a continuation and `test_unassigned_lines_are_collected_never_dropped` lost one of
+    its two expected lines — the invariant quietly weakened by a refactor meant to extend it.
+
+    On a PDF there is no middle band to preserve: a line either starts in the text column or it does
+    not, because `lines_from_pdf` reports positions rather than leading spaces.
+    """
+    indent = line.indent
+    if indent is not None:
+        return indent >= 20
+    return threshold is not None and bool(line.tokens) and line.tokens[0].x0 >= threshold
+
+
+@dataclass(frozen=True)
+class _RowStart:
+    """A row's opening line, however it was recognised."""
+
+    code: str
+    category: str
+    processor_assist: bool
+    text: str
+
+
+def _row_start(line: Line, threshold: float | None) -> _RowStart | None:
+    """A row's opening line, read from spacing on text and from POSITIONS on a PDF.
+
+    ⚠️ THE TEXT REGEX CANNOT BE USED ON A PDF, AND USING IT RETURNED AN EMPTY SHEET. `_ROW_START`
+    requires `\\s{2,}` between the code, the category and the text; a PDF-built line is
+    `" ".join(tokens)` and contains no run of two spaces anywhere. Measured on the same row:
+
+        text:  ' 0006         Invoice                       Provide copy of invoice for credit...'
+        pdf :  '0006 Invoice Provide copy of invoice for credit report.'
+
+    The first matches, the second does not, so every row fell through to `unassigned_lines` and the
+    sheet parsed to zero rows. This is the THIRD defect from one cause — the Champions header pairs
+    and the UWM loan-fact scan were the others — so the rule is worth stating once, plainly:
+    **on PDF input whitespace carries no information; only positions do.**
+
+    The positional split needs no invented characters: the column threshold already separates the
+    code and category (at the margin) from the text, which is the only boundary that matters.
+    """
+    if line.indent is not None:
+        match = _ROW_START.match(line.text)
+        if match is None:
+            return None
+        return _RowStart(
+            code=match.group(1),
+            category=match.group(3).strip(),
+            processor_assist=match.group(2) is not None,
+            text=match.group(4).strip(),
         )
-    if indent > 3:
+
+    tokens = line.tokens
+    if not tokens or not _CODE.match(tokens[0].text) or threshold is None:
+        return None
+
+    # ⚠️ THE CODE MUST BE AT THE MARGIN, AND DROPPING THIS SPLIT A ROW IN TWO. `_ROW_START` anchors
+    # at `^\s{0,3}`, so on text a four-digit number deep inside a wrapped line can never open a row.
+    # Translating to positions lost that anchor, and `4235`'s continuation — which begins
+    # `2026 and 2025 for Jordan Ellis...` — was read as a row start: a YEAR in the text column, four
+    # digits long. The page-break sheet returned 17 rows instead of 16 with `4235` truncated to its
+    # first line. The margin test is what `^\s{0,3}` means in a world of columns.
+    if not _is_shallow(line, threshold):
+        return None
+
+    rest = list(tokens[1:])
+    processor_assist = bool(rest) and rest[0].text == "(PA)"
+    if processor_assist:
+        rest = rest[1:]
+
+    text = [token for token in rest if token.x0 >= threshold]
+    if not text:
+        # A four-digit token with nothing in the text column is not a row start — it is a figure
+        # inside somebody else's sentence.
+        return None
+    return _RowStart(
+        code=tokens[0].text,
+        category=" ".join(token.text for token in rest if token.x0 < threshold),
+        processor_assist=processor_assist,
+        text=" ".join(token.text for token in text),
+    )
+
+
+def _is_heading(line: Line, threshold: float | None = None) -> bool:
+    """A heading sits at the margin, carries no leading 4-digit code, and matches the pattern.
+
+    ⚠️ ANSWERING `False` FOR EVERY PDF LINE WAS A REAL DEFECT, and it is what this replaced. `indent`
+    is None for PDF-built lines, so `indent is None or indent > 3` made this False for every line of
+    every uploaded sheet — and the caller's next branch treats "not shallow" as a continuation, so
+    each bucket heading was silently glued onto the preceding condition's text. Row starts still
+    matched, so the sheet produced the right NUMBER of rows, all filed under a stale bucket, one
+    carrying words the lender never wrote.
+    """
+    if not _is_shallow(line, threshold):
         return False
     text = line.text.strip()
     if not text or _ROW_START.match(line.text):
@@ -431,12 +561,6 @@ def read_uwm(lines: Sequence[Line]) -> ParsedSheet:
     # headings glued into the text. Section 3 authors the first PDF fixture and calibrates a
     # points-based threshold; LP-905, which is the first caller to hand this real PDFs, comes after
     # it in the spec's own order (§4), so nothing downstream depends on this gap being filled yet.
-    if any(line.from_pdf for line in lines):
-        raise NotImplementedError(
-            "the UWM reader cannot yet read PDF-built lines: heading and continuation detection "
-            "need a column threshold in points, which section 3 calibrates against a real PDF"
-        )
-
     def index_of(marker: str) -> int | None:
         return next(
             (i for i, line in enumerate(lines) if line.text.strip() == marker),
@@ -469,6 +593,12 @@ def read_uwm(lines: Sequence[Line]) -> ParsedSheet:
         sheet.warnings.extend(fact_warnings)
 
     block_end = expiry_at if expiry_at is not None else len(lines)
+    # Computed over the CONDITIONS BLOCK ONLY. The header and the loan-information table have their
+    # own column structure — a two-column header would contribute a gap of its own and move the
+    # split — so the threshold is derived from the lines it will actually be applied to.
+    threshold = _shallow_threshold(
+        [line for line in lines[conditions_at + 1 : block_end] if not line.is_blank]
+    )
     rows: list[_Row] = []
     current: _Row | None = None
     heading, kind = "", BucketKind.UNKNOWN
@@ -483,20 +613,20 @@ def read_uwm(lines: Sequence[Line]) -> ParsedSheet:
             current = None
             continue
 
-        if (match := _ROW_START.match(line.text)) is not None:
+        if (start := _row_start(line, threshold)) is not None:
             current = _Row(
-                code=match.group(1),
-                category=match.group(3).strip(),
-                processor_assist=match.group(2) is not None,
+                code=start.code,
+                category=start.category,
+                processor_assist=start.processor_assist,
                 heading=heading,
                 kind=kind,
-                parts=[match.group(4).strip()],
+                parts=[start.text],
                 lines=[offset],
             )
             rows.append(current)
             continue
 
-        if _is_heading(line):
+        if _is_heading(line, threshold):
             heading, unknown = line.text.strip(), False
             kind, unknown = _heading_kind(heading)
             if unknown:
@@ -504,8 +634,10 @@ def read_uwm(lines: Sequence[Line]) -> ParsedSheet:
             current = None
             continue
 
-        indent = line.indent
-        if current is not None and (indent is None or indent >= 20):
+        # Not a row start, not a heading, not an artifact. A continuation is a POSITIVE test — a
+        # deep indent on text, the text column on a PDF — never "whatever is left", because the
+        # band between a heading and a continuation belongs in `unassigned_lines`.
+        if current is not None and _is_continuation(line, threshold):
             current.parts.append(line.text.strip())
             current.lines.append(offset)
             continue

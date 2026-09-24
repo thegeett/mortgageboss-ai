@@ -396,22 +396,27 @@ def test_a_label_word_inside_a_value_is_not_a_label() -> None:
     assert facts == {"Loan Program": "Conventional Escrows Waived", "FICO": "742"}
 
 
-def test_a_pdf_sheet_is_refused_loudly_rather_than_misread() -> None:
-    """⚠️ THE DEFECT SECTION 1'S OWN FIX CREATED.
+def test_a_pdf_sheet_with_no_conditions_block_is_not_an_error() -> None:
+    """⚠️ THIS TEST USED TO ASSERT A `NotImplementedError`, AND THAT REFUSAL IS DELIBERATELY GONE.
 
-    `indent` is None for PDF-built lines, so `_is_heading` returned False for EVERY line and the
-    continuation branch — which treats None as "indented" — glued each bucket heading onto the
-    preceding condition. Row starts still matched, so a PDF produced the right number of rows, under
-    stale buckets, one carrying words the lender never wrote. Silence is the whole problem; until
-    section 3 calibrates a points threshold, this raises.
+    `read_uwm` refused PDF input entirely while `indent` was the only answer to heading-versus-
+    continuation, because `indent` is None for PDF-built lines. A derived column threshold replaced
+    it, so a PDF is now read — the equivalence between a text fixture and a PDF rendered from the
+    same text is proved in `test_reader_uwm_pdf.py`.
+
+    What remains worth pinning here is the degenerate case: a PDF with a title and no `CONDITIONS`
+    marker is a warning and `needs_ai`, never a crash, because an unreadable upload must reach the
+    processor as a failed round rather than as a 500.
     """
     document = pymupdf.open()
     page = document.new_page()
     page.insert_text((72.0, 100.0), "LOAN APPROVAL CONDITIONS - X - 1", fontsize=9)
-    pdf_lines = lines_from_pdf(bytes(document.tobytes()))
 
-    with pytest.raises(NotImplementedError, match="column threshold in points"):
-        read_uwm(pdf_lines)
+    sheet = read_uwm(lines_from_pdf(bytes(document.tobytes())))
+
+    assert sheet.rows == []
+    assert sheet.needs_ai is True
+    assert any("CONDITIONS" in warning for warning in sheet.warnings)
 
 
 def test_unassigned_lines_are_collected_never_dropped() -> None:
