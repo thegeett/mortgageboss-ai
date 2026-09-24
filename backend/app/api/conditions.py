@@ -17,13 +17,24 @@ scoped, so a round can only ever be opened on a file the caller's company owns.
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from sqlalchemy import select
 
 from app.api.dependencies import CurrentUser
 from app.core.config import settings
 from app.core.database import DbSession
-from app.models.condition_round import ConditionRoundCompleteness, ConditionSourceKind
-from app.schemas.condition import ConditionPasteRequest, ConditionRoundPublic
+from app.models.condition_round import (
+    ConditionRound,
+    ConditionRoundCompleteness,
+    ConditionSourceKind,
+)
+from app.models.helpers import only_active
+from app.schemas.condition import (
+    ConditionEnrichResult,
+    ConditionPasteRequest,
+    ConditionRoundPublic,
+)
+from app.services.condition_enrich import RoundNotEnrichable, enrich_round_with_pdf
 from app.services.condition_rounds import (
     ConditionSheetRejected,
     SheetBytes,
@@ -33,9 +44,44 @@ from app.services.condition_rounds import (
 from app.services.loan_files import get_loan_file
 
 router = APIRouter(prefix="/loan-files", tags=["conditions"])
+#: ⚠️ A SECOND ROUTER, BECAUSE THE PATH CARRIES NO LOAN FILE. Spec §LP-907 writes
+#: `POST /api/condition-rounds/{round_id}/attach-pdf`, and a round id is globally unique — so
+#: `ScopedLoanFile`, the tenant gate every nested route uses, has nothing to gate on here. The
+#: scoping moves into the lookup instead (`get_scoped_round`), which is the same shape
+#: `documents.py` uses for its flat router.
+rounds_router = APIRouter(prefix="/condition-rounds", tags=["conditions"])
 
 #: Read the upload a megabyte at a time, the same as the MISMO path.
 _CHUNK = 1024 * 1024
+
+
+async def get_scoped_round(
+    round_id: UUID, db: DbSession, current_user: CurrentUser
+) -> ConditionRound:
+    """The round in the path, scoped to the caller's company.
+
+    ⚠️ THE SCOPE IS IN THE QUERY, NOT IN A CHECK AFTER IT. Fetching by id and then comparing
+    `company_id` gives the same answer but a different failure: for the window between the two the
+    row is in hand, and any code added later that touches it before the check leaks another tenant's
+    data. Filtering in the statement makes a mismatched (company, round) pair unfetchable rather than
+    merely rejected — the same reasoning `get_loan_file` uses, and the reason the forward door's
+    404 is indistinguishable from a missing id.
+    """
+    round_ = await db.scalar(
+        only_active(
+            select(ConditionRound).where(
+                ConditionRound.id == round_id,
+                ConditionRound.company_id == current_user.company_id,
+            ),
+            ConditionRound,
+        )
+    )
+    if round_ is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found.")
+    return round_
+
+
+ScopedRound = Annotated[ConditionRound, Depends(get_scoped_round)]
 
 
 async def _read_capped(upload: UploadFile, *, max_bytes: int) -> bytes:
@@ -164,3 +210,65 @@ async def paste_conditions(
     await db.commit()
     await db.refresh(round_)
     return ConditionRoundPublic.from_model(round_)
+
+
+@rounds_router.post(
+    "/{round_id}/attach-pdf",
+    response_model=ConditionEnrichResult,
+    status_code=status.HTTP_200_OK,
+)
+async def attach_pdf(
+    round_: ScopedRound,
+    db: DbSession,
+    current_user: CurrentUser,
+    file: Annotated[UploadFile, File(description="The lender's condition sheet, as a PDF")],
+) -> ConditionEnrichResult:
+    """Attach the lender's PDF to a round that was pasted → merge into THE SAME round (S1-09).
+
+    ⚠️ 200, NOT 201 OR 202, AND THAT IS THE CONTRACT THIS TICKET EXISTS TO STATE. Nothing is created:
+    no second round, and — when the PDF carries the conditions the paste already had — no new
+    conditions either. A 201 would say something was created and invite a client to expect a new id.
+
+    The merge runs IN THE REQUEST rather than on a worker, unlike the upload door. The reason is the
+    same one the paste endpoint gives from the other side: the upload door answers before the parse
+    so the UI can poll a `PARSING` round, but an enrich has a round on screen already, and moving it
+    back to `PARSING` to reuse that machinery is exactly what the service refuses to do — it would
+    make a re-parse something a file upload does silently. The processor gets the merged result, or
+    a refusal naming the reason.
+    """
+    content = await _read_capped(file, max_bytes=settings.condition_sheet_max_bytes)
+    if not content:
+        raise HTTPException(status_code=422, detail="No file provided.")
+
+    try:
+        result = await enrich_round_with_pdf(
+            db,
+            round_=round_,
+            content=content,
+            declared_content_type=file.content_type,
+            actor_user_id=current_user.id,
+        )
+    except RoundNotEnrichable as exc:
+        # 409: the round exists and the caller may see it — it is the round's STATE that refuses.
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    except ConditionSheetRejected as exc:
+        raise HTTPException(status_code=422, detail=exc.reason) from exc
+
+    await db.commit()
+    await db.refresh(round_)
+
+    return ConditionEnrichResult(
+        round_id=round_.id,
+        round_number=round_.round_number,
+        status=round_.status,
+        sheet_format=round_.sheet_format,
+        filled_header=result.filled_header,
+        filled_expiry=result.filled_expiry,
+        filled_date_printed=result.filled_date_printed,
+        matched=result.matched,
+        added=result.added,
+        # ⚠️ A COUNT, NOT THE TEXTS. Those are the lender's words (ADR-405) and the rows themselves
+        # come back on the round; a response does not need to restate them to report a number.
+        unmatched_existing=len(result.unmatched_existing),
+        warnings=result.warnings,
+    )

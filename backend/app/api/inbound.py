@@ -26,6 +26,7 @@ from app.schemas.inbound import (
     UseAsConditionSheetRequest,
     UseAsConditionSheetResponse,
 )
+from app.services.condition_enrich import RoundNotEnrichable
 from app.services.condition_rounds import ConditionSheetRejected
 from app.services.inbound_triage import (
     AcceptAs,
@@ -35,6 +36,7 @@ from app.services.inbound_triage import (
     forward_attachment_as_sheet,
     list_file_messages,
     list_triage_queue,
+    merge_attachment_into_round,
     reject_attachment,
 )
 
@@ -259,6 +261,7 @@ async def use_as_condition_sheet(
     loan_file: ScopedLoanFile,
     db: DbSession,
     current_user: CurrentUser,
+    response: Response,
 ) -> UseAsConditionSheetResponse:
     """Use an emailed PDF as this file's condition sheet (LP-905, screen S1-13).
 
@@ -277,20 +280,53 @@ async def use_as_condition_sheet(
     forwarding has the same exposure: it would create a round on a file from a message no company
     owns yet. Route the message first, then forward it.
 
-    202, like the upload: the round comes back in `PARSING` and the UI polls it.
+    ⚠️ TWO OUTCOMES, TWO STATUS CODES, AND THE DIFFERENCE IS WHETHER ANYTHING WAS CREATED. Without
+    `attach_to_round_id` this opens a new round and answers **202**: the round comes back `PARSING`
+    and the UI polls it. With one, it MERGES into that round and answers **200** — nothing was
+    created, nothing was queued, and there is nothing to poll. LP-905 refused that branch with a
+    `501` because the merge did not exist; LP-907 is the merge.
     """
-    if payload.attach_to_round_id is not None:
-        # Spec §LP-905 defines this as running the LP-907 merge, and LP-907 does not exist. Refusing
-        # is honest; quietly creating a second round instead would be the silent-wrong-answer shape
-        # this stage keeps finding.
-        raise HTTPException(
-            status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Attaching to an existing round arrives with LP-907. Start a new round instead.",
-        )
-
     attachment = await _scoped_attachment(
         db, loan_file_id=loan_file.id, attachment_id=attachment_id
     )
+
+    if payload.attach_to_round_id is not None:
+        # ⚠️ LP-907 ARRIVED, SO THE `501` IS GONE. This merges into the named round and creates NO
+        # second round — which is why it answers 200 rather than the 202 the create path uses: there
+        # is nothing to poll, because nothing was queued and nothing was created.
+        try:
+            merged = await merge_attachment_into_round(
+                db,
+                loan_file=loan_file,
+                attachment=attachment,
+                round_id=payload.attach_to_round_id,
+                actor_user_id=current_user.id,
+            )
+        except ConditionSheetRejected as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.reason) from exc
+        except RoundNotEnrichable as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+        except CannotAcceptError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+        await db.commit()
+        await db.refresh(merged)
+        await db.refresh(attachment)
+        # ⚠️ SET EXPLICITLY, BECAUSE THE DECORATOR'S 202 IS THE DEFAULT FOR THE WHOLE HANDLER AND
+        # RETURNING A MODEL DOES NOT OVERRIDE IT. The first version of this branch documented "two
+        # outcomes, two status codes" and shipped one — the merge answered 202 while the docstring
+        # said 200, which is a comment asserting behaviour the code did not have. `auth.py` injects
+        # `Response` for the same reason.
+        #
+        # The distinction is worth the parameter: 202 means "accepted, still being worked on", and
+        # the UI polls a `PARSING` round on the strength of it. A merge is finished when it answers
+        # and queued nothing, so a client polling it would be polling a round that never changes.
+        response.status_code = status.HTTP_200_OK
+        return UseAsConditionSheetResponse(
+            round_id=merged.id,
+            status=merged.status.value,
+            disposition=attachment.disposition.value,
+        )
     try:
         round_ = await forward_attachment_as_sheet(
             db, loan_file=loan_file, attachment=attachment, actor_user_id=current_user.id

@@ -14,6 +14,7 @@ from app.api.calculators import router as calculators_router
 from app.api.capabilities import router as capabilities_router
 from app.api.communications import message_router as messages_router
 from app.api.communications import router as communications_router
+from app.api.conditions import rounds_router as condition_rounds_router
 from app.api.conditions import router as conditions_router
 from app.api.document_findings import router as findings_router
 from app.api.documents import flat_router as documents_flat_router
@@ -156,6 +157,7 @@ app.include_router(inbound_router, prefix=API_V1_PREFIX)
 app.include_router(inbound_company_router, prefix=API_V1_PREFIX)
 app.include_router(needs_router, prefix=API_V1_PREFIX)
 app.include_router(conditions_router, prefix=API_V1_PREFIX)
+app.include_router(condition_rounds_router, prefix=API_V1_PREFIX)
 app.include_router(activity_router, prefix=API_V1_PREFIX)
 app.include_router(documents_nested_router, prefix=API_V1_PREFIX)
 app.include_router(documents_flat_router, prefix=API_V1_PREFIX)

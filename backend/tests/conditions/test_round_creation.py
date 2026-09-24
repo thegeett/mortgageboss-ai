@@ -21,6 +21,7 @@ from app.services.condition_rounds import (
     ConditionSheetRejected,
     SheetBytes,
     create_round_from_sheet,
+    reject_unless_pdf,
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -209,8 +210,6 @@ async def test_the_refusal_quotes_what_the_sender_CLAIMED(db_session: AsyncSessi
 
     Same bytes, three declarations, three honest messages.
     """
-    from app.services.condition_rounds import _reject_unless_pdf
-
     png = (
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
         b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
@@ -218,11 +217,11 @@ async def test_the_refusal_quotes_what_the_sender_CLAIMED(db_session: AsyncSessi
     )
 
     with pytest.raises(ConditionSheetRejected) as claimed_pdf:
-        _reject_unless_pdf(png, declared_content_type="application/pdf")
+        reject_unless_pdf(png, declared_content_type="application/pdf")
     assert "says it is application/pdf" in claimed_pdf.value.reason
 
     with pytest.raises(ConditionSheetRejected) as claimed_nothing_useful:
-        _reject_unless_pdf(png, declared_content_type="application/octet-stream")
+        reject_unless_pdf(png, declared_content_type="application/octet-stream")
     # It never claimed to be a PDF, so it is not accused of having claimed one.
     assert "says it is application/pdf" not in claimed_nothing_useful.value.reason
     assert "image/png" in claimed_nothing_useful.value.reason

@@ -523,16 +523,21 @@ def _owner_hint(
     return OwnerHint.UNKNOWN, OwnerHintSource.NONE
 
 
-def _fingerprint_text(text: str) -> str:
+def note_stripped(text: str) -> str:
     """The text with note spans removed, lower-cased, whitespace collapsed (rule 5's input).
 
-    Used here only for DEDUPLICATION (rule 6). The stored `text_fingerprint` is computed at import.
+    ⚠️ PUBLIC, AND SHARED WITH THE STORED FINGERPRINT (LP-907). It was private while this module was
+    the only caller; `app.conditions.fingerprint` now hashes exactly this, so "is this the same
+    wording?" has ONE answer. Two normalisations that could disagree would mean a row deduplicated
+    within a sheet and then duplicated across rounds — the failure both are meant to prevent.
 
-    ⚠️ THIS DOES NOT MAKE AN ANNOTATED COPY EQUAL TO A CLEAN ONE, and an earlier version of this
-    docstring claimed it did. Rule 6's key is "the same code, fingerprint AND notes", so the notes are
-    compared as a third element and the stripping here is cancelled by it. That is the SPEC'S rule and
-    it is kept deliberately: the alternative — dropping the notes from the key — would discard a copy
-    the underwriter annotated in favour of one they did not, losing the annotation.
+    ⚠️ THIS DOES NOT MAKE AN ANNOTATED COPY EQUAL TO A CLEAN ONE *HERE*, and an earlier version of
+    this docstring claimed it did. Rule 6's key is "the same code, fingerprint AND notes", so the
+    notes are compared as a third element and the stripping is cancelled by it. That is the SPEC'S
+    rule and it is kept deliberately: the alternative — dropping the notes from the key — would
+    discard a copy the underwriter annotated in favour of one they did not, losing the annotation.
+    The stored fingerprint has no such third element, which is exactly why a condition that comes
+    back with a new note is recognised as the same condition rather than as a new one.
 
     The consequence, stated rather than hidden: a page-overlap duplicate whose two copies differ —
     annotated on one page only, or split mid-sentence so the text itself differs — SURVIVES as two
@@ -811,6 +816,26 @@ def uwm_block_start(lines: Sequence[Line]) -> int | None:
     heading gets `PASTED_TEXT` and `needs_ai` rather than a confident wrong answer — the same choice
     this module makes for Champions, and the same direction: a paste that is not understood goes to
     LP-908, it does not get a lender's name attached to a guess.
+
+    ⚠️ THE KNOWN RESIDUAL IS A FAMILY, NOT A LIST, AND STATING IT AS A LIST WOULD MISLEAD. A
+    four-digit-first-column table is still read as UWM whenever ANY line above it satisfies
+    `_heading_kind` — which accepts three ways: the line is in `_HEADINGS`, **or** it carries a
+    `(PTD|PTF|PTC|PTA)` parenthetical, **or** it contains `Trailing`.
+
+    The middle clause is open-ended: any title-cased line ending in one of four parentheticals
+    qualifies, so `Whatever (PTA)` passes as readily as `Compliance - Prior To Closing (PTD)`. An
+    earlier version of this comment enumerated five example shapes, which invites the next reader to
+    treat a sixth as a new defect rather than as the same rule behaving as written.
+
+    It is left because the available fix is worse than the residual, and the open clause is why:
+    the parenthetical test is exactly what makes `UW - Prior To Final Approval (PTD)` work, so
+    tightening it refuses real headings. Real blocks interleave headings with rows — 3, 2 and 5
+    headings against 6, 6 and 16 row starts across the fixtures — while a fake carries one heading
+    at the top, so "a known heading that is not the first content line" would refuse the whole
+    family. It would ALSO refuse a genuine single-bucket excerpt, which is a real thing a processor
+    pastes, and trading a constructible wrong answer for a plausible one is the move that produced
+    three failed gap rules earlier in this stage. Such a paste has to be constructed deliberately;
+    none has been observed. Recorded so a reader can check the rule rather than rediscover it.
     """
     content = [line for line in lines if not line.is_blank]
     if not content:
@@ -942,7 +967,7 @@ def read_uwm(lines: Sequence[Line], *, conditions_from: int | None = None) -> Pa
     for row in rows:
         text = " ".join(row.parts)
         notes = _notes(text, sheet.date_printed)
-        key = (row.code, _fingerprint_text(text), tuple(n.text for n in notes))
+        key = (row.code, note_stripped(text), tuple(n.text for n in notes))
         if key in seen:
             sheet.duplicates_dropped += 1
             sheet.warnings.append(f"dropped page-overlap duplicate of code {row.code}")

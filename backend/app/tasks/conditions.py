@@ -30,19 +30,18 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-import pymupdf
 import structlog
 from celery import Task
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.conditions.readers import (
-    READER_VERSION,
-    detect_format,
-    lines_from_pdf,
-    reader_for,
-)
+from app.conditions.readers import READER_VERSION
 from app.conditions.readers.model import ParsedSheet
+from app.conditions.sheet_read import (
+    ConditionParseError,
+    SheetBytesUnavailable,
+    sheet_from_bytes,
+)
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_round import ConditionRound, ConditionRoundStatus
 from app.services.condition_rounds import draft_rows_json, parse_report_for
@@ -59,39 +58,6 @@ PARSE_SOFT_LIMIT_SECONDS = 300
 PARSE_HARD_LIMIT_SECONDS = 360
 
 
-class ConditionParseError(Exception):
-    """A parse that cannot proceed, carrying a TYPED reason and a sentence for the processor.
-
-    ⚠️ NEVER A BARE `except Exception` (spec §9.8). "The file is no longer in storage", "this PDF
-    cannot be opened" and "the sheet is empty" lead a processor to three different next actions, and
-    collapsing them into one message makes a failed round a dead end. `failure_kind` is what code
-    and dashboards read; `detail` is what a person reads.
-
-    ⚠️ `detail` IS COMPOSED, NEVER QUOTED FROM THE SHEET. It is written into
-    `parse_report.failure_detail`, which the readonly layer scrubs for identifier SHAPES only — a
-    digit run is redacted, a borrower's name is not. The same rule that moved a warning from quoting
-    a loan-information line to naming its position.
-    """
-
-    failure_kind = "parse_failed"
-
-    def __init__(self, detail: str) -> None:
-        super().__init__(detail)
-        self.detail = detail
-
-
-class SheetBytesUnavailable(ConditionParseError):
-    """The stored PDF could not be fetched — the round exists but its bytes do not."""
-
-    failure_kind = "bytes_unavailable"
-
-
-class SheetUnreadable(ConditionParseError):
-    """The bytes are not a PDF this library can open."""
-
-    failure_kind = "unreadable"
-
-
 def _storage_path(round_: ConditionRound) -> str | None:
     """The newest arrival's stored bytes. `sources` is a list because a paste can gain a PDF."""
     for source in reversed(round_.sources or []):
@@ -102,7 +68,11 @@ def _storage_path(round_: ConditionRound) -> str | None:
 
 
 async def _read_sheet(round_: ConditionRound) -> tuple[str, ParsedSheet]:
-    """Fetch the bytes, detect the layout, and hand them to the reader that knows it."""
+    """Fetch the round's stored bytes, then read them.
+
+    The FETCHING half is what belongs to the task: `attach-pdf` already holds its upload in memory
+    and shares only `sheet_from_bytes` (see `app.conditions.sheet_read`).
+    """
     path = _storage_path(round_)
     if path is None:
         raise SheetBytesUnavailable(
@@ -116,16 +86,7 @@ async def _read_sheet(round_: ConditionRound) -> tuple[str, ParsedSheet]:
             "The stored condition sheet could not be retrieved. Upload it again."
         ) from exc
 
-    try:
-        lines = lines_from_pdf(content)
-    except (pymupdf.EmptyFileError, pymupdf.FileDataError) as exc:
-        # Measured: empty bytes raise EmptyFileError, garbage and truncated files FileDataError.
-        raise SheetUnreadable(
-            "This PDF could not be opened. It may be damaged — ask the lender to send it again."
-        ) from exc
-
-    name, read = reader_for(detect_format(lines))
-    return name, read(lines)
+    return sheet_from_bytes(content)
 
 
 async def _settle(

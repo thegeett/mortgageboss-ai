@@ -88,7 +88,7 @@ def _storage_path(*, company_id: UUID, loan_file_id: UUID) -> str:
     return f"condition-sheets/{company_id}/{loan_file_id}/{uuid4().hex}.pdf"
 
 
-def _reject_unless_pdf(content: bytes, *, declared_content_type: str | None = None) -> None:
+def reject_unless_pdf(content: bytes, *, declared_content_type: str | None = None) -> None:
     """Refuse anything that is not a readable, unencrypted PDF.
 
     ⚠️ THE STATE ALONE IS NOT ENOUGH, AND THIS IS THE TRAP. `assess` returns SAFE for an IMAGE too —
@@ -123,7 +123,7 @@ async def create_round_from_sheet(
     Shared by both front doors — the upload endpoint and the inbox's "Use as condition sheet" — so
     that an emailed sheet and an uploaded one produce the same row, differing only in `sources`.
     """
-    _reject_unless_pdf(sheet.content, declared_content_type=sheet.declared_content_type)
+    reject_unless_pdf(sheet.content, declared_content_type=sheet.declared_content_type)
 
     storage_path = _storage_path(company_id=loan_file.company_id, loan_file_id=loan_file.id)
     await get_storage_backend().save_at(storage_path=storage_path, content=sheet.content)

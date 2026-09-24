@@ -288,6 +288,34 @@ class ConditionCreateRequest(BaseModel):
     bucket_kind: BucketKind = BucketKind.UNKNOWN
 
 
+class ConditionEnrichResult(BaseModel):
+    """What attaching the lender's PDF to an existing round did (LP-907, screen S1-09).
+
+    ⚠️ EVERY FIELD IS A COUNT OR A FLAG, NEVER A CONDITION'S WORDING. S1-09's success callout says
+    what the PDF filled in and that it added no new conditions and no second round, so counts are
+    what it needs — and `unmatched_existing` is deliberately a NUMBER rather than the texts, because
+    those are the lender's words and this response is not where they belong (ADR-405). The rows
+    themselves come back on the round.
+    """
+
+    round_id: UUID
+    #: Always the round that was passed in. Present so the caller can assert it, since "no second
+    #: round was created" is the property this whole endpoint exists to guarantee.
+    round_number: int | None = None
+    status: ConditionRoundStatus
+    sheet_format: ConditionSheetFormat
+    filled_header: bool = False
+    filled_expiry: bool = False
+    filled_date_printed: bool = False
+    #: Existing rows that gained a code, category or bucket the paste could not carry.
+    matched: int = 0
+    #: Rows on the PDF that the paste did not have — added to THIS round, never a new one.
+    added: int = 0
+    #: Rows the paste had and the PDF does not. KEPT, never removed (ADR-404).
+    unmatched_existing: int = 0
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ConditionImportResult(BaseModel):
     """What an import did, for the toast and the timeline entry.
 

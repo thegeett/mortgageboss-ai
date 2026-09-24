@@ -163,13 +163,17 @@ async def test_the_attachment_is_kept_as_correspondence_not_made_a_document(
     assert documents == []
 
 
-async def test_attaching_to_an_existing_round_is_refused_until_lp907(
+async def test_attaching_to_a_round_that_is_not_on_this_file_is_refused(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ ACCEPTED IN THE CONTRACT, REFUSED IN BEHAVIOUR. The spec defines `attach_to_round_id` as
-    running the LP-907 merge, and LP-907 does not exist. Declaring the field keeps the endpoint
-    stable for the UI that will send it; refusing is honest, where quietly creating a SECOND round
-    instead would be the silent-wrong-answer shape this stage keeps finding."""
+    """⚠️ `attach_to_round_id` ARRIVES IN THE REQUEST BODY, which makes it the one id here that
+    cannot be trusted. The route proves the caller owns the FILE; only the scoped lookup proves the
+    ROUND is on it. An unknown id is refused and leaves nothing behind.
+
+    This test used to assert a `501` — LP-905 declared the field and refused it because the LP-907
+    merge did not exist. It does now, so what is worth pinning moved from "refused" to "refused for
+    the right reason".
+    """
     loan_file, attachment, token = await _setup(db_session, slug="fwd-attach")
 
     response = await client.post(
@@ -178,8 +182,8 @@ async def test_attaching_to_an_existing_round_is_refused_until_lp907(
         json={"attach_to_round_id": str(uuid4())},
     )
 
-    assert response.status_code == 501
-    assert "LP-907" in response.text
+    assert response.status_code == 409
+    assert "No such condition round on this loan file" in response.text
 
     rounds = (
         (
@@ -191,6 +195,54 @@ async def test_attaching_to_an_existing_round_is_refused_until_lp907(
         .all()
     )
     assert rounds == [], "a refused attach must not leave a round behind"
+
+
+async def test_forwarding_into_an_existing_round_merges_instead_of_creating_one(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """⚠️ THE `501` LP-905 LEFT BEHIND, NOW CLOSED — and the property it was protecting is the one
+    asserted here: forwarding into a round enriches THAT round and creates no second one.
+
+    200 rather than 202, because nothing was created and nothing was queued, so there is nothing to
+    poll. The attachment is still kept as CORRESPONDENCE, never turned into a document.
+    """
+    from app.models.condition_round import ConditionRoundCompleteness
+    from app.services.condition_rounds import create_round_from_paste
+    from tests.conditions.fixture_helpers import portal_excerpt
+
+    loan_file, attachment, token = await _setup(db_session, slug="fwd-merge")
+    pasted = await create_round_from_paste(
+        db_session,
+        loan_file=loan_file,  # type: ignore[arg-type]
+        text=portal_excerpt(),
+        completeness=ConditionRoundCompleteness.PARTIAL,
+    )
+
+    response = await client.post(
+        _url(loan_file.id, attachment.id),
+        headers=_auth(token),
+        json={"attach_to_round_id": str(pasted.id)},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["round_id"] == str(pasted.id)
+    assert response.json()["disposition"] == AttachmentDisposition.CORRESPONDENCE.value
+
+    rounds = (
+        (
+            await db_session.execute(
+                select(ConditionRound).where(ConditionRound.loan_file_id == loan_file.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rounds) == 1, "a merge must not leave a second round behind"
+    # S1-13's link still derives from `sources` — now pointing at the round the PDF enriched.
+    await db_session.refresh(pasted)
+    assert any(
+        source.get("inbound_attachment_id") == str(attachment.id) for source in pasted.sources
+    )
 
 
 async def test_forwarding_the_same_attachment_twice_is_refused(

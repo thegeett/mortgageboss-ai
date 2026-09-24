@@ -17,6 +17,8 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
+from app.conditions import sheet_read
+from app.conditions.sheet_read import SheetUnreadable
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_round import (
     ConditionRound,
@@ -25,8 +27,7 @@ from app.models.condition_round import (
     ConditionSourceKind,
 )
 from app.services.condition_rounds import SheetBytes, create_round_from_sheet
-from app.tasks import conditions as task_module
-from app.tasks.conditions import SheetUnreadable, parse_round
+from app.tasks.conditions import parse_round
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.conditions.fixture_helpers import UWM_ROUND_1
@@ -185,7 +186,11 @@ async def test_a_crash_mid_parse_leaves_the_round_untouched(
     def _explode(_content: bytes) -> object:
         raise RuntimeError("reader blew up mid-parse")
 
-    monkeypatch.setattr(task_module, "lines_from_pdf", _explode)
+    # ⚠️ PATCHED WHERE THE NAME NOW LIVES, AND THE MOVE BROKE THIS ONCE. LP-907 lifted the read out
+    # of this task into `app.conditions.sheet_read`, and the old `setattr(task_module, ...)` went on
+    # naming an attribute the module no longer had — `AttributeError`, caught here rather than by
+    # quietly patching nothing. A monkeypatch is only as good as the binding it targets.
+    monkeypatch.setattr(sheet_read, "lines_from_pdf", _explode)
     round_ = await _round(db_session)
 
     with pytest.raises(RuntimeError):

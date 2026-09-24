@@ -374,6 +374,95 @@ async def forward_attachment_as_sheet(
     return round_
 
 
+async def merge_attachment_into_round(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    attachment: InboundAttachment,
+    round_id: UUID,
+    actor_user_id: UUID,
+) -> ConditionRound:
+    """Merge an emailed PDF into an EXISTING round instead of opening a new one (LP-907).
+
+    This is what spec §LP-905's `attach_to_round_id` always meant, and what LP-905 refused with a
+    `501` because the merge did not exist yet.
+
+    ⚠️ THE ROUND IS LOADED SCOPED TO THIS LOAN FILE, AND THAT IS NOT OPTIONAL. `round_id` arrives in
+    a REQUEST BODY, so it is a caller-supplied id for a globally-unique row — the one shape that
+    cannot be trusted to belong to the file in the path. The route proves the caller owns the FILE;
+    nothing but this query proves the ROUND is on it. Scoping inside the statement rather than
+    fetching and comparing means a mismatched (file, round) pair is unfetchable, not merely
+    rejected.
+
+    ⚠️ THE `sources` DUPLICATE GUARD IS DELIBERATELY NOT APPLIED HERE, and the difference is the
+    whole point rather than an oversight. `forward_attachment_as_sheet` refuses an attachment whose
+    id already appears in some round's `sources`, because creating a SECOND round from one
+    attachment broke the one-to-one the S1-13 link derives from. Merging is the opposite case: it
+    puts that attachment's id into a round that already exists, creating no second round at all.
+    Attaching the same PDF twice is still refused — by `enrich_round_with_pdf`, on "this round
+    already has a PDF source", which is the guard that actually fits the question here.
+    """
+    from app.services.condition_enrich import enrich_round_with_pdf
+
+    message = await db.get(InboundMessage, attachment.inbound_message_id)
+    if message is None:
+        raise CannotAcceptError("The original message is no longer available.")
+    if message.loan_file_id != loan_file.id:
+        raise CannotAcceptError(
+            "This attachment belongs to a message routed to a different loan file."
+        )
+    if attachment.safety_state is not AttachmentSafetyState.SAFE:
+        # PENDING IS NOT A PASS — the scan is asynchronous, so "nobody has looked yet" is a state
+        # that genuinely persists and must never read as "nothing was found".
+        raise CannotAcceptError(
+            f"This attachment is {attachment.safety_state.value}, not safe to use. "
+            f"{attachment.safety_reason or ''}".strip()
+        )
+    if attachment.disposition not in (
+        AttachmentDisposition.PENDING,
+        AttachmentDisposition.CORRESPONDENCE,
+    ):
+        raise CannotAcceptError(f"This attachment has already been {attachment.disposition.value}.")
+
+    round_ = await db.scalar(
+        only_active(
+            select(ConditionRound).where(
+                ConditionRound.id == round_id,
+                ConditionRound.loan_file_id == loan_file.id,
+            ),
+            ConditionRound,
+        )
+    )
+    if round_ is None:
+        raise CannotAcceptError("No such condition round on this loan file.")
+
+    content = await _attachment_bytes(db, attachment=attachment)
+    await enrich_round_with_pdf(
+        db,
+        round_=round_,
+        content=content,
+        # What the sender's mail client declared, so a refusal quotes the sender's own claim.
+        declared_content_type=attachment.declared_content_type,
+        actor_user_id=actor_user_id,
+    )
+
+    # The attachment's id goes onto the ROUND's sources by the merge itself, so S1-13's link still
+    # derives from the same field — now pointing at the round it enriched.
+    round_.sources = [
+        *round_.sources[:-1],
+        {**round_.sources[-1], "inbound_attachment_id": str(attachment.id)},
+    ]
+    attachment.disposition = AttachmentDisposition.CORRESPONDENCE
+    await db.flush()
+    logger.info(
+        "attachment_merged_into_condition_round",
+        attachment_id=str(attachment.id),
+        round_id=str(round_.id),
+        loan_file_id=str(loan_file.id),
+    )
+    return round_
+
+
 async def list_file_messages(db: AsyncSession, *, loan_file: LoanFile) -> list[InboundMessage]:
     """Everything that arrived for one loan file, newest first.
 
