@@ -239,13 +239,16 @@ async def create_round_from_paste(
     and the rules over it are string work. Queuing it would buy nothing and would cost the processor
     a "Reading…" screen for a result that was ready before the response was written.
 
-    ⚠️ ALWAYS `DRAFT`, EVEN WHEN THE RULES COULD NOT SPLIT THE TEXT — a deliberate departure from
-    spec §LP-907, which says to answer `PARSING` and queue the AI split. LP-908 does not exist, so
-    that branch would enqueue nothing and leave the round in `PARSING` with no worker and no exit:
-    the processor sits on screen S1-02 forever. LP-905 recorded a stranded `PARSING` round as the
-    one gap it left open; manufacturing that state deliberately would be worse than the honest
-    alternative, which is a DRAFT holding whatever the rules did find, with `needs_ai` recorded in
-    `parse_report` so LP-908 can find exactly these rounds and finish the job.
+    ⚠️ `DRAFT` WHEN THE RULES READ IT, `PARSING` WHEN THEY COULD NOT — and the second half of that
+    is LP-908 arriving. LP-907 shipped this always-DRAFT, as a deliberate departure from spec
+    §LP-907's "answer `PARSING` and queue the AI split", for one stated reason: LP-908 did not exist,
+    so the branch would have enqueued nothing and left the round in `PARSING` with no worker and no
+    exit — the processor on screen S1-02 forever, which is the one gap LP-905 explicitly left open.
+
+    That reason has expired rather than been overruled, so the deviation is reverted rather than
+    left standing. A paste the rules cannot split now opens `PARSING` and the caller enqueues
+    `split_condition_round`, which settles it to `DRAFT` with the AI's rows or to `PARSE_FAILED`
+    with a typed reason.
 
     ⚠️ NO PDF, SO NOTHING IS STORED. There are no bytes — `raw_text` on the row IS the source, which
     is why `_storage_path` in the parse task returns None for a pasted round and a re-parse of one
@@ -262,7 +265,9 @@ async def create_round_from_paste(
         company_id=loan_file.company_id,
         loan_file_id=loan_file.id,
         lender_id=loan_file.lender_id,
-        status=ConditionRoundStatus.DRAFT,
+        # The rules' verdict decides: read it, and the round is ready to review; could not, and it
+        # is `PARSING` until the split task settles it.
+        status=(ConditionRoundStatus.PARSING if sheet.needs_ai else ConditionRoundStatus.DRAFT),
         # ⚠️ REQUIRED FROM THE CALLER, never defaulted here (ADR-404). "Just some" can only ever add
         # and update; "the full list" is what lets a later comparison mean anything. A service that
         # guessed would decide the file's history on the processor's behalf.
@@ -291,22 +296,34 @@ async def create_round_from_paste(
     # read later by the task (ROUND_PARSED); a paste does both inside one request. Emitting only one
     # would leave the round-details history (S1-09) reading differently depending on which door the
     # round came through, for rounds that are otherwise identical.
-    for kind, detail in (
+    events: list[tuple[ConditionEventKind, dict[str, Any]]] = [
         (
             ConditionEventKind.ROUND_RECEIVED,
             # Metadata only — never the pasted text, which is NPI and already on the row.
             {"source_kind": ConditionSourceKind.PASTE.value, "chars": len(text)},
-        ),
-        (
-            ConditionEventKind.ROUND_PARSED,
-            {
-                "reader": reader,
-                "reader_version": READER_VERSION,
-                "rows": len(sheet.rows),
-                "needs_ai": sheet.needs_ai,
-            },
-        ),
-    ):
+        )
+    ]
+    # ⚠️ `ROUND_PARSED` ONLY IF THE RULES ACTUALLY READ IT. This used to be emitted unconditionally,
+    # which was true while a paste always landed DRAFT — and became a lie the moment a `needs_ai`
+    # paste started opening `PARSING`: the round's own history would say it was parsed before
+    # anything had read it, and then say so AGAIN when the split task settled it. Screen S1-09
+    # renders that history, so a processor would see two parses, one of which never happened.
+    #
+    # A test caught this: two `ROUND_PARSED` events on one round after a redelivery.
+    if not sheet.needs_ai:
+        events.append(
+            (
+                ConditionEventKind.ROUND_PARSED,
+                {
+                    "reader": reader,
+                    "reader_version": READER_VERSION,
+                    "rows": len(sheet.rows),
+                    "needs_ai": False,
+                },
+            )
+        )
+
+    for kind, detail in events:
         db.add(
             ConditionEvent(
                 company_id=loan_file.company_id,

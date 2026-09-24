@@ -162,6 +162,35 @@ async def test_both_events_are_written_because_both_things_happened(
     assert set(received.detail) == {"source_kind", "chars"}
 
 
+async def test_a_paste_awaiting_the_ai_has_not_been_parsed_yet(
+    db_session: AsyncSession,
+) -> None:
+    """⚠️ THE ROUND'S HISTORY MUST NOT CLAIM A PARSE THAT HAS NOT HAPPENED.
+
+    A paste the rules read emits ROUND_RECEIVED and ROUND_PARSED together, because both genuinely
+    happened inside the request. One that needs the AI has only ARRIVED — the split task emits
+    ROUND_PARSED when it settles. Emitting it here too put two parses on one round, one of which
+    never occurred, and screen S1-09 renders that history to a processor.
+    """
+    round_ = await _paste(
+        db_session, text="Please send whatever you have for this file when you can."
+    )
+
+    kinds = [
+        event.kind
+        for event in (
+            await db_session.execute(
+                select(ConditionEvent).where(ConditionEvent.round_id == round_.id)
+            )
+        )
+        .scalars()
+        .all()
+    ]
+
+    assert kinds == [ConditionEventKind.ROUND_RECEIVED]
+    assert round_.status is ConditionRoundStatus.PARSING
+
+
 async def test_a_paste_writes_a_timeline_entry(db_session: AsyncSession) -> None:
     round_ = await _paste(db_session)
 
@@ -175,25 +204,26 @@ async def test_a_paste_writes_a_timeline_entry(db_session: AsyncSession) -> None
     assert entry.detail["source_kind"] == ConditionSourceKind.PASTE.value
 
 
-async def test_text_the_rules_cannot_split_is_a_draft_not_a_stranded_round(
+async def test_text_the_rules_cannot_split_opens_parsing_for_the_ai(
     db_session: AsyncSession,
 ) -> None:
-    """⚠️ A DELIBERATE DEPARTURE FROM SPEC §LP-907, WHICH SAYS `PARSING` AND QUEUE THE AI SPLIT.
+    """⚠️ LP-907's DEVIATION, REVERTED NOW THAT ITS REASON HAS EXPIRED.
 
-    LP-908 does not exist, so that branch would enqueue nothing and leave the round in `PARSING`
-    with no worker and no exit — the processor sits on screen S1-02 forever. LP-905 recorded a
-    stranded `PARSING` round as the one gap it left open; manufacturing that state on purpose would
-    be worse than a DRAFT holding what the rules did find, with `needs_ai` recorded so LP-908 can
-    find exactly these rounds.
+    LP-907 shipped this as `DRAFT` for one stated reason: LP-908 did not exist, so `PARSING` would
+    have enqueued nothing and stranded the round with no worker and no exit — the gap LP-905
+    recorded. LP-908 §2 is the worker, so the spec's shape applies: `PARSING`, and the caller
+    enqueues the split.
+
+    `needs_ai` with `ai_used` still false is what says the round is WAITING rather than finished —
+    the two are read together, and the split task sets the second.
     """
     round_ = await _paste(
         db_session, text="Please send whatever you have for this file when you can."
     )
 
-    assert round_.status is ConditionRoundStatus.DRAFT
+    assert round_.status is ConditionRoundStatus.PARSING
     assert round_.sheet_format is ConditionSheetFormat.PASTED_TEXT
     assert round_.parse_report["needs_ai"] is True
-    # The pair is read together: the rules gave up, and no AI has run yet.
     assert round_.parse_report["ai_used"] is False
 
 

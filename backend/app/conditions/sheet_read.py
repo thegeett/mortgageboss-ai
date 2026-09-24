@@ -13,8 +13,21 @@ function that did both would mean the endpoint writing bytes to storage purely t
 passing `None` for a path it does not have. `sheet_from_bytes` is the half they share.
 
 NO NPI IN A FAILURE DETAIL (spec §9.5, §9.8): every `detail` below is COMPOSED, never quoted from the
-sheet. It is written into `parse_report.failure_detail`, which the readonly layer scrubs for
-identifier SHAPES only — a digit run is redacted, a borrower's name is not.
+sheet.
+
+⚠️ AND THE REASON IS NOT THE ONE THIS DOCSTRING USED TO GIVE. It said `parse_report.failure_detail`
+"reaches the readonly layer, which scrubs identifier SHAPES only". It does not reach it at all:
+`parse_report` is in the EXCLUDED set (`tests/test_readonly_query.py`) and the migration drops it
+whole — the view projects `reader`, `reader_version`, `ai_used`, `duplicates_dropped`,
+`warning_count` and `unassigned_count`, all derived. The scrub-shapes argument belongs to columns
+that ARE exposed, and this is not one. `models/condition_round.py` has always said so correctly;
+the wrong version was copied from here into three other files.
+
+The reason that does hold is stronger. `parse_report` is excluded precisely BECAUSE
+`unassigned_lines` inside it carries verbatim sheet text, so quoting a borrower's name into
+`failure_detail` puts NPI at rest in a field nobody can inspect to find it — and the derived scalars
+are all an analyst ever gets. Same shape as the loan-information warning fixed earlier in this
+stage: nothing escaped, and it was still wrong to store.
 """
 
 from __future__ import annotations

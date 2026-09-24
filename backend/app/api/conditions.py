@@ -17,7 +17,9 @@ scoped, so a round can only ever be opened on a file the caller's company owns.
 from typing import Annotated
 from uuid import UUID
 
+import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from kombu.exceptions import OperationalError
 from sqlalchemy import select
 
 from app.api.dependencies import CurrentUser
@@ -26,6 +28,7 @@ from app.core.database import DbSession
 from app.models.condition_round import (
     ConditionRound,
     ConditionRoundCompleteness,
+    ConditionRoundStatus,
     ConditionSourceKind,
 )
 from app.models.helpers import only_active
@@ -51,8 +54,58 @@ router = APIRouter(prefix="/loan-files", tags=["conditions"])
 #: `documents.py` uses for its flat router.
 rounds_router = APIRouter(prefix="/condition-rounds", tags=["conditions"])
 
+log = structlog.get_logger(__name__)
+
 #: Read the upload a megabyte at a time, the same as the MISMO path.
 _CHUNK = 1024 * 1024
+
+#: What a processor is told when the broker would not take the round. Composed, never quoted from
+#: the paste: `failure_detail` is stored inside `parse_report`, which the readonly layer DROPS
+#: WHOLE rather than scrubs, so NPI quoted here would sit at rest in a column nobody can inspect to
+#: find it (spec §9.5).
+_ENQUEUE_FAILED_DETAIL = (
+    "These conditions could not be queued for reading. Nothing was lost — try again in a moment."
+)
+
+
+async def _enqueue_split_or_fail(db: DbSession, round_: ConditionRound) -> None:
+    """Queue the AI split, and mark the round failed if the broker will not take it.
+
+    ⚠️ REPORTING THE OUTCOME RATHER THAN SWALLOWING IT, and this repo already learned which of those
+    is right here. `documents.py` carries both shapes: `_enqueue_reprocess` logs and moves on,
+    because the document is fine either way; `_enqueue_full_reprocess` REPORTS, because its callers
+    set a blocking state first and, in the LP-637 review's words, "a swallowed failure made that
+    permanent: a FAILED document became a PENDING one with a type and no error, which reads as
+    healthy, is invisible in the UI".
+
+    A round stuck in `PARSING` is that same shape — healthy-looking and invisible. The row is
+    committed BEFORE `.delay()` is reached (correctly: a worker that picked it up first would find
+    no row), so a broker that is down leaves a round nothing will ever move and a processor watching
+    screen S1-02 indefinitely. That is LP-905's recorded stranded-round gap, and reverting the paste
+    door to `PARSING` put it on the one door a person actually waits at.
+
+    A typed `PARSE_FAILED` is something they can act on. A spinner with no end is not.
+    """
+    try:
+        from app.tasks.conditions import split_condition_round
+
+        split_condition_round.delay(str(round_.id))
+    except OperationalError:
+        # ⚠️ SPECIFIC, NEVER A BARE `except Exception` (spec §9.8). This is the broker refusing the
+        # message — the one failure the round must survive. Anything else is a bug and belongs in
+        # the error handler, not filed as a parse failure that blames the lender's sheet.
+        round_.status = ConditionRoundStatus.PARSE_FAILED
+        # A NEW dict: SQLAlchemy does not track in-place mutation of JSONB, so an updated key on the
+        # existing one would simply not be written.
+        round_.parse_report = {
+            **(round_.parse_report or {}),
+            "failure_kind": "enqueue_failed",
+            "failure_detail": _ENQUEUE_FAILED_DETAIL,
+        }
+        await db.commit()
+        await db.refresh(round_)
+        # Ids and counts only (spec §9.5) — never the pasted text.
+        log.warning("condition_split_enqueue_failed", round_id=str(round_.id))
 
 
 async def get_scoped_round(
@@ -159,6 +212,12 @@ async def upload_condition_sheet(
 
     # Enqueued AFTER the commit, deliberately: a worker that picked the round up before the
     # transaction landed would find no row. The same ordering every enqueue in this repo uses.
+    # ⚠️ UNGUARDED, AND THAT IS A DECISION RATHER THAN AN OVERSIGHT — see `_enqueue_split_or_fail`
+    # above, which DOES guard the same call. This door has the identical exposure: the round is
+    # committed in `PARSING` before `.delay()` is reached, so a broker that is down strands it.
+    # It is left alone because this is LP-905's surface with its own test coverage, and changing a
+    # shipped door inside an AI-split ticket is how a ticket becomes a refactor. The mitigation is
+    # available and belongs with the reaper (LP-908 review).
     from app.tasks.conditions import parse_condition_round
 
     parse_condition_round.delay(str(round_.id))
@@ -209,6 +268,13 @@ async def paste_conditions(
 
     await db.commit()
     await db.refresh(round_)
+
+    # ⚠️ ENQUEUED ONLY WHEN THE RULES GAVE UP, and after the commit for the reason every enqueue in
+    # this repo uses: a worker that picked the round up before the transaction landed would find no
+    # row. A round the rules read is already DRAFT and has nothing to queue.
+    if round_.status is ConditionRoundStatus.PARSING:
+        await _enqueue_split_or_fail(db, round_)
+
     return ConditionRoundPublic.from_model(round_)
 
 

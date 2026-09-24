@@ -144,9 +144,18 @@ class ConditionRound(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     #: `{reader, reader_version, warnings, unassigned_lines, duplicates_dropped, ai_used}`.
     #:
     #: ⚠️ NPI AS A WHOLE, because `unassigned_lines` holds lines lifted from the sheet verbatim. The
-    #: rest of it — the reader name, the counts, the typed failure reason — is exactly what a
-    #: staging query needs, so the readonly view exposes those as separate scalars rather than
-    #: exposing the column.
+    #: readonly view therefore exposes derived scalars rather than the column: `reader`,
+    #: `reader_version`, `ai_used`, `duplicates_dropped`, `warning_count`, `unassigned_count`.
+    #:
+    #: ⚠️ THE TYPED FAILURE REASON IS NOT AMONG THEM, and an earlier version of this comment said it
+    #: was ("the reader name, the counts, the typed failure reason — is exactly what a staging query
+    #: needs"). `failure_kind` and `failure_detail` are not projected by migration `d1f4b8c25e93`, so
+    #: they are dropped with the column and never reach a staging query at all.
+    #:
+    #: That matters for what may be written INTO them: nothing here is ever scrubbed, because
+    #: nothing here is ever exposed. A borrower's name quoted into `failure_detail` does not escape
+    #: — it sits at rest in a column excluded precisely because it already carries sheet text, where
+    #: nobody can inspect it to find it. Compose those strings; never quote the sheet (spec §9.5).
     parse_report: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
 
     created_by_user_id: Mapped[UUID | None] = mapped_column(

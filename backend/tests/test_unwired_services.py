@@ -109,15 +109,6 @@ KNOWN_UNWIRED = {
     "_is_borrower_facing",  # LP-809
     "open_draft_preview",  # LP-811a
     "existing_identities",  # LP-93
-    # ⚠️ LP-908 SECTION 1, AND THIS GUARD CAUGHT IT DOING EXACTLY WHAT IT WAS BUILT TO CATCH. The
-    # splitter is written and has 17 tests; nothing in production calls it, because the wiring is
-    # section 2 — a paste the rules cannot split becomes PARSING with a queued split task, which
-    # also reverts LP-907's deliberate DRAFT-not-PARSING deviation now that its stated reason
-    # ("LP-908 does not exist") has expired.
-    #
-    # It goes on the list rather than the suite staying red, and it comes OFF in that commit — the
-    # second assertion below enforces that, so this entry cannot outlive its reason.
-    "split_conditions",  # LP-908 §2 wires it
 }
 
 

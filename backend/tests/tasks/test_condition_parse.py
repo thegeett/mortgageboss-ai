@@ -249,10 +249,18 @@ async def test_missing_bytes_fail_with_their_own_reason(db_session: AsyncSession
 async def test_the_failure_detail_quotes_nothing_from_the_sheet(
     db_session: AsyncSession,
 ) -> None:
-    """⚠️ COMPOSED, NEVER QUOTED (spec §9.5). `failure_detail` is written into `parse_report`, which
-    the readonly layer scrubs for identifier SHAPES only — a digit run is redacted, a borrower's
-    name is not. The same rule that moved a warning from quoting a loan-information line to naming
-    its position."""
+    """⚠️ COMPOSED, NEVER QUOTED (spec §9.5), AND NOT FOR THE REASON THIS DOCSTRING USED TO GIVE.
+
+    It said `failure_detail` "reaches the readonly layer, which scrubs identifier SHAPES only". It
+    does not reach it: `parse_report` is in the EXCLUDED set and migration `d1f4b8c25e93` drops it
+    whole, projecting only derived scalars. Nothing quoted here escapes — and it is still wrong to
+    store, because that column is excluded PRECISELY BECAUSE `unassigned_lines` inside it carries
+    verbatim sheet text, so a borrower's name in `failure_detail` is NPI at rest in a field nobody
+    can inspect to find it.
+
+    The same rule that moved a warning from quoting a loan-information line to naming its position:
+    there too nothing escaped the view, and storing it was the part that needed fixing.
+    """
     # ⚠️ THE BAD BYTES GO IN *AFTER* CREATION. An earlier version passed them to
     # `create_round_from_sheet`, which refuses a non-PDF at the door — so the round never existed
     # and the test failed inside its own setup with `ConditionSheetRejected`. The upload guard and

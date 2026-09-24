@@ -118,6 +118,37 @@ class _Coverage:
 
     So every character of the input is assigned to exactly one condition, heading or ignored entry,
     and what nothing claims goes to `unassigned_lines` (spec §LP-908, §9.2).
+
+    ⚠️ WHAT THIS DOES **NOT** CHECK, AND THE LIST ABOVE WOULD OTHERWISE IMPLY IT DOES: WHERE THE CUTS
+    FELL. A partition constrains COVERAGE, not BOUNDARY PLACEMENT. `claim` asks only whether a span
+    is unclaimed and `unclaimed` reports only gaps — neither asks whether a cut landed in the right
+    place, so ANY set of non-overlapping spans that happens to tile the input passes, and the correct
+    split is only one of the many tilings that do. Both of these were measured through this module:
+
+        one condition cut in two:
+          in  'TC: Title company to include lender loan number on all checks sent to lender.'
+          out ['TC: Title company to include lender loan number', 'on all checks sent to lender.']
+          -> 2 rows, 0 rejected, nothing unassigned, no warning
+
+        two conditions merged into one:
+          in  two real conditions, one per line
+          out ['Provide copy of invoice for credit report. Provide copy of invoice for final ...']
+          -> 1 row, 0 rejected, nothing unassigned, no warning
+
+    Boundary errors ARE caught whenever they leave a remnant — an arbitrary wrong cut usually
+    strands something, which is what `test_a_span_crossing_a_real_boundary_leaves_the_rest_unassigned`
+    exercises — but a clean tiling leaves none.
+
+    So: "AI only splits, enforced by code rather than instruction" holds for VERBATIM-NESS and for
+    COVERAGE. It does not hold for BOUNDARIES; those rest on the prompt, which addresses them
+    explicitly and states the asymmetry (a condition carrying an extra sentence is a small fix on
+    the review screen; a condition split in half is two half-conditions, both wrong). That is
+    instruction, and it is the one property the code behind it does not verify.
+
+    A shape heuristic would catch both cases above — a row whose span does not begin at a line start
+    or end at a line/sentence end is suspicious — and is deliberately NOT implemented. This stage has
+    three failed gap rules behind it, and a fourth heuristic would make wrong answers rarer and more
+    believable rather than fewer. The limitation is named instead, here and in the ticket.
     """
 
     def __init__(self, text: str) -> None:

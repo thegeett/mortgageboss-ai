@@ -342,6 +342,11 @@ async def use_as_condition_sheet(
 
     # After the commit, for the same reason the upload endpoint enqueues there: a worker that picked
     # the round up before the transaction landed would find no row.
+    # ⚠️ UNGUARDED, DELIBERATELY. `api/conditions.py`'s `_enqueue_split_or_fail` guards the same call
+    # on the paste door and this one does not: the round is committed in `PARSING` before `.delay()`
+    # is reached, so a broker that is down strands it exactly the same way. Left as LP-905 shipped
+    # it — changing a committed door inside an AI-split ticket is how a ticket becomes a refactor —
+    # and the mitigation belongs with the reaper that closes it properly (LP-908 review).
     from app.tasks.conditions import parse_condition_round
 
     parse_condition_round.delay(str(round_.id))

@@ -163,10 +163,18 @@ async def test_the_merge_never_overwrites_wording_the_processor_can_see(
 
 
 async def test_the_format_is_upgraded_from_pasted_text(db_session: AsyncSession) -> None:
-    """A pasted round's format was inferred from row shapes; the PDF names the layout outright."""
+    """A pasted round's format was inferred from row shapes; the PDF names the layout outright.
+
+    ⚠️ A NUMBERED LIST RATHER THAN PROSE, and the difference is LP-908 §2. Prose sets `needs_ai`, so
+    the paste now opens `PARSING` and enrich refuses it — correctly, because the split task owns that
+    state. A numbered list is structure the generic reader recognises, so the round lands `DRAFT`
+    with `PASTED_TEXT`, which is the state this test is actually about.
+    """
     round_, _file = await _pasted_round(
-        db_session, text="Please send whatever you have for this file."
+        db_session,
+        text="1. Provide the final settlement statement.\n2. Provide the signed note.",
     )
+    assert round_.status is ConditionRoundStatus.DRAFT
     assert round_.sheet_format is ConditionSheetFormat.PASTED_TEXT
 
     await enrich_round_with_pdf(db_session, round_=round_, content=_round_2_pdf())

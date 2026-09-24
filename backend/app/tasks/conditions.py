@@ -45,6 +45,11 @@ from app.conditions.sheet_read import (
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_round import ConditionRound, ConditionRoundStatus
 from app.services.condition_rounds import draft_rows_json, parse_report_for
+from app.services.condition_split import (
+    SPLIT_VERSION,
+    ConditionSplitUnavailable,
+    split_conditions,
+)
 from app.storage import StorageError, get_storage_backend
 from app.tasks.base import run_async, task_session
 from app.tasks.celery_app import celery_app
@@ -218,6 +223,106 @@ async def parse_round(db: AsyncSession, round_id: UUID) -> None:
     )
 
 
+async def split_round(db: AsyncSession, round_id: UUID) -> None:
+    """Split a pasted round the rules could not read, on a session the CALLER owns (LP-908 §2).
+
+    ⚠️ THIS ONE *DOES* REUSE `_settle`, AND THE ENRICH MERGE DELIBERATELY DOES NOT. The difference is
+    not taste: this genuinely IS a parse settling a round that is `PARSING`, so the compare-and-set
+    guarded on that status means exactly what it says — a redelivery, a manual re-enqueue and a
+    crash-retry all converge, and a round the processor DISCARDED while the model was working is
+    protected because it is no longer `PARSING`. Enrich borrows none of that, because there the
+    round is `DRAFT` or `IMPORTED` with content a processor may already be reviewing.
+
+    ⚠️ THE INPUT IS `raw_text`, WHICH IS WHY A PASTED ROUND STORES IT. Splitting a reconstruction of
+    the rows the rules half-read would feed the model our guess instead of the lender's page — and
+    §9.3's substring check is against this exact text.
+    """
+    round_ = await db.scalar(select(ConditionRound).where(ConditionRound.id == round_id))
+    if round_ is None:
+        logger.info("condition_split_round_missing", round_id=str(round_id))
+        return
+    if round_.status is not ConditionRoundStatus.PARSING:
+        # Already settled, or discarded while this was queued. Not an error.
+        logger.info(
+            "condition_split_not_pending", round_id=str(round_id), status=round_.status.value
+        )
+        return
+
+    text = round_.raw_text
+    if not text:
+        settled = await _settle(
+            db,
+            round_id=round_id,
+            values={
+                "status": ConditionRoundStatus.PARSE_FAILED,
+                "parse_report": {
+                    **(round_.parse_report or {}),
+                    "failure_kind": "no_text",
+                    "failure_detail": (
+                        "This round has no text to read. Paste the conditions again."
+                    ),
+                },
+            },
+            kind=ConditionEventKind.ROUND_PARSE_FAILED,
+            detail={"failure_kind": "no_text"},
+        )
+        logger.warning("condition_split_no_text", round_id=str(round_id), settled=settled)
+        return
+
+    try:
+        outcome = await split_conditions(text)
+    except ConditionSplitUnavailable as exc:
+        settled = await _settle(
+            db,
+            round_id=round_id,
+            values={
+                "status": ConditionRoundStatus.PARSE_FAILED,
+                "parse_report": {
+                    **(round_.parse_report or {}),
+                    "failure_kind": "ai_unavailable",
+                    "failure_detail": exc.detail,
+                },
+            },
+            kind=ConditionEventKind.ROUND_PARSE_FAILED,
+            detail={"failure_kind": "ai_unavailable"},
+        )
+        logger.warning("condition_split_failed", round_id=str(round_id), settled=settled)
+        return
+
+    report = parse_report_for("split", outcome.sheet)
+    # ⚠️ `ai_used` TRUE ONLY HERE. `parse_report_for` hardcodes False because it is written for the
+    # rule readers, and the pair (needs_ai, ai_used) is what makes "waiting for the AI" and "the AI
+    # has run" distinguishable states rather than one ambiguous flag.
+    report["ai_used"] = True
+    report["reader_version"] = SPLIT_VERSION
+    report["rejected_rows"] = outcome.rejected
+
+    settled = await _settle(
+        db,
+        round_id=round_id,
+        values={
+            "status": ConditionRoundStatus.DRAFT,
+            "draft_rows": draft_rows_json(outcome.sheet),
+            "parse_report": report,
+        },
+        kind=ConditionEventKind.ROUND_PARSED,
+        detail={
+            "reader": "split",
+            "reader_version": SPLIT_VERSION,
+            "rows": len(outcome.sheet.rows),
+            "rejected": outcome.rejected,
+        },
+    )
+    logger.info(
+        "condition_split_settled",
+        round_id=str(round_id),
+        rows=len(outcome.sheet.rows),
+        rejected=outcome.rejected,
+        unassigned=len(outcome.sheet.unassigned_lines),
+        settled=settled,
+    )
+
+
 async def _run_parse(round_id: str) -> None:
     try:
         round_pk = UUID(round_id)
@@ -225,6 +330,15 @@ async def _run_parse(round_id: str) -> None:
         return
     async with task_session() as db:
         await parse_round(db, round_pk)
+
+
+async def _run_split(round_id: str) -> None:
+    try:
+        round_pk = UUID(round_id)
+    except ValueError:
+        return
+    async with task_session() as db:
+        await split_round(db, round_pk)
 
 
 @celery_app.task(  # type: ignore[untyped-decorator]
@@ -257,4 +371,33 @@ def parse_condition_round(self: Task, round_id: str) -> None:
     )
 
 
-__all__ = ["parse_condition_round"]
+@celery_app.task(  # type: ignore[untyped-decorator]
+    bind=True,
+    name="conditions.split_condition_round",
+    max_retries=MAX_RETRIES,
+    soft_time_limit=PARSE_SOFT_LIMIT_SECONDS,
+    time_limit=PARSE_HARD_LIMIT_SECONDS,
+)
+def split_condition_round(self: Task, round_id: str) -> None:
+    """Celery task: split a pasted round the rules could not read (LP-908 §2).
+
+    The same bounded-retry shape as the parse: the split itself never raises — an unreachable model
+    is recorded on the round as a typed failure the processor can act on — so this covers a
+    transient error AROUND it, and on exhaustion leaves the round in `PARSING` rather than inventing
+    a terminal state the code never reached.
+
+    ⚠️ THE SAME STRANDED-`PARSING` GAP LP-905 RECORDED APPLIES HERE, and it is the reason LP-907 did
+    not open this state before the worker existed. It is buildable as a query — `status` plus
+    `created_at` — and is still deliberately not built.
+    """
+    retry_or_terminal(
+        self,
+        lambda: run_async(_run_split(round_id)),
+        on_exhausted=lambda exc: logger.error(
+            "condition_split_exhausted", round_id=round_id, error_type=type(exc).__name__
+        ),
+        event="condition_split_exhausted",
+    )
+
+
+__all__ = ["parse_condition_round", "split_condition_round"]
