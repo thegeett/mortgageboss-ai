@@ -39,8 +39,26 @@ if TYPE_CHECKING:
 class ActivityType(StrEnum):
     """Types of activities recorded on a loan file.
 
-    A reasonable initial set; it grows over time as more operations are
-    instrumented — adding a value is a trivial VARCHAR + CHECK change.
+    ⚠️ ADDING A MEMBER HERE CHANGES WHAT THE CODE WRITES AND NOTHING ABOUT WHAT THE DATABASE
+    ACCEPTS. These are VARCHAR + CHECK (ADR-037), not a native enum, so a new value REQUIRES a
+    constraint-swap migration that lists **every** value — see the newest
+    `*_activity.py` revision for the shape, and `tests/test_activity_type_migrations.py` for the
+    guard that enforces it.
+
+    This warning is here because the sentence it replaced — "adding a value is a trivial VARCHAR +
+    CHECK change" — preceded two incidents, and a person adding a member reads this docstring and
+    never sees the test:
+
+    * **LP-637** added a member with no migration at all and the whole suite stayed green. `conftest`
+      builds the schema with `Base.metadata.create_all`, which regenerates the CHECK from the current
+      enum, so the test database always agrees with the code whatever the migrations say. Only
+      production disagreed.
+    * **LP-UI-033** shipped a swap that silently REVOKED four live values. Each swap DROPs the
+      constraint and recreates it from its own tuple, so a value an earlier migration added and a
+      later one omits is gone.
+
+    The guard reads the migrations as TEXT for exactly that reason: a database test cannot see the
+    bug, because the schema it tests was built from this file.
     """
 
     FILE_CREATED = "file_created"
@@ -99,6 +117,10 @@ class ActivityType(StrEnum):
     # document: it never enters classify → extract → needs (ADR-403), and a timeline that filed it
     # under "document uploaded" would invite exactly the confusion the boundary exists to prevent.
     CONDITION_SHEET_RECEIVED = "condition_sheet_received"
+    #: LP-909 — a reviewed draft became the file's conditions. Paired with a constraint swap in
+    #: `20260924_…_lp909_condition_imported_activity.py`: this is VARCHAR + CHECK (ADR-037), so
+    #: adding a member here changes only what the CODE writes, never what the database accepts.
+    CONDITION_IMPORTED = "condition_imported"
 
 
 class ActivityLog(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
