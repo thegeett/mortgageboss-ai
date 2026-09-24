@@ -193,6 +193,47 @@ async def test_attaching_to_an_existing_round_is_refused_until_lp907(
     assert rounds == [], "a refused attach must not leave a round behind"
 
 
+async def test_forwarding_the_same_attachment_twice_is_refused(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """⚠️ A SELF-PERMITTING LOOP, AND IT BROKE A STATED INVARIANT.
+
+    The disposition guard admits PENDING *or* CORRESPONDENCE, and the action ends by setting
+    CORRESPONDENCE — so the first call creates exactly the condition the second one requires, and it
+    stays true forever. N forwards gave N rounds, all in PARSING, all parsing identical bytes.
+
+    The wasted work was the least of it. Every one of those rounds carries the SAME
+    `inbound_attachment_id` in its `sources`, and that field is what the attachment→round link is
+    derived from — deliberately, instead of materialising a column. The derivation assumes
+    one-to-one; this made it one-to-many, so screen S1-13's "Used as condition sheet → Round N" had
+    no single answer to render.
+
+    Refusing with the EXISTING round's id is also what a processor who clicked twice actually wants:
+    "this is already round 3", not a second round to discard.
+    """
+    loan_file, attachment, token = await _setup(db_session, slug="fwd-twice")
+
+    first = await client.post(_url(loan_file.id, attachment.id), headers=_auth(token), json={})
+    assert first.status_code == 202
+
+    second = await client.post(_url(loan_file.id, attachment.id), headers=_auth(token), json={})
+
+    assert second.status_code == 409
+    # The refusal names the round that already exists, so the UI can link straight to it.
+    assert first.json()["round_id"] in second.text
+
+    rounds = (
+        (
+            await db_session.execute(
+                select(ConditionRound).where(ConditionRound.loan_file_id == loan_file.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rounds) == 1, "a second forward must not create a second round"
+
+
 async def test_an_unsafe_attachment_is_refused(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:

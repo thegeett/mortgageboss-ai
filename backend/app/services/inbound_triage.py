@@ -24,7 +24,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -32,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.models.activity_log import ActivityType
+from app.models.condition_round import ConditionRound
 from app.models.document import Document, UploadSource
 from app.models.helpers import only_active
 from app.models.inbound_attachment import (
@@ -45,12 +45,12 @@ from app.services.activity_log import log_activity
 from app.services.documents import create_document
 from app.storage import get_storage_backend
 
-if TYPE_CHECKING:
-    # ⚠️ TYPE-ONLY, BECAUSE THE RUNTIME IMPORT IS DELIBERATELY FUNCTION-LOCAL. `condition_rounds`
-    # is imported inside `forward_attachment_as_sheet` so this module's import graph stays one-way;
-    # naming the type here gives ruff and mypy the symbol without moving that import to the top,
-    # where it would create the cycle the local import exists to avoid.
-    from app.models.condition_round import ConditionRound
+# ⚠️ THE MODEL IS A TOP-LEVEL IMPORT; ONLY THE SERVICE IS FUNCTION-LOCAL. An earlier version put
+# `ConditionRound` under `TYPE_CHECKING`, reasoning about a cycle — but the cycle concern belongs to
+# `app.services.condition_rounds`, which this module calls into, NOT to `app.models.condition_round`,
+# which imports no services at all. The result was a name available to mypy and absent at runtime:
+# `select(ConditionRound)` inside the forward action would have raised `NameError` on the first
+# forward, while `import app.services.inbound_triage` succeeded and proved nothing.
 
 logger = get_logger(__name__)
 
@@ -294,10 +294,12 @@ async def forward_attachment_as_sheet(
     if message is None:
         raise CannotAcceptError("The original message is no longer available.")
 
-    # The same three guards `accept_attachment` applies, in the same order and for the same reasons.
-    # Copied deliberately rather than shared: a future divergence between "may become a document"
-    # and "may become a condition sheet" should be visible as a difference here, not hidden behind a
-    # helper both call.
+    # ⚠️ THE SAME GUARDS AS `accept_attachment`, COPIED RATHER THAN SHARED — AND THEY HAVE ALREADY
+    # DIVERGED, which is the argument rather than a hypothetical one. `accept_attachment` refuses
+    # anything that is not PENDING (line 174); this admits PENDING *or* CORRESPONDENCE, because a
+    # processor may file an attachment as correspondence first and decide to read it as a sheet
+    # afterwards. A shared `_may_be_used(...)` would have needed a parameter on the day it was
+    # written, which is precisely the shape that makes a helper worse than the duplication.
     if message.loan_file_id != loan_file.id:
         raise CannotAcceptError(
             "This attachment belongs to a message routed to a different loan file."
@@ -309,6 +311,35 @@ async def forward_attachment_as_sheet(
             f"This attachment is {attachment.safety_state.value}, not safe to use. "
             f"{attachment.safety_reason or ''}".strip()
         )
+    # ⚠️ ALREADY USED? THE GUARD BELOW CANNOT ANSWER THIS, BY CONSTRUCTION. It admits PENDING or
+    # CORRESPONDENCE, and this function ends by SETTING CORRESPONDENCE — so the first call creates
+    # exactly the state the next call requires, and it stays true forever. A self-permitting loop:
+    # N forwards gave N rounds, all PARSING, all reading identical bytes.
+    #
+    # The wasted work was the least of it. Every such round carries the same `inbound_attachment_id`
+    # in `sources`, and that field is how the attachment→round link is derived rather than stored as
+    # a column. The derivation assumes ONE-TO-ONE; duplicates made it one-to-many and left screen
+    # S1-13's "Used as condition sheet → Round N" with no single answer to render. A stated
+    # invariant, invalidated silently.
+    #
+    # Asked of the rounds rather than of the attachment, and no new column is needed: the field that
+    # IS the join is the field that answers it.
+    existing = await db.scalar(
+        only_active(
+            select(ConditionRound).where(
+                ConditionRound.loan_file_id == loan_file.id,
+                ConditionRound.sources.contains([{"inbound_attachment_id": str(attachment.id)}]),
+            ),
+            ConditionRound,
+        )
+    )
+    if existing is not None:
+        # Naming the round is what a processor who clicked twice actually wants — "this is already
+        # round 3" rather than a second round to discard.
+        raise CannotAcceptError(
+            f"This attachment has already been used as a condition sheet ({existing.id})."
+        )
+
     if attachment.disposition not in (
         AttachmentDisposition.PENDING,
         AttachmentDisposition.CORRESPONDENCE,

@@ -270,6 +270,13 @@ async def use_as_condition_sheet(
     A file id in the body would have to be scoped by hand, which is the check everyone forgets.
     Recorded as a spec-vs-code difference; the code wins, per the survey's rule.
 
+    ⚠️ THE CAPABILITY THE SPEC DESCRIBED IS GENUINELY GONE, AND THAT IS AN EXISTING RULE RATHER THAN
+    A NEW ONE. Spec §LP-905 puts `loan_file_id` in the body "if the message is unrouted"; here an
+    unrouted attachment 404s at `_scoped_attachment`. `attachment_preview` in this module already
+    reasons the same way on purpose — "the unrouted queue is visible to EVERY company" — and
+    forwarding has the same exposure: it would create a round on a file from a message no company
+    owns yet. Route the message first, then forward it.
+
     202, like the upload: the round comes back in `PARSING` and the UI polls it.
     """
     if payload.attach_to_round_id is not None:
