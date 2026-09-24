@@ -100,6 +100,12 @@ def test_the_header_and_its_date_survive_the_pdf_path(fixture: str) -> None:
     assert from_pdf.date_printed == from_text.date_printed
     assert from_pdf.header == from_text.header
     assert from_pdf.warnings == from_text.warnings
+    # ⚠️ `expiry_dates` IS THE LAST POSITIONAL FIELD, and it belongs here for the same reason the
+    # other three do: it is derived from column positions, read by different code on each path, and
+    # its tolerance was until recently a constant meaning CHARACTERS on text and POINTS on a PDF —
+    # which rejected three of round 1's six dates as "19 from the nearest column". Exactly the
+    # profile of a field that has already bitten this file twice.
+    assert from_pdf.expiry_dates == from_text.expiry_dates
 
 
 @pytest.mark.parametrize("fixture", ALL_FIXTURES)

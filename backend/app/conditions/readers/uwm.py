@@ -215,7 +215,31 @@ _LOAN_LABEL_ANYWHERE = re.compile(
 
 
 def _pairs_in_cell(cell: str) -> list[tuple[str, str]]:
-    """Every `label value` pair inside one cell, or nothing if it does not open with a label."""
+    """Every `label value` pair inside one cell, or nothing if it does not open with a label.
+
+    ⚠️ WHAT ACTUALLY PROTECTS A VALUE CONTAINING A LABEL WORD, because it is not what it looks like.
+    Two different mechanisms, and only one of them is this function's:
+
+    * `Terman`, `Statuses` — rejected by `_LOAN_LABEL_ANYWHERE`'s boundary guards, so a label that is
+      merely a prefix or suffix of a longer word is not a label. That part is here.
+    * `Loan Program | Conforming Fixed Term` — survives because `_cells` split on the column gutter
+      BEFORE this ran, so the label word and the next real label were never in the same cell. **The
+      protection is the cell boundary, not the label set**, and it would move if cell-splitting
+      changed.
+
+    THE RESIDUAL, STATED EXACTLY. A label word mid-value with no column break after it, all in ONE
+    cell, does split — measured:
+
+        cells : ['Loan Program Conforming Fixed Term Loan']
+        pairs : [('Loan Program', 'Conforming Fixed'), ('Term', 'Loan')]
+
+    On text that cannot arise: `\\s{2,}` always puts the value in its own cell. It needs a PDF whose
+    gutter detection merged a column pair, and a lender printing a label word mid-value. Left as is
+    deliberately — the failure is LOUD (`Term` as a key is obviously wrong, and the review screen
+    shows the header) rather than silent, and this file has been badly served by fixes aimed at
+    cases nobody has seen. Three gap rules were already tried and each picked one level of a
+    hierarchy; a fourth is not the answer.
+    """
     out: list[tuple[str, str]] = []
     rest = cell.strip()
     while rest:
