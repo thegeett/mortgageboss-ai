@@ -91,6 +91,27 @@ def _exempt(route: APIRoute) -> bool:
     return all((method, route.path) in _UNGATED_BY_DESIGN for method in _methods(route))
 
 
+def _walk(exemptions: set[tuple[str, str]]) -> list[str]:
+    """Every route carrying no gate valid for its router, given this exemption set.
+
+    ⚠️ THE EXEMPTION SET IS A PARAMETER SO THE CHECK CAN BE INVOKED, and that is the whole reason
+    this is a function. The test below that claims an exemption silences something used to assert
+    two helper predicates and never call the walk at all — its docstring described a demonstration
+    it did not perform. A mechanism can only be shown to work by running it.
+    """
+    ungated: list[str] = []
+    for name, router, gates in _gate_map():
+        for route in _routes(router):
+            if gates and _declares(route, gates):
+                continue
+            for method in sorted(_methods(route)):
+                if (method, route.path) in exemptions:
+                    continue
+                wanted = " or ".join(sorted(gate.__name__ for gate in gates)) or "<none accepted>"
+                ungated.append(f"[{name}] {method} {route.path} (expected {wanted})")
+    return ungated
+
+
 def test_every_condition_route_declares_the_right_gate() -> None:
     """No GET exemption: an ungated read is the leak, not an ungated write.
 
@@ -98,17 +119,7 @@ def test_every_condition_route_declares_the_right_gate() -> None:
     its own path shape, so a route cannot pass by carrying a scoping callable that has nothing to
     scope.
     """
-    ungated: list[str] = []
-
-    for name, router, gates in _gate_map():
-        for route in _routes(router):
-            if _exempt(route) or (gates and _declares(route, gates)):
-                continue
-            for method in sorted(_methods(route)):
-                if (method, route.path) in _UNGATED_BY_DESIGN:
-                    continue
-                expected = " or ".join(sorted(gate.__name__ for gate in gates)) or "<none accepted>"
-                ungated.append(f"[{name}] {method} {route.path} (expected {expected})")
+    ungated = _walk(_UNGATED_BY_DESIGN)
 
     assert not ungated, (
         "these routes carry no valid tenant gate. Declare the dependency correct for the router, "
@@ -159,13 +170,21 @@ def test_an_exemption_actually_silences_the_check() -> None:
     `/inbound/queue` carries no file gate and is listed. If the exemption were dead — as it was when
     one test honoured it and two ignored it — this walk would report it, and the only way to get
     green would be to remove the honest entry.
+
+    ⚠️ AND IT RUNS THE WALK RATHER THAN ASSERTING ITS INPUTS. An earlier version checked
+    `_declares(...) is False` and `_exempt(...) is True` — the two conditions the skip branch
+    consults — and never invoked the check, so the demonstration in this docstring was not
+    performed. Pinning a predicate is not pinning the behaviour that reads it.
     """
-    from app.api.inbound import company_router
+    with_exemptions = _walk(_UNGATED_BY_DESIGN)
+    without = _walk(set())
 
-    (queue,) = [r for r in _routes(company_router) if r.path == "/inbound/queue"]
+    queue = "[inbound-company] GET /inbound/queue (expected <none accepted>)"
 
-    assert _declares(queue, {*(g for _n, _r, gs in _gate_map() for g in gs)}) is False
-    assert _exempt(queue) is True
+    # Listed: silent. Unlisted: reported. The entry is load-bearing, not decorative.
+    assert queue not in with_exemptions
+    assert queue in without, "emptying the list must surface the route the entry covers"
+    assert without == [queue], "only the exempt route should differ between the two walks"
 
 
 def test_the_gate_detection_would_notice_an_ungated_route() -> None:
@@ -195,22 +214,36 @@ def test_the_detection_finds_the_real_routes_gated() -> None:
     assertion above. This asserts it recognises the gates actually in place, per router, so both
     answers are demonstrated rather than one.
     """
+    # ⚠️ THE DENOMINATOR IS COMPUTED BEFORE THE WALK, AND TWO EARLIER VERSIONS GOT THIS WRONG IN
+    # OPPOSITE DIRECTIONS. First a guessed literal (`>= 12` against a real 11) — wrong, and failing
+    # later for a reason nobody could reconstruct, since adding a route legitimately moves it.
+    # Then a "derived" count that incremented `expected` and `checked` in lockstep with the
+    # assertion between them: no execution path could separate them, so `checked == expected` could
+    # NEVER fail while its comment claimed to check reach. That is the worse of the two, because a
+    # tautology reads as rigour — the same family as the escape hatch whose comment claimed more
+    # than the code did.
+    #
+    # Counted here, independently, from the map itself: if the walk below skips a route it should
+    # have reached, the totals disagree.
+    should_reach = [
+        route
+        for _name, router, gates in _gate_map()
+        if gates
+        for route in _routes(router)
+        if not _exempt(route)
+    ]
+
     checked = 0
-    expected = 0
     for _name, router, gates in _gate_map():
         if not gates:
             continue
         for route in _routes(router):
             if _exempt(route):
                 continue
-            expected += 1
             assert _declares(route, gates), f"{sorted(route.methods)} {route.path}"
             checked += 1
 
-    # ⚠️ DERIVED FROM THE MAP, NOT A LITERAL. A hardcoded floor was wrong on the first run — I
-    # estimated 12 against a real 11 — and the deeper problem is that a number picked by estimating
-    # fails later for a reason nobody can reconstruct: adding a route legitimately moves it, so the
-    # next person raises the constant and learns nothing. This asserts the walk reached every route
-    # it set out to reach, which is the property meant all along.
-    assert checked == expected
-    assert expected > 0, "the gate map reached no routes at all — the walk has broken"
+    assert should_reach, "the gate map reached no routes at all — the walk has broken"
+    assert checked == len(should_reach), (
+        f"the walk checked {checked} routes but the map names {len(should_reach)}"
+    )
