@@ -20,9 +20,14 @@ from datetime import date
 from app.models.condition import BucketKind, OwnerHint, OwnerHintSource
 from app.models.condition_round import ConditionSheetFormat
 
-#: A rule-read row is certain: the layout said so. LP-908's AI split uses 0.6, and the review screen
-#: sorts anything under 0.8 first and demands the flagged-rows checkbox before import.
+#: A rule-read row is certain: the layout said so. The review screen sorts anything under 0.8 first
+#: and demands the flagged-rows checkbox before import.
 RULE_CONFIDENCE = 1.0
+#: A row the AI split produced (LP-908, spec §LP-908). Below 0.8 deliberately: the rules could not
+#: find where one condition ends and the next begins, so a model guessed — and every such row is
+#: shown flagged before a processor can import it. It is NOT a statement that the WORDING is
+#: uncertain; the wording is checked to be a substring of the input, so it is exact or it is dropped.
+AI_SPLIT_CONFIDENCE = 0.6
 #: A row whose segment failed the Champions centre-rule check — read, but not trusted.
 UNCERTAIN_CONFIDENCE = 0.5
 
