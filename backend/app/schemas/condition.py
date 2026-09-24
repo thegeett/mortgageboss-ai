@@ -208,7 +208,17 @@ class ConditionRoundPublic(BaseModel):
     date_printed: date_type | None
     round_date: date_type
     expiry_dates: dict[str, Any] | None = None
-    #: Present on a DRAFT and cleared on import — the review screen's rows.
+    #: ⚠️ PRESENT DOES NOT MEAN REVIEWABLE, and an earlier version of this comment said "Present on a
+    #: DRAFT and cleared on import", which is true of one state and populated in two. `from_model`
+    #: fills this whenever the round HAS rows, and `create_round_from_paste` writes them
+    #: unconditionally — so a `PARSING` round awaiting the AI split carries the rules-read rows too.
+    #:
+    #: Screen S1-02 is the reason that is safe: while a round is `PARSING` it renders SKELETONS and
+    #: polls, never these rows. Nothing is under review, which is exactly why the split task may
+    #: replace them wholesale under its `status = PARSING` compare-and-set — where the enrich merge,
+    #: acting on a DRAFT whose rows ARE on screen and editable, deliberately may not.
+    #:
+    #: So: read `status` to decide whether a processor can act on these, never their presence.
     draft_rows: list[DraftRowPublic] | None = None
     parse_report: ParseReportPublic = Field(default_factory=ParseReportPublic)
     #: The letter's own details, shown in the side panel and the round-details sheet. Absent for a
