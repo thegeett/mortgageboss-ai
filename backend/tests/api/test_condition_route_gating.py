@@ -88,6 +88,23 @@ def _declares(route: APIRoute, gates: set[Callable[..., Any]]) -> bool:
 
 
 def _exempt(route: APIRoute) -> bool:
+    """Whether EVERY method on this route is exempt — the route-level question.
+
+    ⚠️ TWO EXEMPTION SEMANTICS LIVE IN THIS FILE AND THEY COINCIDE ONLY BY LUCK (review). `_walk`
+    tests membership per `(method, path)` inside its method loop; this tests per ROUTE with `all`.
+    For a route carrying two methods where only one is listed they diverge: `_walk` skips the exempt
+    method and reports the rest, while this returns False and the reach test demands a gate for the
+    whole route.
+
+    That divergence is defensible rather than a bug — FastAPI dependencies are declared per ROUTE,
+    not per method, so a route with any non-exempt method genuinely needs the gate. But it is two
+    answers to one question, and the reason nobody has noticed is that all 12 walked routes are
+    single-method, which makes the two identical today.
+
+    Recorded rather than unified: collapsing them would mean picking one, and the right choice
+    depends on a case that does not exist yet. If a condition route ever grows a second method, this
+    is the comment that says where to look.
+    """
     return all((method, route.path) in _UNGATED_BY_DESIGN for method in _methods(route))
 
 
