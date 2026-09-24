@@ -84,7 +84,17 @@ async def make_round(
     round_number: int | None = None,
 ) -> ConditionRound:
     """A round in whatever state the test needs. `round_number` stays None unless asked for —
-    drafts have none, and the partial unique index only constrains imported rows."""
+    drafts have none, and the partial unique index only constrains rows that HAVE a number.
+
+    ⚠️ THIS SAID "ONLY CONSTRAINS IMPORTED ROWS", WHICH IS THE BELIEF LP-904's REVIEW CORRECTED.
+    The predicate is `round_number IS NOT NULL AND deleted_at IS NULL` — no status term at all — so
+    a round that was imported and is later DISCARDED keeps its number and is still constrained. The
+    omission is deliberate: `condition_events` is append-only, so a discarded round's ROUND_IMPORTED
+    event survives forever, and freeing its number would leave two different sheets both recorded as
+    "round 2" in an immutable history with nothing able to tell them apart.
+
+    `tests/models/test_condition_round_number_uniqueness.py` pins both halves.
+    """
     round_ = ConditionRound(
         company_id=company.id,
         loan_file_id=loan_file.id,

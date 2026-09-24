@@ -27,7 +27,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import Date, ForeignKey, Index, Text
+from sqlalchemy import Date, ForeignKey, Index, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -89,6 +89,38 @@ class ConditionRound(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         # The round strip reads a file's rounds newest-first; the status half serves the poll that
         # waits for PARSING to become DRAFT.
         Index("ix_condition_rounds_file_status", "loan_file_id", "status"),
+        # ⚠️ DECLARED HERE **AND** CREATED BY RAW SQL IN LP-904's MIGRATION (`d1f4b8c25e93`), AND
+        # BOTH HALVES ARE LOAD-BEARING. The migration half is what a deployed database has; this
+        # half is what `Base.metadata.create_all` builds, and the suite builds from `create_all`
+        # rather than from migrations. Until this was added the index existed in production and in
+        # NO TEST DATABASE — measured, not inferred: two rounds numbered 2 on one file inserted
+        # cleanly.
+        #
+        # That is the mirror of the trap LP-904 documented and then fell into. Its own ticket says
+        # `str_enum`'s CHECK "only materialises through `Base.metadata.create_all` — which is what
+        # the suite builds from, and precisely why an enum/database mismatch is invisible to it".
+        # Same blind spot, opposite direction: an index that lives only in a migration is invisible
+        # the same way. `lender_contacts` does both halves (`uq_lender_contacts_lender_email`) and
+        # is the pattern followed here.
+        #
+        # It matters beyond tidiness because this index IS the rule. `loan_file_needs_lock` is
+        # advisory — it yields `bool(acquired)`, every caller binds nothing, and its 30s timeout
+        # auto-expires a HELD lock — so nothing else stops two concurrent imports computing the
+        # same `max + 1`. LP-909's import catches the violation and recomputes; without this
+        # declaration that retry is code no test could ever provoke.
+        #
+        # The predicate mirrors the migration exactly. Partial because drafts have no number at all
+        # (it is assigned on import) and several NULLs must not collide; `deleted_at IS NULL` stays
+        # so a soft delete releases the number as the visible consequence of a deliberate act.
+        # DISCARDED is deliberately NOT in the predicate: a discarded round keeps its number,
+        # because `condition_events` is append-only and its ROUND_IMPORTED event survives forever.
+        Index(
+            "uq_condition_rounds_file_number",
+            "loan_file_id",
+            "round_number",
+            unique=True,
+            postgresql_where=text("round_number IS NOT NULL AND deleted_at IS NULL"),
+        ),
     )
 
     #: Carried rather than inherited through the loan file. A round is reached directly by id from
