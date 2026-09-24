@@ -26,6 +26,7 @@
  * the five unions, or deleting an entry from any map, would compile silently and
  * fall through to `resolveStatus`'s amber fallback at runtime.
  */
+import type { ConditionRoundStatus } from "@/lib/types/conditions";
 import type { DocumentStatus } from "@/lib/types/document";
 import type { DtiLimitStatus } from "@/lib/types/dti";
 import type { LoanFileStatus } from "@/lib/types/loan-file";
@@ -215,6 +216,38 @@ export const CALCULATOR_STATUS: Record<CalculatorStatus, StatusMeta> = {
   "binding:dti": { tone: "neutral", label: "Limited by DTI" },
   "binding:ltv": { tone: "neutral", label: "Limited by LTV" },
   "binding:loan_limit": { tone: "neutral", label: "Limited by the program limit" },
+};
+
+// --- condition round (lib/types/conditions.ts ConditionRoundStatus) --------- //
+//
+// ⚠️ EVERY LABEL HERE IS ABOUT THE SHEET, NEVER ABOUT A CONDITION. Stage 1 has no
+// status controls at all (ADR-404): nothing in this product may say a condition
+// is cleared, done, satisfied or open, and the reference screens repeat it as a
+// standing rule. A round moving to `imported` says the lender's list is now the
+// file's record — it says nothing whatever about whether any demand in it has
+// been met, and a label like "Complete" here would quietly claim otherwise on
+// the one screen a processor reads for exactly that question.
+export const CONDITION_ROUND_STATUS: Record<ConditionRoundStatus, StatusMeta> = {
+  // In flight: the task is reading the sheet. S1-02 shows skeleton rows and polls
+  // to `draft` or `parse_failed`, so this is the only round state with a spinner.
+  parsing: { tone: "progress", label: "Reading", spin: true },
+  // Work waiting for a person, which is what `attention` means. The wording is
+  // the reference screen's own ("Review · not imported yet", S1-04) rather than a
+  // paraphrase, because it is the phrase the screen and the processor share.
+  draft: { tone: "attention", label: "Review · not imported yet" },
+  // Blocking: the sheet arrived and nothing came of it, so the file cannot move
+  // on this round until someone retries, uploads another PDF, or pastes instead.
+  // S1-03 shows the typed reason from `parse_report` beside this.
+  parse_failed: { tone: "blocking", label: "Could not be read" },
+  // `verified` in this vocabulary is "checked and good — by a rule or by a
+  // person", and that is exactly what an import is: a processor reviewed the rows
+  // and saved them. The claim stops at the sheet — see the warning above.
+  imported: { tone: "verified", label: "Imported" },
+  // NEUTRAL, NOT BLOCKING, and the distinction is the point. A discard is a
+  // deliberate act by a processor, not a failure: the round stays on the strip so
+  // they can see they did it, and painting it red would turn their own decision
+  // into something that looks like it went wrong.
+  discarded: { tone: "neutral", label: "Discarded" },
 };
 
 /**

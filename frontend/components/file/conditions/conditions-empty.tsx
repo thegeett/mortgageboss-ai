@@ -13,7 +13,23 @@ import { Check, ClipboardList, Copy, PencilLine, Upload } from "lucide-react";
 import { useCallback, useState } from "react";
 import { type FileRejection, useDropzone } from "react-dropzone";
 
-/** The server's own ceiling (`settings.condition_sheet_max_bytes`). Kept in sync by the sentence. */
+/**
+ * A COPY of the server's ceiling (`settings.condition_sheet_max_bytes`), and the duplication is
+ * stated rather than papered over.
+ *
+ * ⚠️ AN EARLIER COMMENT HERE SAID "Kept in sync by the sentence", which asserts a mechanism that
+ * cannot work: a sentence cannot know how an environment was configured. The server value is a
+ * Pydantic Settings field, so it is env-overridable and not fixed at build time.
+ *
+ * ⚠️ THE DIRECTION MATTERS AND ONLY ONE OF THEM IS SAFE. While this number is LOWER than the
+ * server's, an over-limit file is refused here and nothing is lost — visible, not silent. If an
+ * environment LOWERS the server's ceiling below this, the direction inverts: the client accepts an
+ * 18 MB file, the processor waits through the upload, and the server answers 413 at the end. That is
+ * reachable by configuration with no code change, and invisible to every test on both sides.
+ *
+ * The real fix is for the server to state its ceiling so there is one source; that is API surface
+ * this ticket did not take. Until then this is a known duplicate, not a synchronised one.
+ */
 const MAX_SHEET_BYTES = 20 * 1024 * 1024;
 
 /**

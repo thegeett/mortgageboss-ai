@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { isStranded } from "@/lib/api/conditions";
-import { CONDITION_ROUND_STATUS } from "@/lib/status";
+import { CONDITION_ROUND_STATUS, resolveStatus } from "@/lib/status";
 import type { ConditionRound, ConditionSource } from "@/lib/types/conditions";
 import { cn } from "@/lib/utils";
 import { CircleCheckBig, CircleDashed } from "lucide-react";
@@ -40,8 +40,15 @@ function sourceLabel(sources: ConditionSource[]): string | null {
  * its task is enqueued, so a broker that is down strands it forever — `_enqueue_split_or_fail`
  * documents that the upload and forward doors are deliberately unmitigated. S1-02 says "poll until
  * DRAFT or PARSE_FAILED", which does not contemplate never. Past the stranded window the polling
- * stops (see `isStranded`) and this offers a retry, because a progress card that never resolves is
- * the same dead end as a spinner with no exit.
+ * stops (see `isStranded`) and this says so, because a progress card that never resolves is the same
+ * dead end as a spinner with no exit.
+ *
+ * ⚠️ IT SAYS SO RATHER THAN OFFERING A RETRY, AND THIS DOCSTRING USED TO CLAIM OTHERWISE. There is
+ * no route that re-reads an existing round — `parse_condition_round.delay()` is called from creation
+ * paths only — so the way out is to upload again, not to retry. `onRetry` remains optional for the
+ * day such a route exists; the caller passes none today. Correcting the body and leaving this
+ * paragraph would have been the exact defect this ticket keeps finding: a comment asserting
+ * behaviour the code does not have.
  */
 export function RoundReading({
   round,
@@ -67,7 +74,13 @@ export function RoundReading({
               {stranded ? "This is taking much longer than it should." : "usually under 30 seconds"}
             </p>
           </div>
-          <StatusToken meta={CONDITION_ROUND_STATUS[round.status]} />
+          {/* ⚠️ THROUGH `resolveStatus`, NOT A DIRECT INDEX. Indexing is compile-time safe — the map
+              is typed to the union, so all five keys are forced — but the case the helper exists for
+              is not a compile-time case. A backend one deploy ahead of this bundle sends a sixth
+              status, the index returns `undefined`, and `StatusToken` evaluates `GLYPH[meta.tone]`:
+              a TypeError that takes the card down instead of degrading to an honest unknown label.
+              The enum-mirror guard makes that drift unlikely in CI; it cannot guard a browser tab. */}
+          <StatusToken meta={resolveStatus(CONDITION_ROUND_STATUS, round.status)} />
         </div>
 
         <ol className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -89,9 +102,14 @@ export function RoundReading({
 
         {stranded ? (
           <div className="flex flex-col gap-2">
+            {/* ⚠️ THIS SENTENCE PROMISED A ROUTE THAT DOES NOT EXIST. It said "you can try reading
+                it again" — but `parse_condition_round.delay()` is called from creation paths only,
+                so there is no way to re-read a round that already exists. `RoundFailed` drops its
+                Try again button for exactly this reason; the reasoning had not been carried here,
+                and a paragraph offering a route with no button is a dead button wearing prose. */}
             <p className="max-w-prose text-sm text-muted-foreground">
-              Nothing has come back from the reader. The sheet is stored and nothing was lost — you
-              can try reading it again, or bring the conditions in another way.
+              Nothing has come back from the reader. The sheet is stored and nothing was lost, but
+              it will not read itself — upload it again, or bring the conditions in another way.
             </p>
             {onRetry ? (
               <div>
