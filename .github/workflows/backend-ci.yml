@@ -1,16 +1,27 @@
 name: Backend CI
 
+# The paths outside backend/ are files a pytest test READS (LP-909 review): a change to one of them
+# alone can turn a backend test red, so it has to run this workflow. Keep the two lists identical,
+# and add to them whenever a test starts reading another file from outside backend/.
+#   frontend/lib/types/conditions.ts   tests/test_condition_type_mirror.py
+#
+# This is the mirror of the list frontend-ci.yml has carried since LP-900. It matters most in the
+# direction that has no other trigger: adding a member to a TypeScript union touches nothing under
+# backend/, so without this the guard written to catch exactly that is never run, and the suite is
+# green because it did not execute rather than because it passed.
 on:
   push:
     branches: [main]
     paths:
       - "backend/**"
       - ".github/workflows/backend-ci.yml"
+      - "frontend/lib/types/conditions.ts"
   pull_request:
     branches: [main]
     paths:
       - "backend/**"
       - ".github/workflows/backend-ci.yml"
+      - "frontend/lib/types/conditions.ts"
 
 defaults:
   run:
