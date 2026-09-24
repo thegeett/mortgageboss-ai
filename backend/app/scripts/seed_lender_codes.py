@@ -32,6 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.conditions.lender_codes import LenderCodeRow, load_seed, seeded_lender_keys
+from app.conditions.lender_codes.status import resolved_status
 from app.core.database import async_session_maker
 from app.models.helpers import only_active
 from app.models.lender import Lender
@@ -116,8 +117,12 @@ async def _upsert(db: AsyncSession, *, lender_id: UUID, row: LenderCodeRow) -> s
     # RAISED, NEVER LOWERED. A code a person has reviewed is MAPPED, and shipped data does not
     # demote a human decision back to SEEDED. An OBSERVED_UNMAPPED row that the seed now explains
     # becomes SEEDED, which is the case this exists for.
-    if existing.status is LenderCodeStatus.OBSERVED_UNMAPPED:
-        existing.status = LenderCodeStatus.SEEDED
+    #
+    # ⚠️ THE RULE MOVED OUT OF THIS FILE AND THIS IS NOW ITS SECOND CALLER, NOT ITS OWNER (LP-909
+    # review). It lived here as a local promotion — correct while the seed was the ONLY writer of
+    # these rows. LP-909's import is the second, and one rule stated independently in two places is
+    # how the two drift. `resolved_status` is the single statement; this line applies it.
+    existing.status = resolved_status(existing.status, LenderCodeStatus.SEEDED)
 
     after = (
         existing.label,
