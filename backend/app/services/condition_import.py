@@ -105,18 +105,66 @@ def _row_fingerprint(row: dict[str, Any]) -> str:
 
 
 async def _existing_conditions(db: AsyncSession, *, loan_file_id: UUID) -> list[Condition]:
+    """Every live condition on the file, oldest first.
+
+    ⚠️ THE ORDER IS LOAD-BEARING AND THERE WAS NONE. Two conditions can legitimately share
+    `(lender_id, lender_code)` — that is exactly what `possible_match` exists for, since a
+    same-code/different-wording row creates a second condition under the same code. The lookup below
+    keeps the FIRST of them, so without an `ORDER BY` "which one" was whatever the planner happened
+    to return, and `possible_match` pointed at a different condition from run to run. Oldest first
+    makes it the original, which is the one Stage 2's comparison wants to be told about.
+
+    NOT filtered by lender, deliberately: a condition recorded before the file's lender was known
+    carries `lender_id = None` and must still be reachable — see `_lender_compatible`.
+    """
     stmt = select(Condition).where(Condition.loan_file_id == loan_file_id)
-    return list((await db.execute(only_active(stmt, Condition))).scalars().all())
+    stmt = only_active(stmt, Condition).order_by(Condition.created_at, Condition.id)
+    return list((await db.execute(stmt)).scalars().all())
+
+
+def _lender_compatible(condition: Condition, lender_id: UUID | None) -> bool:
+    """Whether this condition and this round could belong to the same lender.
+
+    ⚠️ `None` MEANS "NOT KNOWN YET", NEVER "A DIFFERENT LENDER", and collapsing those two is what
+    made the wording pass wrong. `loan_file.lender_id` is nullable and mutable, and a round takes the
+    FILE's lender, so a file legitimately accumulates conditions under `None` and later gains one.
+    Refusing to match across `None` would duplicate the same demand the moment the lender was set —
+    the exact failure the fingerprint pass exists to prevent.
+
+    Two DIFFERENT known lenders are a different matter and do not match. Spec §LP-909 step 2 scopes
+    the search to "the same file **and lender**", and that clause governs both passes.
+    """
+    return condition.lender_id is None or lender_id is None or condition.lender_id == lender_id
+
+
+def _first_compatible(
+    candidates: list[Condition] | None, lender_id: UUID | None
+) -> Condition | None:
+    """The oldest condition with this wording that could belong to this lender."""
+    for candidate in candidates or []:
+        if _lender_compatible(candidate, lender_id):
+            return candidate
+    return None
 
 
 def _match(
     row: dict[str, Any],
     *,
     by_code: dict[tuple[UUID | None, str], Condition],
-    by_text: dict[str, Condition],
+    by_text: dict[str, list[Condition]],
     lender_id: UUID | None,
 ) -> tuple[Condition | None, Condition | None]:
     """The spec's two passes. Returns `(match, possible_match)`.
+
+    ⚠️ BOTH PASSES ARE LENDER-SCOPED, AND THE SECOND ONE WAS NOT. `by_code` is keyed
+    `(lender_id, code)` so pass 1 was scoped by construction; `by_text` was keyed on the fingerprint
+    alone, so a condition belonging to lender A matched a sheet from lender B whenever the wording
+    was identical — silently, with no warning, recording lender A's condition as having appeared on
+    lender B's round. Measured on two lenders sharing one file (review): `created=0 seen_again=1`.
+
+    Worse, the same import disagreed with itself three ways: the code map recorded `(lender B, code)`
+    as a brand-new OBSERVED_UNMAPPED entry in the very transaction where this pass declared the
+    condition identical. Pass 1 lender-specific, code map lender-specific, pass 2 lender-agnostic.
 
     ⚠️ `possible_match` IS AN ID FOR STAGE 2, NOT A DECISION HERE. A condition with the SAME code and
     a DIFFERENT fingerprint is either a re-worded demand or a different demand the lender happened to
@@ -126,6 +174,7 @@ def _match(
     """
     code = row.get("lender_code")
     text_print = _row_fingerprint(row)
+    by_wording = _first_compatible(by_text.get(text_print), lender_id)
 
     if isinstance(code, str) and code:
         exact = by_code.get((lender_id, code))
@@ -133,9 +182,9 @@ def _match(
             return exact, None
         # Same code, different words: not a match, but worth naming.
         if exact is not None:
-            return by_text.get(text_print), exact
+            return by_wording, exact
 
-    return by_text.get(text_print), None
+    return by_wording, None
 
 
 # --------------------------------------------------------------------------- #
@@ -426,6 +475,18 @@ async def _assign_round_number(db: AsyncSession, *, round_: ConditionRound) -> i
     number = await _next_round_number(db, loan_file_id=round_.loan_file_id)
 
     for attempt in range(1, MAX_NUMBER_ATTEMPTS + 1):
+        if attempt > 1:
+            # ⚠️ RECOMPUTED AT THE TOP OF A RETRY, NOT AFTER THE FAILURE THAT CAUSED IT. Those look
+            # equivalent and are not: recomputing in the `except` branch meant the LAST failed
+            # attempt also issued a query, for a number nobody would ever use, while holding a lock
+            # that auto-expires at 30 seconds — the exact resource this bound exists to protect.
+            #
+            # It also made "attempts" and "computations" differ by one, which is how a test counting
+            # the latter while claiming to pin the former read as correct: `len(calls) == 4` against
+            # `MAX_NUMBER_ATTEMPTS == 3`. Here the two counts are the same number, so the test can
+            # assert the property directly instead of an off-by-one restatement of it.
+            number = await _next_round_number(db, loan_file_id=round_.loan_file_id)
+
         savepoint = await db.begin_nested()
         round_.round_number = number
         round_.status = ConditionRoundStatus.IMPORTED
@@ -440,12 +501,13 @@ async def _assign_round_number(db: AsyncSession, *, round_: ConditionRound) -> i
             await savepoint.rollback()
             # Reload before touching `round_` again — see the docstring.
             await db.refresh(round_)
-            number = await _next_round_number(db, loan_file_id=round_.loan_file_id)
             logger.info(
                 "condition_round_number_retry",
                 round_id=str(round_.id),
                 attempt=attempt,
-                next_number=number,
+                # The number that was REFUSED. It used to log the freshly recomputed one under the
+                # same name, so the line read as though the retry had already succeeded.
+                claimed_number=number,
             )
             continue
         await savepoint.commit()
@@ -505,14 +567,18 @@ async def import_round(
         raise RoundNotImportable("This round has no rows to import. Discard it instead.")
 
     existing = await _existing_conditions(db, loan_file_id=round_.loan_file_id)
-    by_code: dict[tuple[UUID | None, str], Condition] = {
-        (condition.lender_id, condition.lender_code): condition
-        for condition in existing
-        if condition.lender_code
-    }
-    by_text: dict[str, Condition] = {
-        condition.text_fingerprint: condition for condition in existing
-    }
+    # ⚠️ FIRST WINS, NOT LAST, AND BOTH LOOKUPS HOLD EVERY CANDIDATE RATHER THAN ONE. Two conditions
+    # can share `(lender_id, lender_code)` by design — a same-code/different-wording row creates a
+    # second one, which is what `possible_match` is for. A dict comprehension silently kept whichever
+    # came last out of an unordered query; `setdefault` over the oldest-first list keeps the
+    # original. And the wording index keeps a LIST because the right candidate now depends on the
+    # lender, so picking one up front would pick it before the question was asked.
+    by_code: dict[tuple[UUID | None, str], Condition] = {}
+    by_text: dict[str, list[Condition]] = {}
+    for condition in existing:
+        if condition.lender_code:
+            by_code.setdefault((condition.lender_id, condition.lender_code), condition)
+        by_text.setdefault(condition.text_fingerprint, []).append(condition)
 
     # ⚠️ `lender_id` IS NULLABLE AND A FILE WITH NO LENDER MUST STILL IMPORT. `(lender, code)` is
     # meaningless without the lender (ADR-407), so the code-map step is SKIPPED rather than guessed
@@ -559,12 +625,20 @@ async def import_round(
 
             # So a sheet listing the same condition twice matches the first one rather than
             # creating a second.
-            by_text.setdefault(condition.text_fingerprint, condition)
+            by_text.setdefault(condition.text_fingerprint, []).append(condition)
             if condition.lender_code:
                 by_code.setdefault((condition.lender_id, condition.lender_code), condition)
             continue
 
         changed = _update_seen_again(match, row, round_=round_)
+        if match.lender_id is None and round_.lender_id is not None:
+            # ⚠️ ADOPTION, AND WITHOUT IT THE BENIGN CASE QUIETLY DEGRADES. A condition recorded
+            # before the file had a lender matched this round by wording — but leaving it at `None`
+            # means pass 1 can never find it by `(lender, code)` again, so it depends on identical
+            # wording forever and drifts apart the first time the lender rephrases. Measured before
+            # the fix: a lender-less round then a lender round left `lender_id=None` permanently.
+            match.lender_id = round_.lender_id
+            changed["lender_adopted"] = True
         db.add(
             ConditionEvent(
                 company_id=round_.company_id,

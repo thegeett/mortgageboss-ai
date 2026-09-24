@@ -196,15 +196,25 @@ async def test_the_timeline_says_what_happened(db_session: AsyncSession) -> None
 # --------------------------------------------------------------------------- #
 
 
+#: "Not given", so an explicitly passed `None` still means "this round has no lender" rather than
+#: "use the first round's". A plain `None` default would collapse those two, and one of the tests
+#: below is precisely about a round that genuinely has none.
+_KEEP = object()
+
+
 async def _second_round(
-    db: AsyncSession, *, first: ConditionRound, rows: list[dict[str, Any]]
+    db: AsyncSession,
+    *,
+    first: ConditionRound,
+    rows: list[dict[str, Any]],
+    lender_id: Any = _KEEP,
 ) -> ConditionRound:
     """Another sheet for the same file — built directly, because `make_round` takes a Company and
     the first round already carries the ids this needs."""
     round_ = ConditionRound(
         company_id=first.company_id,
         loan_file_id=first.loan_file_id,
-        lender_id=first.lender_id,
+        lender_id=first.lender_id if lender_id is _KEEP else lender_id,
         status=ConditionRoundStatus.DRAFT,
         round_date=first.round_date,
         sources=[],
@@ -441,6 +451,130 @@ async def test_a_file_with_no_lender_still_imports(db_session: AsyncSession) -> 
     assert condition.lender_id is None
 
 
+async def test_two_lenders_on_one_file_do_not_share_a_condition(
+    db_session: AsyncSession,
+) -> None:
+    """⚠️ SPEC STEP 2 SCOPES BOTH PASSES TO "the same file **and lender**", AND THE WORDING PASS DID
+    NOT. Measured before the fix: lender B's sheet carrying lender A's exact wording produced
+    `created=0 seen_again=1` — one condition, still owned by lender A, recorded as having appeared
+    on lender B's round and carrying its chip. No error and no warning.
+
+    The same import disagreed with itself three ways: the code map recorded `(lender B, "7086")` as
+    a brand-new OBSERVED_UNMAPPED entry in the very transaction where this pass declared the
+    condition identical. Lender-specific in the code map, lender-specific in pass 1, lender-agnostic
+    in pass 2.
+
+    Reachable rather than theoretical: `loan_file.lender_id` is nullable and mutable, and a round
+    takes the FILE's lender.
+    """
+    company = await make_company(db_session)
+    loan_file = await make_loan_file(db_session, company=company)
+    lender_a = await make_lender(db_session, company=company, name="UWM")
+    lender_b = await make_lender(db_session, company=company, name="Champions")
+
+    round_a = await make_round(db_session, company=company, loan_file=loan_file, lender=lender_a)
+    round_a.draft_rows = [_row()]
+    await db_session.flush()
+    await import_round(db_session, round_=round_a)
+
+    round_b = await make_round(db_session, company=company, loan_file=loan_file, lender=lender_b)
+    round_b.draft_rows = [_row()]
+    await db_session.flush()
+    outcome = await import_round(db_session, round_=round_b)
+
+    assert outcome.created == 1, "another lender's demand is its own condition"
+    assert outcome.seen_again == 0
+    conditions = await _conditions(db_session, loan_file.id)
+    assert len(conditions) == 2
+    assert {c.lender_id for c in conditions} == {lender_a.id, lender_b.id}
+
+
+async def test_a_condition_recorded_before_the_lender_was_known_is_adopted(
+    db_session: AsyncSession,
+) -> None:
+    """⚠️ `None` MEANS "NOT KNOWN YET", NEVER "A DIFFERENT LENDER", and the two need opposite
+    handling. Refusing to match across `None` would duplicate the demand the moment the file's
+    lender was set — the failure the fingerprint pass exists to prevent.
+
+    But matching and leaving it at `None` is the other half of the defect, and it is the half that
+    was silent: pass 1 could then never find the condition by `(lender, code)` again, so it would
+    depend on identical wording forever and drift apart the first time the lender rephrased.
+    Measured before the fix: `lender_id` stayed `None` permanently.
+    """
+    company = await make_company(db_session)
+    loan_file = await make_loan_file(db_session, company=company)
+    lender = await make_lender(db_session, company=company)
+
+    first = await make_round(db_session, company=company, loan_file=loan_file, lender=None)
+    first.draft_rows = [_row()]
+    await db_session.flush()
+    await import_round(db_session, round_=first)
+
+    second = await _second_round(db_session, first=first, rows=[_row()], lender_id=lender.id)
+    outcome = await import_round(db_session, round_=second)
+
+    assert outcome.seen_again == 1, "the same demand, not a duplicate"
+    (condition,) = await _conditions(db_session, loan_file.id)
+    assert condition.lender_id == lender.id, "adopted by the lender that claimed it"
+
+    (event,) = [
+        e
+        for e in await _events(db_session, second.id)
+        if e.kind is ConditionEventKind.CONDITION_SEEN_AGAIN
+    ]
+    assert event.detail["changed"]["lender_adopted"] is True
+
+
+async def test_a_round_with_no_lender_matches_a_condition_that_has_one(
+    db_session: AsyncSession,
+) -> None:
+    """Compatibility runs both ways. A round whose file has no lender set does not know a DIFFERENT
+    lender — it knows none — so it must match rather than duplicate, and must not blank the lender
+    the condition already carries."""
+    first, loan_file, lender = await _draft(db_session)
+    await import_round(db_session, round_=first)
+
+    second = await _second_round(db_session, first=first, rows=[_row()], lender_id=None)
+    outcome = await import_round(db_session, round_=second)
+
+    assert outcome.seen_again == 1
+    (condition,) = await _conditions(db_session, loan_file.id)
+    assert condition.lender_id == lender.id, "and it keeps the lender it had"
+
+
+async def test_possible_match_names_the_oldest_condition_under_a_shared_code(
+    db_session: AsyncSession,
+) -> None:
+    """⚠️ TWO CONDITIONS CAN SHARE `(lender, code)` BY DESIGN — a same-code/different-wording row
+    creates a second one, which is what `possible_match` exists for. The lookup keeps the FIRST of
+    them, and `_existing_conditions` had no `ORDER BY` at all, so "first" was whatever the planner
+    returned: the id in `possible_match` could differ from run to run on identical data.
+    """
+    first, loan_file, _ = await _draft(db_session)
+    await import_round(db_session, round_=first)
+    (original,) = await _conditions(db_session, loan_file.id)
+
+    second = await _second_round(
+        db_session, first=first, rows=[_row(verbatim_text="Reworded once.")]
+    )
+    await import_round(db_session, round_=second)
+    assert len(await _conditions(db_session, loan_file.id)) == 2, "same code, different words"
+
+    third = await _second_round(
+        db_session, first=first, rows=[_row(verbatim_text="Reworded twice.")]
+    )
+    await import_round(db_session, round_=third)
+
+    (created,) = [
+        e
+        for e in await _events(db_session, third.id)
+        if e.kind is ConditionEventKind.CONDITION_CREATED
+    ]
+    assert created.detail["possible_match"] == str(original.id), (
+        "the original, not whichever row the planner happened to return last"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Numbering, and the race the lock does not prevent
 # --------------------------------------------------------------------------- #
@@ -496,13 +630,27 @@ async def test_the_retry_is_bounded(
 ) -> None:
     """⚠️ NEVER AN UNBOUNDED LOOP. `max + 1` recomputed under contention can lose twice, and an
     unbounded retry would outlive the 30-second lock it holds — the very failure it exists to
-    prevent. A typed refusal, not a silent give-up."""
+    prevent. A typed refusal, not a silent give-up.
+
+    ⚠️ THE ATTEMPTS ARE COUNTED, AND WITHOUT THAT THIS TEST WAS BLIND TO ITS OWN SUBJECT (review).
+    It asserted only that a refusal carrying "Try again" came out — which is true of a bound of 3, of
+    25, or of 250. Measured: with `MAX_NUMBER_ATTEMPTS = 25` this test still passed, and the only
+    failure anywhere came from the recovery test noticing incidentally at a bound of 1.
+
+    The uncaught direction is the harmful one. A vanished bound is loud; an INFLATED bound is silent
+    and is exactly what outlives the advisory lock. The assertion was downstream of the property
+    rather than of its negation — the third time that shape has appeared in this ticket, after a
+    reach assertion that could not fail and an exemption test that never invoked the walk.
+    """
     first, _file, _ = await _draft(db_session)
     await import_round(db_session, round_=first)
 
     second = await _second_round(db_session, first=first, rows=[_row(verbatim_text=HOI)])
 
+    calls: list[int] = []
+
     async def always_taken(db: AsyncSession, *, loan_file_id: Any) -> int:
+        calls.append(1)
         return 1
 
     monkeypatch.setattr(condition_import, "_next_round_number", always_taken)
@@ -510,6 +658,25 @@ async def test_the_retry_is_bounded(
     with pytest.raises(RoundNotImportable) as refused:
         await import_round(db_session, round_=second)
     assert "Try again" in refused.value.reason
+    assert len(calls) == condition_import.MAX_NUMBER_ATTEMPTS, (
+        "it tried exactly the stated number of times — not merely 'it gave up eventually'"
+    )
+    # ⚠️ AND A CEILING, BECAUSE THE LINE ABOVE MOVES WITH THE CONSTANT IT CHECKS. Comparing the
+    # attempt count to `MAX_NUMBER_ATTEMPTS` is true for ANY value of it — measured: setting the
+    # constant to 25 left all 27 tests green, including this one, AFTER it had already been
+    # corrected once for being blind to the bound. Same shape, one level down.
+    #
+    # The property is not "it tried the number it says". It is "the number it says is small enough
+    # to finish inside the advisory lock it is holding". The lock auto-expires at 30 seconds and one
+    # attempt is a flush plus a query, so a handful is defensible and a hundred is not.
+    #
+    # A ceiling rather than the exact value on purpose: `== 3` would be the guessed constant this
+    # ticket was already caught on, and would fail when someone legitimately moves 3 to 4. This
+    # fails only when the bound stops being a bound.
+    assert condition_import.MAX_NUMBER_ATTEMPTS <= 5, (
+        "a bound this large outlives the 30-second lock the retry holds — the failure it exists "
+        "to prevent"
+    )
 
 
 # --------------------------------------------------------------------------- #
