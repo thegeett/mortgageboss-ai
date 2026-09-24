@@ -289,6 +289,19 @@ def read_champions(lines: Sequence[Line]) -> ParsedSheet:
     first_page = [line for line in lines if line.page == 1 and not line.is_blank]
     repeated = frozenset(line.text.strip() for line in first_page[:2])
 
+    # ⚠️ WHERE EACH LINE SITS IN THE INPUT, BECAUSE `source_line_numbers` MEANS INDICES AND THIS
+    # READER USED TO PUT SOMETHING ELSE THERE. It stored `int(line.y)` — a coordinate in POINTS —
+    # while `uwm.py` and `generic.py` store the line's position in the sequence. Three problems, and
+    # the field's own docstring ("which input lines produced this row") rules out all three: the
+    # scale is wrong, the value is lossy, and it is NOT UNIQUE — `Line.page` exists precisely
+    # because y repeats on every page, so two rows on different pages could carry identical "line
+    # numbers" and no consumer could tell them apart.
+    #
+    # Keyed on `id()` rather than on the line itself. `Line` is a frozen dataclass and hashable, but
+    # two lines with identical text and position are a real thing on a repeating certificate, and a
+    # value-keyed map would silently merge them — which is the same uniqueness bug in a new place.
+    index_of = {id(line): position for position, line in enumerate(lines)}
+
     segments, header_lines = _segments(lines, repeated)
     header, expiry, header_warnings = _header(header_lines)
     sheet.header = header
@@ -317,7 +330,11 @@ def read_champions(lines: Sequence[Line]) -> ParsedSheet:
                     [previous.verbatim_text, *(line.text.strip() for line in leftover)]
                 )
                 previous.crossed_page = True
-                previous.source_line_numbers.extend(range(len(leftover)))
+                # ⚠️ THE TAIL'S OWN INDICES, NOT `range(len(leftover))`. That counted the leftover
+                # lines from zero and appended those ordinals onto a list already holding y-values —
+                # so ONE row carried two different scales at once, and the tail pointed at the first
+                # lines of the document instead of the ones it came from.
+                previous.source_line_numbers.extend(index_of[id(line)] for line in leftover)
             else:
                 sheet.unassigned_lines.extend(line.text.strip() for line in leftover)
 
@@ -337,7 +354,7 @@ def read_champions(lines: Sequence[Line]) -> ParsedSheet:
                     owner_hint=OwnerHint.UNKNOWN,
                     owner_hint_source=OwnerHintSource.NONE,
                     confidence=RULE_CONFIDENCE if ok else UNCERTAIN_CONFIDENCE,
-                    source_line_numbers=[int(line.y) for line in row_lines],
+                    source_line_numbers=[index_of[id(line)] for line in row_lines],
                 )
             )
 

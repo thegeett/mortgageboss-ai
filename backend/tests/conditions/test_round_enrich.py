@@ -296,6 +296,78 @@ async def test_an_imported_round_merges_into_its_conditions(db_session: AsyncSes
     ]
 
 
+async def test_a_condition_the_pdf_adds_to_an_imported_round_records_that_it_appeared(
+    db_session: AsyncSession,
+) -> None:
+    """⚠️ IMPORT IS NOT THE ONLY WRITER OF CONDITIONS, AND THIS IS THE SECOND ONE.
+
+    "Which rounds did a condition appear on" is derived from `CONDITION_CREATED` /
+    `CONDITION_SEEN_AGAIN` events (spec §LP-909) — the `R1 R2` chips, and the round card's own
+    count. A condition created here WITHOUT that event gets no chips at all, while its own
+    `first_round_id` and `last_seen_round_id` both point at this very round, and the round
+    undercounts itself by exactly the number added.
+
+    Reachable rather than theoretical: paste, import, then attach the lender's PDF — the flow
+    `attach-pdf` exists for, reached from the review screen's own "Attach the lender's PDF" action.
+    Nothing pinned it until this test: the `added` assertions above are the DRAFT path, which
+    correctly has no events because a draft has no conditions yet.
+    """
+    round_, loan_file = await _pasted_round(db_session)
+    # Import only the FIRST two rows, so the PDF brings four the round has never seen.
+    rows = list(round_.draft_rows or [])[:2]
+    for index, row in enumerate(rows, start=1):
+        db_session.add(
+            Condition(
+                company_id=round_.company_id,
+                loan_file_id=round_.loan_file_id,
+                first_round_id=round_.id,
+                last_seen_round_id=round_.id,
+                sequence=index,
+                lender_code=row["lender_code"],
+                bucket_heading=row["bucket_heading"],
+                bucket_kind=BucketKind(row["bucket_kind"]),
+                verbatim_text=row["verbatim_text"],
+                text_fingerprint=fingerprint(row["verbatim_text"]),
+                underwriter_notes=[],
+            )
+        )
+    round_.status = ConditionRoundStatus.IMPORTED
+    round_.round_number = 2
+    round_.draft_rows = None
+    await db_session.flush()
+
+    result = await enrich_round_with_pdf(db_session, round_=round_, content=_round_2_pdf())
+
+    assert result.added == 4, "the PDF carries four conditions this round had not imported"
+
+    created = (
+        (
+            await db_session.execute(
+                select(ConditionEvent).where(
+                    ConditionEvent.round_id == round_.id,
+                    ConditionEvent.kind == ConditionEventKind.CONDITION_CREATED,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(created) == result.added, "every added condition records that it appeared here"
+    # Each event names a real condition, so the chips and the count can be derived from it.
+    condition_ids = set(
+        (
+            await db_session.execute(
+                select(Condition.id).where(Condition.loan_file_id == loan_file.id)  # type: ignore[attr-defined]
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert {event.condition_id for event in created} <= condition_ids
+    # ⚠️ Counts and codes only — never the lender's wording (spec §9.5).
+    assert all(set(event.detail) == {"source", "lender_code"} for event in created)
+
+
 async def test_something_that_is_not_a_pdf_is_refused(db_session: AsyncSession) -> None:
     """The same typed refusal the upload door gives, for the same reason (spec §9.8)."""
     round_, _file = await _pasted_round(db_session)

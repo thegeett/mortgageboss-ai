@@ -173,7 +173,12 @@ def _merge_draft_rows(round_: ConditionRound, sheet: ParsedSheet, result: Enrich
 
 
 async def _merge_conditions(
-    db: AsyncSession, round_: ConditionRound, sheet: ParsedSheet, result: EnrichResult
+    db: AsyncSession,
+    round_: ConditionRound,
+    sheet: ParsedSheet,
+    result: EnrichResult,
+    *,
+    actor_user_id: UUID | None = None,
 ) -> None:
     """Merge into an IMPORTED round's `conditions`, which are real rows with identity."""
     existing = list(
@@ -194,26 +199,52 @@ async def _merge_conditions(
             fingerprint(pdf_row.verbatim_text)
         )
         if target is None:
+            created = Condition(
+                company_id=round_.company_id,
+                loan_file_id=round_.loan_file_id,
+                lender_id=round_.lender_id,
+                first_round_id=round_.id,
+                last_seen_round_id=round_.id,
+                sequence=pdf_row.sequence,
+                lender_code=pdf_row.lender_code,
+                lender_category=pdf_row.lender_category,
+                bucket_heading=pdf_row.bucket_heading,
+                bucket_kind=pdf_row.bucket_kind,
+                verbatim_text=pdf_row.verbatim_text,
+                text_fingerprint=fingerprint(pdf_row.verbatim_text),
+                underwriter_notes=[
+                    {"date": n.date.isoformat() if n.date else None, "text": n.text}
+                    for n in pdf_row.underwriter_notes
+                ],
+                owner_hint=pdf_row.owner_hint,
+                owner_hint_source=pdf_row.owner_hint_source,
+            )
+            db.add(created)
+            # ⚠️ THE EVENT IS NOT DECORATION HERE — IT IS THE ONLY RECORD THAT THIS CONDITION WAS ON
+            # THIS SHEET, and an earlier version of this branch omitted it.
+            #
+            # Import is not the only writer of conditions; this is the second. "Which rounds did a
+            # condition appear on" is derived from `CONDITION_CREATED` / `CONDITION_SEEN_AGAIN`
+            # events (spec §LP-909), so a condition created without one gets NO round chips at all
+            # — while its own `first_round_id` and `last_seen_round_id` both point at this very
+            # round — and the round's own count undercounts by exactly the number added here.
+            #
+            # Reachable rather than theoretical: it is the paste-then-attach-PDF flow on an already
+            # imported round, which is precisely what `attach-pdf` was built for.
+            #
+            # `flush` first, because the event needs the condition's id and `db.add` alone does not
+            # assign one.
+            await db.flush()
             db.add(
-                Condition(
+                ConditionEvent(
                     company_id=round_.company_id,
                     loan_file_id=round_.loan_file_id,
-                    lender_id=round_.lender_id,
-                    first_round_id=round_.id,
-                    last_seen_round_id=round_.id,
-                    sequence=pdf_row.sequence,
-                    lender_code=pdf_row.lender_code,
-                    lender_category=pdf_row.lender_category,
-                    bucket_heading=pdf_row.bucket_heading,
-                    bucket_kind=pdf_row.bucket_kind,
-                    verbatim_text=pdf_row.verbatim_text,
-                    text_fingerprint=fingerprint(pdf_row.verbatim_text),
-                    underwriter_notes=[
-                        {"date": n.date.isoformat() if n.date else None, "text": n.text}
-                        for n in pdf_row.underwriter_notes
-                    ],
-                    owner_hint=pdf_row.owner_hint,
-                    owner_hint_source=pdf_row.owner_hint_source,
+                    round_id=round_.id,
+                    condition_id=created.id,
+                    kind=ConditionEventKind.CONDITION_CREATED,
+                    actor_user_id=actor_user_id,
+                    # Counts, codes and names only — never the lender's wording (spec §9.5).
+                    detail={"source": "attach_pdf", "lender_code": created.lender_code},
                 )
             )
             result.added += 1
@@ -295,7 +326,7 @@ async def enrich_round_with_pdf(
         round_.sheet_format = sheet.sheet_format
 
     if round_.status is ConditionRoundStatus.IMPORTED:
-        await _merge_conditions(db, round_, sheet, result)
+        await _merge_conditions(db, round_, sheet, result, actor_user_id=actor_user_id)
     else:
         _merge_draft_rows(round_, sheet, result)
 
