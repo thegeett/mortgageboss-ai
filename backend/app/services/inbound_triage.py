@@ -257,6 +257,40 @@ async def reject_attachment(
     return attachment
 
 
+async def _round_carrying(
+    db: AsyncSession, *, loan_file: LoanFile, attachment: InboundAttachment
+) -> ConditionRound | None:
+    """The active round on this file whose `sources` already carry this attachment, if any.
+
+    ⚠️ ONE QUESTION, ASKED BY BOTH DOORS, AND SPLITTING IT IS HOW THE INVARIANT BROKE TWICE. The
+    attachment→round link is DERIVED from `sources` rather than stored as a column (screen S1-13
+    renders "Used as condition sheet → Round N" from it), and that derivation assumes ONE-TO-ONE.
+
+    The first break was a self-permitting loop on the create path: the disposition guard admitted
+    CORRESPONDENCE and the action set it, so every repeat forward made another round.
+
+    The second was subtler and this helper exists because of it. The guard lived INSIDE
+    `forward_attachment_as_sheet`, and the endpoint branches to the merge BEFORE calling it — so
+    forwarding an attachment and then merging the same attachment into a DIFFERENT round produced
+    two rounds carrying one id, with neither guard at fault: `enrich_round_with_pdf` asks only
+    whether the TARGET round already has a PDF source, which cannot see another round. Worse than
+    the first, because those two rounds look legitimately different — one PARSING from the email,
+    one DRAFT under review — so nothing suggests they share a source.
+
+    The fix is to ask the question where the ATTACHMENT is the subject, once, for both paths.
+    """
+    found: ConditionRound | None = await db.scalar(
+        only_active(
+            select(ConditionRound).where(
+                ConditionRound.loan_file_id == loan_file.id,
+                ConditionRound.sources.contains([{"inbound_attachment_id": str(attachment.id)}]),
+            ),
+            ConditionRound,
+        )
+    )
+    return found
+
+
 async def forward_attachment_as_sheet(
     db: AsyncSession,
     *,
@@ -324,15 +358,7 @@ async def forward_attachment_as_sheet(
     #
     # Asked of the rounds rather than of the attachment, and no new column is needed: the field that
     # IS the join is the field that answers it.
-    existing = await db.scalar(
-        only_active(
-            select(ConditionRound).where(
-                ConditionRound.loan_file_id == loan_file.id,
-                ConditionRound.sources.contains([{"inbound_attachment_id": str(attachment.id)}]),
-            ),
-            ConditionRound,
-        )
-    )
+    existing = await _round_carrying(db, loan_file=loan_file, attachment=attachment)
     if existing is not None:
         # Naming the round is what a processor who clicked twice actually wants — "this is already
         # round 3" rather than a second round to discard.
@@ -394,13 +420,20 @@ async def merge_attachment_into_round(
     fetching and comparing means a mismatched (file, round) pair is unfetchable, not merely
     rejected.
 
-    ⚠️ THE `sources` DUPLICATE GUARD IS DELIBERATELY NOT APPLIED HERE, and the difference is the
-    whole point rather than an oversight. `forward_attachment_as_sheet` refuses an attachment whose
-    id already appears in some round's `sources`, because creating a SECOND round from one
-    attachment broke the one-to-one the S1-13 link derives from. Merging is the opposite case: it
-    puts that attachment's id into a round that already exists, creating no second round at all.
-    Attaching the same PDF twice is still refused — by `enrich_round_with_pdf`, on "this round
-    already has a PDF source", which is the guard that actually fits the question here.
+    ⚠️ THE `sources` GUARD APPLIES HERE TOO, AND AN EARLIER VERSION OF THIS DOCSTRING ARGUED IT
+    SHOULD NOT. The argument was that merging creates no second round, so the duplicate guard did not
+    fit — true as far as it went, and it left a hole a review found by execution: forward an
+    attachment (round 1 carries its id), then merge the SAME attachment into a different round, and
+    two rounds carry one `inbound_attachment_id`. Exactly the one-to-many S1-13 cannot render.
+
+    `enrich_round_with_pdf` could not catch it: its guard asks whether THE TARGET round already has
+    a PDF source, and a different round is invisible to that question. Both guards were individually
+    correct, and the gap was the space between them.
+
+    So `_round_carrying` runs on this path as well, with ONE exception: when the round already
+    carrying the attachment IS the merge target. That is a re-attach to the same round, and
+    `enrich_round_with_pdf` refuses it on its own terms with a message that says so — "this round
+    already has the lender's PDF" is more useful there than "already used as a condition sheet".
     """
     from app.services.condition_enrich import enrich_round_with_pdf
 
@@ -435,6 +468,14 @@ async def merge_attachment_into_round(
     )
     if round_ is None:
         raise CannotAcceptError("No such condition round on this loan file.")
+
+    carrying = await _round_carrying(db, loan_file=loan_file, attachment=attachment)
+    if carrying is not None and carrying.id != round_.id:
+        # A DIFFERENT round already has this attachment. Naming it is what the processor needs:
+        # the answer is "it is already on round N", not "try a different round".
+        raise CannotAcceptError(
+            f"This attachment has already been used as a condition sheet ({carrying.id})."
+        )
 
     content = await _attachment_bytes(db, attachment=attachment)
     await enrich_round_with_pdf(

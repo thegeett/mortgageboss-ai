@@ -286,6 +286,104 @@ async def test_forwarding_the_same_attachment_twice_is_refused(
     assert len(rounds) == 1, "a second forward must not create a second round"
 
 
+async def test_one_attachment_cannot_end_up_in_two_rounds(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """⚠️ THE SAME ONE-TO-MANY THE FIRST FIX CLOSED, REOPENED THROUGH THE MERGE DOOR.
+
+    Forwarding an attachment creates round 1 carrying its id in `sources`. Forwarding it AGAIN with
+    `attach_to_round_id` pointing at a different round merges it there — and now two rounds carry the
+    same `inbound_attachment_id`.
+
+    Both guards are individually correct and neither sees it. The endpoint branches on
+    `attach_to_round_id` BEFORE `forward_attachment_as_sheet`, so the `sources` containment guard
+    never runs on the merge path; and `enrich_round_with_pdf` asks only whether THE TARGET round
+    already has a PDF source, which cannot see a different round.
+
+    Worse than the original: there the two rounds were identical duplicates a processor would
+    notice. Here round 1 is a PARSING round from the email and round 2 a DRAFT under review, so they
+    look legitimately different and nothing hints they share a source. S1-13's "Used as condition
+    sheet → Round N" has two answers and no way to choose.
+    """
+    from app.models.condition_round import ConditionRoundCompleteness
+    from app.services.condition_rounds import create_round_from_paste
+    from tests.conditions.fixture_helpers import portal_excerpt
+
+    loan_file, attachment, token = await _setup(db_session, slug="fwd-two-rounds")
+
+    first = await client.post(_url(loan_file.id, attachment.id), headers=_auth(token), json={})
+    assert first.status_code == 202
+
+    other = await create_round_from_paste(
+        db_session,
+        loan_file=loan_file,  # type: ignore[arg-type]
+        text=portal_excerpt(),
+        completeness=ConditionRoundCompleteness.PARTIAL,
+    )
+
+    second = await client.post(
+        _url(loan_file.id, attachment.id),
+        headers=_auth(token),
+        json={"attach_to_round_id": str(other.id)},
+    )
+
+    assert second.status_code == 409, second.text
+    assert first.json()["round_id"] in second.text
+
+    rounds = (
+        (
+            await db_session.execute(
+                select(ConditionRound).where(ConditionRound.loan_file_id == loan_file.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    carrying = [
+        r
+        for r in rounds
+        for source in (r.sources or [])
+        if source.get("inbound_attachment_id") == str(attachment.id)
+    ]
+    assert len(carrying) == 1, "exactly one round may carry an attachment's id"
+
+
+async def test_re_attaching_to_the_round_that_already_has_it_refuses_on_the_rounds_own_terms(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """⚠️ THE ONE EXCEPTION TO THE CROSS-ROUND GUARD, AND NOTHING COVERED IT UNTIL NOW.
+
+    The guard refuses an attachment already carried by a DIFFERENT round. Pointing it at the round
+    that already has it is a re-attach, and that is `enrich_round_with_pdf`'s question, not the
+    attachment's — "this round already has the lender's PDF" tells the processor what to do, where
+    "already used as a condition sheet (this round)" would be a riddle.
+
+    A mutation run proved this was untested: tightening the guard to refuse the same-round case left
+    all 16 tests in these two files green, so the exception could have been deleted silently.
+    """
+    loan_file, attachment, token = await _setup(db_session, slug="fwd-reattach")
+
+    first = await client.post(_url(loan_file.id, attachment.id), headers=_auth(token), json={})
+    assert first.status_code == 202
+    round_id = first.json()["round_id"]
+
+    second = await client.post(
+        _url(loan_file.id, attachment.id),
+        headers=_auth(token),
+        json={"attach_to_round_id": round_id},
+    )
+
+    assert second.status_code == 409
+    # ⚠️ THE ROUND'S OWN MESSAGE, NOT THE ATTACHMENT'S — which is exactly what the exception allows,
+    # and the message is about STATUS rather than the PDF because `enrich_round_with_pdf` checks the
+    # status first and a forwarded round is still PARSING while the task reads it. (I expected the
+    # PDF-source message here and was wrong about the order, not about the behaviour.)
+    assert "cannot take a PDF" in second.text
+    # The discriminator: without the exception this would be the attachment guard's sentence, which
+    # tells a processor nothing they can act on when the round named IS the one they chose.
+    assert "already been used as a condition sheet" not in second.text
+
+
 async def test_an_unsafe_attachment_is_refused(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
