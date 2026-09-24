@@ -16,6 +16,7 @@ refusal stands.
 
 from __future__ import annotations
 
+import pymupdf
 import pytest
 from app.conditions.readers import lines_from_pdf, lines_from_text, read_uwm
 from app.conditions.readers.uwm import _shallow_threshold
@@ -80,6 +81,71 @@ def test_nothing_is_left_unassigned_on_the_pdf_path(fixture: str) -> None:
 
     assert sheet.unassigned_lines == []
     assert sheet.needs_ai is False
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_the_header_and_its_date_survive_the_pdf_path(fixture: str) -> None:
+    """⚠️ THE FIELDS THE EQUIVALENCE TESTS ORIGINALLY DID NOT COMPARE, WHICH IS HOW A DEFECT HID.
+
+    The first version compared codes, order, buckets and verbatim text — and nothing else. So a PDF
+    read that produced `date_printed=None` and **16 warnings** against the text path's 0 passed 20
+    tests without complaint. `_split_header`'s pair regex required `:\\s{2,}`, and PDF text joins
+    tokens with single spaces, so `Date Printed` was never matched — which then left every
+    underwriter note dateless, because rule 4 resolves a note's year against it.
+
+    A guard that compares four fields says nothing about the fifth.
+    """
+    from_pdf, from_text = _from_pdf(fixture), _from_text(fixture)
+
+    assert from_pdf.date_printed == from_text.date_printed
+    assert from_pdf.header == from_text.header
+    assert from_pdf.warnings == from_text.warnings
+
+
+@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+def test_the_underwriter_notes_resolve_identically_from_both_inputs(fixture: str) -> None:
+    """Notes carry a resolved DATE, and the date comes from the header — so this fails the moment
+    the header stops being read on either path."""
+
+    def notes(sheet: object) -> list[tuple[str | None, str, str]]:
+        return [
+            (row.lender_code, note.text, str(note.date))
+            for row in sheet.rows  # type: ignore[attr-defined]
+            for note in row.underwriter_notes
+        ]
+
+    assert notes(_from_pdf(fixture)) == notes(_from_text(fixture))
+
+
+def test_a_block_of_one_line_rows_still_parses_from_a_pdf() -> None:
+    """⚠️ THE DEFECT MY OWN DOCSTRING TALKED ME PAST.
+
+    A conditions block whose rows all fit on one line has no continuation column, so
+    `_shallow_threshold` returns None — correctly. But `_row_start` also required a threshold, so
+    **no row opened either**: two well-formed rows produced `rows: []` with both lines in
+    `unassigned_lines`. §9.2 was technically honoured (nothing was dropped) while the processor got
+    an empty round.
+
+    The row's own token gaps answer the question the block-level threshold cannot.
+    """
+    document = pymupdf.open()
+    page = document.new_page(width=900, height=400)
+    for x, y, text in (
+        (54.0, 60.0, "LOAN APPROVAL CONDITIONS - X - 1"),
+        (54.0, 90.0, "CONDITIONS"),
+        (54.0, 110.0, "Closing (PTF)"),
+        (54.0, 130.0, "0006   Invoice   Provide copy of invoice for credit report."),
+        (54.0, 146.0, "0007   Invoice   Provide copy of invoice for final inspection."),
+        (54.0, 176.0, "EXPIRATION DATES"),
+    ):
+        page.insert_text((x, y), text, fontsize=8, fontname="cour")
+
+    sheet = read_uwm(lines_from_pdf(bytes(document.tobytes())))
+
+    assert [row.lender_code for row in sheet.rows] == ["0006", "0007"]
+    assert sheet.rows[0].lender_category == "Invoice"
+    assert sheet.rows[0].verbatim_text == "Provide copy of invoice for credit report."
+    assert sheet.unassigned_lines == []
 
 
 def test_round1_still_yields_the_spec_eleven_rows_from_a_pdf() -> None:

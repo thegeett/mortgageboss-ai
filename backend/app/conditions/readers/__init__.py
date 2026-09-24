@@ -15,6 +15,8 @@ even then it only SPLITS — it never interprets. A reader that returned approxi
 would defeat the entire point of storing the lender's wording verbatim.
 """
 
+from collections.abc import Callable, Sequence
+
 from app.conditions.readers.champions import read_champions
 from app.conditions.readers.detect import detect_format, first_content_line
 from app.conditions.readers.generic import read_generic
@@ -35,6 +37,33 @@ from app.conditions.readers.model import (
     UnderwriterNote,
 )
 from app.conditions.readers.uwm import read_uwm
+from app.models.condition_round import ConditionSheetFormat
+
+#: ⚠️ THE READERS ARE VERSIONED BECAUSE A RE-PARSE MUST BE REPRODUCIBLE (spec §9.6). It is recorded
+#: in `parse_report.reader_version`, so a round read months ago can be told apart from one read by a
+#: reader that has since changed — without which "re-parse and compare" means nothing. Bump it when a
+#: reader's OUTPUT changes for input it already handled, not when a comment moves.
+READER_VERSION = "v1"
+
+
+def reader_for(
+    sheet_format: ConditionSheetFormat,
+) -> tuple[str, Callable[[Sequence[Line]], ParsedSheet]]:
+    """The reader for a detected format, with the name that goes in `parse_report.reader`.
+
+    Lives with the readers rather than in the task: which function reads which layout is reader
+    knowledge, and a second mapping maintained beside the first is how the two drift. The name is
+    what the review screen renders — "Read by rules (uwm v1) — no AI" — so it is the reader's own
+    short name, never a class path.
+    """
+    match sheet_format:
+        case ConditionSheetFormat.UWM_APPROVAL_LETTER:
+            return "uwm", read_uwm
+        case ConditionSheetFormat.CHAMPIONS_CERTIFICATE:
+            return "champions", read_champions
+        case _:
+            return "generic", read_generic
+
 
 __all__ = [
     "NON_BREAKING_SPACE",

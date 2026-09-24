@@ -20,7 +20,9 @@ THE SHAPE OF A UWM SHEET, which is what every rule below is reading:
 ⚠️ THE EXPIRY TABLE IS THE REASON LINES CARRY POSITIONS AT ALL. Empty columns (CPL, Other, Payoff,
 Short Sale, Title, VOB are all blank on the real sheets) mean the Nth date is NOT the Nth header.
 Matching by order would silently file the insurance date under `other`. Each date goes to the header
-whose start column is NEAREST to it, and a distance over 8 gets a warning rather than a guess.
+whose start column is NEAREST to it, and one too far from any column gets a warning rather than a
+guess — "too far" being a fraction of the sheet's own column spacing, because the spec's "8" means
+characters on a pasted sheet and points on an uploaded one.
 
 ⚠️ NOTHING IS SILENTLY DROPPED (spec §9.2). Every non-blank line between `CONDITIONS` and
 `EXPIRATION DATES` becomes part of a row, a bucket heading, a known artifact (the mortgagee clause,
@@ -33,6 +35,7 @@ from __future__ import annotations
 
 import itertools
 import re
+import statistics
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -113,8 +116,18 @@ _EXPIRY_KEYS: dict[str, str] = {
     "VOB": "vob",
 }
 
-#: Rule 8: a date further than this from any header is reported rather than assigned confidently.
-_NEAREST_COLUMN_TOLERANCE = 8.0
+#: Rule 8: how far a date may sit from its column header before it is reported rather than assigned.
+#:
+#: ⚠️ A FRACTION OF THE COLUMN SPACING, NOT A CONSTANT, because the two inputs are in different
+#: units and a single number silently means different things in each. The spec's "8" is eight
+#: CHARACTERS; on a PDF the same eight is eight POINTS — under two characters at 8pt Courier — and
+#: three of round 1's six dates were rejected as "19 from the nearest column" when 19 points is
+#: about four characters. That is the same units confusion as an `indent` that was always None and a
+#: `\s{2,}` scan that matched nothing: a text-calibrated constant applied to positions.
+#:
+#: Derived from the gap between the expiry headers themselves, it is unitless: a date belongs to a
+#: column when it is nearer to it than to its neighbour, with a margin.
+_NEAREST_COLUMN_FRACTION = 0.4
 
 #: Rule 2's known labels. Order matters only for the longest-match scan below — `Loan Amount
 #: (Base/Total)` must be found before `Loan Amount` would be, so the scan sorts by length.
@@ -162,11 +175,63 @@ _LOAN_LABELS: tuple[str, ...] = (
 #: could not fix it — that stops a shorter label overlapping a longer MATCH, and does nothing about a
 #: label matching inside a value. This is the same `\s{2,}` shape `_split_header`'s pair regex uses,
 #: which is exactly why the header never had this bug.
-_LOAN_LABEL_SCAN = re.compile(
-    r"(?:^\s*|\s{2,})("
+#: The known labels, longest first so `Loan Amount (Base/Total)` is not truncated to `Loan Amount`
+#: and `Property Type` is not read as `Property`.
+#:
+#: ⚠️ MATCHED AT A CELL START, NOT ACROSS ARBITRARY WHITESPACE, and getting this wrong twice is why
+#: it is spelled out. The first version searched the whole line, so `Property  118 Status Road` gave
+#: `{'Property': '118', 'Status': 'Road'}` — a street name eating the field that owned the line. The
+#: second required `\s{2,}` around the label, which fixed text and broke PDFs, where
+#: `lines_from_pdf` joins tokens with SINGLE spaces and the scan matched nothing at all (16
+#: `unrecognised loan-information line` warnings against the text path's zero).
+#:
+#: Relaxing it to `\s+` brought the street name straight back. The width of the gap was never the
+#: real signal — being at the start of a COLUMN was, and `_cells` recovers that from two spaces on
+#: text and from token gaps on a PDF, so one rule now serves both units.
+_LOAN_LABEL_PREFIX = re.compile(
+    r"^("
     + "|".join(re.escape(label) for label in sorted(_LOAN_LABELS, key=len, reverse=True))
-    + r")(?=\s{2,}|$)"
+    + r")(?=\s|$)"
 )
+
+#: The same closed set, found ANYWHERE in a cell — used only to bound a value that has already been
+#: opened by a label, never to open one.
+#:
+#: ⚠️ THIS IS WHAT REPLACED A GAP-WIDTH RULE, AFTER THREE OF THEM FAILED. A PDF's gaps form a
+#: HIERARCHY — measured on round 1's loan-information lines: words 9.6-52.8 points, label-to-value
+#: ~77-100, column-pair ~130-158 — so any single threshold picks one level and merges the others.
+#: A constant of 24 split every word; a median multiple and a largest-gap split each merged whole
+#: column pairs, leaving `AUS` holding `Desktop Underwriter Submission Date 07/17/2026`. 18 of 26
+#: lines were wrong, and the premise ("one gap rule recovers the columns") was what was wrong.
+#:
+#: The label set needs no gap at all: a value ends where the next KNOWN label begins. And it cannot
+#: bring back the street-name defect, because a cell is only scanned when it STARTS with a label —
+#: `118 Status Road` never does, so `Status` inside it is never consulted.
+_LOAN_LABEL_ANYWHERE = re.compile(
+    r"(?:(?<=\s)|^)("
+    + "|".join(re.escape(label) for label in sorted(_LOAN_LABELS, key=len, reverse=True))
+    + r")(?=\s|$)"
+)
+
+
+def _pairs_in_cell(cell: str) -> list[tuple[str, str]]:
+    """Every `label value` pair inside one cell, or nothing if it does not open with a label."""
+    out: list[tuple[str, str]] = []
+    rest = cell.strip()
+    while rest:
+        opening = _LOAN_LABEL_PREFIX.match(rest)
+        if opening is None:
+            break
+        label = opening.group(1)
+        tail = rest[opening.end() :].strip()
+        following = _LOAN_LABEL_ANYWHERE.search(tail)
+        if following is None:
+            out.append((label, tail))
+            break
+        out.append((label, tail[: following.start()].strip()))
+        rest = tail[following.start() :]
+    return out
+
 
 #: Rule 1: the lender's own team, which becomes `header["lender_team"]`.
 _TEAM_LABELS: tuple[str, ...] = ("Senior UW", "UW II", "UW Team", "AE", "Closer")
@@ -205,6 +270,12 @@ def _heading_kind(text: str) -> tuple[BucketKind, bool]:
 #: Below this, a block's first-token positions are one column and nothing is a continuation.
 #: Expressed in points and compared against the block's OWN spread, so it carries no font metric.
 _MIN_COLUMN_SEPARATION_POINTS = 24.0
+
+#: How much wider than a line's typical word gap a gap must be to count as a COLUMN GUTTER.
+#: A multiple rather than a distance, so it means the same at any font size — measured on a UWM
+#: loan-information line at 8pt Courier, word gaps cluster at ~48 points and gutters start at ~77,
+#: so anything from about 1.3 upward separates them; 1.6 leaves margin on both sides.
+_GUTTER_MULTIPLE = 1.6
 
 
 def _shallow_threshold(lines: Sequence[Line]) -> float | None:
@@ -307,7 +378,7 @@ def _row_start(line: Line, threshold: float | None) -> _RowStart | None:
         )
 
     tokens = line.tokens
-    if not tokens or not _CODE.match(tokens[0].text) or threshold is None:
+    if not tokens or not _CODE.match(tokens[0].text):
         return None
 
     # ⚠️ THE CODE MUST BE AT THE MARGIN, AND DROPPING THIS SPLIT A ROW IN TWO. `_ROW_START` anchors
@@ -323,15 +394,39 @@ def _row_start(line: Line, threshold: float | None) -> _RowStart | None:
     processor_assist = bool(rest) and rest[0].text == "(PA)"
     if processor_assist:
         rest = rest[1:]
+    if len(rest) < 2:
+        return None
 
-    text = [token for token in rest if token.x0 >= threshold]
+    # ⚠️ TWO DIFFERENT QUESTIONS, AND CONFLATING THEM LOST EVERY ROW ON A SHEET WITH NO WRAPPED
+    # TEXT. The block threshold answers "where does a CONTINUATION start" — a property of FIRST
+    # tokens across the block. This needs "where does the TEXT start inside THIS row" — a property
+    # of the tokens within one line. A block whose rows all fit on one line has no answer to the
+    # first and a perfectly good answer to the second, and returning None when `threshold is None`
+    # meant two well-formed rows parsed to nothing: `rows: []`, both lines in `unassigned_lines`.
+    #
+    # So the boundary falls back to the widest gap inside the row. For
+    # `0006 Invoice Provide copy of invoice...` the gaps are ~47 (code→category), ~72
+    # (category→text) and ~10-30 (between words), so it lands on `Provide` and the category is
+    # `Invoice`. Computed inline rather than as a helper, to avoid importing `Token` for one
+    # annotation — three missing imports today came from exactly that habit.
+    boundary = threshold
+    if boundary is None:
+        widest, at = max(
+            ((b.x0 - a.x0, b.x0) for a, b in itertools.pairwise(rest)),
+            key=lambda pair: pair[0],
+        )
+        boundary = at if widest >= _MIN_COLUMN_SEPARATION_POINTS else None
+
+    if boundary is None:
+        return None
+    text = [token for token in rest if token.x0 >= boundary]
     if not text:
         # A four-digit token with nothing in the text column is not a row start — it is a figure
         # inside somebody else's sentence.
         return None
     return _RowStart(
         code=tokens[0].text,
-        category=" ".join(token.text for token in rest if token.x0 < threshold),
+        category=" ".join(token.text for token in rest if token.x0 < boundary),
         processor_assist=processor_assist,
         text=" ".join(token.text for token in text),
     )
@@ -423,6 +518,48 @@ def _fingerprint_text(text: str) -> str:
     return " ".join(_NOTE.sub(" ", text).lower().split())
 
 
+def _cells(line: Line) -> list[str]:
+    """One line split into its printed COLUMNS, from whichever signal the input carries.
+
+    ⚠️ THE ONE PLACE THE TWO INPUTS' UNITS ARE RECONCILED. A UWM header or loan-information line is a
+    row of cells: `Note Rate | 6.374% | Compensation Type | Lender Paid`. On text the gutter is a run
+    of spaces; on a PDF it is a horizontal gap in points, and `" ".join(tokens)` has destroyed the
+    run of spaces entirely. Every defect in this file's history has come from applying one unit's
+    constant to the other's input — a `\\s{2,}` scan that matched nothing on a PDF, an `indent`
+    that was always None, a tolerance of "8" that meant characters here and points there.
+
+    So the gutter is detected per input and everything downstream works on cells, which have no
+    units at all.
+    """
+    if line.indent is not None:
+        return [cell for cell in re.split(r"\s{2,}", line.text.strip()) if cell]
+
+    gaps = [b.x0 - a.x0 for a, b in itertools.pairwise(line.tokens)]
+    if not gaps:
+        return [line.text.strip()] if line.text.strip() else []
+
+    # ⚠️ THE GUTTER IS DERIVED FROM THIS LINE, NOT FROM A CONSTANT, and a constant got it wrong in
+    # exactly the way this file keeps getting things wrong. `_MIN_COLUMN_SEPARATION_POINTS` (24.0)
+    # is calibrated for the gap between a row CODE and its TEXT; inside a loan-information line at
+    # 8pt Courier, ordinary word gaps measure 38-53 points, so every word became its own cell and
+    # `AUS: Desktop Underwriter` came back as `AUS: Desktop`.
+    #
+    # Measured on that line: word gaps 38.4-52.8 (median 48.0), gutters 76.8-158.4. Two clean
+    # populations, ~24 points apart, and the boundary between them is a property of the line's own
+    # typesetting. A multiple of the median splits them at any font size — which is what the text
+    # path gets for free, because there a gutter IS two-or-more spaces.
+    typical = statistics.median(gaps)
+    gutter = typical * _GUTTER_MULTIPLE
+
+    out: list[list[str]] = [[line.tokens[0].text]]
+    for gap, token in zip(gaps, line.tokens[1:], strict=True):
+        if gap >= gutter:
+            out.append([token.text])
+        else:
+            out[-1].append(token.text)
+    return [" ".join(cell) for cell in out]
+
+
 def _split_header(lines: Sequence[Line]) -> tuple[dict[str, object], date | None, list[str]]:
     """Rule 1: `Label:  value` pairs, up to two per line, from the title to `LOAN INFORMATION`."""
     team: list[dict[str, object]] = []
@@ -430,7 +567,25 @@ def _split_header(lines: Sequence[Line]) -> tuple[dict[str, object], date | None
     printed: date | None = None
     warnings: list[str] = []
 
-    pairs = re.compile(r"([A-Za-z][A-Za-z /]*?):\s{2,}(.*?)(?=\s{2,}[A-Za-z][A-Za-z /]*?:|$)")
+    # ⚠️ A CLOSED-SET SCAN, NOT A GENERIC `Label:` PATTERN. The generic form needed `:\s{2,}` to know
+    # where a value ended, and PDF text joins tokens with SINGLE spaces — so on an uploaded sheet it
+    # matched nothing and `Date Printed` was lost, which in turn left every underwriter note
+    # dateless, because rule 4 resolves a note's year against `date_printed`.
+    #
+    # Relaxing the generic pattern to `\s+` would be ambiguous: with single spaces, "Contact Name:
+    # Priya Raman Senior UW: Dana Okafor" gives no way to tell where the first value stops. Matching
+    # a KNOWN label instead bounds each value by the start of the next one, which is what the
+    # Champions header already does for the same reason.
+    pairs = re.compile(
+        r"("
+        + "|".join(
+            re.escape(label)
+            for label in sorted(
+                (*_TEAM_LABELS, *_BROKER_LABELS, "Date Printed"), key=len, reverse=True
+            )
+        )
+        + r"):"
+    )
     # ⚠️ A ROLE PRINTED WITH NO VALUE IS STILL A ROLE. `Closer:` with nothing after it is the lender
     # asserting the role exists and is unfilled; the pair regex above cannot match it (it requires a
     # value), so it is picked up here. Omitting the entry would make "no closer assigned yet"
@@ -442,8 +597,14 @@ def _split_header(lines: Sequence[Line]) -> tuple[dict[str, object], date | None
             role = unfilled.group(1).strip()
             if role in _TEAM_LABELS:
                 team.append({"role": role, "name": "", "phone_ext": None})
-        for label, value in pairs.findall(line.text):
-            label, value = label.strip(), value.strip()
+        # ⚠️ SLICED BETWEEN MATCHES, NOT `findall` PAIRS. The scan above captures the LABEL only, so
+        # a value runs from the end of its own label to the start of the next one — which is what
+        # bounds it now that a single space no longer separates columns.
+        matches = list(pairs.finditer(line.text))
+        for index, match in enumerate(matches):
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(line.text)
+            label = match.group(1).strip()
+            value = line.text[match.end() : end].strip()
             if label in _TEAM_LABELS:
                 ext = _EXT.search(value)
                 team.append(
@@ -479,8 +640,28 @@ def _split_loan_facts(lines: Sequence[Line]) -> tuple[dict[str, str], list[str]]
         text = line.text
         if not text.strip():
             continue
-        matches = list(_LOAN_LABEL_SCAN.finditer(text))
-        if not matches:
+
+        # ⚠️ A LABEL COUNTS ONLY AT THE START OF A CELL. `Property  118 Status Road` is two cells,
+        # and `Status` sits mid-cell in the second — so it is a street name, not a field. Scanning
+        # the whole line instead lost the `Property` key entirely to a word inside its own value.
+        cells = _cells(line)
+        labelled: list[tuple[str, str]] = []
+        for index, cell in enumerate(cells):
+            pairs = _pairs_in_cell(cell)
+            if not pairs:
+                continue
+            for label, value in pairs[:-1]:
+                if value:
+                    labelled.append((label, value))
+            # A label whose value is empty takes the NEXT cell, which is how the wide two-column
+            # rows print: `Note Rate | 6.374%`. Only the LAST pair in a cell can be open-ended.
+            label, value = pairs[-1]
+            if not value and index + 1 < len(cells) and not _pairs_in_cell(cells[index + 1]):
+                value = cells[index + 1].strip()
+            if value:
+                labelled.append((label, value))
+
+        if not labelled:
             if text.strip().startswith("*"):
                 continue  # the "* Note rate is subject to change" footnote — lender boilerplate
             # ⚠️ THE POSITION, NEVER THE LINE ITSELF. A loan-information line carries the borrower's
@@ -492,11 +673,9 @@ def _split_loan_facts(lines: Sequence[Line]) -> tuple[dict[str, str], list[str]]
             # nothing escaped that way — but the value was still stored in a field declared clean.)
             warnings.append(f"unrecognised loan-information line at line {int(line.y)}")
             continue
-        for index, match in enumerate(matches):
-            end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-            value = text[match.end() : end].strip()
+        for label, value in labelled:
             if value:
-                facts[match.group(1)] = value
+                facts[label] = value
     return facts, warnings
 
 
@@ -522,6 +701,15 @@ def _expiry(lines: Sequence[Line]) -> tuple[dict[str, date | None], list[str]]:
         if token is not None:
             columns.append((token.x0, key))
 
+    # ⚠️ DERIVED FROM THIS SHEET'S OWN COLUMN SPACING, so it carries no unit. The spec's "8" is
+    # eight CHARACTERS; the same 8 applied to a PDF is eight POINTS — under two characters at 8pt —
+    # and three of round 1's six dates were rejected as "19 from the nearest column" when 19 points
+    # is about four characters. A fraction of the narrowest gap between adjacent headers means the
+    # same thing in both units: nearer to this column than to its neighbour, with a margin.
+    ordered = sorted(x for x, _ in columns)
+    spacing = min((b - a for a, b in itertools.pairwise(ordered)), default=0.0)
+    tolerance = spacing * _NEAREST_COLUMN_FRACTION if spacing else 8.0
+
     value_line = next(
         (
             line
@@ -541,7 +729,7 @@ def _expiry(lines: Sequence[Line]) -> tuple[dict[str, date | None], list[str]]:
         if nearest is None:
             continue
         distance = abs(nearest[0] - token.x0)
-        if distance > _NEAREST_COLUMN_TOLERANCE:
+        if distance > tolerance:
             warnings.append(
                 f"expiry date {token.text} is {distance:.0f} from the nearest column "
                 f"({nearest[1]}); not assigned"

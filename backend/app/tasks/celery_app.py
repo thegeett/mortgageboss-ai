@@ -29,6 +29,7 @@ _TASK_MODULES = [
     "app.tasks.verification_rules",  # LP-365 — the governed snapshot/rules pass
     "app.tasks.inbound",  # LP-803 — inbound mail ingest + the SQS poller
     "app.tasks.email_draft",  # LP-809 review — draft prose, off the request path
+    "app.tasks.conditions",  # LP-905 — reading an arrived condition sheet
 ]
 
 celery_app = Celery(
