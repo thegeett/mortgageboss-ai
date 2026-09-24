@@ -34,17 +34,29 @@ from app.models.condition_round import (
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.schemas.condition import (
+    ConditionCreateRequest,
+    ConditionDraftUpdate,
     ConditionEnrichResult,
+    ConditionImportResult,
     ConditionPasteRequest,
     ConditionPublic,
     ConditionRoundPublic,
 )
 from app.services.condition_enrich import RoundNotEnrichable, enrich_round_with_pdf
+from app.services.condition_import import (
+    RoundNotImportable,
+    create_manual_condition,
+    import_round,
+)
 from app.services.condition_rounds import (
     ConditionSheetRejected,
+    RoundNotDiscardable,
+    RoundNotEditable,
     SheetBytes,
     create_round_from_paste,
     create_round_from_sheet,
+    discard_round,
+    update_draft,
 )
 from app.services.conditions import (
     appearances_for_file,
@@ -53,6 +65,7 @@ from app.services.conditions import (
     rows_on_sheet,
 )
 from app.services.loan_files import get_loan_file
+from app.services.needs_engine import loan_file_needs_lock
 
 router = APIRouter(prefix="/loan-files", tags=["conditions"])
 #: ⚠️ A SECOND ROUTER, BECAUSE THE PATH CARRIES NO LOAN FILE. Spec §LP-907 writes
@@ -429,3 +442,161 @@ async def attach_pdf(
         unmatched_existing=len(result.unmatched_existing),
         warnings=result.warnings,
     )
+
+
+async def _round_card(db: DbSession, round_: ConditionRound) -> ConditionRoundPublic:
+    """One round with its count filled in.
+
+    ⚠️ `condition_count` DEFAULTS TO 0 AND MUST BE SUPPLIED, which is easy to forget precisely
+    because forgetting it looks like data rather than like a bug. `paste_conditions` does forget it
+    today: it answers `from_model(round_)` for a round it just filled with rows, so the response
+    says "0 on sheet". That is LP-907's shipped door and widening this ticket into it would be a
+    refactor, but it is the reason this helper exists rather than three more call sites that each
+    have to remember.
+    """
+    _, per_round = await appearances_for_file(db, loan_file_id=round_.loan_file_id)
+    return ConditionRoundPublic.from_model(round_, condition_count=rows_on_sheet(round_, per_round))
+
+
+@rounds_router.post(
+    "/{round_id}/import",
+    response_model=ConditionImportResult,
+    status_code=status.HTTP_200_OK,
+)
+async def import_condition_round(
+    round_: ScopedRound, db: DbSession, current_user: CurrentUser
+) -> ConditionImportResult:
+    """Turn a reviewed draft into the file's conditions (spec §LP-909 steps 1-5).
+
+    ⚠️ 200, NOT 201, THOUGH CONDITIONS ARE CREATED. The resource this call addresses is the ROUND,
+    and the round already existed — it is settled in place, from DRAFT to IMPORTED. A 201 would
+    invite a client to look for a new id in a `Location` header that names nothing new.
+
+    ⚠️ THE LOCK IS TAKEN HERE AND NOT IN THE SERVICE, AND THAT PLACEMENT IS THE WHOLE POINT. An
+    `async with loan_file_needs_lock(...)` inside `import_round` would release when the service
+    returned — before this handler commits — leaving the commit outside the window the lock exists
+    to cover. It is the repo's first handler-level use of it; every other call site is a task or a
+    service that owns its own transaction.
+
+    ⚠️ AND IT IS ADVISORY, NOT MUTUAL EXCLUSION. It yields `bool(acquired)` and every caller in this
+    repo proceeds either way, and its 30-second timeout auto-expires a HELD lock, so a slow import
+    can lose it mid-transaction. What actually prevents two rounds sharing a number is
+    `uq_condition_rounds_file_number`; the service catches that violation and recomputes. The lock
+    narrows the window, it does not close it, and nothing here may assume otherwise.
+    """
+    async with loan_file_needs_lock(round_.loan_file_id):
+        try:
+            outcome = await import_round(db, round_=round_, actor_user_id=current_user.id)
+        except RoundNotImportable as exc:
+            # 409, like the enrich door: the round exists and the caller may see it — it is the
+            # round's STATE that refuses, and the reason says which state it is in.
+            raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+        await db.commit()
+
+    return ConditionImportResult(
+        round_id=round_.id,
+        round_number=outcome.round_number,
+        created=outcome.created,
+        seen_again=outcome.seen_again,
+        # Codes, never wording. The code map is explicitly not NPI (LP-904); the conditions are.
+        unmapped_codes=outcome.unmapped_codes,
+    )
+
+
+@rounds_router.post(
+    "/{round_id}/discard",
+    response_model=ConditionRoundPublic,
+    status_code=status.HTTP_200_OK,
+)
+async def discard_condition_round(
+    round_: ScopedRound, db: DbSession, current_user: CurrentUser
+) -> ConditionRoundPublic:
+    """Throw a draft away. It stays on the round strip, marked discarded.
+
+    ⚠️ AN IMPORTED ROUND IS REFUSED, and the service's docstring carries the argument: its conditions
+    survive by ADR-404 and it keeps its number by LP-904's index, so "discarded" would mean one thing
+    for a draft and a different thing for an imported round, shown in the same strip under one word.
+
+    No lock: nothing here assigns a number or touches a cross-row invariant. The round is scoped by
+    `get_scoped_round`, which filters `company_id` inside the statement.
+    """
+    try:
+        await discard_round(db, round_=round_, actor_user_id=current_user.id)
+    except RoundNotDiscardable as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+
+    await db.commit()
+    await db.refresh(round_)
+    return await _round_card(db, round_)
+
+
+@rounds_router.put(
+    "/{round_id}/draft",
+    response_model=ConditionRoundPublic,
+    status_code=status.HTTP_200_OK,
+)
+async def update_condition_draft(
+    round_: ScopedRound, payload: ConditionDraftUpdate, db: DbSession
+) -> ConditionRoundPublic:
+    """Replace a draft's rows, completeness and date before import (screen S1-04).
+
+    ⚠️ THE EDITED TEXT IS WHAT IMPORTS. Spec §8's frontend test is "editing a row and importing sends
+    the edited text", so what a processor writes here is stored verbatim and is what the fingerprint
+    is taken of — which means an edited row may match a different condition, or none. That is correct
+    rather than unfortunate: the fingerprint is of what is imported, not of what was read.
+
+    ⚠️ 409 ON A STALE `expected_updated_at`, RATHER THAN A SILENT LAST-WRITE-WINS. Two tabs on one
+    draft is the case the spec names, but the same check also refuses a tab whose rows were changed
+    by an enrich or a re-parse — both are the same hazard, overwriting work the caller never saw.
+
+    No `current_user` parameter: nothing here is attributed to a person in an event, because a draft
+    is not yet the file's record. The tenant gate is `get_scoped_round`, exactly as on the other
+    round routes, and the gating test walks this router by dependency identity.
+    """
+    try:
+        await update_draft(db, round_=round_, payload=payload)
+    except RoundNotEditable as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+
+    await db.commit()
+    await db.refresh(round_)
+    return await _round_card(db, round_)
+
+
+@router.post(
+    "/{loan_file_id}/conditions",
+    response_model=ConditionPublic,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_condition_by_hand(
+    loan_file: ScopedLoanFileById,
+    payload: ConditionCreateRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionPublic:
+    """Add one condition by hand (screen S1-12).
+
+    ⚠️ 201, UNLIKE THE OTHER THREE, because this one genuinely creates a resource with a new id.
+
+    ⚠️ IT TAKES THE LOCK BECAUSE IT MAY CREATE ROUND 1. On a file that has never imported a sheet
+    there is no round to file this into, so the service opens one with source `MANUAL` and assigns
+    it a number — the same race the import has, and therefore the same narrowing. On a file that has
+    imported, it joins the latest imported round and the lock costs nothing.
+
+    ⚠️ THE ROUND IT JOINS IS `PARTIAL`, ALWAYS. A round holding hand-typed conditions is not a claim
+    that the lender's list is complete, and ADR-404 lets only a FULL round's absences mean anything —
+    so marking it FULL would let Stage 2 later propose that everything nobody typed had been cleared.
+
+    The condition comes back with its round chips, which for a manual condition name the round it was
+    filed into rather than a sheet it was printed on; `origin` is the column that keeps those
+    distinguishable.
+    """
+    async with loan_file_needs_lock(loan_file.id):
+        condition = await create_manual_condition(
+            db, loan_file=loan_file, payload=payload, actor_user_id=current_user.id
+        )
+        await db.commit()
+
+    await db.refresh(condition)
+    numbers, _ = await appearances_for_file(db, loan_file_id=loan_file.id)
+    return ConditionPublic.from_model(condition, round_numbers=numbers.get(condition.id, []))

@@ -31,7 +31,7 @@ from app.models.lender_condition_code import LenderCodeStatus, LenderConditionCo
 from app.schemas.condition import DraftRowPublic
 from app.services import condition_import
 from app.services.condition_import import RoundNotImportable, import_round
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.models.conftest_helpers import (
     make_company,
@@ -572,6 +572,57 @@ async def test_possible_match_names_the_oldest_condition_under_a_shared_code(
     ]
     assert created.detail["possible_match"] == str(original.id), (
         "the original, not whichever row the planner happened to return last"
+    )
+
+
+async def test_the_conditions_lookup_orders_deterministically(db_session: AsyncSession) -> None:
+    """⚠️ THE ONE MUTATION A BEHAVIOURAL TEST CANNOT CATCH, PINNED BY READING THE EMITTED SQL.
+
+    Removing the `ORDER BY` from `_existing_conditions` left all 27 tests green. That is not a gap in
+    the tests above; it is unobservable behaviourally. The review session measured why: they forced a
+    tuple relocation — a row physically moved past another in the heap, `(0,1)` to `(0,3)` — and the
+    unordered result STILL came back in creation order, because an index on `loan_file_id` serves
+    this query rather than a heap scan. There is no arrangement of rows a test may legitimately
+    construct that makes the missing clause show.
+
+    So the test reads the statement instead. ⚠️ AND THIS IS NOT THE METADATA ASSERTION REJECTED FOR
+    `uq_condition_rounds_file_number`: there, the model declaration and the database were two
+    artifacts free to disagree, and asserting the declaration existed would have passed against one
+    that never reached any database — which was the entire failure. Here the captured string IS what
+    was sent to the server. It pins the statement, not that Postgres honours it; SQL semantics are
+    not this test's job.
+
+    ⚠️ THE STRICT CLAUSE, NOT A PREFIX. `"ORDER BY conditions.created_at"` would also be true of
+    `... DESC`, and true of a version that dropped the `conditions.id` tiebreak — and that tiebreak
+    is what makes two rows with identical `created_at` deterministic, which is reachable inside a
+    single import where several conditions are created in one flush.
+    """
+    company = await make_company(db_session)
+    loan_file = await make_loan_file(db_session, company=company)
+
+    statements: list[str] = []
+
+    def capture(
+        conn: Any, cursor: Any, statement: str, parameters: Any, context: Any, executemany: bool
+    ) -> None:
+        statements.append(statement)
+
+    bind = db_session.get_bind()
+    event.listen(bind, "before_cursor_execute", capture)
+    try:
+        await condition_import._existing_conditions(db_session, loan_file_id=loan_file.id)
+    finally:
+        event.remove(bind, "before_cursor_execute", capture)
+
+    selects = [sql for sql in statements if "FROM conditions" in sql]
+    # ⚠️ WITHOUT THIS THE TEST PASSES BY PROVING NOTHING. A listener that never fires leaves
+    # `selects` empty, every assertion below is vacuously skipped, and the test reads as rigorous
+    # while checking no statement at all — the exact shape this ticket has now corrected four times.
+    assert selects, "no SELECT was captured: the listener never fired, so this test proves nothing"
+
+    assert any("ORDER BY conditions.created_at, conditions.id" in sql for sql in selects), (
+        "the lookup must order oldest-first with an id tiebreak, or `possible_match` names "
+        f"whichever row the planner returned: {selects[-1][-160:]}"
     )
 
 

@@ -40,9 +40,16 @@ from app.models.activity_log import ActivityType
 from app.models.base import utcnow
 from app.models.condition import BucketKind, Condition, ConditionOrigin, OwnerHint, OwnerHintSource
 from app.models.condition_event import ConditionEvent, ConditionEventKind
-from app.models.condition_round import ConditionRound, ConditionRoundStatus
+from app.models.condition_round import (
+    ConditionRound,
+    ConditionRoundCompleteness,
+    ConditionRoundStatus,
+    ConditionSourceKind,
+)
 from app.models.helpers import only_active
 from app.models.lender_condition_code import LenderCodeStatus, LenderConditionCode
+from app.models.loan_file import LoanFile
+from app.schemas.condition import ConditionCreateRequest, DraftRowPublic
 from app.services.activity_log import log_activity
 
 logger = structlog.get_logger(__name__)
@@ -355,6 +362,7 @@ def _create_condition(
     *,
     round_: ConditionRound,
     code_row: LenderConditionCode | None,
+    origin: ConditionOrigin = ConditionOrigin.SHEET,
 ) -> Condition:
     owner_hint = _enum_from(row, "owner_hint", OwnerHint, OwnerHint.UNKNOWN)
     owner_hint_source = _enum_from(row, "owner_hint_source", OwnerHintSource, OwnerHintSource.NONE)
@@ -384,9 +392,13 @@ def _create_condition(
         owner_hint_source=owner_hint_source,
         info_only=info_only,
         canonical_type_id=canonical_type_id,
-        # It came off a sheet. `POST /conditions` is the other origin, and the distinction is what
-        # lets the chips say a condition was never printed on a round.
-        origin=ConditionOrigin.SHEET,
+        # ⚠️ THE CALLER NAMES THE DOOR, AND THERE IS ONLY ONE CONSTRUCTOR ON PURPOSE. Import passes
+        # SHEET; the manual door passes MANUAL. This module's docstring states the rule every writer
+        # of a `Condition` must honour — emit `CONDITION_CREATED` — and a second constructor is
+        # precisely how a third writer comes to stop honouring it, which is what happened in
+        # `condition_enrich.py`. The distinction itself is what lets the chips say a condition was
+        # never printed on a sheet.
+        origin=origin,
         # `prep_status` and `lender_status` take their defaults and are never moved in Stage 1.
     )
 
@@ -740,9 +752,170 @@ async def import_round(
     )
 
 
+# --------------------------------------------------------------------------- #
+# The third door: one condition, typed by hand (spec §LP-909, screen S1-12)
+# --------------------------------------------------------------------------- #
+
+
+async def _latest_imported_round(db: AsyncSession, *, loan_file_id: UUID) -> ConditionRound | None:
+    """The file's highest-numbered imported round, or None if no sheet has ever been imported."""
+    stmt = select(ConditionRound).where(
+        ConditionRound.loan_file_id == loan_file_id,
+        ConditionRound.status == ConditionRoundStatus.IMPORTED,
+    )
+    stmt = only_active(stmt, ConditionRound).order_by(ConditionRound.round_number.desc())
+    # Annotated rather than returned straight: `db.scalar` degrades to `Any` once the select has
+    # been chained through `only_active` and `order_by`, and returning that from a function declared
+    # `ConditionRound | None` is exactly what mypy's `no-any-return` is for. Widening the signature
+    # to match the inference would hide the looseness instead of naming it.
+    latest: ConditionRound | None = await db.scalar(stmt)
+    return latest
+
+
+async def _next_sequence(db: AsyncSession, *, loan_file_id: UUID) -> int:
+    """One past the file's highest sequence, so a hand-typed condition sorts after the sheet's."""
+    highest = await db.scalar(
+        select(func.max(Condition.sequence)).where(Condition.loan_file_id == loan_file_id)
+    )
+    return int(highest or 0) + 1
+
+
+async def _manual_round(
+    db: AsyncSession, *, loan_file: LoanFile, actor_user_id: UUID | None
+) -> ConditionRound:
+    """Round 1 for a file where a processor typed a condition before any sheet arrived.
+
+    ⚠️ ALWAYS `PARTIAL`, AND THIS IS THE ONE THAT WOULD BITE SILENTLY. ADR-404 lets only a FULL
+    round's absences mean anything: a `FULL` round is a claim that the lender's list is complete, and
+    Stage 2's comparison is entitled to propose "probably cleared" for anything missing from one. A
+    round holding whatever a processor happened to type by hand is not that claim, and marking it
+    FULL would let a later comparison conclude that every condition nobody typed had been cleared.
+
+    It takes a number immediately through `_assign_round_number`, which is also what makes it
+    IMPORTED — a manual round has nothing to review, so there is no draft state for it to sit in.
+    """
+    now = utcnow()
+    source: dict[str, Any] = {"kind": ConditionSourceKind.MANUAL.value, "at": now.isoformat()}
+    if actor_user_id is not None:
+        source["user_id"] = str(actor_user_id)
+
+    round_ = ConditionRound(
+        company_id=loan_file.company_id,
+        loan_file_id=loan_file.id,
+        lender_id=loan_file.lender_id,
+        completeness=ConditionRoundCompleteness.PARTIAL,
+        sources=[source],
+        round_date=now.date(),
+        created_by_user_id=actor_user_id,
+    )
+    db.add(round_)
+    await db.flush()
+
+    db.add(
+        ConditionEvent(
+            company_id=loan_file.company_id,
+            loan_file_id=loan_file.id,
+            round_id=round_.id,
+            kind=ConditionEventKind.ROUND_RECEIVED,
+            actor_user_id=actor_user_id,
+            detail={"source_kind": ConditionSourceKind.MANUAL.value},
+        )
+    )
+    # Settled before the savepoint `_assign_round_number` takes — a rollback there discards whatever
+    # is still unflushed inside its window.
+    await db.flush()
+    await _assign_round_number(db, round_=round_)
+    return round_
+
+
+async def create_manual_condition(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    payload: ConditionCreateRequest,
+    actor_user_id: UUID | None = None,
+) -> Condition:
+    """Add one condition by hand. Flushes; the caller commits.
+
+    ⚠️ THE THIRD WRITER OF A `Condition`, AND IT EMITS `CONDITION_CREATED` LIKE THE OTHER TWO. The
+    rule is in this module's docstring because breaking it already happened once: `condition_enrich`
+    created conditions silently and they carried no round chips. This goes through the SAME
+    `_create_condition` as the import rather than constructing a second one — a separate constructor
+    is how the next writer comes to forget.
+
+    ⚠️ IT GOES INTO A REAL ROUND, AND THE CHIP IS TRUTHFUL BECAUSE OF THAT. Spec §LP-909 puts a
+    hand-typed condition into the latest imported round, or creates round 1 with source `MANUAL` if
+    the file has none — so the round genuinely is its home and `R1` is not a claim that it was
+    printed on a sheet. `origin` carries that distinction: `SHEET` for a row read off a letter,
+    `MANUAL` for this. Emitting nothing instead would reproduce the enrich bug exactly.
+
+    ⚠️ THE CODE MAP'S DEFAULTS ARE APPLIED; ITS COUNTERS ARE NOT. `times_seen` is what orders the
+    unmapped backlog, and it is supposed to answer "how often do lenders actually send this code" —
+    a processor typing one is not the lender sending it, so counting it would inflate the queue with
+    our own keystrokes. Looking the code up to fill `info_only`, `canonical_type_id` and an owner
+    hint costs nothing and is the same meaning the import would have applied.
+    """
+    round_ = await _latest_imported_round(db, loan_file_id=loan_file.id)
+    if round_ is None:
+        round_ = await _manual_round(db, loan_file=loan_file, actor_user_id=actor_user_id)
+
+    code_row: LenderConditionCode | None = None
+    if round_.lender_id is not None and payload.lender_code:
+        found = await _load_code_map(db, lender_id=round_.lender_id, codes=[payload.lender_code])
+        code_row = found.get(payload.lender_code)
+
+    # Through `DraftRowPublic` like every other row in this domain, so a hand-typed condition and a
+    # parsed one are the same shape by construction rather than by agreement.
+    row = DraftRowPublic(
+        sequence=await _next_sequence(db, loan_file_id=loan_file.id),
+        lender_code=payload.lender_code,
+        lender_category=payload.lender_category,
+        # ⚠️ NOT AN INVENTED LABEL. The heading is the LENDER's vocabulary — "Prior To Docs (PTD)",
+        # "Underwriter To Obtain And Clear" — and manufacturing one here would put words in their
+        # mouth on a row they never wrote. Empty means the processor filed it under no heading, and
+        # the list can say so.
+        bucket_heading=payload.bucket_heading or "",
+        bucket_kind=payload.bucket_kind,
+        # Stored exactly as typed: the dialog's hint says "Type it exactly as the lender wrote it",
+        # and this is the boundary that honours it.
+        verbatim_text=payload.verbatim_text,
+    ).model_dump(mode="json")
+
+    condition = _create_condition(
+        row, round_=round_, code_row=code_row, origin=ConditionOrigin.MANUAL
+    )
+    db.add(condition)
+    # `flush` first: the event needs the condition's id, and `db.add` alone does not assign one.
+    await db.flush()
+
+    db.add(
+        ConditionEvent(
+            company_id=round_.company_id,
+            loan_file_id=round_.loan_file_id,
+            round_id=round_.id,
+            condition_id=condition.id,
+            kind=ConditionEventKind.CONDITION_CREATED,
+            actor_user_id=actor_user_id,
+            detail={"source": "manual", "lender_code": condition.lender_code},
+        )
+    )
+    await db.flush()
+
+    # Ids and codes only — never the wording (spec §9.5).
+    logger.info(
+        "condition_added_by_hand",
+        loan_file_id=str(loan_file.id),
+        round_id=str(round_.id),
+        condition_id=str(condition.id),
+        lender_code=condition.lender_code,
+    )
+    return condition
+
+
 __all__ = [
     "MAX_NUMBER_ATTEMPTS",
     "ImportOutcome",
     "RoundNotImportable",
+    "create_manual_condition",
     "import_round",
 ]

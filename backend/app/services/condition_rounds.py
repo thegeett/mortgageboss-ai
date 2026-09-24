@@ -38,7 +38,7 @@ from app.models.condition_round import (
 )
 from app.models.inbound_attachment import AttachmentSafetyState
 from app.models.loan_file import LoanFile
-from app.schemas.condition import DraftRowPublic
+from app.schemas.condition import ConditionDraftUpdate, DraftRowPublic
 from app.services.activity_log import log_activity
 from app.services.attachment_safety import assess
 from app.storage import get_storage_backend
@@ -347,5 +347,137 @@ async def create_round_from_paste(
             "rows": len(sheet.rows),
         },
     )
+    await db.flush()
+    return round_
+
+
+# --------------------------------------------------------------------------- #
+# Editing a draft, and throwing one away (LP-909 section 2)
+# --------------------------------------------------------------------------- #
+
+
+class RoundNotDiscardable(Exception):
+    """The round cannot be discarded, with the reason a processor can act on."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class RoundNotEditable(Exception):
+    """The draft cannot be replaced — wrong state, or someone else changed it first."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+#: A draft may be thrown away from any state that is not yet the file's record. `PARSING` is included
+#: deliberately: it is the one escape from a round the broker never picked up, which LP-905 recorded
+#: as a real stranded state rather than a hypothetical one.
+DISCARDABLE = (
+    ConditionRoundStatus.DRAFT,
+    ConditionRoundStatus.PARSING,
+    ConditionRoundStatus.PARSE_FAILED,
+)
+
+
+async def discard_round(
+    db: AsyncSession, *, round_: ConditionRound, actor_user_id: UUID | None = None
+) -> ConditionRound:
+    """Throw away a draft. Flushes; the caller commits.
+
+    ⚠️ AN IMPORTED ROUND IS NOT DISCARDABLE, AND THAT IS A DECISION RATHER THAN AN OMISSION. LP-904's
+    migration guarantees that a round discarded after import KEEPS its number and stays in the unique
+    index, and ADR-404 forbids deleting or clearing a condition — so discarding an imported round
+    would leave every one of its conditions alive and still chipped to it. "Discarded" would then
+    mean "the round is out of the workflow but its conditions are still the file's record", which is
+    a different thing from "this draft was thrown away" shown in the same strip under one word.
+
+    Stage 1 has no use for that state, so it is refused rather than given two meanings. If Stage 2
+    needs it, it needs its own verb and its own event.
+
+    ⚠️ `draft_rows` ARE KEPT, NOT CLEARED. The round strip lists discarded rounds on purpose — a
+    processor who threw a draft away should see that they did — and `rows_on_sheet` reads a
+    non-imported round's count from its rows, so clearing them would render the card as "0 on sheet"
+    and lose what was discarded. Import clears them because they became conditions; nothing became
+    anything here.
+
+    ⚠️ NO TIMELINE ENTRY. `ActivityType` has no member for this and adding one is a constraint-swap
+    migration (ADR-037) that spec §LP-909 does not ask for. The `ROUND_DISCARDED` condition event is
+    the record, and it is what screen S1-09's history renders.
+    """
+    if round_.status is ConditionRoundStatus.IMPORTED:
+        raise RoundNotDiscardable(
+            "This round has already been imported and its conditions are part of the file. "
+            "Discarding it would leave them behind."
+        )
+    if round_.status is ConditionRoundStatus.DISCARDED:
+        raise RoundNotDiscardable("This round was already discarded.")
+    if round_.status not in DISCARDABLE:
+        raise RoundNotDiscardable("This round cannot be discarded.")
+
+    round_.status = ConditionRoundStatus.DISCARDED
+    db.add(
+        ConditionEvent(
+            company_id=round_.company_id,
+            loan_file_id=round_.loan_file_id,
+            round_id=round_.id,
+            kind=ConditionEventKind.ROUND_DISCARDED,
+            actor_user_id=actor_user_id,
+            # Counts and names only — never the rows being thrown away.
+            detail={"rows": len(round_.draft_rows or [])},
+        )
+    )
+    await db.flush()
+    return round_
+
+
+async def update_draft(
+    db: AsyncSession, *, round_: ConditionRound, payload: ConditionDraftUpdate
+) -> ConditionRound:
+    """Replace a draft's rows before import. Flushes; the caller commits.
+
+    ⚠️ `DRAFT` ONLY, AND `PARSING` IS THE POINTED EXCLUSION. A `PARSING` round carries rules-read rows
+    too, but nothing is under review while it parses — screen S1-02 renders skeletons and polls — and
+    the split task replaces those rows WHOLESALE under a `status = PARSING` compare-and-set. Letting
+    an edit land there would make the processor's work vanish when the task settled, with no conflict
+    anyone could see. `ConditionRoundPublic.draft_rows` carries the same warning: read `status`,
+    never the presence of rows.
+
+    ⚠️ OPTIMISTIC CONCURRENCY ON `updated_at`, WHICH IS EXACT AND THAT IS THE POINT. `TimestampMixin`
+    sets `onupdate=utcnow` in Python, so ANY modification bumps it — an enrich merging a PDF into
+    this round, or a re-parse. So a second tab editing stale rows is refused, and so is a tab whose
+    rows were changed by something other than a person. Both are the same hazard: overwriting work
+    the caller never saw.
+
+    `expected_updated_at` is optional in the schema, so a caller may omit it and take the last write.
+    That is deliberate — the spec asks for concurrency control, not for a mandatory token — but the
+    UI always sends what it read.
+
+    ⚠️ NO EVENT. `ConditionEventKind` has `CONDITION_EDITED` for a CONDITION and nothing for a draft
+    round, and a draft is not yet the file's record: the rows are the record of themselves and
+    `updated_at` says when they moved. Inventing a member here would be a kind nothing else writes.
+    """
+    if round_.status is not ConditionRoundStatus.DRAFT:
+        raise RoundNotEditable(
+            "Only a draft awaiting review can be edited. This round is "
+            f"{round_.status.value.replace('_', ' ')}."
+        )
+
+    if payload.expected_updated_at is not None and payload.expected_updated_at != round_.updated_at:
+        raise RoundNotEditable(
+            "Someone else changed this draft while you were editing it. Reload to see their "
+            "version before saving yours."
+        )
+
+    # Through the schema, exactly as `draft_rows_json` does on the reading side: what is stored is
+    # what is served, and a hand-rolled dict here would be a third representation of a row.
+    round_.draft_rows = [row.model_dump(mode="json") for row in payload.draft_rows]
+    if payload.completeness is not None:
+        round_.completeness = payload.completeness
+    if payload.round_date is not None:
+        round_.round_date = payload.round_date
+
     await db.flush()
     return round_
