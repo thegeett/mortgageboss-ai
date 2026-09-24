@@ -763,11 +763,8 @@ def _expiry(lines: Sequence[Line]) -> tuple[dict[str, date | None], list[str]]:
     return dates, warnings
 
 
-#: How many row starts a marker-less paste must carry before it is read as a UWM excerpt. Two,
-#: because ONE four-digit number followed by two columns occurs in ordinary prose — a year, an
-#: amount, a figure inside somebody else's sentence, all of which this reader has already been
-#: caught by once. Two of them on separate lines is a list. Measured on the round-2 conditions
-#: block: 6 row starts in 15 lines.
+#: How many row starts a marker-less paste must carry before it can be a UWM excerpt. Necessary and
+#: NOT sufficient — see `uwm_block_start`, where the bucket heading does the actual discriminating.
 _MIN_PASTED_ROW_STARTS = 2
 
 
@@ -776,22 +773,64 @@ def uwm_block_start(lines: Sequence[Line]) -> int | None:
 
     ⚠️ A PROCESSOR COPYING FROM THE PORTAL COPIES THE ROWS, NOT THE WORD ABOVE THEM — so the marker
     `read_uwm` bounds its block with is precisely what a paste loses. This answers the same question
-    from the rows themselves, and LP-907's paste reader hands the answer back as `conditions_from`.
+    from the text itself, and LP-907's paste reader hands the answer back as `conditions_from`.
 
-    THE TEST IS THIS READER'S OWN ROW RULE, not a looser "does that look like a code" regex. What
-    `_row_start` accepts is what the block will actually parse into rows, so a paste can never be
-    recognised as UWM and then read as nothing — the two decisions cannot disagree because they are
-    the same decision.
+    ⚠️ COUNTING ROW STARTS IS NOT ENOUGH, AND AN EARLIER VERSION OF THIS FUNCTION DID EXACTLY THAT.
+    Its comment argued that one four-digit number followed by two columns occurs in ordinary prose
+    but "two of them on separate lines is a list". The premise was right and the conclusion did not
+    follow: two of them on separate lines is a TABLE, and a fixed-pitch table whose first column is
+    four digits is what a processor pastes constantly. Measured, every one of these was claimed as a
+    UWM sheet with `needs_ai=False` and no warning at all:
+
+        2026  Tax Return   Provide signed 2026 federal returns     -> 2 rows, codes 2026/2025
+        1000  Principal    Payment one of the schedule             -> 3 rows, codes 1000/1001/1002
+        4417  Appraisal Inc  Invoice for the appraisal fee         -> 3 rows, codes 4417/4418/4419
+        8821  Checking     Ending balance as of last statement     -> 2 rows, codes 8821/8822
+
+    That is worse than failing to recognise a real sheet, and worse than the Champions case this
+    module already handles. Champions produces visibly wrong rows AND a warning AND `needs_ai`, so a
+    processor sees something went wrong. These produce plausible rows with confident lender codes,
+    no warning, and `needs_ai=False` so nothing asks for a second opinion — and their fingerprints
+    then feed the import matcher, which is the same duplication failure the recognition exists to
+    prevent, arriving through the door opened to fix it.
+
+    ⚠️ THE DISCRIMINATOR IS THE BUCKET HEADING, AND IT IS NOT THE CODES. Rejecting year-shaped codes
+    would be the obvious fix and it is wrong: the round-2 block's own codes include `1947`. What
+    separates a conditions block from a table is that its rows are GROUPED UNDER HEADINGS, and a
+    processor copying the portal copies those headings with the rows — which is exactly why reading
+    the same excerpt with the generic reader produced the heading as a spurious extra row.
+
+    A heading-SHAPED line is not enough either, because `_HEADING` matches any short title-cased
+    line: `Tax Returns` passes it. The test is a heading whose bucket this reader actually KNOWS —
+    `_HEADINGS` or a `(PTD|PTF|PTC|PTA)` parenthetical or `Trailing`. Measured across every fixture,
+    that costs nothing on real input: round 1 has 3 headings and all 3 are known, round 2 has 2 of
+    2, and the page-break sheet 5 of 5. Not one real conditions block carries an unknown-kind
+    heading, while all four tables above carry none at all.
+
+    THE FALSE NEGATIVE IS DELIBERATE AND SAFE. A processor who copies one bucket's rows WITHOUT its
+    heading gets `PASTED_TEXT` and `needs_ai` rather than a confident wrong answer — the same choice
+    this module makes for Champions, and the same direction: a paste that is not understood goes to
+    LP-908, it does not get a lender's name attached to a guess.
     """
     content = [line for line in lines if not line.is_blank]
     if not content:
         return None
+
     threshold = _shallow_threshold(content)
-    starts = sum(1 for line in content if _row_start(line, threshold) is not None)
-    # Zero, because the block IS the whole paste: anything above the first row — a heading the
+    starts = 0
+    known_headings = 0
+    for line in content:
+        if _row_start(line, threshold) is not None:
+            starts += 1
+        elif _is_heading(line, threshold) and not _heading_kind(line.text.strip())[1]:
+            known_headings += 1
+
+    if starts < _MIN_PASTED_ROW_STARTS or known_headings == 0:
+        return None
+    # Zero, because the block IS the whole paste: anything above the first row — the heading the
     # processor copied with it, a stray portal line — is read by the same rules and ends up as a
     # bucket heading or in `unassigned_lines`. Nothing is dropped for having been copied too (§9.2).
-    return 0 if starts >= _MIN_PASTED_ROW_STARTS else None
+    return 0
 
 
 def read_uwm(lines: Sequence[Line], *, conditions_from: int | None = None) -> ParsedSheet:

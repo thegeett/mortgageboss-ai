@@ -8,6 +8,7 @@ wrong one, so each is pinned against the thing it would otherwise silently becom
 from __future__ import annotations
 
 import pymupdf
+import pytest
 from app.conditions.readers import (
     read_champions,
     read_generic,
@@ -17,9 +18,16 @@ from app.conditions.readers import (
 )
 from app.conditions.readers.lines import lines_from_text
 from app.conditions.readers.paste import CHAMPIONS_GEOMETRY_LOST
+from app.conditions.readers.uwm import _heading_kind, _is_heading, _row_start, _shallow_threshold
 from app.models.condition_round import ConditionSheetFormat
 from tests.conditions import champions_fixture, uwm_pdf_fixture
-from tests.conditions.fixture_helpers import UWM_ROUND_2, portal_excerpt, sheet_text
+from tests.conditions.fixture_helpers import (
+    UWM_PAGEBREAK,
+    UWM_ROUND_1,
+    UWM_ROUND_2,
+    portal_excerpt,
+    sheet_text,
+)
 
 #: The round-2 codes, in sheet order (spec §7.2).
 ROUND_2_CODES = ["1228", "1947", "1582", "0006", "0007", "6378"]
@@ -149,32 +157,121 @@ def test_prose_is_not_mistaken_for_a_layout() -> None:
     assert sheet.needs_ai is True
 
 
-def test_one_coded_line_is_not_a_list() -> None:
-    """⚠️ TWO ROW STARTS, NOT ONE. A single four-digit number followed by two columns happens in
-    ordinary prose — a year, an amount, a figure inside somebody else's sentence, all of which this
-    reader has already been caught by once. Two on separate lines is a list."""
-    text = (
-        "Appraised value came in at 2026 figures.\n"
-        " 0006         Invoice                       Provide copy of invoice for credit report."
-    )
-    fmt, _reader, _sheet = read_pasted_text(text)
+#: Fixed-pitch tables whose first column happens to be four digits — what a processor pastes
+#: constantly. Every one of these was claimed as a UWM sheet before the heading test existed.
+NOT_UWM_TABLES = {
+    "tax years": (
+        " 2026         Tax Return                    Provide signed 2026 federal returns\n"
+        " 2025         Tax Return                    Provide signed 2025 federal returns"
+    ),
+    "amortisation": (
+        " 1000         Principal                     Payment one of the schedule\n"
+        " 1001         Interest                      Payment two of the schedule\n"
+        " 1002         Escrow                        Payment three of the schedule"
+    ),
+    "invoice numbers": (
+        " 4417         Appraisal Inc                 Invoice for the appraisal fee\n"
+        " 4418         Title Co                      Invoice for the title search\n"
+        " 4419         Title Co                      Invoice for the closing protection letter"
+    ),
+    "account endings": (
+        " 8821         Checking                      Ending balance as of last statement\n"
+        " 8822         Savings                       Ending balance as of last statement"
+    ),
+    # ⚠️ THIS ONE IS REAL UWM CONTENT — genuine codes, genuine categories, genuine wording — pasted
+    # WITHOUT its bucket heading. It is refused anyway, and that is the deliberate false negative:
+    # nothing in the text distinguishes it from the four tables above.
+    "real rows, no heading": (
+        " 0006         Invoice                       Provide copy of invoice for credit report.\n"
+        " 0007         Invoice                       Provide copy of invoice for final inspection."
+    ),
+}
 
-    assert fmt is ConditionSheetFormat.PASTED_TEXT
+
+@pytest.mark.parametrize("name", sorted(NOT_UWM_TABLES))
+def test_a_table_of_four_digit_numbers_is_not_a_uwm_sheet(name: str) -> None:
+    """⚠️ THE BUG THIS TEST EXISTS FOR WAS SHIPPED AND CAUGHT IN REVIEW, and it was worse than the
+    Champions case beside it.
+
+    Counting row starts alone claimed all five of these as `uwm_approval_letter` with rows, confident
+    lender codes, `needs_ai=False` and NOT ONE WARNING. Champions at least fails visibly — wrong
+    rows, a warning, `needs_ai` set — so a processor sees that something went wrong. These looked
+    entirely plausible, and their fingerprints would then have fed the import matcher: the same
+    duplication failure the recognition was built to prevent, through the door opened to fix it.
+
+    A table is refused; nothing is lost, because the text still becomes a `PASTED_TEXT` round and
+    LP-908 splits it.
+    """
+    text = NOT_UWM_TABLES[name]
+    fmt, reader, sheet = read_pasted_text(text)
+
     assert uwm_block_start(lines_from_text(text)) is None
+    assert fmt is ConditionSheetFormat.PASTED_TEXT
+    assert reader == "generic"
+    # ⚠️ AND NO ROW CARRIES A UWM `lender_category`, which is the part that made these dangerous:
+    # the generic reader has no category column at all, so nothing downstream can mistake a tax year
+    # for a lender code sitting beside a lender's own vocabulary.
+    assert all(row.lender_category is None for row in sheet.rows)
 
 
-def test_two_coded_lines_are_a_list() -> None:
-    """The other side of the same threshold, so it is pinned from both directions."""
-    text = (
+def test_the_discriminator_is_the_heading_and_not_the_codes() -> None:
+    """⚠️ REJECTING YEAR-SHAPED CODES WOULD BE THE OBVIOUS FIX AND IT IS WRONG. The round-2 block's
+    own codes include `1947`. The same rows are refused without their heading and accepted with it,
+    so the heading is doing the work — and the codes are untouched by the rule."""
+    rows = (
         " 0006         Invoice                       Provide copy of invoice for credit report.\n"
         " 0007         Invoice                       Provide copy of invoice for final inspection."
     )
-    fmt, _reader, sheet = read_pasted_text(text)
 
+    assert uwm_block_start(lines_from_text(rows)) is None
+    assert uwm_block_start(lines_from_text(f"Closing (PTF)\n{rows}")) == 0
+
+    fmt, _reader, sheet = read_pasted_text(f"Closing (PTF)\n{rows}")
     assert fmt is ConditionSheetFormat.UWM_APPROVAL_LETTER
-    assert uwm_block_start(lines_from_text(text)) == 0
     assert [r.lender_code for r in sheet.rows] == ["0006", "0007"]
-    assert sheet.rows[0].lender_category == "Invoice"
+    assert sheet.rows[0].bucket_heading == "Closing (PTF)"
+    # A year-shaped code is read as a code, exactly as the real sheet needs.
+    assert "1947" in [r.lender_code for r in read_pasted_text(portal_excerpt())[2].rows]
+
+
+def test_a_heading_shaped_line_is_not_enough() -> None:
+    """`_HEADING` matches any short title-cased line, so `Tax Returns` passes the SHAPE test. The
+    rule requires a heading whose bucket this reader actually knows — `_HEADINGS`, a
+    `(PTD|PTF|PTC|PTA)` parenthetical, or `Trailing`."""
+    titled_table = (
+        "Tax Returns\n"
+        " 2026         Tax Return                    Provide signed 2026 federal returns\n"
+        " 2025         Tax Return                    Provide signed 2025 federal returns"
+    )
+
+    assert uwm_block_start(lines_from_text(titled_table)) is None
+    assert read_pasted_text(titled_table)[0] is ConditionSheetFormat.PASTED_TEXT
+
+
+@pytest.mark.parametrize("fixture", [UWM_ROUND_1, UWM_ROUND_2, UWM_PAGEBREAK])
+def test_every_real_conditions_block_carries_a_known_heading(fixture: str) -> None:
+    """THE COST OF THE RULE ON REAL INPUT, MEASURED RATHER THAN ASSUMED — because `read_uwm` does
+    warn about unrecognised headings, so unknown ones plainly can occur.
+
+    Across every fixture, every heading in the conditions block maps to a known bucket: 3 of 3 in
+    round 1, 2 of 2 in round 2, 5 of 5 in the page-break sheet. The rule refuses nothing real.
+    """
+    lines = lines_from_text(sheet_text(fixture))
+    start = next(i for i, ln in enumerate(lines) if ln.text.strip() == "CONDITIONS") + 1
+    end = next(
+        (i for i, ln in enumerate(lines) if ln.text.strip() == "EXPIRATION DATES"), len(lines)
+    )
+    block = [ln for ln in lines[start:end] if not ln.is_blank]
+    threshold = _shallow_threshold(block)
+
+    headings = [
+        ln.text.strip()
+        for ln in block
+        if _row_start(ln, threshold) is None and _is_heading(ln, threshold)
+    ]
+
+    assert headings, "a conditions block with no heading at all would defeat the paste rule"
+    assert all(not _heading_kind(text)[1] for text in headings), headings
 
 
 def test_an_empty_paste_degrades_rather_than_raising() -> None:
