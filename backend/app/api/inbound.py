@@ -23,12 +23,16 @@ from app.schemas.inbound import (
     AcceptAttachmentResponse,
     InboundAttachmentPublic,
     InboundMessagePublic,
+    UseAsConditionSheetRequest,
+    UseAsConditionSheetResponse,
 )
+from app.services.condition_rounds import ConditionSheetRejected
 from app.services.inbound_triage import (
     AcceptAs,
     CannotAcceptError,
     accept_attachment,
     attachment_preview,
+    forward_attachment_as_sheet,
     list_file_messages,
     list_triage_queue,
     reject_attachment,
@@ -241,6 +245,68 @@ async def accept(
         document_id=result.document.id if result.document else None,
         disposition=result.attachment.disposition.value,
         possible_duplicate=result.flagged_possible_duplicate,
+    )
+
+
+@router.post(
+    "/attachments/{attachment_id}/condition-round",
+    response_model=UseAsConditionSheetResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def use_as_condition_sheet(
+    attachment_id: UUID,
+    payload: UseAsConditionSheetRequest,
+    loan_file: ScopedLoanFile,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> UseAsConditionSheetResponse:
+    """Use an emailed PDF as this file's condition sheet (LP-905, screen S1-13).
+
+    ⚠️ THE PATH CARRIES THE LOAN FILE, AND THE SPEC'S DOES NOT. Spec §LP-905 writes
+    `POST /api/inbound/attachments/{attachment_id}/condition-round` with `loan_file_id` in the body
+    when the message is unrouted. This router is mounted at `/loan-files/{file_identifier}/inbound`,
+    so the real path is `…/inbound/attachments/{id}/condition-round` — and that is the better shape,
+    because `ScopedLoanFile` fetches the file scoped to the caller's company BEFORE the handler runs.
+    A file id in the body would have to be scoped by hand, which is the check everyone forgets.
+    Recorded as a spec-vs-code difference; the code wins, per the survey's rule.
+
+    202, like the upload: the round comes back in `PARSING` and the UI polls it.
+    """
+    if payload.attach_to_round_id is not None:
+        # Spec §LP-905 defines this as running the LP-907 merge, and LP-907 does not exist. Refusing
+        # is honest; quietly creating a second round instead would be the silent-wrong-answer shape
+        # this stage keeps finding.
+        raise HTTPException(
+            status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Attaching to an existing round arrives with LP-907. Start a new round instead.",
+        )
+
+    attachment = await _scoped_attachment(
+        db, loan_file_id=loan_file.id, attachment_id=attachment_id
+    )
+    try:
+        round_ = await forward_attachment_as_sheet(
+            db, loan_file=loan_file, attachment=attachment, actor_user_id=current_user.id
+        )
+    except ConditionSheetRejected as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.reason) from exc
+    except CannotAcceptError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    await db.commit()
+    await db.refresh(round_)
+    await db.refresh(attachment)
+
+    # After the commit, for the same reason the upload endpoint enqueues there: a worker that picked
+    # the round up before the transaction landed would find no row.
+    from app.tasks.conditions import parse_condition_round
+
+    parse_condition_round.delay(str(round_.id))
+
+    return UseAsConditionSheetResponse(
+        round_id=round_.id,
+        status=round_.status.value,
+        disposition=attachment.disposition.value,
     )
 
 

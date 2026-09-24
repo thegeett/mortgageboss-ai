@@ -63,3 +63,28 @@ class AcceptAttachmentResponse(BaseModel):
     document_id: UUID | None
     disposition: str
     possible_duplicate: bool
+
+
+class UseAsConditionSheetRequest(BaseModel):
+    """Turn an emailed PDF into a condition round (LP-905, screen S1-13).
+
+    ⚠️ `attach_to_round_id` IS ACCEPTED AND REFUSED, DELIBERATELY. Spec §LP-905 defines it as running
+    "the LP-907 merge" when the file's newest round was pasted and has no PDF — and LP-907 does not
+    exist yet. Declaring the field now keeps the endpoint's contract stable for the UI that will send
+    it, while refusing it is honest: half a merge that silently created a second round instead would
+    be worse than a clear "not yet".
+    """
+
+    attach_to_round_id: UUID | None = Field(
+        default=None,
+        description="Attach to an existing pasted round instead of starting a new one (LP-907).",
+    )
+
+
+class UseAsConditionSheetResponse(BaseModel):
+    """The round the attachment became, and what happened to the attachment."""
+
+    round_id: UUID
+    status: str
+    #: Always `correspondence` — the attachment is kept, never turned into a document (ADR-403).
+    disposition: str

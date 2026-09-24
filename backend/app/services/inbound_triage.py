@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -43,6 +44,13 @@ from app.models.loan_file import LoanFile
 from app.services.activity_log import log_activity
 from app.services.documents import create_document
 from app.storage import get_storage_backend
+
+if TYPE_CHECKING:
+    # ⚠️ TYPE-ONLY, BECAUSE THE RUNTIME IMPORT IS DELIBERATELY FUNCTION-LOCAL. `condition_rounds`
+    # is imported inside `forward_attachment_as_sheet` so this module's import graph stays one-way;
+    # naming the type here gives ruff and mypy the symbol without moving that import to the top,
+    # where it would create the cycle the local import exists to avoid.
+    from app.models.condition_round import ConditionRound
 
 logger = get_logger(__name__)
 
@@ -249,6 +257,92 @@ async def reject_attachment(
     return attachment
 
 
+async def forward_attachment_as_sheet(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    attachment: InboundAttachment,
+    actor_user_id: UUID,
+) -> ConditionRound:
+    """Use an emailed PDF as a condition sheet, keeping it as CORRESPONDENCE (LP-905, spec §6).
+
+    ⚠️ IT LIVES HERE BY PRECEDENT, NOT BY TASTE. This module already imports the domain service that
+    owns what an attachment becomes — `from app.services.documents import create_document` (line 44),
+    called by `accept_attachment` at line 192 — so "a triage action reaches into the domain service
+    that owns the object it produces" is the established pattern in this exact file, and this is that
+    pattern one domain over.
+
+    The alternative — building the action in `condition_rounds` — would invert a dependency this file
+    has already settled, and would need `_attachment_bytes` promoted across a module boundary to do
+    it. `condition_rounds` does not import this module, so the dependency still runs one way only.
+
+    ⚠️ THE ATTACHMENT DOES NOT BECOME A DOCUMENT, and that is the whole point of the action. A
+    lender's letter satisfies no need and would be classified against a 166-type BORROWER taxonomy —
+    the same reasoning that created `CORRESPONDENCE` in the first place (ADR-403). So the bytes are
+    re-derived and handed to `create_round_from_sheet`, which stores them with `save_at`; no
+    `Document` row is created and the classify → extract → needs pipeline is never entered.
+
+    The disposition is set to CORRESPONDENCE rather than left PENDING: the processor HAS now decided
+    what this attachment is. Screen S1-13 reads that back as "Kept as correspondence" beside a link
+    to the round, which is derivable from the round's `sources` — each carries the
+    `inbound_attachment_id` it came from, so no column is needed to join them.
+    """
+    from app.models.condition_round import ConditionSourceKind
+    from app.services.condition_rounds import SheetBytes, create_round_from_sheet
+
+    message = await db.get(InboundMessage, attachment.inbound_message_id)
+    if message is None:
+        raise CannotAcceptError("The original message is no longer available.")
+
+    # The same three guards `accept_attachment` applies, in the same order and for the same reasons.
+    # Copied deliberately rather than shared: a future divergence between "may become a document"
+    # and "may become a condition sheet" should be visible as a difference here, not hidden behind a
+    # helper both call.
+    if message.loan_file_id != loan_file.id:
+        raise CannotAcceptError(
+            "This attachment belongs to a message routed to a different loan file."
+        )
+    if attachment.safety_state is not AttachmentSafetyState.SAFE:
+        # PENDING IS NOT A PASS — the scan is asynchronous, so "nobody has looked yet" is a state
+        # that genuinely persists and must never read as "nothing was found".
+        raise CannotAcceptError(
+            f"This attachment is {attachment.safety_state.value}, not safe to use. "
+            f"{attachment.safety_reason or ''}".strip()
+        )
+    if attachment.disposition not in (
+        AttachmentDisposition.PENDING,
+        AttachmentDisposition.CORRESPONDENCE,
+    ):
+        # Already accepted as a document, rejected or marked duplicate. CORRESPONDENCE is allowed
+        # through because the processor may file it first and decide to read it afterwards.
+        raise CannotAcceptError(f"This attachment has already been {attachment.disposition.value}.")
+
+    content = await _attachment_bytes(db, attachment=attachment)
+    round_ = await create_round_from_sheet(
+        db,
+        loan_file=loan_file,
+        sheet=SheetBytes(
+            content=content,
+            source_kind=ConditionSourceKind.EMAIL,
+            # ⚠️ WHAT THE SENDER'S MAIL CLIENT DECLARED, passed through rather than assumed, so a
+            # refusal quotes the claim the sender actually made (LP-905 §1 review, Q1).
+            declared_content_type=attachment.declared_content_type,
+            inbound_attachment_id=attachment.id,
+        ),
+        actor_user_id=actor_user_id,
+    )
+
+    attachment.disposition = AttachmentDisposition.CORRESPONDENCE
+    await db.flush()
+    logger.info(
+        "attachment_used_as_condition_sheet",
+        attachment_id=str(attachment.id),
+        round_id=str(round_.id),
+        loan_file_id=str(loan_file.id),
+    )
+    return round_
+
+
 async def list_file_messages(db: AsyncSession, *, loan_file: LoanFile) -> list[InboundMessage]:
     """Everything that arrived for one loan file, newest first.
 
@@ -349,6 +443,7 @@ __all__ = [
     "CannotAcceptError",
     "accept_attachment",
     "attachment_preview",
+    "forward_attachment_as_sheet",
     "list_file_messages",
     "list_triage_queue",
     "reject_attachment",
