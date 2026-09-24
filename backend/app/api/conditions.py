@@ -453,6 +453,13 @@ async def _round_card(db: DbSession, round_: ConditionRound) -> ConditionRoundPu
     says "0 on sheet". That is LP-907's shipped door and widening this ticket into it would be a
     refactor, but it is the reason this helper exists rather than three more call sites that each
     have to remember.
+
+    ⚠️ `upload_condition_sheet` HAS THE IDENTICAL SHAPE AND IS CORRECT — do not "fix" it by copying
+    this. `create_round_from_sheet` opens a `PARSING` round and assigns no `draft_rows` at all, so an
+    upload genuinely holds no rows when it answers and its zero is the truth. Paste stores its rows
+    synchronously, which is why only paste reports a number it can see is wrong. Routing upload
+    through here would add a query whose answer is already known (raised in review, where the two
+    call sites looked like one defect).
     """
     _, per_round = await appearances_for_file(db, loan_file_id=round_.loan_file_id)
     return ConditionRoundPublic.from_model(round_, condition_count=rows_on_sheet(round_, per_round))
