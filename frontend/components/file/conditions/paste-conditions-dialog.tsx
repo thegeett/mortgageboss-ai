@@ -83,6 +83,10 @@ export function PasteConditionsDialog({
   const answerName = useId();
 
   const [text, setText] = useState("");
+  // ⚠️ "partial" IS LOAD-BEARING, NOT A TASTE (ADR-404). "full" is what entitles Stage 2 to propose
+  // a condition absent from a later sheet as "probably cleared"; "partial" can never remove
+  // anything. The API refuses to guess — `completeness` is required with no server default — so
+  // changing this line changes what a processor is taken to have CLAIMED, not just what is preselected.
   const [completeness, setCompleteness] = useState<ConditionRoundCompleteness>("partial");
   const [roundDate, setRoundDate] = useState(today());
   const paste = usePasteConditions(fileId);

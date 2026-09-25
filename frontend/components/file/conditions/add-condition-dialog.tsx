@@ -98,7 +98,27 @@ export function AddConditionDialog({
         lender_code: lenderCode.trim() || null,
         lender_category: category.trim() || null,
         bucket_kind: bucketKind,
-        bucket_heading: BUCKET_KIND_LABEL[bucketKind],
+        // ⚠️ EXPLICITLY `null`, NOT OMITTED, MATCHING THE TWO FIELDS ABOVE. They send `|| null` with
+        // a comment saying why — the column is nullable and `""` would be a value the lender never
+        // wrote — and a third field escaping that convention in the same expression is the
+        // inconsistency worth avoiding. `null` says we considered it and have nothing; leaving the
+        // key out says nothing at all. The server turns it into `""` either way.
+        bucket_heading: null,
+        // ⚠️ AND SENDING A REAL ONE WAS A DEFECT (LP-909 review). It used to send
+        // `BUCKET_KIND_LABEL[bucketKind]` — OUR prose — into a column that holds the LENDER's
+        // printed vocabulary ("Prior To Docs (PTD)", "Underwriter To Obtain And Clear").
+        // `create_manual_condition` refuses to manufacture one for exactly that reason and writes
+        // `""` when none is given, meaning "the processor filed it under no heading". The client
+        // handing it a label defeated a rule the server states in words.
+        //
+        // The `unknown` case shows the shape worst: its label is "No heading given", so choosing
+        // *no heading* would have written that SENTENCE into the column whose empty value already
+        // means it — two rows indistinguishable downstream, only one of them true.
+        //
+        // The two are different facts, which is why they are different columns: `bucket_kind` is
+        // WHEN the condition is due, `bucket_heading` is WHAT THE LENDER PRINTED. Deriving the
+        // second from the first is a category error. A typed heading, if ever wanted, needs its own
+        // free-text field asking for the lender's heading rather than a dropdown of ours.
       },
       {
         onSuccess: () => {

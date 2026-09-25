@@ -111,6 +111,25 @@ describe("a file refused before a round exists", () => {
   it("accepts a PDF inside the limit", () => {
     expect(refuseSheet(new File(["x"], "sheet.pdf", { type: "application/pdf" }))).toBeNull();
   });
+
+  it("⚠️ refuses an empty PDF as empty, not as oversized", () => {
+    // Not a design sentence — the server 422s zero bytes and this is the instant version of that.
+    // Ordered BEFORE the ceiling on purpose: "larger than 20 MB" about a 0-byte file would send a
+    // processor hunting for a smaller copy of a file that has no contents.
+    expect(refuseSheet(new File([], "sheet.pdf", { type: "application/pdf" }))).toBe(
+      "That file is empty. Check it opens, then upload it again.",
+    );
+  });
+
+  it("⚠️ refuses a PDF whose MIME type is upper-case, and one with no type at all", () => {
+    // Both were live differences between this function and a duplicate the conditions page grew:
+    // it skipped `.toLowerCase()` and short-circuited on an empty `file.type`, so a browser that
+    // reported no type for an unrecognised extension got past it. Neither shape is theoretical.
+    expect(refuseSheet(new File(["x"], "SHEET.PDF", { type: "APPLICATION/PDF" }))).toBeNull();
+    expect(refuseSheet(new File(["x"], "sheet", { type: "" }))).toBe(
+      "That file isn’t a PDF. Upload the lender’s PDF, or paste the conditions.",
+    );
+  });
 });
 
 // --------------------------------------------------------------------------- //

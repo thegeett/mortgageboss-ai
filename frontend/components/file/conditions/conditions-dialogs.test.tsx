@@ -216,10 +216,36 @@ describe("adding a condition by hand (S1-12)", () => {
       verbatim_text: "Provide a signed letter of explanation for the credit inquiry.",
       lender_code: "0006",
       bucket_kind: "prior_to_closing",
-      bucket_heading: "Prior to closing",
       // Untouched optional fields go as null rather than as empty strings — the column is nullable
       // and "" would be a value the lender never wrote.
       lender_category: null,
     });
+  });
+
+  it("⚠️ never sends a bucket_heading, because that column is the LENDER's words", () => {
+    // THIS TEST USED TO ASSERT THE OPPOSITE AND PINNED A DEFECT. It expected
+    // `bucket_heading: "Prior to closing"` — our label for a bucket KIND — written into the column
+    // that holds what the lender actually printed. `create_manual_condition` declines to invent one
+    // and writes `""` for "filed under no heading", so the client was defeating a rule the server
+    // states in a comment.
+    //
+    // The backend has its own test for this and it passes, because it posts no `bucket_heading` key
+    // — a path the real client never took. Two green tests, each covering one layer, and the
+    // product violated the property both believed they were protecting.
+    show([round()]);
+    fireEvent.change(screen.getByLabelText(/Lender’s wording/), {
+      target: { value: "Provide the final title commitment." },
+    });
+    fireEvent.change(screen.getByLabelText("Heading"), { target: { value: "unknown" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add condition" }));
+
+    const sent = addMutate.mock.calls[0]?.[0];
+    expect(sent.bucket_kind).toBe("unknown");
+    // ⚠️ THE WORST CASE, NAMED: `BUCKET_KIND_LABEL.unknown` is "No heading given". Sending it would
+    // write that sentence into a column whose EMPTY value already means it.
+    //
+    // `null` rather than absent, matching `lender_code` and `lender_category` beside it — the
+    // server maps it to `""` either way, and asserting the shape keeps the three consistent.
+    expect(sent.bucket_heading).toBeNull();
   });
 });

@@ -33,16 +33,31 @@ import { type FileRejection, useDropzone } from "react-dropzone";
 const MAX_SHEET_BYTES = 20 * 1024 * 1024;
 
 /**
- * Refuse a file before a round exists, in the screen's own words.
+ * Refuse a file before a round exists, in the screen’s own words.
  *
- * ⚠️ THE SENTENCES ARE THE DESIGN'S, VERBATIM. S1-03 specifies what a pre-round refusal says —
- * "That file isn't a PDF. Upload the lender's PDF, or paste the conditions." and "This PDF is larger
- * than 20 MB." — and the server is still authoritative. This is fast feedback, never the rule.
+ * ⚠️ TWO OF THESE SENTENCES ARE THE DESIGN’S, VERBATIM, AND ONE IS OURS. S1-03 specifies what a
+ * pre-round refusal says — "That file isn’t a PDF. Upload the lender’s PDF, or paste the
+ * conditions." and "This PDF is larger than 20 MB." The empty-file sentence is NOT in the design;
+ * it is here because the server refuses zero bytes with a 422 and a processor deserves to know
+ * instantly rather than after a round trip. Saying which is which matters: a later reader checking
+ * this against the PNG will not find the third one, and should not conclude the screen drifted.
+ *
+ * ⚠️ THE ONLY COPY, AND IT WAS BRIEFLY NOT. The conditions tab page grew its OWN `refuseSheet`
+ * rather than importing this one, and the two disagreed three ways inside a single commit — the
+ * page let an empty MIME type through, skipped `.toLowerCase()`, and used a different sentence
+ * ("Condition sheets must be PDFs.") that no test pinned and no design specifies. Worse, the
+ * comment above it claimed "the same sentences when it is missed". Raised in review; the page now
+ * imports this.
+ *
+ * The server is still authoritative. This is fast feedback, never the rule.
  */
 export function refuseSheet(file: File): string | null {
   if (file.type.toLowerCase() !== "application/pdf") {
     return "That file isn’t a PDF. Upload the lender’s PDF, or paste the conditions.";
   }
+  // Before the ceiling: a zero-byte file is not "too large", and telling a processor it is would
+  // send them looking for a smaller copy of a file that has no contents at all.
+  if (file.size === 0) return "That file is empty. Check it opens, then upload it again.";
   if (file.size > MAX_SHEET_BYTES) return "This PDF is larger than 20 MB.";
   return null;
 }

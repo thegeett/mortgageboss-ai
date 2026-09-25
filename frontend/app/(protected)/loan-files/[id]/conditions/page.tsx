@@ -2,6 +2,7 @@
 
 import { AddConditionDialog } from "@/components/file/conditions/add-condition-dialog";
 import { ConditionsDashboard } from "@/components/file/conditions/conditions-dashboard";
+import { refuseSheet } from "@/components/file/conditions/conditions-empty";
 import { PasteConditionsDialog } from "@/components/file/conditions/paste-conditions-dialog";
 import {
   useConditionRounds,
@@ -13,16 +14,6 @@ import { getErrorMessage } from "@/lib/errors/api-error";
 import { notifyError, notifyStarted, notifySuccess } from "@/lib/toast";
 import { useParams } from "next/navigation";
 import { useRef, useState } from "react";
-
-/** The same ceiling `ConditionsEmpty` enforces, and the same sentences when it is missed. */
-const MAX_SHEET_BYTES = 20 * 1024 * 1024;
-
-function refuseSheet(file: File): string | null {
-  if (file.type && file.type !== "application/pdf") return "Condition sheets must be PDFs.";
-  if (file.size === 0) return "That file is empty.";
-  if (file.size > MAX_SHEET_BYTES) return "This PDF is larger than 20 MB.";
-  return null;
-}
 
 /**
  * Conditions tab (LP-909 §3, §4) — replacing the LP-33 placeholder.
