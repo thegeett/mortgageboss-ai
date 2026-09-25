@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { ConditionRound, ConditionSourceKind, ParseReport } from "@/lib/types/conditions";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -101,6 +101,7 @@ const handlers = {
   onAddByHand: vi.fn(),
   onUploadAnother: vi.fn(),
   onDiscard: vi.fn(),
+  onRetry: vi.fn(),
 };
 
 function show(data: ConditionRound[] | undefined, state: "ok" | "pending" | "error" = "ok") {
@@ -143,11 +144,17 @@ describe("which screen the Conditions tab shows", () => {
     expect(screen.getByText("Password-protected.")).toBeDefined();
   });
 
-  it("⚠️ never offers Try again, because no route re-reads a round", () => {
-    // `parse_condition_round.delay()` is called from creation paths only. Both child screens take
-    // `onRetry` optionally so they need no change the day a route exists; today none is passed.
+  it("⚠️ offers Try again on a failed round, and hands back the round id", () => {
+    // This test asserted the OPPOSITE and was correct at the time: no route re-read an existing
+    // round, so passing a callback would have meant a button that could not work.
+    // `POST /condition-rounds/{id}/reparse` is that route. The id matters — the dashboard knows
+    // which round is current and the page does not, so a callback taking no argument would have
+    // pushed that lookup somewhere it cannot be done.
     show([round({ status: "parse_failed", parse_report: report({ failure_kind: "no_text" }) })]);
-    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(handlers.onRetry).toHaveBeenCalledWith("r1");
   });
 
   it("⚠️ shows a round waiting for the AI split as being read, at every door", () => {

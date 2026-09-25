@@ -86,6 +86,7 @@ export function InboundAttachmentRow({
   onAccept,
   onAcceptAsCorrespondence,
   onReject,
+  onUseAsConditionSheet,
   busy = false,
 }: {
   fileId: string | null;
@@ -93,10 +94,21 @@ export function InboundAttachmentRow({
   onAccept?: () => void;
   onAcceptAsCorrespondence?: () => void;
   onReject?: () => void;
+  /** Turn this attachment into the file's condition sheet (S1-13). PDFs only. */
+  onUseAsConditionSheet?: () => void;
   busy?: boolean;
 }) {
   const decided = attachment.disposition !== "pending";
-  const canAccept = attachment.safety_state === "safe" && !decided && Boolean(onAccept);
+  const undecidedAndSafe = attachment.safety_state === "safe" && !decided;
+  const canAccept = undecidedAndSafe && Boolean(onAccept);
+  // ⚠️ PDFs ONLY, AND THE GATE IS HERE RATHER THAN IN A REFUSAL. `reject_unless_pdf` turns anything
+  // else into a 422 at the door, so offering this on a .docx would be a button that reliably fails
+  // — the dead-button pattern S1-03 and S1-02 were both corrected for. A lender's letter that
+  // arrived as something other than a PDF has to be dealt with as a document, not as a sheet.
+  const canUseAsSheet =
+    undecidedAndSafe &&
+    Boolean(onUseAsConditionSheet) &&
+    attachment.sniffed_content_type === "application/pdf";
   const name = attachment.filename_original ?? attachment.filename_normalized;
 
   return (
@@ -127,17 +139,38 @@ export function InboundAttachmentRow({
           </p>
         ) : null}
       </div>
-      {canAccept ? (
+      {canAccept || canUseAsSheet ? (
         <div className="flex shrink-0 flex-col gap-1">
-          <Button size="sm" onClick={onAccept} disabled={busy}>
-            Accept
-          </Button>
-          <Button size="sm" variant="ghost" onClick={onAcceptAsCorrespondence} disabled={busy}>
-            Correspondence
-          </Button>
-          <Button size="sm" variant="ghost" onClick={onReject} disabled={busy}>
-            Reject
-          </Button>
+          {/* ⚠️ FIRST AND PRIMARY (S1-13), AND THAT ORDERING IS THE DECISION. A lender's approval
+              letter is the one attachment a processor is most likely to be looking for, and
+              "Accept" would file it as a borrower DOCUMENT — classified against a 166-type taxonomy
+              with no bucket for it (ADR-403). Putting the right action first is what stops the
+              wrong one being the obvious one. */}
+          {canUseAsSheet ? (
+            <Button size="sm" onClick={onUseAsConditionSheet} disabled={busy}>
+              Use as condition sheet
+            </Button>
+          ) : null}
+          {canAccept ? (
+            <>
+              <Button
+                size="sm"
+                // Demoted only when the sheet action is beside it: on a non-PDF this is still the
+                // primary thing to do, and greying it there would say the row has no good action.
+                variant={canUseAsSheet ? "outline" : "default"}
+                onClick={onAccept}
+                disabled={busy}
+              >
+                Accept
+              </Button>
+              <Button size="sm" variant="ghost" onClick={onAcceptAsCorrespondence} disabled={busy}>
+                Correspondence
+              </Button>
+              <Button size="sm" variant="ghost" onClick={onReject} disabled={busy}>
+                Reject
+              </Button>
+            </>
+          ) : null}
         </div>
       ) : null}
     </li>

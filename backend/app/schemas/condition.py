@@ -58,6 +58,10 @@ from app.models.condition_round import (
 #: it reaches a reader, rather than after.
 MAX_PASTE_CHARS = 100_000
 
+#: The reparse window is NOT declared here. It belongs with the parse time limits it is derived
+#: from — `app/conditions/limits.py` — because a schema module importing from `app/tasks/` would
+#: invert the direction this repo's imports run.
+
 
 class UnderwriterNotePublic(BaseModel):
     """A dated note the underwriter appended inside the condition's text.

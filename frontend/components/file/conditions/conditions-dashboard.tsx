@@ -75,10 +75,16 @@ function Notice({
  * rules-read rows too, so "has rows" would show a sheet as reviewable while the split was still
  * running — the trap `ConditionRound.draft_rows` warns about in its own comment.
  *
- * ⚠️ NO `onRetry` IS PASSED ANYWHERE, and that is a fact about the API rather than an omission.
- * `parse_condition_round.delay()` is called from creation paths only, so there is no route that
- * re-reads an existing round. Both child screens take the callback optionally so the day one exists
- * they need no change; until then a button that cannot work is worse than an absent one.
+ * ⚠️ `onRetry` NOW EXISTS, AND THIS PARAGRAPH USED TO EXPLAIN WHY IT COULD NOT. It said no route
+ * re-read an existing round — true then, because `parse_condition_round.delay()` was called from
+ * creation paths only — and concluded that "a button that cannot work is worse than an absent one".
+ * `POST /condition-rounds/{id}/reparse` is that route, so both child screens are finally passed the
+ * callback they have always accepted, and the copy on them that promised it stops being a dead
+ * button wearing prose.
+ *
+ * ⚠️ NOT THE SAME THING AS THE `ErrorState` RETRY BELOW. That one refetches the LIST when the tab
+ * itself failed to load; this one asks the SERVER to read a stored sheet again. They read alike at
+ * a glance and mean entirely different things, which is why the handler names differ.
  */
 export function ConditionsDashboard({
   fileId,
@@ -86,12 +92,15 @@ export function ConditionsDashboard({
   onAddByHand,
   onUploadAnother,
   onDiscard,
+  onRetry,
 }: {
   fileId: string;
   onPaste: () => void;
   onAddByHand: () => void;
   onUploadAnother: () => void;
   onDiscard: (roundId: string) => void;
+  /** Ask the server to read this round's stored sheet again (S1-02 stranded, S1-03 "Try again"). */
+  onRetry: (roundId: string) => void;
 }) {
   const rounds = useConditionRounds(fileId);
 
@@ -128,13 +137,18 @@ export function ConditionsDashboard({
   const current = live[0] as ConditionRound;
 
   if (current.status === "parsing") {
-    return <RoundReading round={current} />;
+    // ⚠️ THE RETRY IS OFFERED ONLY ONCE THE ROUND IS STRANDED, which `RoundReading` decides for
+    // itself — it renders the button only in that branch. Passing the callback unconditionally is
+    // correct: the server refuses a round it is still reading, so a button shown too early would
+    // 409 with "this sheet is still being read", and the screen already knows not to show it.
+    return <RoundReading round={current} onRetry={() => onRetry(current.id)} />;
   }
 
   if (current.status === "parse_failed") {
     return (
       <RoundFailed
         round={current}
+        onRetry={() => onRetry(current.id)}
         onUploadAnother={onUploadAnother}
         onPaste={onPaste}
         onDiscard={() => onDiscard(current.id)}

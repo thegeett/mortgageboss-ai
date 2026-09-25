@@ -43,12 +43,16 @@ function sourceLabel(sources: ConditionSource[]): string | null {
  * stops (see `isStranded`) and this says so, because a progress card that never resolves is the same
  * dead end as a spinner with no exit.
  *
- * ⚠️ IT SAYS SO RATHER THAN OFFERING A RETRY, AND THIS DOCSTRING USED TO CLAIM OTHERWISE. There is
- * no route that re-reads an existing round — `parse_condition_round.delay()` is called from creation
- * paths only — so the way out is to upload again, not to retry. `onRetry` remains optional for the
- * day such a route exists; the caller passes none today. Correcting the body and leaving this
- * paragraph would have been the exact defect this ticket keeps finding: a comment asserting
- * behaviour the code does not have.
+ * ⚠️ IT NOW OFFERS THE RETRY IT USED TO EXPLAIN AWAY. This paragraph said "there is no route that
+ * re-reads an existing round — `parse_condition_round.delay()` is called from creation paths only",
+ * and that was true when written. `POST /condition-rounds/{id}/reparse` is that route, so the
+ * dashboard passes `onRetry` and the button under the stranded copy is live.
+ *
+ * ⚠️ THE BUTTON APPEARS ONLY IN THE STRANDED BRANCH, WHICH IS NOT MERELY TIDY. The server REFUSES a
+ * reparse on a round it is still reading, so a Try again offered during a healthy parse would 409
+ * with "this sheet is still being read". Both sides now use the same bound — `STRANDED_AFTER_MS`
+ * here is `STRANDED_AFTER_SECONDS` there, pinned by `test_condition_type_mirror.py` — so what this
+ * screen shows and what the server will accept cannot drift apart.
  */
 export function RoundReading({
   round,
@@ -102,14 +106,13 @@ export function RoundReading({
 
         {stranded ? (
           <div className="flex flex-col gap-2">
-            {/* ⚠️ THIS SENTENCE PROMISED A ROUTE THAT DOES NOT EXIST. It said "you can try reading
-                it again" — but `parse_condition_round.delay()` is called from creation paths only,
-                so there is no way to re-read a round that already exists. `RoundFailed` drops its
-                Try again button for exactly this reason; the reasoning had not been carried here,
-                and a paragraph offering a route with no button is a dead button wearing prose. */}
+            {/* ⚠️ THIS SENTENCE ONCE PROMISED A ROUTE THAT DID NOT EXIST — "you can try reading it
+                again", when nothing re-read an existing round. It was rewritten to stop promising
+                it, and is now rewritten again because the route arrived: the reparse endpoint hands
+                the stored PDF back to the reader. A paragraph and a button that finally agree. */}
             <p className="max-w-prose text-sm text-muted-foreground">
-              Nothing has come back from the reader. The sheet is stored and nothing was lost, but
-              it will not read itself — upload it again, or bring the conditions in another way.
+              Nothing has come back from the reader. The sheet is stored and nothing was lost — you
+              can hand it back to the reader, or bring the conditions in another way.
             </p>
             {onRetry ? (
               <div>

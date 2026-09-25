@@ -87,8 +87,14 @@ export function RoundFailed({
         </code>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* `Try again` is primary and only offered when re-reading is possible: a pasted round has
-              no stored PDF to re-read, and a button that cannot work is worse than an absent one. */}
+          {/* `Try again` is primary and only offered when re-reading is possible — and what makes it
+              possible changed. It used to be nothing: no route re-read an existing round at all.
+              `POST /condition-rounds/{id}/reparse` is that route now, so the caller passes this.
+
+              It stays OPTIONAL because the server still refuses some rounds, and the sharpest case
+              is a pasted one: `parse_round` reads the sheet from storage, and a paste has no stored
+              PDF — its text IS the source. The refusal says so in those words rather than settling
+              `bytes_unavailable` and blaming storage for something that was never there. */}
           {onRetry ? (
             <Button size="sm" onClick={onRetry}>
               Try again

@@ -257,12 +257,25 @@ describe("a round that could not be read (S1-03)", () => {
     expect(screen.getByText("reason: parse_failed · reader uwm v1")).toBeDefined();
   });
 
-  it("offers no Try again when re-reading is impossible", () => {
-    // A pasted round has no stored PDF to re-read. A button that cannot work is worse than an
-    // absent one: it spends the processor's attention and returns nothing.
-    render(<RoundFailed round={round()} {...actions} />);
+  it("⚠️ shows Try again only when a caller supplies it, and this test used to prove nothing", () => {
+    // THE OLD VERSION WAS TAUTOLOGICAL AND READ AS MEANINGFUL. It rendered `round()` — an upload,
+    // not a paste — asserted no Try again, and explained the absence as "a pasted round has no
+    // stored PDF to re-read". The fixture had no such property: the button was missing purely
+    // because `actions` omits `onRetry`, so the test asserted the consequence of its own setup
+    // while appearing to assert a rule about pasted rounds.
+    //
+    // The real rule is this one, and it is worth pinning because the screen is now reached BOTH
+    // ways: the dashboard passes `onRetry` for a stored sheet, and the prop stays optional because
+    // the server refuses a reparse where there is nothing stored to re-read.
+    const { unmount } = render(<RoundFailed round={round()} {...actions} />);
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
     expect(screen.getByRole("button", { name: "Paste instead" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Discard" })).toBeDefined();
+    unmount();
+
+    const onRetry = vi.fn();
+    render(<RoundFailed round={round()} {...actions} onRetry={onRetry} />);
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 });

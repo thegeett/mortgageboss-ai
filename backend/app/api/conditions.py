@@ -53,10 +53,12 @@ from app.services.condition_rounds import (
     ConditionSheetRejected,
     RoundNotDiscardable,
     RoundNotEditable,
+    RoundNotReparsable,
     SheetBytes,
     create_round_from_paste,
     create_round_from_sheet,
     discard_round,
+    reparse_round,
     update_draft,
 )
 from app.services.conditions import (
@@ -120,6 +122,43 @@ async def _enqueue_split_or_fail(db: DbSession, round_: ConditionRound) -> None:
         await db.refresh(round_)
         # Ids and counts only (spec §9.5) — never the pasted text.
         log.warning("condition_split_enqueue_failed", round_id=str(round_.id))
+
+
+async def _enqueue_parse_or_fail(db: DbSession, round_: ConditionRound) -> None:
+    """Queue the read, and mark the round failed if the broker will not take it.
+
+    ⚠️ THE SPLIT'S TWIN, AND THE UPLOAD DOOR DELIBERATELY HAS NO SUCH GUARD. That door's bare
+    `.delay()` carries a comment calling the exposure a decision rather than an oversight, on the
+    grounds that changing a shipped door inside another ticket is how a ticket becomes a refactor.
+
+    Reparse does not get to inherit that. The round is committed `PARSING` BEFORE this is reached,
+    so a broker that is down leaves exactly the permanent-`PARSING` round this stage has now fixed
+    twice — and a processor who pressed "Try again" watching it strand a second time is the worst
+    version of it, because they asked for the recovery and the recovery is what failed.
+
+    ⚠️ AND A FAILED REPARSE MUST NOT LOOK LIKE A FAILED SHEET. `failure_kind` is `enqueue_failed`,
+    whose sentence says the conditions could not be QUEUED and nothing was lost — never a reason
+    that blames the lender's PDF, which was read fine or was never read at all.
+    """
+    try:
+        from app.tasks.conditions import parse_condition_round
+
+        parse_condition_round.delay(str(round_.id))
+    except OperationalError:
+        # ⚠️ kombu's, NOT `sqlalchemy.exc`'s — two unrelated classes share the name and `.delay()`
+        # raises kombu's, so catching the other is a guard that never fires (LP-908 review).
+        # Specific, never a bare `except Exception` (spec §9.8).
+        round_.status = ConditionRoundStatus.PARSE_FAILED
+        # A NEW dict: SQLAlchemy does not track in-place mutation of JSONB.
+        round_.parse_report = {
+            **(round_.parse_report or {}),
+            "failure_kind": "enqueue_failed",
+            "failure_detail": ENQUEUE_FAILED_DETAIL,
+        }
+        await db.commit()
+        await db.refresh(round_)
+        # Ids and counts only (spec §9.5).
+        log.warning("condition_reparse_enqueue_failed", round_id=str(round_.id))
 
 
 async def get_scoped_round(
@@ -527,6 +566,47 @@ async def discard_condition_round(
 
     await db.commit()
     await db.refresh(round_)
+    return await _round_card(db, round_)
+
+
+@rounds_router.post(
+    "/{round_id}/reparse",
+    response_model=ConditionRoundPublic,
+    status_code=status.HTTP_200_OK,
+)
+async def reparse_condition_round(
+    round_: ScopedRound, db: DbSession, current_user: CurrentUser
+) -> ConditionRoundPublic:
+    """Read a stored sheet again — screen S1-03's "Try again" and S1-02's stranded state.
+
+    ⚠️ 200, NOT 202, THOUGH A TASK IS QUEUED. The round already existed and is settled in place back
+    to `PARSING`; nothing is created. A 202 would invite a client to look for a new id. The same
+    argument `import` and `discard` make on this router.
+
+    ⚠️ NO REQUEST BODY AT ALL, which is why there is no defaulted-singleton parameter here.
+    `documents.py` needs `body: DocumentReprocessRequest = _DEFAULT_REPROCESS_REQUEST` because
+    FastAPI makes a Pydantic body REQUIRED even when every field on it has a default, so a body-less
+    POST would 422. A reparse takes no options, so declaring an empty model to then default it would
+    be machinery standing in for nothing.
+
+    ⚠️ THE ENQUEUE IS AFTER THE COMMIT AND IS GUARDED. Before it, a worker could pick the round up
+    and find the old row; unguarded, a broker that is down strands the round the processor just
+    asked to rescue.
+
+    WHAT IT REFUSES, and each with its own sentence (spec §9.8): an imported round, a discarded one,
+    a draft that was read fine, a round whose only source is a paste and so has no PDF to re-read,
+    and a `PARSING` round that has not yet been waiting long enough to count as abandoned. That last
+    one is also what makes a double-press safe — the second is refused rather than queueing a second
+    reader.
+    """
+    try:
+        await reparse_round(db, round_=round_, actor_user_id=current_user.id)
+    except RoundNotReparsable as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+
+    await db.commit()
+    await db.refresh(round_)
+    await _enqueue_parse_or_fail(db, round_)
     return await _round_card(db, round_)
 
 

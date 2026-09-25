@@ -41,11 +41,27 @@ class ConditionEventKind(StrEnum):
     Note what is ABSENT and stays absent until Stage 2: there is no `CONDITION_CLEARED`, no
     `CONDITION_REMOVED` and no `ROUND_COMPARED`. Stage 1 cannot produce them, and an enum member
     nothing writes is an invitation (ADR-404).
+
+    ⚠️ ADDING A MEMBER HERE IS A MIGRATION, AND NO TEST WILL TELL YOU SO. `kind` is VARCHAR + CHECK
+    (ADR-037, via `str_enum`), so a new member changes what the code writes and nothing about what
+    the database accepts — and conftest builds the schema with `create_all`, which regenerates the
+    CHECK from this very enum. The suite therefore stays green against a database that would reject
+    the value on the first real write. That is the LP-637 defect exactly;
+    `tests/test_activity_type_migrations.py` guards `activity_type` against it and now guards
+    `ck_condition_events_conditioneventkind` too.
     """
 
     ROUND_RECEIVED = "round_received"
     ROUND_PARSED = "round_parsed"
     ROUND_PARSE_FAILED = "round_parse_failed"
+    #: A processor asked for a stored sheet to be read again (LP-909 §3).
+    #:
+    #: ⚠️ NOT `ROUND_RECEIVED` REUSED, THOUGH THAT WOULD HAVE SAVED A MIGRATION. Screen S1-09
+    #: renders this history, and "Condition sheet received" for an event where nothing was received
+    #: is the class of statement this stage keeps deleting from comments and screens. Adding it is
+    #: permitted by ADR-404 precisely because something writes it — the rule forbids members nothing
+    #: writes, not members that cost a constraint swap.
+    ROUND_REPARSE_REQUESTED = "round_reparse_requested"
     ROUND_IMPORTED = "round_imported"
     ROUND_DISCARDED = "round_discarded"
     #: A round gained a later source — the PDF for a round that was pasted (LP-907).

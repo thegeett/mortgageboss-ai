@@ -44,6 +44,10 @@ from app.schemas.condition import MAX_PASTE_CHARS
 #: `backend/tests/x.py` → `backend/tests` → `backend` → the repo root.
 _TYPES_FILE = Path(__file__).resolve().parents[2] / "frontend" / "lib" / "types" / "conditions.ts"
 
+#: The hooks module, which holds the numbers rather than the types. A second path because the
+#: stranded window lives with the polling logic that uses it, not with the type declarations.
+_TYPES_FILE_API = Path(__file__).resolve().parents[2] / "frontend" / "lib" / "api" / "conditions.ts"
+
 #: TypeScript name → the backend enum it restates. Hand-written on purpose: a backend enum added
 #: with no entry here is invisible to this test, and that has to be somebody's decision rather than
 #: a silent omission.
@@ -112,6 +116,30 @@ def test_the_frontend_union_matches_the_backend_enum(name: str) -> None:
     extra = frontend - backend
     assert not missing, f"{name}: the backend has {sorted(missing)} and the frontend does not"
     assert not extra, f"{name}: the frontend has {sorted(extra)} and the backend does not"
+
+
+def test_the_stranded_window_agrees() -> None:
+    """The second number both sides enforce, and the one that was actually disagreeing (LP-909).
+
+    The client had `5 * 60 * 1000` justified by S1-02's "usually under 30 seconds", which consulted
+    neither Celery limit — and 300s is EXACTLY `PARSE_SOFT_LIMIT_SECONDS`, so the tab called a round
+    dead at the instant the worker raises `SoftTimeLimitExceeded`, with a minute of hard-limit
+    runway left. Now that the server REFUSES a reparse inside its own window, a client that is
+    shorter offers a button that reliably 409s.
+
+    ⚠️ READ FROM `app.conditions.limits`, NOT FROM A LITERAL HERE. The server derives the window
+    from the timeout it must exceed; pinning against a number typed into this test would make the
+    test the third copy of the fact rather than the thing that stops copies drifting.
+    """
+    from app.conditions.limits import STRANDED_AFTER_SECONDS
+
+    source = _TYPES_FILE_API.read_text(encoding="utf-8")
+    match = re.search(r"const STRANDED_AFTER_MS\s*=\s*([0-9_]+)\s*\*\s*1000\s*;", source)
+    assert match, (
+        "STRANDED_AFTER_MS is not declared in the expected form in "
+        f"{_TYPES_FILE_API.name} — if it moved or changed shape this guard is checking nothing"
+    )
+    assert int(match.group(1).replace("_", "")) == STRANDED_AFTER_SECONDS
 
 
 def test_the_paste_ceiling_agrees() -> None:

@@ -2,7 +2,13 @@
 
 import { InboundAttachmentRow } from "@/components/file/communication/inbound-attachment";
 import { Badge } from "@/components/ui/badge";
-import { unclaimed, useAcceptAttachment, useRejectAttachment } from "@/lib/api/inbound";
+import {
+  unclaimed,
+  useAcceptAttachment,
+  useForwardAttachmentAsSheet,
+  useRejectAttachment,
+} from "@/lib/api/inbound";
+import { getErrorMessage } from "@/lib/errors/api-error";
 import { messageTimeShort } from "@/lib/message-time";
 import type { InboundMessage } from "@/lib/types/inbound";
 import { Mail, MailQuestion, ShieldCheck, ShieldQuestion } from "lucide-react";
@@ -106,7 +112,8 @@ export function InboundMessageCard({
 }) {
   const accept = useAcceptAttachment(fileId ?? "");
   const reject = useRejectAttachment(fileId ?? "");
-  const busy = accept.isPending || reject.isPending;
+  const useAsSheet = useForwardAttachmentAsSheet(fileId ?? "");
+  const busy = accept.isPending || reject.isPending || useAsSheet.isPending;
   const hidden = unclaimed(message);
 
   return (
@@ -167,6 +174,12 @@ export function InboundMessageCard({
                     onAcceptAsCorrespondence: () =>
                       accept.mutate({ attachmentId: attachment.id, asCorrespondence: true }),
                     onReject: () => reject.mutate(attachment.id),
+                    // ⚠️ INSIDE THE `fileId` SPREAD, WITH THE OTHERS, AND THAT IS THE POINT OF THE
+                    // SPREAD. In the company queue there is no file to open a round on — the
+                    // server 404s an unrouted attachment rather than letting one company create a
+                    // round from a message no company owns yet. Omitting the callback there makes
+                    // the button absent rather than present and failing.
+                    onUseAsConditionSheet: () => useAsSheet.mutate(attachment.id),
                   }
                 : {})}
             />
@@ -181,6 +194,15 @@ export function InboundMessageCard({
           That could not be done. The file may have changed since this page loaded — refresh and try
           again.
         </p>
+      ) : null}
+      {/* ⚠️ ITS OWN LINE, SHOWING THE SERVER'S SENTENCE, RATHER THAN JOINING THE ONE ABOVE. The
+          generic copy — "the file may have changed, refresh and try again" — is a guess, and it is
+          the wrong guess for every refusal this action actually produces: the attachment has
+          already been used as a condition sheet (409, naming the round that exists), the round it
+          would attach to is not on this file, the attachment is quarantined, or the message is
+          unrouted. Each names a different next step, and "refresh" is none of them (spec §9.8). */}
+      {useAsSheet.isError ? (
+        <p className="text-sm text-danger">{getErrorMessage(useAsSheet.error)}</p>
       ) : null}
       {accept.data?.possible_duplicate ? (
         <p className="text-sm text-warning">

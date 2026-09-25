@@ -20,6 +20,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mockAccept = vi.fn();
 const mockReject = vi.fn();
+const mockUseAsSheet = vi.fn();
 
 vi.mock("@/lib/api/inbound", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api/inbound")>("@/lib/api/inbound");
@@ -29,6 +30,16 @@ vi.mock("@/lib/api/inbound", async () => {
     unclaimed: actual.unclaimed,
     useAcceptAttachment: () => ({ mutate: mockAccept, isPending: false, isError: false }),
     useRejectAttachment: () => ({ mutate: mockReject, isPending: false, isError: false }),
+    // ⚠️ AN EXPLICIT MOCK OBJECT MEANS A NEW EXPORT IS `undefined` UNTIL IT IS LISTED HERE, and
+    // omitting this one broke all ten tests in this file at once — the card calls the hook
+    // unconditionally, so every render threw before reaching a single assertion. The failure looked
+    // like ten separate breakages and was one missing line (LP-909 §3).
+    useForwardAttachmentAsSheet: () => ({
+      mutate: mockUseAsSheet,
+      isPending: false,
+      isError: false,
+      error: null,
+    }),
     useAttachmentPreview: () => ({ data: null, isPending: false }),
   };
 });
@@ -87,15 +98,46 @@ afterEach(() => {
 });
 
 describe("a message on its own file", () => {
-  it("shows what the sender wrote and offers the three decisions", () => {
+  it("shows what the sender wrote and offers the four decisions", () => {
+    // ⚠️ FOUR SINCE LP-909 §3, AND THE COUNT IN THE NAME IS DELIBERATE. S1-13 adds "Use as condition
+    // sheet" as a FIRST and primary action, because a lender's approval letter is the attachment a
+    // processor is most likely hunting for — and "Accept" would file it as a borrower DOCUMENT,
+    // classified against a 166-type taxonomy with no bucket for it (ADR-403). Asserting the count
+    // in the name is what makes a silently-dropped action visible in a diff.
     render(<InboundMessageCard message={ROUTED} fileId="file-1" />, { wrapper });
 
     expect(screen.getByText("jane.borrower@personal-email.com")).toBeDefined();
     expect(screen.getByText("Docs for 42 Maple Ave - Jane Borrower")).toBeDefined();
     expect(screen.getByText("Jane_2024_tax_return.pdf")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Use as condition sheet" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Accept" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Correspondence" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Reject" })).toBeDefined();
+  });
+
+  it("⚠️ offers the sheet action only for a PDF, since anything else is refused at the door", () => {
+    // `reject_unless_pdf` turns a non-PDF into a 422 before a round is created, so offering this on
+    // a .docx would be a button that reliably fails — the dead-button pattern S1-02 and S1-03 were
+    // both corrected for. The other three stay: a Word document is still something a processor may
+    // accept, keep as correspondence, or reject.
+    // ⚠️ SPREAD FROM `ATTACHMENT`, NOT FROM `ROUTED.attachments[0]`. This repo enables
+    // `noUncheckedIndexedAccess`, so indexing the array yields `InboundAttachment | undefined` and
+    // spreading that makes every field optional — which does not satisfy `InboundAttachment`.
+    // Vitest passed anyway, because it does not typecheck; only `tsc` caught it.
+    const docx = {
+      ...ROUTED,
+      attachments: [
+        {
+          ...ATTACHMENT,
+          sniffed_content_type:
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        },
+      ],
+    };
+    render(<InboundMessageCard message={docx} fileId="file-1" />, { wrapper });
+
+    expect(screen.queryByRole("button", { name: "Use as condition sheet" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Accept" })).toBeDefined();
   });
 
   it("names the rung it matched on, not the confidence", () => {
@@ -121,6 +163,12 @@ describe("a message nobody owns", () => {
 
     expect(screen.queryByRole("button", { name: "Accept" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
+    // ⚠️ S1-13 IS ABSENT HERE TOO, AND THIS IS THE ONLY THING THAT PROVES IT. The callback is passed
+    // inside the `fileId` spread with the other three, so the company queue gets none of them — and
+    // the server agrees: an unrouted attachment 404s rather than letting one company open a round
+    // from a message no company owns yet. Without this line, nothing distinguishes that guard from
+    // a version that renders the button everywhere and fails on click.
+    expect(screen.queryByRole("button", { name: "Use as condition sheet" })).toBeNull();
   });
 
   it("stays visible, with our own assessment of the bytes", () => {

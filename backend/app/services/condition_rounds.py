@@ -25,6 +25,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.conditions.limits import STRANDED_AFTER_SECONDS
 from app.conditions.readers import READER_VERSION, read_pasted_text
 from app.conditions.readers.model import ParsedSheet
 from app.models.activity_log import ActivityType
@@ -379,6 +380,14 @@ class RoundNotDiscardable(Exception):
         self.reason = reason
 
 
+class RoundNotReparsable(Exception):
+    """The round cannot be read again, with the reason a processor can act on."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 class RoundNotEditable(Exception):
     """The draft cannot be replaced — wrong state, or someone else changed it first."""
 
@@ -442,6 +451,134 @@ async def discard_round(
             actor_user_id=actor_user_id,
             # Counts and names only — never the rows being thrown away.
             detail={"rows": len(round_.draft_rows or [])},
+        )
+    )
+    await db.flush()
+    return round_
+
+
+#: The states a stored sheet may be handed back to the reader from.
+#:
+#: ⚠️ `DRAFT` IS ABSENT, AND THAT IS THE ONE OMISSION WORTH ARGUING. A processor looking at rows they
+#: dislike has "discard and upload again", which is honest about what happens: a new round, a new
+#: number, the old one visible in the strip. Re-reading in place would silently replace rows they may
+#: already have edited — `update_draft` refuses a stale write for exactly that reason, and a reparse
+#: that ignored it would be the same overwrite through a different door.
+#:
+#: `IMPORTED` and `DISCARDED` are settled: one became the file's record (ADR-404 forbids taking that
+#: back), the other was thrown away on purpose.
+REPARSABLE = (
+    ConditionRoundStatus.PARSE_FAILED,
+    ConditionRoundStatus.PARSING,
+)
+
+
+async def reparse_round(
+    db: AsyncSession, *, round_: ConditionRound, actor_user_id: UUID | None = None
+) -> ConditionRound:
+    """Hand a stored sheet back to the reader. Flushes; the caller commits.
+
+    ⚠️ THIS EXISTS BECAUSE TWO SCREENS ALREADY PROMISED IT. `RoundFailed` offers "Try again" and
+    `RoundReading`'s stranded copy says "you can try reading it again" — and until now no route
+    re-read an existing round at all, so both took `onRetry` optionally and the caller passed none.
+    A paragraph offering a route with no control is a dead button wearing prose (LP-909 review).
+
+    ⚠️ A `PARSING` ROUND IS REFUSED UNTIL IT IS GENUINELY ABANDONED, measured from `updated_at`
+    rather than `created_at`. From `created_at` a stranded round stays reparsable forever, so two
+    presses queue two parses that race each other's compare-and-set. From `updated_at` the reparse
+    bumps the row, so a second press inside the window is REFUSED with a reason — which is what
+    makes this idempotent in the sense that matters: pressing twice cannot produce two readers.
+
+    ⚠️ AND THE WINDOW IS THE SERVER'S, NOT THE CLIENT'S. See `app/conditions/limits.py`: the
+    client's own guess was exactly `PARSE_SOFT_LIMIT_SECONDS`, so it called a round dead at the
+    instant Celery raises `SoftTimeLimitExceeded`, with a minute of hard-limit runway left in which
+    the task could still settle `PARSE_FAILED` itself with a real reason.
+
+    ⚠️ ONE NUMBER SERVES BOTH THE "IS IT ABANDONED" TEST AND THE DEBOUNCE, and review asked whether
+    those are two questions wearing one constant. They are the same question. A reparse queues a
+    task under the SAME hard limit, so "may I ask again?" is still "could a worker still be alive?"
+    — and the answer is bounded by the same timeout. The apparent harshness (refused for ten
+    minutes after pressing Try again) does not arise in the failing case: a parse that fails settles
+    `PARSE_FAILED` within its own limits, and `PARSE_FAILED` is reparsable IMMEDIATELY. The window
+    only bites while a task genuinely could still be running, which is when waiting is the correct
+    advice rather than a penalty.
+
+    ⚠️ NO OPEN DRAFT EDITOR CAN BE INVALIDATED BY THE `updated_at` BUMP, because `DRAFT` is not in
+    `REPARSABLE`. `update_draft` compares `expected_updated_at` and 409s on a stale one — a real
+    hazard for enrich, which touches a DRAFT round — but a reparsable round is `PARSE_FAILED` or
+    `PARSING`, and neither has rows a processor could be editing.
+
+    ⚠️ A PASTED ROUND HAS NO PDF AND IS REFUSED BY NAME. `parse_round` reads the sheet from storage,
+    so a round whose only source is a paste has nothing to re-read — `raw_text` is its source, and
+    feeding that back through the PDF reader is not what this does. Telling the processor to paste
+    again is the true answer; letting it through would settle `bytes_unavailable` and blame storage.
+
+    NO TIMELINE ENTRY: `ActivityType` has no member for it and adding one is a second constraint
+    swap this ticket does not need. The `ROUND_REPARSE_REQUESTED` condition event is the record, and
+    it is what screen S1-09's history renders.
+    """
+    if round_.status not in REPARSABLE:
+        if round_.status is ConditionRoundStatus.IMPORTED:
+            raise RoundNotReparsable(
+                "This round has been imported and its conditions are part of the file. "
+                "Reading it again would not change them."
+            )
+        if round_.status is ConditionRoundStatus.DISCARDED:
+            raise RoundNotReparsable(
+                "This round was discarded. Upload the sheet again to re-read it."
+            )
+        raise RoundNotReparsable(
+            "This sheet has already been read. If the rows are wrong, discard this round and "
+            "upload the sheet again."
+        )
+
+    # ⚠️ NOT `_storage_path`, WHICH BUILDS A NEW PATH RATHER THAN FINDING THE STORED ONE — and the
+    # task module has a DIFFERENT function of the same name that does find it. Asking the round
+    # directly avoids depending on either, and `services → tasks` is the inverted direction anyway.
+    if not any((source or {}).get("storage_path") for source in round_.sources or []):
+        raise RoundNotReparsable(
+            "This round has no stored sheet to read again — its conditions were pasted in. "
+            "Paste them again, or upload the lender's PDF."
+        )
+
+    if round_.status is ConditionRoundStatus.PARSING:
+        waited = (utcnow() - round_.updated_at).total_seconds()
+        if waited < STRANDED_AFTER_SECONDS:
+            raise RoundNotReparsable(
+                "This sheet is still being read. Give it a few more minutes before asking again."
+            )
+
+    previous = round_.status
+    round_.status = ConditionRoundStatus.PARSING
+    # A NEW dict: SQLAlchemy does not track in-place mutation of JSONB, so clearing a key on the
+    # existing one would simply not be written. The failure is cleared because the round is being
+    # read again — leaving it would render a failure banner over a round that is mid-parse.
+    round_.parse_report = {
+        **(round_.parse_report or {}),
+        "failure_kind": None,
+        "failure_detail": None,
+    }
+    # ⚠️ WRITTEN DELIBERATELY, NOT LEFT TO `onupdate` (LP-909 review). `TimestampMixin.updated_at`
+    # has `onupdate=utcnow`, but that is Python-side and only fires when SQLAlchemy actually EMITS
+    # an UPDATE — and it emits one only if a value genuinely changed. Re-parsing an already-`PARSING`
+    # round assigns `status` the value it already holds, and if its `parse_report` happens to equal
+    # the dict built above (both failure keys already None) then nothing is dirty, no UPDATE is
+    # issued, and `updated_at` stays put.
+    #
+    # That is exactly the case the debounce exists for: the stranded round. So the one write the
+    # window is measured from would be the one write that silently did not happen, and a processor
+    # could queue a reader per click. The timestamp is the mechanism, so it is set as a statement of
+    # intent rather than inherited as a side effect of some other column changing.
+    round_.updated_at = utcnow()
+    db.add(
+        ConditionEvent(
+            company_id=round_.company_id,
+            loan_file_id=round_.loan_file_id,
+            round_id=round_.id,
+            kind=ConditionEventKind.ROUND_REPARSE_REQUESTED,
+            actor_user_id=actor_user_id,
+            # Metadata only (spec §9.5) — the state it came from, never the sheet's text.
+            detail={"from_status": previous.value},
         )
     )
     await db.flush()

@@ -36,6 +36,7 @@ from kombu.exceptions import OperationalError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.conditions.limits import PARSE_HARD_LIMIT_SECONDS, PARSE_SOFT_LIMIT_SECONDS
 from app.conditions.readers import READER_VERSION
 from app.conditions.readers.model import ParsedSheet
 from app.conditions.sheet_read import (
@@ -61,11 +62,6 @@ from app.tasks.celery_app import celery_app
 from app.tasks.retry import MAX_RETRIES, retry_or_terminal
 
 logger = structlog.get_logger(__name__)
-
-#: A sheet is small work next to a document pipeline, but a scanned multi-page letter still
-#: rasterises. Its own limits rather than the global 180s, which is below what OCR can need.
-PARSE_SOFT_LIMIT_SECONDS = 300
-PARSE_HARD_LIMIT_SECONDS = 360
 
 
 def _storage_path(round_: ConditionRound) -> str | None:

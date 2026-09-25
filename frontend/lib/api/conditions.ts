@@ -37,12 +37,26 @@ const filePath = (fileId: string) => `${API_V1}/loan-files/${fileId}`;
 const roundPath = (roundId: string) => `${API_V1}/condition-rounds/${roundId}`;
 
 /**
- * How long a round may sit in `parsing` before we stop asking.
+ * How long a round may sit in `parsing` before we stop asking, and before the server will accept a
+ * reparse.
  *
- * S1-02 tells the processor "usually under 30 seconds", so five minutes is far past anything a
- * healthy read takes. It is a ceiling on OUR patience, not an estimate of the work.
+ * ⚠️ THIS NUMBER IS THE SERVER'S, AND THE VERSION THIS REPLACED WAS WRONG IN THE DANGEROUS
+ * DIRECTION. It was `5 * 60 * 1000`, justified by S1-02's "usually under 30 seconds" — a sentence
+ * about the HEALTHY case, which is not what a bound is for. It consulted neither Celery limit.
+ *
+ * 300 seconds is not merely below the parse timeout: it is EXACTLY `PARSE_SOFT_LIMIT_SECONDS`, so
+ * the tab declared a round dead at the precise instant the worker raises `SoftTimeLimitExceeded` —
+ * with 60 seconds of hard-limit runway left in which the task can still finish, or settle
+ * `parse_failed` itself with a reason a processor can act on. Offering "Try again" there would have
+ * raced a live worker rather than rescued a stuck one, and the server now REFUSES a reparse inside
+ * its own window, so the old value would have produced a button that reliably 409s.
+ *
+ * It is `STRANDED_AFTER_SECONDS` from `backend/app/conditions/limits.py`, where it is derived as
+ * `PARSE_HARD_LIMIT_SECONDS + a grace` rather than written as a literal. `tests/test_condition_type_mirror.py`
+ * pins these two together, the same way it pins `MAX_PASTE_CHARS` — a number both sides enforce has
+ * to be one number, and the 20 MB ceiling is the cautionary case that still lacks such a pin.
  */
-const STRANDED_AFTER_MS = 5 * 60 * 1000;
+const STRANDED_AFTER_MS = 600 * 1000;
 
 /** True while the server says it is still reading this round. */
 export function isBeingRead(round: ConditionRound): boolean {
@@ -202,6 +216,36 @@ export function usePasteConditions(fileId: string) {
     mutationFn: async (input: PasteConditionsInput) =>
       (await apiClient.post<ConditionRound>(`${filePath(fileId)}/condition-rounds/paste`, input))
         .data,
+    onSuccess: (round) => invalidateRound(queryClient, fileId, round.id),
+  });
+}
+
+/**
+ * Read a stored sheet again — S1-03's "Try again" and S1-02's stranded state (200).
+ *
+ * ⚠️ THIS HOOK IS WHY TWO SCREENS MAY FINALLY OFFER THE BUTTON THEY ALREADY DESCRIBED. `RoundFailed`
+ * and `RoundReading` both took `onRetry` optionally and the dashboard passed none, because no route
+ * re-read an existing round — `parse_condition_round.delay()` was called from creation paths only.
+ * The comments saying so were correct when written and are now false; they have been corrected
+ * rather than left to mislead.
+ *
+ * ⚠️ IT CAN LEGITIMATELY 409, AND THE CALLER MUST SHOW THE REASON RATHER THAN SWALLOW IT. The server
+ * refuses a round it is still reading (inside the stranded window), a draft, an imported round, a
+ * discarded one, and a round whose only source was a paste and so has no PDF to re-read. Each
+ * carries its own sentence, and "it was pasted, there is nothing stored to read again" tells a
+ * processor something entirely different from "it is still being read".
+ *
+ * ⚠️ NO REQUEST BODY. The endpoint takes no options, so there is nothing to send — and unlike
+ * `documents.py`'s reprocess it declares no Pydantic body at all, so a body-less POST is what it
+ * expects rather than a 422.
+ */
+export function useReparseRound(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (roundId: string) =>
+      (await apiClient.post<ConditionRound>(`${roundPath(roundId)}/reparse`)).data,
+    // The round goes back to `parsing`, so the list must refetch for the polling to resume — the
+    // reparse is invisible without this even though the request succeeded.
     onSuccess: (round) => invalidateRound(queryClient, fileId, round.id),
   });
 }

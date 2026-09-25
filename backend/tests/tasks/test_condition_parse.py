@@ -384,6 +384,36 @@ async def test_a_broker_failure_quotes_nothing_from_the_sheet(
     assert "broker" not in detail.lower()
 
 
+async def test_a_sheet_the_rules_read_cleanly_still_stores_the_lenders_page(
+    db_session: AsyncSession,
+) -> None:
+    """⚠️ THE DRAFT PATH'S `raw_text` WRITE, WHICH NOTHING PINNED UNTIL NOW (LP-908 review).
+
+    The review session moved the write out of the shared `values` dict into the `needs_ai` branch
+    only — the narrowing any reasonable person would make, since the AI path is the one that
+    visibly needs the text — and ran 278 tests. All 278 still passed.
+
+    Every `raw_text` assertion in the suite sat on the paste door or the AI path; the upload door
+    had none at all. So the property held by intention rather than by anything executable, which is
+    this stage's signature defect wearing yet another costume.
+
+    It matters because `reparse_round` reads `raw_text` rather than re-fetching the PDF. Narrowed,
+    reparse silently loses its input on exactly the rounds that READ CLEANLY — which is most of
+    them — and the failure would surface as an empty re-read long after the change that caused it.
+    """
+    round_ = await _round(db_session)
+
+    await parse_round(db_session, round_.id)
+    await db_session.refresh(round_)
+
+    assert round_.status is ConditionRoundStatus.DRAFT
+    assert round_.parse_report["needs_ai"] is False, "the point is the path that does NOT need AI"
+    assert round_.raw_text
+    # A lender code off the letter itself, so this cannot pass against an empty string, a
+    # placeholder, or the reader's reconstruction of the rows.
+    assert "1228" in round_.raw_text
+
+
 async def test_a_pdf_the_rules_read_queues_no_ai_at_all(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
