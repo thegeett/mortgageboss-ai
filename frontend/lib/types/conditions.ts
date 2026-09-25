@@ -27,6 +27,31 @@ export type BucketKind =
   | "trailing"
   | "unknown";
 
+/**
+ * A bucket kind in a processor's words — S1-12's Heading select and the review screen's groups.
+ *
+ * ⚠️ IT LIVES HERE RATHER THAN IN `lib/status.ts`, WHICH IS WHERE IT LOOKS LIKE IT BELONGS. Every
+ * vocabulary in that module is a `Record<K, StatusMeta>` carrying a TONE for `StatusToken`. A
+ * heading has no tone — it is not blocking, verified, or in progress, it is where on the sheet the
+ * lender put the condition — so giving it one would invent a judgement the data does not make, and
+ * put a non-status in a file whose whole contract is status tone.
+ *
+ * ⚠️ AND IT IS NOT DERIVED BY DE-SNAKING THE VALUE. `prior_to_docs` → "Prior to docs" happens to
+ * work; `lender_to_clear` → "Lender to clear" reads as an instruction to the processor when it
+ * means the LENDER clears it, and `master` → "Master" says nothing at all. The labels are written,
+ * so each one can be right.
+ */
+export const BUCKET_KIND_LABEL: Record<BucketKind, string> = {
+  master: "Master (applies to the whole file)",
+  prior_to_approval: "Prior to approval",
+  prior_to_docs: "Prior to docs",
+  prior_to_closing: "Prior to closing",
+  prior_to_funding: "Prior to funding",
+  lender_to_clear: "The lender clears this",
+  trailing: "Trailing (after closing)",
+  unknown: "No heading given",
+};
+
 /** Who probably has to act. A HINT, never a decision — Stage 3 decides. */
 export type OwnerHint =
   | "borrower"

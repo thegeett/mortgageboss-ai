@@ -14,6 +14,7 @@ parse finished would make a slow lender's PDF look like a broken upload.
 scoped, so a round can only ever be opened on a file the caller's company owns.
 """
 
+from collections.abc import Callable
 from typing import Annotated
 from uuid import UUID
 
@@ -84,6 +85,53 @@ log = structlog.get_logger(__name__)
 _CHUNK = 1024 * 1024
 
 
+async def _enqueue_or_fail(
+    db: DbSession,
+    round_: ConditionRound,
+    *,
+    enqueue: Callable[[str], object],
+    event: str,
+) -> None:
+    """Hand a round to a worker, and settle it FAILED if the broker will not take it.
+
+    ⚠️ ONE BODY FOR BOTH DOORS, AND THE ARGUMENT FOR KEEPING THEM SEPARATE WAS ABOUT A DIFFERENT
+    FUNCTION (LP-909 review). I defended the duplication by saying the two "genuinely differ — one
+    mutates the ORM object and commits, the other settles through a compare-and-set". That describes
+    `_queue_split_or_fail` in `app/tasks/conditions.py`, which is a THIRD handler and does differ.
+    The two in THIS module were line-for-line identical apart from which task they import and the
+    log event name, so the reasoning was about the wrong pair.
+
+    Three broker handlers, two of them duplicates, is exactly how the third one goes wrong — and the
+    third is the one whose difference is real and load-bearing (a task has no ORM object in hand and
+    must not clobber a round a processor discarded meanwhile).
+
+    ⚠️ `enqueue` IS THE BOUND `.delay`, RESOLVED BY THE CALLER. Passing the method rather than the
+    task keeps the test seam where every condition test already puts it: `monkeypatch.setattr(
+    task_module.<task>, "delay", ...)` still works, because the attribute is looked up when the
+    caller runs, not when this module is imported.
+    """
+    try:
+        enqueue(str(round_.id))
+    except OperationalError:
+        # ⚠️ kombu's, NOT `sqlalchemy.exc`'s — two unrelated classes share the name and `.delay()`
+        # raises kombu's, so catching the other is a guard that never fires (LP-908 review).
+        # Specific, never a bare `except Exception` (spec §9.8): this is the broker refusing the
+        # message, the one failure the round must survive. Anything else is a bug and belongs in the
+        # error handler, not filed as a parse failure that blames the lender's sheet.
+        round_.status = ConditionRoundStatus.PARSE_FAILED
+        # A NEW dict: SQLAlchemy does not track in-place mutation of JSONB, so an updated key on the
+        # existing one would simply not be written.
+        round_.parse_report = {
+            **(round_.parse_report or {}),
+            "failure_kind": "enqueue_failed",
+            "failure_detail": ENQUEUE_FAILED_DETAIL,
+        }
+        await db.commit()
+        await db.refresh(round_)
+        # Ids and counts only (spec §9.5) — never the sheet's text.
+        log.warning(event, round_id=str(round_.id))
+
+
 async def _enqueue_split_or_fail(db: DbSession, round_: ConditionRound) -> None:
     """Queue the AI split, and mark the round failed if the broker will not take it.
 
@@ -102,26 +150,11 @@ async def _enqueue_split_or_fail(db: DbSession, round_: ConditionRound) -> None:
 
     A typed `PARSE_FAILED` is something they can act on. A spinner with no end is not.
     """
-    try:
-        from app.tasks.conditions import split_condition_round
+    from app.tasks.conditions import split_condition_round
 
-        split_condition_round.delay(str(round_.id))
-    except OperationalError:
-        # ⚠️ SPECIFIC, NEVER A BARE `except Exception` (spec §9.8). This is the broker refusing the
-        # message — the one failure the round must survive. Anything else is a bug and belongs in
-        # the error handler, not filed as a parse failure that blames the lender's sheet.
-        round_.status = ConditionRoundStatus.PARSE_FAILED
-        # A NEW dict: SQLAlchemy does not track in-place mutation of JSONB, so an updated key on the
-        # existing one would simply not be written.
-        round_.parse_report = {
-            **(round_.parse_report or {}),
-            "failure_kind": "enqueue_failed",
-            "failure_detail": ENQUEUE_FAILED_DETAIL,
-        }
-        await db.commit()
-        await db.refresh(round_)
-        # Ids and counts only (spec §9.5) — never the pasted text.
-        log.warning("condition_split_enqueue_failed", round_id=str(round_.id))
+    await _enqueue_or_fail(
+        db, round_, enqueue=split_condition_round.delay, event="condition_split_enqueue_failed"
+    )
 
 
 async def _enqueue_parse_or_fail(db: DbSession, round_: ConditionRound) -> None:
@@ -140,25 +173,11 @@ async def _enqueue_parse_or_fail(db: DbSession, round_: ConditionRound) -> None:
     whose sentence says the conditions could not be QUEUED and nothing was lost — never a reason
     that blames the lender's PDF, which was read fine or was never read at all.
     """
-    try:
-        from app.tasks.conditions import parse_condition_round
+    from app.tasks.conditions import parse_condition_round
 
-        parse_condition_round.delay(str(round_.id))
-    except OperationalError:
-        # ⚠️ kombu's, NOT `sqlalchemy.exc`'s — two unrelated classes share the name and `.delay()`
-        # raises kombu's, so catching the other is a guard that never fires (LP-908 review).
-        # Specific, never a bare `except Exception` (spec §9.8).
-        round_.status = ConditionRoundStatus.PARSE_FAILED
-        # A NEW dict: SQLAlchemy does not track in-place mutation of JSONB.
-        round_.parse_report = {
-            **(round_.parse_report or {}),
-            "failure_kind": "enqueue_failed",
-            "failure_detail": ENQUEUE_FAILED_DETAIL,
-        }
-        await db.commit()
-        await db.refresh(round_)
-        # Ids and counts only (spec §9.5).
-        log.warning("condition_reparse_enqueue_failed", round_id=str(round_.id))
+    await _enqueue_or_fail(
+        db, round_, enqueue=parse_condition_round.delay, event="condition_reparse_enqueue_failed"
+    )
 
 
 async def get_scoped_round(
