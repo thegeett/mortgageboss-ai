@@ -117,6 +117,29 @@ describe("reviewing a draft round", () => {
     expect(sent.expected_updated_at).toBe("2026-08-28T10:05:00Z");
   });
 
+  it("⚠️ sends the token that belongs to the rows it holds, not the freshest one", () => {
+    // THE GUARD WAS BYPASSED RATHER THAN TRIPPED (LP-909 review). `rows` is seeded once; the
+    // dashboard renders this component with NO `key`, so a refetch swaps the `round` prop under a
+    // mounted component without resetting them. Sending `round.updated_at` therefore paired STALE
+    // rows with a FRESH token — `update_draft` found the token current and wrote, so the 409 for
+    // "someone else changed this" could never fire and the other writer's work vanished silently.
+    //
+    // Re-rendering with a newer `updated_at` is exactly what a mid-review enrich or reparse does.
+    const { rerender } = render(<RoundReview round={round()} fileId="f1" onDiscard={vi.fn()} />);
+
+    rerender(
+      <RoundReview
+        round={round({ updated_at: "2026-08-28T11:00:00Z" })}
+        fileId="f1"
+        onDiscard={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Import 1 condition/ }));
+
+    // The ORIGINAL token, so the server can tell the rows are stale and refuse.
+    expect(saveMutate.mock.calls[0]?.[0].expected_updated_at).toBe("2026-08-28T10:05:00Z");
+  });
+
   it("⚠️ imports only after the save resolves, never in parallel", () => {
     // The import reads `draft_rows` from the ROW, so firing both at once would race: the import
     // could read the pre-edit rows and a processor would have no way to tell.

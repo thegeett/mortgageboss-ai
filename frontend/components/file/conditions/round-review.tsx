@@ -82,6 +82,27 @@ export function RoundReview({
 }) {
   const checkboxId = useId();
   const [rows, setRows] = useState<DraftRow[]>(round.draft_rows ?? []);
+  /**
+   * ⚠️ THE TOKEN FOR THE ROWS WE ARE HOLDING, CAPTURED FROM THE SAME SNAPSHOT (LP-909 review).
+   *
+   * Sending `round.updated_at` instead read the LIVE prop while `rows` stayed the snapshot `useState`
+   * seeded from — and the dashboard renders this component with no `key`, so a refetch swaps the
+   * prop under a mounted component without resetting the rows. The PUT then carried a FRESH token
+   * with STALE rows: `update_draft` compares the token, finds it current, and writes. The 409 that
+   * exists for exactly this case could never fire, so the guard was bypassed rather than tripped —
+   * a silent overwrite of whatever the other writer had just done.
+   *
+   * Frozen here, the pair travels together: stale rows arrive with the stale token that produced
+   * them, `update_draft` refuses with 409, and the processor is told rather than the other writer's
+   * work disappearing. That is the behaviour the endpoint already implements — it was simply never
+   * handed a token old enough to trip it.
+   *
+   * ⚠️ AND `importNow` SAVES UNCONDITIONALLY, WHICH MAKES THIS FIRE ON EVERY IMPORT RATHER THAN
+   * RARELY. A processor who edits nothing, leaves the screen open across an enrich, and presses
+   * Import would otherwise overwrite the enriched rows with the pre-enrich copy. Both behaviours are
+   * right; together they need this token to be honest.
+   */
+  const [baseUpdatedAt] = useState(round.updated_at);
   const [checked, setChecked] = useState(false);
   const save = useUpdateDraft(fileId);
   const importRound = useImportRound(fileId);
@@ -102,7 +123,7 @@ export function RoundReview({
       {
         roundId: round.id,
         draft_rows: rows,
-        expected_updated_at: round.updated_at,
+        expected_updated_at: baseUpdatedAt,
       },
       {
         onSuccess: () =>
