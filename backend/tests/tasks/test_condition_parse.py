@@ -314,6 +314,76 @@ async def test_handing_a_sheet_to_the_ai_writes_no_parsed_event(
     assert kinds == [ConditionEventKind.ROUND_RECEIVED]
 
 
+@pytest.mark.parametrize(
+    "source_kind",
+    [ConditionSourceKind.PDF_UPLOAD, ConditionSourceKind.EMAIL],
+    ids=["upload", "forward"],
+)
+async def test_a_broker_that_refuses_the_split_fails_the_round_rather_than_stranding_it(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch, source_kind: ConditionSourceKind
+) -> None:
+    """⚠️ THE STRANDED ROUND THIS TICKET ELIMINATED, ARRIVING BY A THIRD ROUTE (LP-908 review).
+
+    Queueing the split from every door closed two paths to a permanent `PARSING` round and opened
+    one: the row is committed BEFORE `.delay()` is reached, so a broker that is down leaves a round
+    with rows, text, and no task — and the first version of this fix called `.delay()` bare.
+
+    Asserting the enqueue proves the CALL, not the delivery. The tests above pass in exactly this
+    scenario, because the call was made. Only this one distinguishes "queued" from "queued and
+    accepted", which is the distinction the processor experiences.
+
+    ⚠️ `kombu`'s `OperationalError`, NOT `sqlalchemy.exc`'s. Two unrelated exception classes share
+    the name, and catching the wrong one would be a guard that never fires while every test here
+    still passed — the mutation run is what proves this one does.
+    """
+    from app.tasks import conditions as task_module
+    from kombu.exceptions import OperationalError
+
+    def _broker_down(_round_id: str) -> None:
+        raise OperationalError("broker unreachable")
+
+    monkeypatch.setattr(task_module.split_condition_round, "delay", _broker_down)
+
+    round_ = await _round(db_session, content=render_text_pdf(PROSE_SHEET), source_kind=source_kind)
+
+    await parse_round(db_session, round_.id)
+    await db_session.refresh(round_)
+
+    assert round_.status is ConditionRoundStatus.PARSE_FAILED
+    assert round_.parse_report["failure_kind"] == "enqueue_failed"
+    assert "try again" in round_.parse_report["failure_detail"]
+    # The reader's own verdict survives the failure: `needs_ai` is still what the rules answered.
+    assert round_.parse_report["needs_ai"] is True
+    kinds = [e.kind for e in await _events(db_session, round_.id)]
+    assert ConditionEventKind.ROUND_PARSE_FAILED in kinds
+
+
+async def test_a_broker_failure_quotes_nothing_from_the_sheet(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Spec §9.5: `failure_detail` is COMPOSED. It lives inside `parse_report`, which the readonly
+    layer drops whole rather than scrubs — so text quoted here would be NPI at rest in a column
+    nobody can inspect to find it."""
+    from app.tasks import conditions as task_module
+    from kombu.exceptions import OperationalError
+
+    def _broker_down(_round_id: str) -> None:
+        raise OperationalError("broker unreachable")
+
+    monkeypatch.setattr(task_module.split_condition_round, "delay", _broker_down)
+
+    round_ = await _round(db_session, content=render_text_pdf(PROSE_SHEET))
+
+    await parse_round(db_session, round_.id)
+    await db_session.refresh(round_)
+
+    detail = round_.parse_report["failure_detail"]
+    assert "whatever you have for this file" not in detail
+    # Nor does the broker's own message leak: that is operational text, not something a processor
+    # can act on, and "broker unreachable" in front of a loan processor is noise.
+    assert "broker" not in detail.lower()
+
+
 async def test_a_pdf_the_rules_read_queues_no_ai_at_all(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -49,6 +49,7 @@ from app.services.condition_import import (
     import_round,
 )
 from app.services.condition_rounds import (
+    ENQUEUE_FAILED_DETAIL,
     ConditionSheetRejected,
     RoundNotDiscardable,
     RoundNotEditable,
@@ -79,14 +80,6 @@ log = structlog.get_logger(__name__)
 
 #: Read the upload a megabyte at a time, the same as the MISMO path.
 _CHUNK = 1024 * 1024
-
-#: What a processor is told when the broker would not take the round. Composed, never quoted from
-#: the paste: `failure_detail` is stored inside `parse_report`, which the readonly layer DROPS
-#: WHOLE rather than scrubs, so NPI quoted here would sit at rest in a column nobody can inspect to
-#: find it (spec §9.5).
-_ENQUEUE_FAILED_DETAIL = (
-    "These conditions could not be queued for reading. Nothing was lost — try again in a moment."
-)
 
 
 async def _enqueue_split_or_fail(db: DbSession, round_: ConditionRound) -> None:
@@ -121,7 +114,7 @@ async def _enqueue_split_or_fail(db: DbSession, round_: ConditionRound) -> None:
         round_.parse_report = {
             **(round_.parse_report or {}),
             "failure_kind": "enqueue_failed",
-            "failure_detail": _ENQUEUE_FAILED_DETAIL,
+            "failure_detail": ENQUEUE_FAILED_DETAIL,
         }
         await db.commit()
         await db.refresh(round_)

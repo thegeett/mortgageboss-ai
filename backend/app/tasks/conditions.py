@@ -32,6 +32,7 @@ from uuid import UUID
 
 import structlog
 from celery import Task
+from kombu.exceptions import OperationalError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,7 +45,11 @@ from app.conditions.sheet_read import (
 )
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_round import ConditionRound, ConditionRoundStatus
-from app.services.condition_rounds import draft_rows_json, parse_report_for
+from app.services.condition_rounds import (
+    ENQUEUE_FAILED_DETAIL,
+    draft_rows_json,
+    parse_report_for,
+)
 from app.services.condition_split import (
     SPLIT_VERSION,
     ConditionSplitUnavailable,
@@ -149,6 +154,60 @@ async def _settle(
     return True
 
 
+async def _queue_split_or_fail(
+    db: AsyncSession, *, round_id: UUID, parse_report: dict[str, Any]
+) -> None:
+    """Queue the AI split, and settle the round FAILED if the broker will not take it.
+
+    ⚠️ THE FIX THIS TICKET EXISTS FOR, REINTRODUCED BY ANOTHER ROUTE AND CAUGHT IN REVIEW. The
+    commit that made the split reachable from every door called `.delay()` bare. The round is
+    committed `PARSING` BEFORE the enqueue — correctly, since a worker that picked it up first
+    would find no row — so a broker that is down left exactly the permanent-`PARSING` round this
+    work set out to eliminate, arriving by a third path instead of the original two.
+
+    ⚠️ AND NOTHING WOULD HAVE SHOWN IT. `OperationalError` appeared in one test file in the whole
+    backend suite, covering the one enqueue that was already guarded: "the only door with coverage
+    was the only door that worked", now true of the enqueues inside the fix for it.
+
+    ⚠️ IT SETTLES RATHER THAN RE-RAISING, WHICH FORGOES CELERY'S RETRY ON PURPOSE. Letting the
+    error escape would reach `retry_or_terminal`, which retries — and a retry genuinely would
+    re-parse and re-enqueue, because the round is still `PARSING` so the compare-and-set wins
+    again. But `on_exhausted` only LOGS, so once the retries run out the round sits `PARSING`
+    forever with no exit and no reason recorded. A typed `PARSE_FAILED` is something a processor
+    can act on immediately; a spinner that ends in silence six minutes later is not. The paste
+    door made this same trade and states the same reason.
+
+    The compare-and-set still guards the write: a processor who DISCARDED the round between the
+    enqueue attempt and this settle is protected, because it is no longer `PARSING`.
+    """
+    try:
+        split_condition_round.delay(str(round_id))
+    except OperationalError:
+        # ⚠️ SPECIFIC, NEVER A BARE `except Exception` (spec §9.8), AND FROM `kombu` RATHER THAN
+        # `sqlalchemy.exc`. Two unrelated classes share this name; `.delay()` raises kombu's when
+        # the broker refuses the message, so catching SQLAlchemy's would be a guard that never
+        # fires — verified against the paste door, which imports the same one.
+        #
+        # Anything else is a bug and belongs in the error handler, not filed as a parse failure
+        # that blames the lender's sheet.
+        settled = await _settle(
+            db,
+            round_id=round_id,
+            values={
+                "status": ConditionRoundStatus.PARSE_FAILED,
+                "parse_report": {
+                    **parse_report,
+                    "failure_kind": "enqueue_failed",
+                    "failure_detail": ENQUEUE_FAILED_DETAIL,
+                },
+            },
+            kind=ConditionEventKind.ROUND_PARSE_FAILED,
+            detail={"failure_kind": "enqueue_failed"},
+        )
+        # Ids and counts only (spec §9.5) — never the sheet's text.
+        logger.warning("condition_split_enqueue_failed", round_id=str(round_id), settled=settled)
+
+
 async def parse_round(db: AsyncSession, round_id: UUID) -> None:
     """Read one round into draft rows, on a session the CALLER owns.
 
@@ -208,6 +267,20 @@ async def parse_round(db: AsyncSession, round_id: UUID) -> None:
     # no text to read. Paste the conditions again.", telling a processor to paste a letter they had
     # just uploaded. It is stored on the DRAFT path too, so a reparse after a reader fix has the page
     # without re-fetching the PDF.
+    #
+    # ⚠️ THIS IS A RETENTION CHANGE, NOT AN EXPOSURE ONE, and the distinction is worth stating
+    # because the two are easy to conflate (LP-908 review). No NPI reaches anywhere it could not
+    # reach before: `raw_text` is in the readonly layer's EXCLUDED set, migration `d1f4b8c25e93`
+    # drops it by name, and the view projects only `(raw_text IS NOT NULL) AS has_raw_text`. What
+    # DID change is how much is kept: the lender's full page is now at rest for every uploaded and
+    # forwarded round, where before only pasted ones carried it. Reparse is what justifies holding
+    # it; if that ever goes away, so should this.
+    #
+    # ⚠️ AND `has_raw_text` NOW MEANS SOMETHING ELSE. It used to separate pasted rounds from
+    # uploaded ones, because only a paste wrote the column. From this commit it is true for nearly
+    # every parsed round, so any readonly query that leaned on it to count pastes is silently
+    # answering a different question. `sources[].kind` is the field that still means what that one
+    # used to.
     values: dict[str, Any] = {
         "sheet_format": sheet.sheet_format,
         "date_printed": sheet.date_printed,
@@ -235,7 +308,7 @@ async def parse_round(db: AsyncSession, round_id: UUID) -> None:
             # After the commit, for the reason every enqueue in this repo gives: a worker that picked
             # the round up before the transaction landed would find no row. Only if we WON the
             # compare-and-set — a redelivery that lost must not queue a second split.
-            split_condition_round.delay(str(round_id))
+            await _queue_split_or_fail(db, round_id=round_id, parse_report=values["parse_report"])
         logger.info(
             "condition_parse_needs_ai",
             round_id=str(round_id),

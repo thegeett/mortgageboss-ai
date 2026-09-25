@@ -46,6 +46,21 @@ from app.storage import get_storage_backend
 #: The only content type a condition sheet may be. The spec says PDF only.
 PDF_CONTENT_TYPE = "application/pdf"
 
+#: What a processor is told when the broker would not take the round.
+#:
+#: ⚠️ IT LIVES HERE BECAUSE TWO CALLERS NEED IT AND THEY CANNOT SHARE IT WHERE IT WAS. It was
+#: private to `app/api/conditions.py`, and `app/tasks/conditions.py` now needs the same sentence
+#: for the same failure — but `tasks → services` is the one direction this repo's imports run, so a
+#: task importing from the API layer would invert it. Copying the string instead would leave two
+#: sentences free to drift into telling a processor two different things about one failure.
+#:
+#: Composed, never quoted from the sheet: `failure_detail` is stored inside `parse_report`, which
+#: the readonly layer DROPS WHOLE rather than scrubs, so NPI quoted here would sit at rest in a
+#: column nobody can inspect to find it (spec §9.5).
+ENQUEUE_FAILED_DETAIL = (
+    "These conditions could not be queued for reading. Nothing was lost — try again in a moment."
+)
+
 
 class ConditionSheetRejected(Exception):
     """The bytes cannot be accepted as a condition sheet, with a reason a processor can act on.
