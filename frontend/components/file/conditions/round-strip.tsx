@@ -19,9 +19,39 @@ function usDate(value: string | null): string {
  * then enriched carries BOTH `paste` and `pdf_upload`, so asking "was it pasted" would keep offering
  * Attach on a round that already has the letter. The question is whether a PDF is present, not how
  * the round began.
+ *
+ * ⚠️ THIS IS A PROXY FOR THE SERVER'S RULE, NOT THE RULE (LP-909 review). The authority is
+ * `_has_pdf_source` in `condition_enrich.py`, which keys on `storage_path` and says why: "it is the
+ * BYTES that make a second attach meaningless. `kind` would need a list of three values kept in step
+ * with the enum." This IS that list — and it cannot be anything else, because
+ * `ConditionSourcePublic` does not serialise `storage_path`. The client is structurally unable to ask
+ * the server's question, so it asks the nearest one it can see.
+ *
+ * It holds today because every source that carries bytes is written with kind `pdf_upload` or
+ * `email`, and a paste or a manual round carries none. That is a fact about the current writers
+ * rather than a rule they are bound by: a fourth kind that stores bytes, or a bytes-less forward,
+ * splits the two answers apart silently, and the failure is a button offered for a merge the server
+ * refuses. Exposing `storage_path` on `ConditionSourcePublic` would retire the proxy.
  */
 export function hasPdf(round: ConditionRound): boolean {
   return round.sources.some((source) => source.kind === "pdf_upload" || source.kind === "email");
+}
+
+/**
+ * Whether the server would accept a PDF for this round.
+ *
+ * ⚠️ THE SERVER REFUSES ON TWO COUNTS AND THE STRIP CHECKED ONE (LP-909 review).
+ * `enrich_round_with_pdf` raises `RoundNotEnrichable` when the status is outside `ENRICHABLE`
+ * (`draft` or `imported`) AND when the round already has stored bytes. Gating on the second alone
+ * offered "Attach the lender's PDF" on a `discarded` round — which this strip renders deliberately,
+ * at `opacity-60`, so the button appeared on it — and on a `parse_failed` one. Both answer 409.
+ *
+ * A control that offers what the server refuses is the same defect as a label promising what its
+ * handler cannot do; this stage has corrected that three times already.
+ */
+export function canAttachPdf(round: ConditionRound): boolean {
+  const enrichable = round.status === "draft" || round.status === "imported";
+  return enrichable && !hasPdf(round);
 }
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -68,7 +98,7 @@ export function RoundStrip({
       </div>
 
       {rounds.map((round) => {
-        const attachable = !hasPdf(round);
+        const attachable = canAttachPdf(round);
         return (
           <div
             key={round.id}

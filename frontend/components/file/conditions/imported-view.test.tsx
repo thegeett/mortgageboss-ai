@@ -210,6 +210,26 @@ describe("the round strip (S1-05, S1-08)", () => {
     expect(screen.queryByRole("button", { name: "Attach the lender’s PDF" })).toBeNull();
   });
 
+  it("⚠️ and NOT on a round the server would refuse for its STATUS", () => {
+    // THE HALF THE GATE WAS MISSING (LP-909 review). `enrich_round_with_pdf` refuses on TWO counts:
+    // a status outside `ENRICHABLE` (`draft` or `imported`), AND a round that already has stored
+    // bytes. The strip checked only the second, so a DISCARDED round with no PDF — which this strip
+    // renders deliberately, at `opacity-60` — was offered "Attach the lender's PDF" for a merge the
+    // server answers 409 to.
+    //
+    // The discarded-rounds test above already builds exactly this fixture and asserts only that the
+    // word renders, so the button was on screen in a passing test: the scenario was covered and the
+    // assertion was not.
+    show([round({ id: "r2", round_number: null, status: "discarded" }, ["paste"])]);
+    expect(screen.queryByRole("button", { name: "Attach the lender’s PDF" })).toBeNull();
+  });
+
+  it("⚠️ nor on a parse_failed round, for the same reason", () => {
+    // `parse_failed` is outside `ENRICHABLE` too. Reparse is its recovery, not attach.
+    show([round({ id: "r2", round_number: null, status: "parse_failed" }, ["paste"])]);
+    expect(screen.queryByRole("button", { name: "Attach the lender’s PDF" })).toBeNull();
+  });
+
   it("says what a partial round did NOT do, so absence does not read as removal", () => {
     show([round({ completeness: "partial" }, ["paste"])]);
     expect(screen.getByText(/were left as they are — nothing is removed or cleared/)).toBeDefined();
@@ -242,6 +262,38 @@ describe("the round-details sheet (S1-09)", () => {
     show([round()]);
     fireEvent.click(screen.getByRole("button", { name: "Letter details →" }));
     expect(screen.queryByText(/Lender’s PDF attached/)).toBeNull();
+  });
+
+  it("⚠️ does not call a match a fill, and can still say nothing was filled", async () => {
+    // `matched` COUNTS PASTED ROWS THE PDF RECOGNISED; it is not a thing the enrich filled. It sat
+    // inside the Filled list, so an attach that filled nothing but matched six rows read "Filled the
+    // codes on the 6 pasted conditions" — claiming work the result does not report — and the zero
+    // case became unreachable whenever matching happened, which is the ordinary outcome of attaching
+    // the PDF of a sheet already pasted in full.
+    show([round({ id: "r2", round_number: 2 }, ["paste"])]);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(input, "files", {
+      value: [new File(["x"], "approval.pdf", { type: "application/pdf" })],
+    });
+    fireEvent.change(input);
+
+    attachMutate.mock.calls[0]?.[1]?.onSuccess?.({
+      round_id: "r2",
+      round_number: 2,
+      status: "imported",
+      sheet_format: "uwm_approval_letter",
+      filled_header: false,
+      filled_expiry: false,
+      filled_date_printed: false,
+      matched: 6,
+      added: 0,
+      unmatched_existing: 0,
+      warnings: [],
+    });
+
+    expect(await screen.findByText(/Nothing new was found in it/)).toBeDefined();
+    expect(screen.getByText(/It matched 6 pasted conditions/)).toBeDefined();
+    expect(screen.queryByText(/Filled the codes/)).toBeNull();
   });
 
   it("⚠️ has no History section, because no endpoint serves one", () => {

@@ -45,17 +45,24 @@ function enrichSummary(result: ConditionEnrichResult): string {
   if (result.filled_header) filled.push("the letter details");
   if (result.filled_expiry) filled.push("the expiry dates");
   if (result.filled_date_printed) filled.push("the date printed");
-  if (result.matched > 0) {
-    filled.push(
-      `the codes on the ${result.matched} pasted ${result.matched === 1 ? "condition" : "conditions"}`,
-    );
-  }
+
+  // ⚠️ `matched` IS NOT SOMETHING FILLED, AND IT WAS IN THE FILLED LIST (LP-909 review). It counts
+  // the pasted rows the PDF recognised — `_merge_conditions` increments it when a row MATCHES, and
+  // separately fills fields on it. So a PDF that matched six conditions and filled no letter details
+  // read "Filled the codes on the 6 pasted conditions", claiming work the result does not report.
+  // Worse, it made the zero case unreachable whenever matching happened: "Nothing new was found in
+  // it" could not fire for an attach that filled nothing but recognised rows, which is the ordinary
+  // outcome of re-attaching a sheet already pasted in full.
+  const matched =
+    result.matched > 0
+      ? ` It matched ${result.matched} pasted ${result.matched === 1 ? "condition" : "conditions"}.`
+      : "";
 
   const what =
     filled.length === 0
       ? "Nothing new was found in it"
       : `Filled ${filled.length === 1 ? filled[0] : `${filled.slice(0, -1).join(", ")} and ${filled.at(-1)}`}`;
-  return `Lender’s PDF attached. ${what}. No new conditions, no second round.`;
+  return `Lender’s PDF attached. ${what}.${matched} No new conditions, no second round.`;
 }
 
 /**
