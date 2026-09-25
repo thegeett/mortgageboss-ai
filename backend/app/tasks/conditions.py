@@ -42,6 +42,7 @@ from app.conditions.readers.model import ParsedSheet
 from app.conditions.sheet_read import (
     ConditionParseError,
     SheetBytesUnavailable,
+    header_with_clause,
     sheet_from_bytes,
 )
 from app.models.condition_event import ConditionEvent, ConditionEventKind
@@ -280,7 +281,9 @@ async def parse_round(db: AsyncSession, round_id: UUID) -> None:
     values: dict[str, Any] = {
         "sheet_format": sheet.sheet_format,
         "date_printed": sheet.date_printed,
-        "header": sheet.header or None,
+        # The mortgagee clause is a sibling field on the sheet, not a key inside `header` — see
+        # `header_with_clause`, which folds it in for both writers.
+        "header": header_with_clause(sheet),
         "expiry_dates": {
             key: value.isoformat() if value else None for key, value in sheet.expiry_dates.items()
         },

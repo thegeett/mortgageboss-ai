@@ -103,9 +103,41 @@ def sheet_from_bytes(content: bytes) -> tuple[str, ParsedSheet, str]:
     return name, read(lines), "\n".join(line.text for line in lines)
 
 
+def header_with_clause(sheet: ParsedSheet) -> dict[str, object] | None:
+    """The sheet's header with the mortgagee clause folded in, or None when there is nothing.
+
+    ⚠️ THE CLAUSE WAS PARSED AND THEN DROPPED, AND THE MODEL'S COMMENT SAID OTHERWISE.
+    `condition_round.py` documents `header` as `{loan_facts, lender_team, dates, mortgagee_clause?}`
+    — but `_split_header` returns only `{lender_team, broker_contact}`, the reader stores the clause
+    as a SIBLING field on `ParsedSheet`, and both writers persisted `sheet.header` alone. So the key
+    that comment promises was one nothing wrote, and S1-04's "Mortgagee clause" block — with its
+    Copy button — had no data source at all.
+
+    ⚠️ ONE HELPER BECAUSE THERE ARE TWO WRITERS. `parse_round` writes the header on a first read and
+    `enrich_round_with_pdf` writes it when a PDF is attached to a pasted round — and the SECOND is
+    where the design actually shows the clause (S1-09, the round-details sheet after attaching).
+    Folding it in only one place would have left the screen it was drawn for still empty, and two
+    copies of a header assembly is the duplicated-check shape this ticket was already corrected for.
+
+    ⚠️ IT DOES NOT DECIDE WHETHER TO WRITE. The enrich path's rule is FILL, NEVER REPLACE — a round
+    that already has a letterhead keeps it — so this returns a value and leaves that judgement to
+    the caller, which is where it belongs.
+
+    Returns None rather than `{}` when the sheet had neither, so the existing `or None` semantics at
+    both call sites are unchanged and a headerless sheet gains no phantom key.
+    """
+    if not sheet.header and not sheet.mortgagee_clause:
+        return None
+    header: dict[str, object] = dict(sheet.header or {})
+    if sheet.mortgagee_clause:
+        header["mortgagee_clause"] = sheet.mortgagee_clause
+    return header
+
+
 __all__ = [
     "ConditionParseError",
     "SheetBytesUnavailable",
     "SheetUnreadable",
+    "header_with_clause",
     "sheet_from_bytes",
 ]

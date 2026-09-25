@@ -1,5 +1,10 @@
 // @vitest-environment jsdom
-import type { ConditionRound, ConditionSourceKind, ParseReport } from "@/lib/types/conditions";
+import type {
+  ConditionRound,
+  ConditionSourceKind,
+  DraftRow,
+  ParseReport,
+} from "@/lib/types/conditions";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -32,6 +37,13 @@ vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   // renders, the child has its own tests for the upload, and a provider here would let a real
   // mutation reach for the network to prove something neither file is asking.
   useUploadConditionSheet: () => ({ mutate: vi.fn(), isPending: false }),
+  // ⚠️ THE DRAFT BRANCH IS A REAL SCREEN NOW, AND IT MOUNTS TWO MUTATIONS. It used to be an inert
+  // interim card; `RoundReview` calls `useUpdateDraft` and `useImportRound`, so an explicit mock
+  // object without them resolves both to `undefined` and every render of that branch throws before
+  // reaching a single assertion. Same failure the inbound-message-card mock had, one export at a
+  // time — which is the cost of an explicit mock and the reason it is worth stating here.
+  useUpdateDraft: () => ({ mutate: vi.fn(), isPending: false }),
+  useImportRound: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@/lib/api/timeline", () => ({
@@ -87,13 +99,38 @@ function round(
     header: null,
     condition_count: 0,
     created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
     ...overrides,
   };
 }
 
-/** A draft row is only ever counted here, so a stub with the right shape is enough. */
-function rows(count: number) {
-  return Array.from({ length: count }, (_, i) => ({ sequence: i + 1 })) as never;
+/**
+ * Draft rows for a round.
+ *
+ * ⚠️ THESE USED TO BE `{ sequence }` STUBS CAST `as never`, and the comment said "a draft row is
+ * only ever counted here, so a stub with the right shape is enough". That was true while the draft
+ * branch rendered an interim card that counted them; it stopped being true the moment that branch
+ * became the review screen, which reads `underwriter_notes.length`, `confidence` and
+ * `bucket_heading` — so every stub threw on the first row.
+ *
+ * The cast is what let it happen: `as never` silenced the one check that would have caught the
+ * shape changing underneath the helper.
+ */
+function rows(count: number): DraftRow[] {
+  return Array.from({ length: count }, (_, index) => ({
+    sequence: index + 1,
+    lender_code: `${1000 + index}`,
+    lender_category: "Appraisal",
+    bucket_heading: "UW - Prior To Final Approval (PTD)",
+    bucket_kind: "prior_to_docs" as const,
+    verbatim_text: `Condition ${index + 1}.`,
+    underwriter_notes: [],
+    owner_hint: "unknown" as const,
+    owner_hint_source: "none" as const,
+    processor_assist: false,
+    confidence: 1,
+    source_line_numbers: [index + 1],
+  }));
 }
 
 const handlers = {
@@ -202,9 +239,13 @@ describe("which screen the Conditions tab shows", () => {
     expect(screen.getByText("We read this sheet and found no conditions in it")).toBeDefined();
   });
 
-  it("says the review screen is unbuilt rather than rendering a blank tab", () => {
+  it("hands a draft with rows to the review screen", () => {
+    // This asserted "11 conditions read, awaiting review" — the interim card's copy, which said the
+    // review screen was not built yet. It is now, so the branch renders it and the old sentence is
+    // gone rather than reworded.
     show([round({ draft_rows: rows(11) })]);
-    expect(screen.getByText(/11 conditions read, awaiting review/)).toBeDefined();
+    expect(screen.getByText("Review · not imported yet")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Import 11 conditions" })).toBeDefined();
   });
 
   it("names what the failure means for their work rather than apologising", () => {

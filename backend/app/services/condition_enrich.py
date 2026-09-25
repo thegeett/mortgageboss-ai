@@ -40,7 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.conditions.fingerprint import fingerprint
 from app.conditions.readers.model import ParsedRow, ParsedSheet
-from app.conditions.sheet_read import sheet_from_bytes
+from app.conditions.sheet_read import header_with_clause, sheet_from_bytes
 from app.models.base import utcnow
 from app.models.condition import Condition
 from app.models.condition_event import ConditionEvent, ConditionEventKind
@@ -319,8 +319,12 @@ async def enrich_round_with_pdf(
 
     # ⚠️ FILL, NEVER REPLACE. A pasted round has no letterhead, so these are holes; a round that
     # somehow has them keeps what it has.
-    if sheet.header and not round_.header:
-        round_.header = sheet.header
+    # ⚠️ THE CLAUSE COMES WITH IT, AND THIS IS THE PATH THAT MATTERS MOST FOR IT. S1-09 shows the
+    # mortgagee clause on the round-details sheet AFTER a PDF is attached to a pasted round — which
+    # is exactly this branch — so dropping it here would leave the screen it was drawn for empty.
+    header = header_with_clause(sheet)
+    if header and not round_.header:
+        round_.header = header
         result.filled_header = True
     if sheet.expiry_dates and not round_.expiry_dates:
         round_.expiry_dates = {

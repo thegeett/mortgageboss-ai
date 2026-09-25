@@ -230,6 +230,13 @@ class ConditionRoundPublic(BaseModel):
     header: dict[str, Any] | None = None
     condition_count: int = 0
     created_at: datetime
+    #: ⚠️ EXPOSED SO THE STALE-WRITE GUARD IS REACHABLE AT ALL (LP-909 §4). `ConditionDraftUpdate`
+    #: says "the caller sends the `updated_at` it read" — and until now no caller could read it,
+    #: because this schema carried only `created_at`. Every client therefore sent
+    #: `expected_updated_at=None`, which the service treats as "no opinion", so the 409 that exists
+    #: for two tabs on one draft could never fire. The review screen is the first caller that edits
+    #: rows, which is what made the gap load-bearing rather than latent.
+    updated_at: datetime
 
     @classmethod
     def from_model(
@@ -254,6 +261,7 @@ class ConditionRoundPublic(BaseModel):
             header=round_.header,
             condition_count=condition_count,
             created_at=round_.created_at,
+            updated_at=round_.updated_at,
         )
 
 

@@ -218,6 +218,16 @@ export interface ConditionRound {
   header: Record<string, unknown> | null;
   condition_count: number;
   created_at: string;
+  /**
+   * When the row last changed — the value `expected_updated_at` must echo on a draft save.
+   *
+   * ⚠️ IT WAS NOT EXPOSED, WHICH MADE THE STALE-WRITE GUARD UNREACHABLE. `ConditionDraftUpdate`
+   * says "the caller sends the `updated_at` it read", and no caller could read it: the round
+   * schema carried only `created_at`. So two tabs on one draft — the case the 409 exists for —
+   * would both have sent `null` and the second would have overwritten the first in silence.
+   * Added to `ConditionRoundPublic` alongside this (LP-909 §4).
+   */
+  updated_at: string;
 }
 
 // --- writes ----------------------------------------------------------------- //

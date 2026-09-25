@@ -10,6 +10,7 @@ import { TriangleAlert } from "lucide-react";
 import { ConditionsEmpty } from "./conditions-empty";
 import { RoundFailed } from "./round-failed";
 import { RoundReading } from "./round-reading";
+import { RoundReview } from "./round-review";
 
 /**
  * A round that is no longer in play. Discarded rounds stay in the list deliberately — a processor
@@ -185,19 +186,7 @@ export function ConditionsDashboard({
     );
   }
 
-  // ⚠️ INTERIM, AND IT SAYS SO. The review screen is §4; until then a draft with rows would
-  // otherwise render as a blank tab, which reads as a broken feature rather than as unfinished work.
-  return (
-    <Card>
-      <CardContent className="flex flex-col gap-2 p-4">
-        <h2 className="text-base font-semibold text-foreground">
-          {(current.draft_rows ?? []).length} conditions read, awaiting review
-        </h2>
-        <p className="max-w-prose text-sm text-muted-foreground">
-          Nothing is saved to the file until you import. The review screen is not built yet — it
-          arrives with the rest of this ticket.
-        </p>
-      </CardContent>
-    </Card>
-  );
+  // The draft a processor reviews and imports (S1-04/07/10/11). This branch used to be an interim
+  // card saying the review screen was not built yet; it is now the screen.
+  return <RoundReview round={current} fileId={fileId} onDiscard={() => onDiscard(current.id)} />;
 }

@@ -102,6 +102,72 @@ async def test_the_draft_rows_are_stored_as_the_api_serves_them(db_session: Asyn
     assert noted["underwriter_notes"][0]["date"] == "2026-08-28"
 
 
+async def test_the_mortgagee_clause_reaches_the_round(db_session: AsyncSession) -> None:
+    """⚠️ THE MODEL'S OWN COMMENT PROMISED THIS KEY AND NOTHING WROTE IT (LP-909 §4).
+
+    `condition_round.py` documents `header` as `{loan_facts, lender_team, dates,
+    mortgagee_clause?}`. But `_split_header` returns only `{lender_team, broker_contact}`, the
+    reader stores the clause as a SIBLING field on `ParsedSheet`, and this task persisted
+    `sheet.header` alone — so S1-04's "Mortgagee clause" block, Copy button and all, had no data
+    source and could only ever render absent.
+
+    A comment describing a key nothing writes is the same defect this stage keeps deleting from
+    screens and docstrings, found this time in a schema comment.
+    """
+    round_ = await _round(db_session)
+
+    await parse_round(db_session, round_.id)
+    await db_session.refresh(round_)
+
+    assert round_.header is not None
+    # From the fixture's own footer — real lender boilerplate, not a value invented for the test.
+    assert "United Wholesale Mortgage" in round_.header["mortgagee_clause"]
+    # The keys the reader already produced are untouched by the fold.
+    assert "lender_team" in round_.header
+    assert "loan_facts" in round_.header
+
+
+def test_a_sheet_with_no_clause_gains_no_phantom_key() -> None:
+    """⚠️ ABSENT, NOT EMPTY. The side panel renders the clause block conditionally, so "no clause"
+    and "blank clause" must not look alike — `header_with_clause` adds the key only when there is
+    something to put in it.
+
+    ⚠️ DRIVEN DIRECTLY, AND THE FIRST VERSION OF THIS TEST PROVED NOTHING. It monkeypatched
+    `sheet_read.sheet_from_bytes` to strip the clause — but `tasks/conditions.py` does
+    `from app.conditions.sheet_read import sheet_from_bytes`, binding the function into its OWN
+    namespace at import time, so patching the source module rebound a name nothing reads. The real
+    reader ran, the clause came through, and the assertion failed for the right reason: the patch
+    never applied. It would have PASSED had the fold been broken, which is the worse direction.
+
+    Patching `task_module.sheet_from_bytes` would work, but it would pin a binding rather than a
+    behaviour. The property is a fact about a pure function, so it is checked on the pure function.
+    """
+    from app.conditions.readers.model import ParsedSheet
+    from app.conditions.sheet_read import header_with_clause
+
+    # `sheet_format` is the one field with no default — a sheet always came from some layout.
+    fmt = ConditionSheetFormat.UWM_APPROVAL_LETTER
+    with_clause = ParsedSheet(
+        sheet_format=fmt, header={"lender_team": []}, mortgagee_clause="UWM ISAOA, ATIMA"
+    )
+    without = ParsedSheet(sheet_format=fmt, header={"lender_team": []}, mortgagee_clause=None)
+    neither = ParsedSheet(sheet_format=fmt, header={}, mortgagee_clause=None)
+
+    folded = header_with_clause(with_clause)
+    assert folded is not None
+    assert folded["mortgagee_clause"] == "UWM ISAOA, ATIMA"
+    assert folded["lender_team"] == [], "the fold must not disturb what the reader produced"
+
+    kept = header_with_clause(without)
+    assert kept is not None
+    assert "mortgagee_clause" not in kept
+
+    # ⚠️ None, NOT `{}` — both call sites had `sheet.header or None`, and an empty dict would turn a
+    # headerless sheet into one with a header nobody can read anything from. S1-07 branches on
+    # `header === null` to say "a paste has no letter" rather than rendering eleven em-dashes.
+    assert header_with_clause(neither) is None
+
+
 async def test_the_parse_report_names_the_reader_and_its_version(
     db_session: AsyncSession,
 ) -> None:

@@ -73,6 +73,7 @@ function round(overrides: Partial<ConditionRound> = {}): ConditionRound {
     header: null,
     condition_count: 11,
     created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
     ...overrides,
   };
 }
