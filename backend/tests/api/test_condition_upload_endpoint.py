@@ -8,10 +8,17 @@ this stage's signature failure in place for one more commit — a believed prope
 executing it — and the one time such a property was finally checked here, six of LP-904's guards
 failed on their first run.
 
-WHAT IS NOT TESTED HERE, AND WHY. The 202 success path reaches
-`from app.tasks.conditions import parse_condition_round`, which section 2 writes. Every test below
-returns BEFORE that import, so they are honest today; the success case belongs to section 2 rather
-than to a mock that would assert the enqueue happened the way I imagined it.
+WHAT IS NOT TESTED HERE, AND WHERE IT IS. This file covers the door's REFUSALS — every test below
+returns before the round is created. What happens to an accepted sheet is a property of
+`parse_round`, which the door only enqueues, so it is pinned in `tests/tasks/test_condition_parse.py`
+against a round created through the same `create_round_from_sheet` this endpoint calls.
+
+⚠️ THAT SPLIT ONCE HID A REAL DEFECT, AND THE PARAGRAPH HERE HELPED. It used to say the success case
+"belongs to section 2" and stop — which read as a plan and was treated as coverage. Section 2 then
+tested the parse only for an upload whose rules READ cleanly, so the branch where a reader asks for
+the AI went unexercised at every door but paste, and a sheet arriving as a PDF waited forever for a
+split nobody queued. The parse tests are now parameterised over `PDF_UPLOAD` and `EMAIL` for exactly
+that reason. A deferral is only honest while it names where the property actually gets checked.
 """
 
 from __future__ import annotations

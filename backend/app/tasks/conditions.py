@@ -72,11 +72,15 @@ def _storage_path(round_: ConditionRound) -> str | None:
     return None
 
 
-async def _read_sheet(round_: ConditionRound) -> tuple[str, ParsedSheet]:
-    """Fetch the round's stored bytes, then read them.
+async def _read_sheet(round_: ConditionRound) -> tuple[str, ParsedSheet, str]:
+    """Fetch the round's stored bytes, then read them: reader name, sheet, and the source text.
 
     The FETCHING half is what belongs to the task: `attach-pdf` already holds its upload in memory
     and shares only `sheet_from_bytes` (see `app.conditions.sheet_read`).
+
+    The third value is the lender's page as the reader saw it, persisted to `raw_text` so a sheet the
+    rules cannot split can be handed to the AI. Before this, only a paste ever stored text, so
+    chaining the split for a PDF door failed on "no text to read".
     """
     path = _storage_path(round_)
     if path is None:
@@ -99,7 +103,7 @@ async def _settle(
     *,
     round_id: UUID,
     values: dict[str, Any],
-    kind: ConditionEventKind,
+    kind: ConditionEventKind | None,
     detail: dict[str, Any],
 ) -> bool:
     """Write the outcome and its event, or do nothing at all.
@@ -107,6 +111,14 @@ async def _settle(
     ⚠️ ONE CONDITIONAL UPDATE, GUARDED ON `PARSING`. Whoever the database lets through owns the
     outcome; a second delivery matches no row, writes nothing, and appends no event. A round the
     processor DISCARDED while it was being read is also protected, because it is no longer PARSING.
+
+    ⚠️ `kind=None` WRITES NO EVENT, AND EXACTLY ONE CALLER WANTS THAT. A sheet the rules could not
+    split is handed to the AI: its rows and text are stored, the status STAYS `PARSING`, and the
+    split task emits `ROUND_PARSED` when it settles. Emitting one here too would put two parses in a
+    round's history for one read — which LP-907 already shipped once and had to correct, because
+    screen S1-09 renders that history and a processor would see a parse that never happened.
+
+    The compare-and-set is unchanged by it: the guard is what makes the write safe, not the event.
     """
     result = await db.execute(
         update(ConditionRound)
@@ -123,15 +135,16 @@ async def _settle(
         return False
 
     _, company_id, loan_file_id = won
-    db.add(
-        ConditionEvent(
-            company_id=company_id,
-            loan_file_id=loan_file_id,
-            round_id=round_id,
-            kind=kind,
-            detail=detail,
+    if kind is not None:
+        db.add(
+            ConditionEvent(
+                company_id=company_id,
+                loan_file_id=loan_file_id,
+                round_id=round_id,
+                kind=kind,
+                detail=detail,
+            )
         )
-    )
     await db.commit()
     return True
 
@@ -157,7 +170,7 @@ async def parse_round(db: AsyncSession, round_id: UUID) -> None:
         return
 
     try:
-        reader, sheet = await _read_sheet(round_)
+        reader, sheet, source_text = await _read_sheet(round_)
     except ConditionParseError as exc:
         settled = await _settle(
             db,
@@ -189,21 +202,53 @@ async def parse_round(db: AsyncSession, round_id: UUID) -> None:
         )
         return
 
+    # ⚠️ `raw_text` IS WRITTEN ON BOTH PATHS, and that is what makes a PDF splittable at all.
+    # `split_round` reads it, and before LP-908's review only the paste door ever wrote it — so
+    # handing an uploaded or forwarded sheet to the AI settled it `PARSE_FAILED` with "This round has
+    # no text to read. Paste the conditions again.", telling a processor to paste a letter they had
+    # just uploaded. It is stored on the DRAFT path too, so a reparse after a reader fix has the page
+    # without re-fetching the PDF.
+    values: dict[str, Any] = {
+        "sheet_format": sheet.sheet_format,
+        "date_printed": sheet.date_printed,
+        "header": sheet.header or None,
+        "expiry_dates": {
+            key: value.isoformat() if value else None for key, value in sheet.expiry_dates.items()
+        },
+        "draft_rows": draft_rows_json(sheet),
+        "parse_report": parse_report_for(reader, sheet),
+        "raw_text": source_text,
+    }
+
+    if sheet.needs_ai:
+        # ⚠️ STAYS `PARSING`, AND EMITS NOTHING. The rules could not tell where one condition ends
+        # and the next begins, so the AI split owns the terminal state — and its own compare-and-set
+        # is guarded on `PARSING`, which only holds if this write leaves it there. Settling to `DRAFT`
+        # first would both hand a processor rows the rules admit are unsplit AND make the split's
+        # guard miss, so the queued task would log "not pending" and do nothing.
+        #
+        # No `ROUND_PARSED` either: the split emits it when it settles, and two parses in one round's
+        # history for one read is the defect LP-907 shipped and had to correct — screen S1-09 renders
+        # that history, so a processor would see a parse that never happened.
+        settled = await _settle(db, round_id=round_id, values=values, kind=None, detail={})
+        if settled:
+            # After the commit, for the reason every enqueue in this repo gives: a worker that picked
+            # the round up before the transaction landed would find no row. Only if we WON the
+            # compare-and-set — a redelivery that lost must not queue a second split.
+            split_condition_round.delay(str(round_id))
+        logger.info(
+            "condition_parse_needs_ai",
+            round_id=str(round_id),
+            reader=reader,
+            rows=len(sheet.rows),
+            settled=settled,
+        )
+        return
+
     settled = await _settle(
         db,
         round_id=round_id,
-        values={
-            "status": ConditionRoundStatus.DRAFT,
-            "sheet_format": sheet.sheet_format,
-            "date_printed": sheet.date_printed,
-            "header": sheet.header or None,
-            "expiry_dates": {
-                key: value.isoformat() if value else None
-                for key, value in sheet.expiry_dates.items()
-            },
-            "draft_rows": draft_rows_json(sheet),
-            "parse_report": parse_report_for(reader, sheet),
-        },
+        values={**values, "status": ConditionRoundStatus.DRAFT},
         kind=ConditionEventKind.ROUND_PARSED,
         detail={
             "reader": reader,

@@ -107,10 +107,16 @@ def _url(file_id: object, attachment_id: object) -> str:
     return f"/api/v1/loan-files/{file_id}/inbound/attachments/{attachment_id}/condition-round"
 
 
-async def _setup(db: AsyncSession, *, slug: str) -> tuple[object, InboundAttachment, str]:
+async def _setup(
+    db: AsyncSession, *, slug: str, content: bytes | None = None
+) -> tuple[object, InboundAttachment, str]:
     company, _user_row, token = await _user(db, slug=slug)
     loan_file = await create_loan_file(db, company_id=company.id)
-    attachment = await _arrive(db, address=loan_file.get_inbox_address(), content=_pdf())
+    attachment = await _arrive(
+        db,
+        address=loan_file.get_inbox_address(),
+        content=content if content is not None else _pdf(),
+    )
     message = await db.get(InboundMessage, attachment.inbound_message_id)
     assert message is not None
     message.loan_file_id = loan_file.id
@@ -425,3 +431,62 @@ async def test_an_unauthenticated_forward_is_refused(
     response = await client.post(_url(loan_file.id, attachment.id), json={})
 
     assert response.status_code == 401
+
+
+async def test_a_forwarded_sheet_the_rules_cannot_split_reaches_the_ai(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """⚠️ THE DOOR'S OWN SEAM, WHICH IS WHERE THE DEFECT ACTUALLY LIVED (LP-908 review).
+
+    `tests/tasks/test_condition_parse.py` pins the parse for both source kinds, but it builds its
+    round by calling `create_round_from_sheet` directly. That would still pass if this ENDPOINT
+    stopped producing a round the parse can read — a different storage path, a missing source entry,
+    bytes never saved. So this drives the whole seam: a real message arrives, the processor forwards
+    it, and the parse then runs the way the worker would run it.
+
+    The original orphan was exactly a seam failure of this shape. Every piece worked alone: the
+    endpoint made a round, the parse read it, the split task was correct and tested. Nothing joined
+    the forward door to the split, and no test looked at more than one piece at a time.
+
+    ⚠️ `parse_round` IS CALLED HERE RATHER THAN AWAITED FROM THE ENDPOINT, because the endpoint only
+    enqueues — `task_session()` would open its own engine and see none of this test's uncommitted
+    rows. Same reason every task test in the repo drives the inner function.
+    """
+    from app.tasks import conditions as task_module
+    from app.tasks.conditions import parse_round
+    from tests.conditions.uwm_pdf_fixture import render_text_pdf
+
+    enqueued: list[str] = []
+    monkeypatch.setattr(
+        task_module.split_condition_round, "delay", lambda round_id: enqueued.append(round_id)
+    )
+
+    # Prose: no codes, no numbering, no headings, so the rules cannot tell where one condition ends.
+    # The three §7 fixtures are all UWM letters the rules read cleanly, which is why none of them can
+    # reach this branch and why the branch went unexercised at this door for so long.
+    loan_file, attachment, token = await _setup(
+        db_session,
+        slug="fwd-needs-ai",
+        content=render_text_pdf(
+            "Please send over whatever you have for this file when you get a chance."
+        ),
+    )
+
+    response = await client.post(_url(loan_file.id, attachment.id), headers=_auth(token), json={})
+    assert response.status_code == 202, response.text
+    round_id = UUID(response.json()["round_id"])
+
+    await parse_round(db_session, round_id)
+
+    round_ = await db_session.get(ConditionRound, round_id)
+    assert round_ is not None
+    await db_session.refresh(round_)
+
+    assert round_.parse_report["needs_ai"] is True
+    # Stays PARSING: the split's own compare-and-set is guarded on it, so settling here would make
+    # the queued task find no row and log "not pending".
+    assert round_.status is ConditionRoundStatus.PARSING
+    # Without the stored page the split hits `if not text:` and tells the processor to paste a letter
+    # they forwarded from their inbox.
+    assert round_.raw_text
+    assert enqueued == [str(round_id)], "a forwarded sheet nothing will split is stranded"

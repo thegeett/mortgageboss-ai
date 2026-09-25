@@ -6,13 +6,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 /**
  * Which screen the Conditions tab shows, and why (LP-909 §3).
  *
- * ⚠️ THE ORDER OF THE BRANCHES IS PART OF THE BEHAVIOUR, NOT AN IMPLEMENTATION DETAIL. A round can
- * satisfy two predicates at once — a zero-row draft whose reader also asked for AI — and the two
- * cases tell a processor different things to do. Asserting only "some notice rendered" would survive
- * the branches being swapped, so each test names the sentence it expects.
+ * ⚠️ EACH TEST NAMES THE SENTENCE IT EXPECTS, never merely that "a notice rendered" — the screens
+ * tell a processor different things to do, and an assertion that survives them being swapped is not
+ * an assertion about which screen showed.
+ *
+ * This paragraph used to justify that by the ORDER of two competing predicates: a zero-row draft
+ * whose reader also asked for the AI satisfied both `isAbandonedByAi` and `isEmptyDraft`. The first
+ * of those is gone — every door now queues the split, so the state it described is unreachable —
+ * and with it the conflict. The discipline outlives the reason for it.
  *
  * The API module is mocked; every predicate under test is the real one, because the predicates ARE
- * the subject. Mocking `isAbandonedByAi` would leave these asserting against constants written here.
+ * the subject. Mocking one of them would leave these asserting against constants written here.
  */
 
 const useConditionRounds = vi.fn();
@@ -146,38 +150,49 @@ describe("which screen the Conditions tab shows", () => {
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   });
 
-  it("⚠️ calls a non-paste round that needs AI abandoned, not waiting", () => {
-    // The permanent state: `split_condition_round.delay()` is reachable only from `paste_conditions`,
-    // so an uploaded sheet whose reader asked for AI will never be split. Saying "waiting for AI"
-    // would promise work nothing will do.
-    show([round({ parse_report: report({ needs_ai: true }) }, "pdf_upload")]);
-    expect(screen.getByText("This sheet is waiting for a reader that will not come")).toBeDefined();
-    expect(screen.getByText(/Pasting the text starts that split/)).toBeDefined();
+  it("⚠️ shows a round waiting for the AI split as being read, at every door", () => {
+    // This file used to assert the opposite, and the assertion was correct when written:
+    // `split_condition_round.delay()` was reachable only from `paste_conditions`, so an uploaded
+    // sheet whose reader asked for the AI waited forever, and the dashboard said so.
+    //
+    // `parse_round` now queues the split for every door and leaves the round PARSING while it runs,
+    // so "waiting for a reader that will not come" describes a state that no longer exists. The
+    // screen for it was deleted rather than narrowed — a screen for an unreachable state looks
+    // maintained while describing a bug that is gone.
+    show([round({ status: "parsing", parse_report: report({ needs_ai: true }) }, "pdf_upload")]);
+    expect(screen.getByText("Reading the condition sheet…")).toBeDefined();
   });
 
-  it("⚠️ but a PASTED round that needs AI is genuinely waiting, so it is not flagged", () => {
-    // The other half of the same predicate. Without this the test above passes for a version that
-    // flags every `needs_ai` round, which would be wrong on the one door that works.
-    show([round({ parse_report: report({ needs_ai: true }), draft_rows: rows(4) }, "paste")]);
-    expect(screen.queryByText("This sheet is waiting for a reader that will not come")).toBeNull();
-    expect(screen.getByText(/4 conditions read, awaiting review/)).toBeDefined();
+  it("⚠️ and a split that genuinely failed is a failure, not a limbo", () => {
+    // The case the deleted notice was sometimes right about. `split_round` settles PARSE_FAILED with
+    // `ai_unavailable` when the model is unreachable, so it lands on the failure screen with the
+    // server's own sentence — which is where a processor can act on it.
+    show([
+      round({
+        status: "parse_failed",
+        parse_report: report({
+          needs_ai: true,
+          failure_kind: "ai_unavailable",
+          failure_detail: "The reader is unavailable right now.",
+        }),
+      }),
+    ]);
+    expect(screen.getByText("The reader couldn’t finish this one")).toBeDefined();
   });
 
   it("distinguishes a sheet read successfully with nothing in it", () => {
-    // This is what a non-condition PDF actually produces — the state S1-03 was drawn for and the
-    // parse task never reaches, because it settles to DRAFT unconditionally.
+    // Still reachable, and by two routes now: a non-condition PDF the rules read cleanly, and a
+    // split that ran and found nothing (`needs_ai` with `ai_used` true, zero rows).
     show([round({ draft_rows: [] })]);
     expect(screen.getByText("We read this sheet and found no conditions in it")).toBeDefined();
   });
 
-  it("⚠️ prefers the AI message over the empty-sheet one when a round is both", () => {
-    // A zero-row draft whose reader asked for AI satisfies both predicates, and they tell a
-    // processor different things: one says paste the text, the other says this is not a condition
-    // sheet. Swapping the branches would give the wrong advice with every test still green unless
-    // the order is pinned.
-    show([round({ draft_rows: [], parse_report: report({ needs_ai: true }) }, "pdf_upload")]);
-    expect(screen.getByText("This sheet is waiting for a reader that will not come")).toBeDefined();
-    expect(screen.queryByText("We read this sheet and found no conditions in it")).toBeNull();
+  it("⚠️ treats a split that ran and found nothing as an empty sheet, not as pending AI", () => {
+    // The pair (needs_ai, ai_used) is what distinguishes "waiting for the AI" from "the AI has run".
+    // A round carrying both with zero rows has finished, so it must read as an empty sheet rather
+    // than as work still in flight.
+    show([round({ draft_rows: [], parse_report: report({ needs_ai: true, ai_used: true }) })]);
+    expect(screen.getByText("We read this sheet and found no conditions in it")).toBeDefined();
   });
 
   it("says the review screen is unbuilt rather than rendering a blank tab", () => {

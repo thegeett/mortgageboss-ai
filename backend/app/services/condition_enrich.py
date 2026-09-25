@@ -301,7 +301,16 @@ async def enrich_round_with_pdf(
         )
 
     reject_unless_pdf(content, declared_content_type=declared_content_type)
-    reader, sheet = sheet_from_bytes(content)
+    # ⚠️ THE SOURCE TEXT IS DELIBERATELY DISCARDED HERE, and that is not the same decision the parse
+    # task makes. `sheet_from_bytes` now returns the lender's page so a PDF round can be AI-split
+    # (LP-908 review), and the parse task persists it to `raw_text`. This is an ENRICH: it merges a
+    # SECOND PDF into a round that already exists, and for a pasted round `raw_text` is the page the
+    # processor actually pasted — the exact string §9.3's substring check validates the model's rows
+    # against. Overwriting it with a later PDF's text would quietly change what "AI only splits" is
+    # checked against, on a round whose rows a processor may already be reviewing.
+    #
+    # Named with `_` rather than ignored, so the next reader sees a choice instead of an oversight.
+    reader, sheet, _source_text = sheet_from_bytes(content)
 
     storage_path = f"condition-sheets/{round_.company_id}/{round_.loan_file_id}/{uuid4().hex}.pdf"
     await get_storage_backend().save_at(storage_path=storage_path, content=content)

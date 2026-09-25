@@ -21,23 +21,22 @@ function isSettledAway(round: ConditionRound): boolean {
 }
 
 /**
- * ⚠️ A ROUND WHOSE READER ASKED FOR AI THAT NOTHING WILL EVER RUN.
+ * ⚠️ THERE IS NO "ABANDONED BY AI" SCREEN ANY MORE, AND ITS REMOVAL IS THE FIX RATHER THAN A LOSS.
  *
- * `needs_ai: true` with `ai_used: false` is the pair LP-904's schema calls "waiting for the split
- * task". On the PASTE door that is true — `_enqueue_split_or_fail` queues the split there. On the
- * upload and forward doors nothing does: `split_condition_round.delay()` is called from exactly one
- * site, inside `paste_conditions`. So on two of three doors this state is permanent.
+ * This file used to carry a notice — "this sheet is waiting for a reader that will not come" — for a
+ * non-paste round whose reader asked for the AI. It was accurate when written: `split_condition_round`
+ * was reachable only from `paste_conditions`, so an uploaded or forwarded sheet that needed splitting
+ * waited forever.
  *
- * Recorded against LP-908, whose own section row scopes it to "a `needs_ai` PASTE". Rendered here as
- * abandoned rather than waiting, because a screen that says "waiting for AI" about work nothing will
- * do is the stranded-round failure again in a different costume.
+ * `parse_round` now queues the split for every door and leaves such a round `PARSING` while it runs,
+ * so the state that notice described is unreachable. A screen for an unreachable state is the same
+ * class of defect as a comment promising a route that does not exist: it looks maintained while
+ * describing a bug that is gone, and the next reader trusts it.
+ *
+ * A split that genuinely FAILS is a different thing and already has a home — `split_round` settles
+ * `PARSE_FAILED` with `failure_kind: "ai_unavailable"`, which `RoundFailed` renders as "The reader
+ * couldn't finish this one".
  */
-function isAbandonedByAi(round: ConditionRound): boolean {
-  if (round.status !== "draft") return false;
-  const { needs_ai, ai_used } = round.parse_report;
-  if (!needs_ai || ai_used) return false;
-  return !round.sources.some((source) => source.kind === "paste");
-}
 
 /** A sheet that was read successfully and yielded nothing. */
 function isEmptyDraft(round: ConditionRound): boolean {
@@ -140,36 +139,6 @@ export function ConditionsDashboard({
         onPaste={onPaste}
         onDiscard={() => onDiscard(current.id)}
       />
-    );
-  }
-
-  if (isAbandonedByAi(current)) {
-    return (
-      <Notice
-        title="This sheet is waiting for a reader that will not come"
-        actions={
-          <>
-            <Button variant="outline" size="sm" onClick={onUploadAnother}>
-              Upload it again
-            </Button>
-            <Button variant="outline" size="sm" onClick={onPaste}>
-              Paste instead
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-destructive"
-              onClick={() => onDiscard(current.id)}
-            >
-              Discard
-            </Button>
-          </>
-        }
-      >
-        The rules could not tell where one condition ended and the next began, so this sheet needs
-        the AI split — and nothing will run it for a sheet that arrived this way. Pasting the text
-        starts that split; uploading again will not.
-      </Notice>
     );
   }
 

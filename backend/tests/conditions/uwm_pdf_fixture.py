@@ -38,18 +38,30 @@ PAGE_HEIGHT = 1584.0
 BODY_BOTTOM = 1520.0
 
 
-def render_uwm_pdf(fixture: str) -> bytes:
-    """Render one of the §7 text fixtures as a PDF with its column structure preserved.
+def render_text_pdf(text: str) -> bytes:
+    """Render literal text as a PDF with its column structure preserved.
 
     Blank lines advance the cursor without emitting a text run, so vertical spacing survives while no
     empty word boxes are produced — `lines_from_pdf` would otherwise have nothing to group and the
     blank would simply vanish, which is fine here because the UWM reader skips blanks anyway.
+
+    ⚠️ IT TAKES TEXT RATHER THAN A FIXTURE NAME, AND THAT IS WHY IT EXISTS (LP-908 review).
+    `render_uwm_pdf` resolves a filename under `fixtures/` and there are only three, all UWM letters
+    the rules read cleanly — so `needs_ai` is False for every PDF the suite could previously build,
+    and the parse task's "hand it to the AI" branch had no way to be reached at all. A door test for
+    that branch needs a page the rules CANNOT split, and prose is the shortest such page
+    (`test_prose_with_no_structure_at_all_needs_ai`).
+
+    ⚠️ THE PROSE STAYS AT THE CALL SITE, NOT IN `fixtures/`. That directory holds the spec's §7
+    condition sheets, every expected value in `test_reader_uwm.py` transcribed from one of them.
+    A paragraph of prose is not a condition sheet, and filing it beside them would misrepresent what
+    they are — a later reader would reasonably take it for a lender's real output.
     """
     document = pymupdf.open()
     page = document.new_page(width=PAGE_WIDTH, height=PAGE_HEIGHT)
     y = TOP_MARGIN
 
-    for raw in sheet_text(fixture).splitlines():
+    for raw in text.splitlines():
         if raw.strip():
             page.insert_text((LEFT_MARGIN, y), raw, fontsize=FONT_SIZE, fontname=FONT)
         y += LINE_PITCH
@@ -58,3 +70,8 @@ def render_uwm_pdf(fixture: str) -> bytes:
             y = TOP_MARGIN
 
     return bytes(document.tobytes())
+
+
+def render_uwm_pdf(fixture: str) -> bytes:
+    """Render one of the §7 text fixtures as a PDF with its column structure preserved."""
+    return render_text_pdf(sheet_text(fixture))

@@ -66,11 +66,30 @@ class SheetUnreadable(ConditionParseError):
     failure_kind = "unreadable"
 
 
-def sheet_from_bytes(content: bytes) -> tuple[str, ParsedSheet]:
-    """Read PDF bytes into a `ParsedSheet`, with the reader's name for `parse_report.reader`.
+def sheet_from_bytes(content: bytes) -> tuple[str, ParsedSheet, str]:
+    """Read PDF bytes into a `ParsedSheet`: the reader's name, the sheet, and the SOURCE TEXT.
 
     Raises `SheetUnreadable` rather than letting a library exception escape: an unreadable upload
     must reach the processor as a refusal naming the reason, not as a 500.
+
+    ⚠️ THE THIRD VALUE EXISTS SO A PDF CAN BE AI-SPLIT AT ALL (LP-908 review). `split_round` reads
+    `round_.raw_text`, which only the paste door ever wrote — so chaining the split for an uploaded
+    or forwarded sheet hit its `if not text:` branch and settled the round `PARSE_FAILED` with
+    "This round has no text to read. Paste the conditions again.", telling a processor to paste a
+    letter they had just uploaded. Persisting the text is what makes the upload and forward doors
+    splittable.
+
+    ⚠️ IT IS THE LINES THE READER ITSELF SAW, joined, rather than a second extraction. `Line.text`
+    for PDF input is the word-box tokens joined by single spaces (`lines.py`), and those boxes come
+    through `page_ocr.words_for`, which decides per PAGE between a text layer and OCR. So a scanned
+    sheet yields text here exactly as it does to the readers. A separate `page.get_text()` call would
+    be a second answer to "what does this page say" — and §9.3's substring check, which is what makes
+    "AI only splits" enforceable rather than requested, must run against the same string the model
+    was given.
+
+    ⚠️ NPI (ADR-405). The returned text is the lender's page verbatim, so it belongs only in
+    `raw_text` — already classified NPI and dropped whole from the readonly views — and never in a
+    log line, an event detail or a failure message.
     """
     try:
         lines = lines_from_pdf(content)
@@ -81,7 +100,7 @@ def sheet_from_bytes(content: bytes) -> tuple[str, ParsedSheet]:
         ) from exc
 
     name, read = reader_for(detect_format(lines))
-    return name, read(lines)
+    return name, read(lines), "\n".join(line.text for line in lines)
 
 
 __all__ = [
