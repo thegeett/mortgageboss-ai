@@ -8,6 +8,7 @@ import { useConditionRounds } from "@/lib/api/conditions";
 import type { ConditionRound } from "@/lib/types/conditions";
 import { TriangleAlert } from "lucide-react";
 import { ConditionsEmpty } from "./conditions-empty";
+import { ImportedView } from "./imported-view";
 import { RoundFailed } from "./round-failed";
 import { RoundReading } from "./round-reading";
 import { RoundReview } from "./round-review";
@@ -153,6 +154,26 @@ export function ConditionsDashboard({
         onUploadAnother={onUploadAnother}
         onPaste={onPaste}
         onDiscard={() => onDiscard(current.id)}
+      />
+    );
+  }
+
+  // ⚠️ AN IMPORTED ROUND USED TO FALL THROUGH TO `RoundReview`, WHICH IS A SCREEN IT CANNOT USE.
+  // `draft_rows` is CLEARED on import, so a processor who imported a sheet was put back on a review
+  // screen with nothing to review and an "Import 0 conditions" button — the same class as a control
+  // whose label promises what its handler cannot do.
+  //
+  // ⚠️ THE STRIP GETS EVERY ROUND, NOT `live`. Discarded rounds are filtered out of "what am I
+  // working on" and belong in "what has happened to this file"; a round vanishing from the history
+  // reads as data loss.
+  if (current.status === "imported") {
+    return (
+      <ImportedView
+        fileId={fileId}
+        rounds={rounds.data ?? []}
+        onPaste={onPaste}
+        onAddByHand={onAddByHand}
+        onUploadAnother={onUploadAnother}
       />
     );
   }

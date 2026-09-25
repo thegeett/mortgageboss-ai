@@ -103,18 +103,41 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
  * for a pasted round, and eleven rows of "—" would read as a letter we failed to parse instead of a
  * source that never had one.
  *
- * ⚠️ THE MORTGAGEE CLAUSE IS MISSING FROM THE SERVER, NOT FROM HERE. S1-04 shows the clause with a
- * Copy button, and `condition_round.py`'s own comment describes `header` as
- * `{loan_facts, lender_team, dates, mortgagee_clause?}` — but `_split_header` returns only
- * `{lender_team, broker_contact}`, the reader stores the clause on the SHEET
- * (`sheet.mortgagee_clause`), and the parse task never folds it in. So the key that comment promises
- * is one nothing writes.
+ * ⚠️ THE MORTGAGEE CLAUSE IS SENT, AND THIS COMMENT USED TO SAY IT WAS NOT. It described the gap
+ * accurately — the reader stored the clause on the SHEET and neither writer folded it into `header`
+ * — and then the very commit carrying this file CLOSED that gap: `header_with_clause` folds it in at
+ * `tasks/conditions.py` and `condition_enrich.py`, both call sites, fill-never-replace intact. So
+ * the sentence was false the moment it landed rather than drifting into falsehood later, and a
+ * reader trusting it would conclude the Copy button below is dead code and delete it. Caught in
+ * review; the fifth instance of this shape in the stage.
  *
- * Rendered conditionally rather than stubbed: when the backend starts sending it this block appears
- * with no change here, and until then nobody mistakes a missing section for a rendering bug.
- * Recorded against LP-909 rather than worked around.
+ * ⚠️ THE BLOCK IS STILL CONDITIONAL, FOR A DIFFERENT AND PERMANENT REASON. Not "until the backend
+ * starts sending it" — it does — but because a PASTED round genuinely has no clause until its PDF is
+ * attached. `header?.mortgagee_clause` absent means this round has no letter to take one from, which
+ * is a true statement about the round rather than a gap in the pipeline.
  */
 export function ReviewSidePanel({ round }: { round: ConditionRound }) {
+  return (
+    <aside className="flex flex-col gap-1 rounded-lg border border-input bg-card p-3.5">
+      <p className="text-sm font-semibold text-foreground">Also read from the letter</p>
+      <LetterDetails round={round} />
+    </aside>
+  );
+}
+
+/**
+ * The letter's details themselves, without a container.
+ *
+ * ⚠️ EXTRACTED SO S1-09 RENDERS THE SAME BLOCKS RATHER THAN A SECOND COPY OF THEM. The round-details
+ * sheet shows the identical lender team, loan figures, expiry table and mortgagee clause — and
+ * writing them again there is precisely the duplication this ticket has been corrected for twice
+ * already (a second `refuseSheet`, a second broker handler). Two copies of the twelve expiry keys
+ * would diverge the first time the lender's table changed.
+ *
+ * The container stays with each caller because they differ: the review screen frames this as an
+ * `aside` card beside the rows, the details sheet as a section inside a `Sheet`.
+ */
+export function LetterDetails({ round }: { round: ConditionRound }) {
   const header = round.header ?? null;
   const team = (header?.lender_team as TeamMember[] | undefined) ?? [];
   const facts = (header?.loan_facts as Record<string, string> | undefined) ?? {};
@@ -122,9 +145,7 @@ export function ReviewSidePanel({ round }: { round: ConditionRound }) {
   const expiry = round.expiry_dates ?? {};
 
   return (
-    <aside className="flex flex-col gap-1 rounded-lg border border-input bg-card p-3.5">
-      <p className="text-sm font-semibold text-foreground">Also read from the letter</p>
-
+    <>
       {header === null ? (
         <p className="mt-2 max-w-prose text-xs text-muted-foreground">
           A paste has no letter, so there are no lender details to read. Attaching the lender’s PDF
@@ -190,6 +211,6 @@ export function ReviewSidePanel({ round }: { round: ConditionRound }) {
           </div>
         </Block>
       ) : null}
-    </aside>
+    </>
   );
 }

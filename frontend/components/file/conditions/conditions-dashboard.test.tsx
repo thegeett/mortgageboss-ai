@@ -44,6 +44,10 @@ vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   // time — which is the cost of an explicit mock and the reason it is worth stating here.
   useUpdateDraft: () => ({ mutate: vi.fn(), isPending: false }),
   useImportRound: () => ({ mutate: vi.fn(), isPending: false }),
+  // The imported branch mounts `ImportedView`, which reads the file's conditions and owns the
+  // attach-PDF mutation. Third time an explicit mock has needed a new export one at a time.
+  useConditions: () => ({ data: [], isPending: false }),
+  useAttachPdf: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@/lib/api/timeline", () => ({
@@ -237,6 +241,19 @@ describe("which screen the Conditions tab shows", () => {
     // than as work still in flight.
     show([round({ draft_rows: [], parse_report: report({ needs_ai: true, ai_used: true }) })]);
     expect(screen.getByText("We read this sheet and found no conditions in it")).toBeDefined();
+  });
+
+  it("⚠️ hands an IMPORTED round to the imported view, never to the review screen", () => {
+    // THE DEFECT THIS BRANCH CLOSES. An imported round used to fall through `parsing` /
+    // `parse_failed` / empty-draft straight into `RoundReview` — and `draft_rows` is CLEARED on
+    // import, so a processor who imported a sheet landed on a review screen with nothing to review
+    // and an "Import 0 conditions" button. The same class as a control whose label promises what
+    // its handler cannot do.
+    show([round({ status: "imported", round_number: 1, draft_rows: null })]);
+
+    expect(screen.getByText(/This is the lender’s list exactly as issued/)).toBeDefined();
+    expect(screen.queryByText("Review · not imported yet")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Import \d+ condition/ })).toBeNull();
   });
 
   it("hands a draft with rows to the review screen", () => {
