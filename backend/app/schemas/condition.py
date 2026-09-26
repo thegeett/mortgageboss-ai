@@ -103,7 +103,18 @@ class ConditionSourcePublic(BaseModel):
     #: routinely carries the borrower's surname and the loan number" — and putting it on the wire
     #: would export that layout plus a company and file id to answer a yes/no question. This is the
     #: same fact with nothing extra attached.
-    has_bytes: bool = False
+    #:
+    #: ⚠️ REQUIRED, WITH NO DEFAULT, BECAUSE THE DEFAULT WAS THE BUG (LP-909 review). This shipped as
+    #: `= False` and the first version of `from_model` built sources with `model_validate` — a raw
+    #: JSONB entry has no `has_bytes` key, so every source silently became `False`, a VALID value
+    #: that failed nothing. Fixing that one call site left the MECHANISM in place: this model has
+    #: `from_attributes=True`, so the next person who reaches for `model_validate` because it is the
+    #: obvious thing gets `False` again with nothing to tell them.
+    #:
+    #: The asymmetry made it plain — the TypeScript field is required and rejected four stale
+    #: fixtures the moment it landed, while this one would have accepted all of them. Now both sides
+    #: are required, and `from_source` is the only constructor.
+    has_bytes: bool
 
     @classmethod
     def from_source(cls, source: dict[str, Any]) -> "ConditionSourcePublic":
