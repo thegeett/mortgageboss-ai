@@ -324,6 +324,29 @@ never clears, removes or changes a condition's status without a person's click.
    answer by hand, which is what LP-912's verdict endpoint is for. A false one silently reopens a
    condition and moves work backwards.
 
+   **Amended in the second review (R8 to R10); these three rules replace the matching parts of (i)
+   and (ii) above:**
+
+   - **Match on normalised text, not raw text (R8).** The reader keeps whitespace inside a note
+     exactly as it arrives (measured: a paste with "Not in  Upload" gives `'Not in  Upload'`), and a
+     browser copy of the portal need not space a note the way the PDF does. With raw equality, (i)
+     does not recognise the same note and fires a false *Came back*. Both (i) and (ii) compare
+     `" ".join(text.lower().split())`, the normalisation `note_stripped` already uses for wording.
+   - **An undated saved note has an upper bound: the `round_date` of the round it was first seen on
+     (R9).** `underwriter_notes` carries `first_seen_round_id`, and `round_date` is "`date_printed`
+     when known, else the date received", so a note first saved from a paste received on 08/29
+     cannot have been written after 08/29. An incoming dated note with the same normalised text is
+     **the same note** only if its date is on or before that bound. Then (ii) fills the date and
+     (i) keeps the status still. If its date is **after** the bound it is a re-issue: it is new and
+     **fires A1**. Without the bound, (i) swallows exactly the case its own rationale names. Round 1
+     is pasted (the note saved undated), and round 2's PDF prints "**8/28 Not in Upload **9/10 Not in
+     Upload". The 9/10 note matches the undated text, so (i) as first written never fires, which is
+     the same loss it was meant to avoid under text-only matching.
+   - **The date fill writes no event of its own, but it is recorded (R10).** §6 rule 4 says every
+     change writes an event, and a fill changes what the note chip shows. It goes into the
+     `CONDITION_SEEN_AGAIN` event the same import already writes for that condition (a
+     `notes_dated` list in its payload), so there is still one event per condition per import.
+
    **LP-912 therefore wires A1**, with (i) as a guard on its came-back rule and (ii) in the note
    merge, and the strict xfail in `test_note_identity.py` becomes a normal passing test — the
    alternative the review's own xfail reason offers ("either fix `_new_notes` or move this assertion
@@ -351,8 +374,8 @@ Collected so it is not re-derived six times.
   `condition_import.py`'s own log lines are the pattern); a lender + seeded UWM codes in the fixture
   (D-6).
 - **LP-912:** ADR-408 first, recording A1 to A7 as **accepted** (§5.0); A1 **is** wired, carrying
-  §5.2's two-part rule — the came-back guard (a note matching an undated saved note never changes a
-  status) and the date fill-in — which turns `test_note_identity.py`'s strict xfail into a passing
+  §5.2's two-part rule as amended by R8 to R10 (normalised text; an undated saved note bounded by its
+  first round's `round_date`; the fill recorded in `CONDITION_SEEN_AGAIN`), which turns `test_note_identity.py`'s strict xfail into a passing
   test and needs its own test for the guard; one migration carrying eight columns, the event-kind swap (eight kinds), the
   `ck_conditions_ownerhintsource` swap (D-4; `_CASES` already watches it), plus the
   `readonly.conditions` rebuild above `def downgrade(`; every new enum mirrored into
@@ -435,3 +458,23 @@ running the readers, not read by eye. Wrong claims were corrected in place above
   re-run after the edit. Ruff clean over `tests/`.
 - **Frontend at `b0dc8c10`** (unchanged by this review): biome clean over 438 files, `tsc` exit 0,
   `CI=true TZ=UTC pnpm test` **1956 / 1956** in 159 files.
+
+## Second review (of `0fd8066b`)
+
+`0fd8066b` changes docs only. The tests it names for (i) and for the xfail flipping are **promised for
+LP-912's commit**, not included here. The follow-up message could be read as saying they were in this
+commit.
+
+The builder asked for (i) to be attacked directly: can it still fire a false *Came back*, and can it be
+built against the import as it is?
+
+| # | Finding | Fix |
+|---|---|---|
+| R8 | **Yes, (i) can still fire a false *Came back*.** It keys on the note's text being *identical*, and the reader keeps whitespace inside a note: `_NOTE` captures `(.*?)` and only `.strip()`s it. Measured with `read_pasted_text` on round 1: a paste with a double space or a tab inside "Not in Upload" saves `'Not in  Upload'` / `'Not in\tUpload'`. A browser copy of the portal is exactly where that happens. The PDF's note then fails to match the undated one, and A1 fires. | §5.2: (i) and (ii) compare normalised text, `" ".join(text.lower().split())`, the same folding `note_stripped` uses. |
+| R9 | **(i) as written loses the true *Came back* it was designed to keep.** Its rationale is that text-only matching would absorb a real re-issue. But (i) also decides by text alone whenever the saved note is undated, so the case it cites (round 1 pasted, then round 2's PDF carrying "**8/28 Not in Upload **9/10 Not in Upload") never fires for 9/10. This is the note A1's own rationale quotes. | §5.2: the undated saved note is bounded by the `round_date` of its `first_seen_round_id` (the date printed, or else the date received). An incoming note dated on or before the bound is the same note (fill the date, no status). Dated after the bound, it is a re-issue and fires. This is buildable today: both fields exist and the import already has the file's rounds. |
+| R10 | (ii) said "no event written", but §6 rule 4 requires an event for every change. | The fill is recorded in the `CONDITION_SEEN_AGAIN` event the same import already writes, so it adds no second event. |
+| — | **§5.0, accepted rather than pending.** I can't see the product owner's instruction from here. The builder quotes it, and it answers exactly the question the spec says to ask, so recording it as the answer satisfies "record the answers there". Accepted. Keeping A1's intent separate from §5.2's mechanism is right. | None. It has also been raised with this session's user, who can object. |
+| — | **For LP-912 to settle, not a survey defect:** a came-back import already writes `CONDITION_SEEN_AGAIN` and `CONDITION_NOTE_ADDED`, and the spec adds `condition_came_back` plus a move of our status. ADR-408 should say which of these is "the one event" for §6 rule 4, or state why a came-back writes more than one. | Left to LP-912. |
+
+Nothing was run for this review beyond the two reader measurements above. Nothing executable
+changed, so the baseline in the first Review section still stands.
