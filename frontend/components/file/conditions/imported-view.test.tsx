@@ -342,6 +342,51 @@ describe("the round-details sheet (S1-09)", () => {
     expect(screen.queryByText(/Lender’s PDF attached/)).toBeNull();
   });
 
+  it("⚠️ opens on the round AFTER the attach, not the one captured before it", async () => {
+    // Seen in a browser (LP-909 §5): the sheet an attach opens held the round OBJECT from the moment
+    // of `onSuccess`, before the refetch — so under a callout saying the PDF had filled the letter
+    // it showed "A paste has no letter…", no `PDF upload` chip and every expiry as "—". The strip
+    // behind it was already fresh; only the sheet was stale.
+    const before = round({ id: "r2", round_number: 2, header: null, expiry_dates: null }, [
+      "paste",
+    ]);
+    conditionsQuery.mockReturnValue({ data: [condition()], isPending: false });
+    eventsQuery.mockReturnValue({ data: [], isPending: false, isError: false });
+    const { rerender } = render(<ImportedView fileId="f1" rounds={[before]} {...handlers} />);
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(input, "files", {
+      value: [new File(["x"], "approval.pdf", { type: "application/pdf" })],
+    });
+    fireEvent.change(input);
+    attachMutate.mock.calls[0]?.[1]?.onSuccess?.({
+      round_id: "r2",
+      round_number: 2,
+      status: "imported",
+      sheet_format: "uwm_approval_letter",
+      filled_header: true,
+      filled_expiry: true,
+      filled_date_printed: true,
+      matched: 0,
+      added: 0,
+      unmatched_existing: 0,
+      warnings: [],
+    });
+
+    // The invalidation lands: the same round, now carrying the PDF and what it filled.
+    const after = round({ id: "r2", round_number: 2, expiry_dates: { close_by: "2026-11-03" } }, [
+      "paste",
+      "pdf_upload",
+    ]);
+    rerender(<ImportedView fileId="f1" rounds={[after]} {...handlers} />);
+
+    const sheet = await screen.findByRole("dialog");
+    expect(within(sheet).getByText(/Lender’s PDF attached/)).toBeDefined();
+    expect(within(sheet).getByText("PDF upload")).toBeDefined();
+    expect(within(sheet).queryByText(/A paste has no letter/)).toBeNull();
+    expect(within(sheet).getByText("11/03/2026")).toBeDefined();
+  });
+
   it("⚠️ does not call a match a fill, and can still say nothing was filled", async () => {
     // `matched` COUNTS PASTED ROWS THE PDF RECOGNISED; it is not a thing the enrich filled. It sat
     // inside the Filled list, so an attach that filled nothing but matched six rows read "Filled the

@@ -42,7 +42,14 @@ export function ImportedView({
   const conditions = useConditions(fileId);
   const attach = useAttachPdf(fileId);
 
-  const [openRound, setOpenRound] = useState<ConditionRound | null>(null);
+  // ⚠️ THE ID, NOT THE ROUND. This held the round OBJECT, captured from `rounds` at the moment it was
+  // opened — and on the one path S1-09 exists for, that moment is an attach's `onSuccess`, BEFORE
+  // the invalidation refetches. So the sheet opened on the pre-attach round: chips without
+  // `PDF upload`, "A paste has no letter…", every expiry "—", directly under a callout saying the
+  // PDF had just filled them (seen in a browser, LP-909 §5; the strip behind it was already fresh).
+  // Deriving from the live list each render means the sheet shows what the server now says.
+  const [openRoundId, setOpenRoundId] = useState<string | null>(null);
+  const openRound = rounds.find((round) => round.id === openRoundId) ?? null;
   const [enrichment, setEnrichment] = useState<ConditionEnrichResult | null>(null);
 
   const newest = rounds.find((round) => round.status === "imported") ?? rounds[0];
@@ -65,12 +72,14 @@ export function ImportedView({
       <RoundStrip
         rounds={rounds}
         total={conditions.data?.length ?? 0}
-        busyRoundId={attach.isPending ? (openRound?.id ?? null) : null}
+        // The round being attached to is the mutation's own argument. `openRound` is null while an
+        // attach runs from the strip, so the card it was clicked on never showed as busy.
+        busyRoundId={attach.isPending ? (attach.variables?.roundId ?? null) : null}
         onOpenDetails={(round) => {
           // A round opened from the strip shows no enrich callout — that belongs to an attach that
           // just happened, not to every visit.
           setEnrichment(null);
-          setOpenRound(round);
+          setOpenRoundId(round.id);
         }}
         onAttachPdf={(roundId, file) =>
           attach.mutate(
@@ -84,7 +93,7 @@ export function ImportedView({
                 // Open the details sheet on the round that was just enriched, carrying the result so
                 // it can say what the PDF actually filled in (S1-09).
                 setEnrichment(result);
-                setOpenRound(rounds.find((round) => round.id === result.round_id) ?? null);
+                setOpenRoundId(result.round_id);
               },
               onError: (error) =>
                 notifyError({
@@ -130,7 +139,7 @@ export function ImportedView({
         open={openRound !== null}
         onOpenChange={(next) => {
           if (!next) {
-            setOpenRound(null);
+            setOpenRoundId(null);
             setEnrichment(null);
           }
         }}

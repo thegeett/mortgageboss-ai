@@ -111,35 +111,40 @@ export function RoundDetailsSheet({
           </SheetTitle>
         </SheetHeader>
 
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {round.sources.map((source) => (
-            <span
-              key={`${source.kind}-${source.at ?? ""}`}
-              className="rounded-md border border-input px-1.5 py-0.5 text-xs text-muted-foreground"
-            >
-              {SOURCE_LABEL[source.kind] ?? source.kind}
+        {/* ⚠️ THE BODY CARRIES ITS OWN GUTTER. `SheetContent` has no padding and `SheetHeader` brings
+            its own `px-4`, so without this the chips, the letter and the history sat flush against
+            the sheet's edge while the title above them was inset (LP-909 §5, S1-09). */}
+        <div className="px-4 pb-6">
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {round.sources.map((source) => (
+              <span
+                key={`${source.kind}-${source.at ?? ""}`}
+                className="rounded-md border border-input px-1.5 py-0.5 text-xs text-muted-foreground"
+              >
+                {SOURCE_LABEL[source.kind] ?? source.kind}
+              </span>
+            ))}
+            <span className="rounded-md border border-input px-1.5 py-0.5 text-xs text-muted-foreground">
+              {round.completeness === "full" ? "Full list" : "Just some"}
             </span>
-          ))}
-          <span className="rounded-md border border-input px-1.5 py-0.5 text-xs text-muted-foreground">
-            {round.completeness === "full" ? "Full list" : "Just some"}
-          </span>
-          <span className="rounded-md border border-input px-1.5 py-0.5 text-xs text-muted-foreground">
-            {FORMAT_LABEL[round.sheet_format] ?? round.sheet_format}
-          </span>
+            <span className="rounded-md border border-input px-1.5 py-0.5 text-xs text-muted-foreground">
+              {FORMAT_LABEL[round.sheet_format] ?? round.sheet_format}
+            </span>
+          </div>
+
+          {enrichment ? (
+            <p className="mt-3 flex items-start gap-2 rounded-lg border border-success/40 bg-success/5 p-2 text-xs text-foreground-2">
+              <CircleCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" aria-hidden />
+              {enrichSummary(enrichment)}
+            </p>
+          ) : null}
+
+          <div className="mt-3">
+            <LetterDetails round={round} />
+          </div>
+
+          <RoundHistory roundId={round.id} />
         </div>
-
-        {enrichment ? (
-          <p className="mt-3 flex items-start gap-2 rounded-md border border-success/40 bg-success/5 p-2 text-xs text-foreground-2">
-            <CircleCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" aria-hidden />
-            {enrichSummary(enrichment)}
-          </p>
-        ) : null}
-
-        <div className="mt-3">
-          <LetterDetails round={round} />
-        </div>
-
-        <RoundHistory roundId={round.id} />
       </SheetContent>
     </Sheet>
   );
