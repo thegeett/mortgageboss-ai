@@ -31,13 +31,28 @@ carries it the ``ADD CONSTRAINT`` is rejected and the upgrade dies. That is what
 from __future__ import annotations
 
 import ast
+import re
 from enum import StrEnum
 from itertools import combinations
 from pathlib import Path
 
 import pytest
 from app.models.activity_log import ActivityType
+from app.models.condition import (
+    BucketKind,
+    ConditionLenderStatus,
+    ConditionOrigin,
+    ConditionPrepStatus,
+    OwnerHint,
+    OwnerHintSource,
+)
 from app.models.condition_event import ConditionEventKind
+from app.models.condition_round import (
+    ConditionRoundCompleteness,
+    ConditionRoundStatus,
+    ConditionSheetFormat,
+)
+from app.models.lender_condition_code import LenderCodeStatus
 
 _VERSIONS = Path(__file__).resolve().parent.parent / "alembic" / "versions"
 
@@ -55,13 +70,36 @@ _VERSIONS = Path(__file__).resolve().parent.parent / "alembic" / "versions"
 #: Hand-written, like `_MIRRORED` in the type-mirror guard and `design-tokens.test.ts`'s exemptions:
 #: a new enum column with no entry here is invisible to this test, and that has to be somebody's
 #: decision rather than a silent omission.
+#:
+#: THE CONDITION CHECKS WERE STILL OUTSIDE IT AFTER LP-909, and Stage 2 changes one of them (Stage 2
+#: survey D-4, review). LP-912 adds `OwnerHintSource.MANUAL`; `ck_conditions_ownerhintsource` was not
+#: listed, so that change would have been green here and rejected by every migrated database. Every
+#: VARCHAR + CHECK column LP-904 created is now listed. The two nullable `lender_condition_codes`
+#: hints are not: their CHECK is `x IS NULL OR x IN (...)`, a form this reader does not parse.
 _CASES: tuple[tuple[str, type[StrEnum]], ...] = (
     ("ck_activity_logs_activitytype", ActivityType),
     ("ck_condition_events_conditioneventkind", ConditionEventKind),
+    ("ck_conditions_bucketkind", BucketKind),
+    ("ck_conditions_ownerhint", OwnerHint),
+    ("ck_conditions_ownerhintsource", OwnerHintSource),
+    ("ck_conditions_conditionprepstatus", ConditionPrepStatus),
+    ("ck_conditions_conditionlenderstatus", ConditionLenderStatus),
+    ("ck_conditions_conditionorigin", ConditionOrigin),
+    ("ck_condition_rounds_conditionroundstatus", ConditionRoundStatus),
+    ("ck_condition_rounds_conditionroundcompleteness", ConditionRoundCompleteness),
+    ("ck_condition_rounds_conditionsheetformat", ConditionSheetFormat),
+    ("ck_lender_condition_codes_lendercodestatus", LenderCodeStatus),
 )
 
 
 _UNRESOLVED = object()
+
+#: A migration that NAMES a constraint without defining it — in a docstring, or beside a swap of a
+#: different constraint. LP-909's event-kind migration explains itself by naming
+#: `ck_activity_logs_activitytype`, and the first version of Form 1 counted its event-kind swap as
+#: an activity-type definition. Distinct from `_UNRESOLVED`, which is a definition that could not
+#: be read and is always reported.
+_NOT_DEFINED_HERE = object()
 
 
 def _resolve(node: ast.AST | None, env: dict[str, object]) -> object:
@@ -126,6 +164,41 @@ def _module_constants(tree: ast.Module, env: dict[str, object]) -> None:
                 env[name] = value
 
 
+def _swap_helper_constraints(tree: ast.Module, env: dict[str, object]) -> dict[str, set[str]]:
+    """``{helper name: every ``ck_`` constraint its body names}`` for each module-level swap helper.
+
+    A SWAP CALL DOES NOT SAY WHICH CONSTRAINT IT REWRITES; ITS HELPER DOES (Stage 2 survey review).
+    Every helper here takes only the value tuple and names its constraint inside its own body, from a
+    module constant (`_CONSTRAINT`, `_ACTIVITY_CONSTRAINT`). The first version of Form 1 below
+    returned the first swap call in `upgrade()` for WHATEVER constraint it was asked about, which was
+    right only while every migration swapped one constraint. LP-912's single migration swaps two
+    (`ck_condition_events_conditioneventkind` and `ck_conditions_ownerhintsource`), and the guard
+    would have read the event kinds as the owner-hint sources.
+    """
+    out: dict[str, set[str]] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef) or "swap" not in node.name:
+            continue
+        named: set[str] = set()
+        for inner in ast.walk(node):
+            if isinstance(inner, (ast.Name, ast.Constant)):
+                value = _resolve(inner, env)
+                if isinstance(value, str) and value.startswith("ck_"):
+                    named.add(value)
+        out[node.name] = named
+    return out
+
+
+def _mentions(source: str, constraint: str) -> bool:
+    """Whether ``source`` names ``constraint`` as a whole identifier.
+
+    NOT A SUBSTRING TEST. `ck_conditions_ownerhint` is a prefix of `ck_conditions_ownerhintsource`,
+    so a substring test would pull a migration that touches only the second into the first's
+    definitions, where it resolves to nothing and is reported as unreadable.
+    """
+    return re.search(rf"\b{re.escape(constraint)}\b", source) is not None
+
+
 def _constraint_name(call: ast.Call, env: dict[str, object]) -> object:
     """The `name=` a `CheckConstraint(...)` call was given, folded to a string where possible."""
     for keyword in call.keywords:
@@ -170,25 +243,43 @@ def _definition_values(tree: ast.Module, env: dict[str, object], constraint: str
     `_ACTIVITY_NEW`, ...), and a guard keyed on a name is one rename away from silently checking
     nothing — which is exactly what happened once.
     """
+    helpers = _swap_helper_constraints(tree, env)
     for node in tree.body:
         if not isinstance(node, ast.FunctionDef) or node.name != "upgrade":
             continue
         for call in ast.walk(node):
             if not isinstance(call, ast.Call):
                 continue
-            # Form 1 — the swap helper: `_swap_check(_NEW_VALUES)`.
+            # Form 1 — the swap helper: `_swap_check(_NEW_VALUES)`, attributed to the constraint
+            # the call names in its arguments, or else the one its helper's body names. A call
+            # for another constraint is skipped; a helper naming several is ambiguous and
+            # reported as unreadable rather than guessed.
             if isinstance(call.func, ast.Name) and "swap" in call.func.id and call.args:
-                return _resolve(call.args[0], env)
+                resolved_args = [
+                    _resolve(arg, env) for arg in (*call.args, *(k.value for k in call.keywords))
+                ]
+                targets = {
+                    value
+                    for value in resolved_args
+                    if isinstance(value, str) and value.startswith("ck_")
+                } or helpers.get(call.func.id, set())
+                if not targets:
+                    return _UNRESOLVED  # a swap whose constraint cannot be named is never skipped
+                if constraint not in targets:
+                    continue
+                if len(targets) > 1:
+                    return _UNRESOLVED
+                return next(
+                    (value for value in resolved_args if isinstance(value, tuple)), _UNRESOLVED
+                )
             # Form 2 — the origin: `sa.CheckConstraint(_in("kind", _EVENT_KIND), name=<constraint>)`.
             func = call.func
             is_check = (isinstance(func, ast.Attribute) and func.attr == "CheckConstraint") or (
                 isinstance(func, ast.Name) and func.id == "CheckConstraint"
             )
             if is_check and call.args and _constraint_name(call, env) == constraint:
-                values = _values_from_in_call(call.args[0], env)
-                if values is not _UNRESOLVED:
-                    return values
-    return _UNRESOLVED
+                return _values_from_in_call(call.args[0], env)
+    return _NOT_DEFINED_HERE
 
 
 def _definition_value_sets(constraint: str) -> dict[str, set[str]]:
@@ -208,12 +299,14 @@ def _definition_value_sets(constraint: str) -> dict[str, set[str]]:
     unreadable: list[str] = []
     for path in sorted(_VERSIONS.glob("*.py")):
         source = path.read_text()
-        if constraint not in source:
+        if not _mentions(source, constraint):
             continue
         tree = ast.parse(source)
         env: dict[str, object] = {}
         _module_constants(tree, env)
         values = _definition_values(tree, env, constraint)
+        if values is _NOT_DEFINED_HERE:
+            continue
         if not isinstance(values, tuple) or not all(isinstance(v, str) for v in values):
             unreadable.append(path.name)
             continue
@@ -403,3 +496,81 @@ def test_parallel_definitions_permit_identical_value_sets(constraint: str) -> No
         "CONSTRAINT fail — stopping the upgrade before the merge migration that would repair "
         "it.\n  " + "\n  ".join(mismatches)
     )
+
+
+_TWO_SWAPS = """
+_EVENTS = "ck_condition_events_conditioneventkind"
+_SOURCES = "ck_conditions_ownerhintsource"
+_EVENT_VALUES = ("round_imported", "condition_came_back")
+_SOURCE_VALUES = ("prefix", "bucket", "code_map", "none", "manual")
+
+
+def _swap_event_check(values):
+    op.drop_constraint(_EVENTS, "condition_events", type_="check")
+
+
+def _swap_source_check(values):
+    op.drop_constraint(_SOURCES, "conditions", type_="check")
+
+
+def upgrade():
+    _swap_event_check(_EVENT_VALUES)
+    _swap_source_check(_SOURCE_VALUES)
+"""
+
+
+def _values_in(source: str, constraint: str) -> object:
+    tree = ast.parse(source)
+    env: dict[str, object] = {}
+    _module_constants(tree, env)
+    return _definition_values(tree, env, constraint)
+
+
+def test_each_swap_is_read_for_its_own_constraint() -> None:
+    """The shape LP-912's migration will have: two helpers, two constraints, one `upgrade()`.
+
+    The first version of Form 1 returned the FIRST swap call for any constraint, so the owner-hint
+    sources resolved to the event kinds.
+    """
+    assert _values_in(_TWO_SWAPS, "ck_condition_events_conditioneventkind") == (
+        "round_imported",
+        "condition_came_back",
+    )
+    assert _values_in(_TWO_SWAPS, "ck_conditions_ownerhintsource") == (
+        "prefix",
+        "bucket",
+        "code_map",
+        "none",
+        "manual",
+    )
+
+
+def test_a_helper_naming_two_constraints_is_unreadable_rather_than_guessed() -> None:
+    source = _TWO_SWAPS.replace(
+        '    op.drop_constraint(_EVENTS, "condition_events", type_="check")',
+        '    op.drop_constraint(_EVENTS, "condition_events", type_="check")\n'
+        '    op.drop_constraint(_SOURCES, "conditions", type_="check")',
+    )
+    assert _values_in(source, "ck_conditions_ownerhintsource") is _UNRESOLVED
+
+
+def test_a_migration_that_only_names_a_constraint_does_not_define_it() -> None:
+    """LP-909's event-kind migration names `ck_activity_logs_activitytype` in its docstring.
+
+    Before this review its event-kind swap was read as an activity-type definition, so the
+    activity-type union silently included eleven event kinds.
+    """
+    assert _values_in(_TWO_SWAPS, "ck_activity_logs_activitytype") is _NOT_DEFINED_HERE
+    found = _definition_value_sets("ck_activity_logs_activitytype")
+    assert not any("lp909_condition_reparse_event" in name for name in found)
+
+
+def test_a_swap_whose_constraint_cannot_be_named_is_unreadable() -> None:
+    source = _TWO_SWAPS.replace("op.drop_constraint(_SOURCES,", "op.drop_constraint(values[0],")
+    assert _values_in(source, "ck_conditions_ownerhintsource") is _UNRESOLVED
+
+
+def test_a_constraint_name_is_not_matched_inside_a_longer_one() -> None:
+    """`ck_conditions_ownerhint` is a prefix of `ck_conditions_ownerhintsource`."""
+    assert not _mentions('_CONSTRAINT = "ck_conditions_ownerhintsource"', "ck_conditions_ownerhint")
+    assert _mentions('_CONSTRAINT = "ck_conditions_ownerhint"', "ck_conditions_ownerhint")

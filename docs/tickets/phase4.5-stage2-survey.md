@@ -5,8 +5,8 @@
 - **Branch:** `phase4.5-conditions`, HEAD `98a97b4d`, working tree clean at the start
 - **Spec:** `phase4.5-stage2-tickets.md` §1, §2, §10 (it wins over `phase4.5-build-plan.md` §4)
 - **Screens:** none of its own. The Stage 2 pack (`docs/design/phase4.5-conditions/stage2/`) was read
-  end to end before this was written, and the numbers on S2-01, S2-02, S2-06, S2-08 and S2-11 are
-  checked against the fixtures below.
+  end to end before this was written, and the numbers on S2-01, S2-02, S2-06 and S2-11 are
+  checked against the fixtures below. S2-08 is not: it needs round 3, which does not exist yet (§4).
 
 **Nothing in this file is code.** It exists so that LP-911 does not start by assuming a fact that
 stopped being true, and so the four places where the spec and the tree disagree are decided here
@@ -37,10 +37,10 @@ branch runs nothing), §8 step 8 needs the product owner's real sheets, and one 
 2 — they are about a PR to `main` and about the product owner's machine — and per the standing
 instruction this survey records the gap and continues rather than stopping.
 
-**Local checks are therefore the only gate for this whole stage.** The measured limits from LP-909 §5
-still hold on this machine: two `test_page_ocr` tests need tesseract (absent) and
-`test_cli_refuses_unpaced_bedrock` fails on this `.env`'s model tiers. Three failures unrelated to
-conditions; anything else is mine.
+**Local checks are therefore the only gate for this whole stage.** LP-909 §5 measured three failures
+on this machine that are not about conditions: two `test_page_ocr` tests need tesseract (absent) and
+`test_cli_refuses_unpaced_bedrock` fails on this `.env`'s model tiers. This survey ran nothing; the
+baseline at `b0dc8c10` was measured by the review and is in the Review section below.
 
 ## 2. Every fact in §2, checked against the tree
 
@@ -157,10 +157,12 @@ being changed, so **the full suite would be green and the first owner override o
 would raise `IntegrityError` on commit.** That is the LP-637 defect, one enum further over, for the
 second time in this stage.
 
-**Decision: LP-912's migration swaps `ck_conditions_ownerhintsource` listing all five values, and adds
-`("ck_conditions_ownerhintsource", OwnerHintSource)` to `_CASES` in the same commit.** The same applies
-to `ck_condition_events_conditioneventkind` for the six new event kinds — that one *is* watched, so it
-fails loudly, which is the difference between the two and the argument for widening `_CASES`.
+**Decision: LP-912's migration swaps `ck_conditions_ownerhintsource` listing all five values.** The
+same applies to `ck_condition_events_conditioneventkind` for the **eight** new event kinds (LP-912's six
+plus LP-915's `round_compared` and `round_completeness_changed`, which the spec puts in LP-912's single
+migration). *(Review: `_CASES` now watches `ck_conditions_ownerhintsource` and every other
+condition-family CHECK, and the guard's swap reader was fixed so it can read a migration that swaps
+two constraints. LP-912 no longer needs to touch `_CASES`; see Review R3.)*
 
 `ConditionPrepStatus` and `ConditionLenderStatus` gain no members (A4 keeps `review` and
 `pending_review` in the database and out of the UI), so their constraints are untouched.
@@ -199,9 +201,16 @@ none** (`condition_import.py:336-338`) — so `1947` and `6378` keep `prefix`, w
 But the whole step is **skipped when `round_.lender_id is None`** (`:619`), and it needs
 `LenderConditionCode` rows for `(lender, code)`.
 
+`1228` is **`unknown` with source `code_map`**, not source `none`: `uwm.yaml` gives it
+`default_owner_hint: unknown`, and `_apply_code_defaults` records the source whenever the map gives a
+hint (measured in review). So "Not known" must be decided by the owner being `unknown`, never by the
+source being `none`, or `1228` renders as "Not known · from code map".
+
 **Consequence for every Stage 2 fixture:** the acceptance file must be created with a lender and the
-UWM codes loaded, or all eleven conditions come back `unknown` and both the LP-911 assertion and
-S2-01/S2-02/S2-09 are unreproducible. `tests/conditions/test_round_import.py:444-489` is the shape for
+UWM codes loaded, or nine of the eleven conditions come back `unknown` (only `1947` and `6378` keep
+`title`, from the prefix, which the reader sets without any map) and both the LP-911 assertion and
+S2-01/S2-02/S2-09 are unreproducible. Load all 28 rows with `load_seed("uwm")` (measured: 28, one of
+them `info_only`) rather than hand-typing the eleven. `tests/conditions/test_round_import.py:444-489` is the shape for
 building `LenderConditionCode` rows in a test; `app/conditions/lender_codes/loader.py` loads the YAML.
 Noted in the progress file too: **the LP-910 seed has never run against a database**, so the fixture
 must not depend on it having been run.
@@ -242,6 +251,25 @@ counts**, and a fixture that disagreed would have been found halfway through LP-
 
 ## 5. Decisions taken without the product owner
 
+### 5.0 Defaults A1 to A7: not yet shown to the product owner *(added in review, R1)*
+
+The spec's first instruction is to STOP AND ASK about A1 to A7, show them to the product owner here,
+and record the answers **before ADR-408 is written**. This survey did not list them. They are
+recorded here as **adopted as written, pending the product owner's answer**. ADR-408 must say which
+ones were confirmed and which are still defaults.
+
+| # | Default | Status |
+|---|---|---|
+| A1 | A new dated underwriter note sets *Came back* and moves our status to *To do* | **Open, and blocked on §5.2:** a note first saved from a paste is judged new when a PDF carries it |
+| A2 | The processor can change "who it's waiting on" by hand | Adopted, pending answer |
+| A3 | No "Draft email to borrower" in Stage 2 | Adopted, pending answer |
+| A4 | `review` and `pending_review` stay in the database, never offered | Adopted, pending answer |
+| A5 | Hand-added conditions are never "probably cleared" | Adopted, pending answer |
+| A6 | "Probably cleared" compares against every open condition on the file | Adopted, pending answer |
+| A7 | An imported round can switch from *Just some* to *Full list* | Adopted, pending answer |
+
+### 5.1 to 5.5: the spec's contradictions and marked STOP AND ASK points
+
 Each is a **STOP AND ASK** the spec marks, or a contradiction in it, settled with the option that
 never clears, removes or changes a condition's status without a person's click.
 
@@ -252,12 +280,18 @@ never clears, removes or changes a condition's status without a person's click.
    so the soonest is `11/03/2026`, and 09/26 → 11/03 is 38 days. **Decision: build to Done-when and
    S2-11; the goal's example is stale.** (Raised independently by the review session.)
 2. **LP-912's named STOP AND ASK — "if Stage 1's import cannot tell a new note from an old one
-   reliably (for example, the same note pasted twice)" — is not a stop.** It can:
-   `_note_key` is `(date, text)` and ignores `first_seen_round_id` because that field is ours
-   (`condition_import.py:202-209`), and `_new_notes` keeps only keys not already present. A note
-   pasted twice is therefore **not** new, and a note with the same text under a different date
-   correctly **is**. No change needed, and A1 can be wired to the existing decision rather than to a
-   new comparison.
+   reliably (for example, the same note pasted twice)" — IS a stop, and it is open.** *(This item
+   first said the opposite; review measured it wrong, R2.)* `_note_key` is `(date, text)`, and a
+   note's date is resolved from the sheet's `date_printed`. **A paste has no `date_printed`**, so a
+   note first saved from a paste is `(None, "Not in Upload")`; when a later PDF carries the same note
+   it is `("2026-08-28", "Not in Upload")`, the keys differ, and `_new_notes` calls it new. Attaching
+   the PDF to the pasted round does not repair the saved note (`condition_enrich` fills holes and
+   leaves matched rows' notes alone). Under A1 as written, the next full PDF round would set
+   *Came back* and move our status to *To do* on a note the lender wrote weeks before. Measured on
+   `uwm_round1` in `tests/conditions/test_note_identity.py` (a strict xfail).
+   **Recommended for the product owner:** a saved **undated** note matches an incoming **dated** note
+   with the same text: it is not new, its date is filled in place, and no event is written. Same text
+   under two *different* dates stays two notes. LP-912 must not wire A1 until this is answered.
 3. **An UNDATED new note does not set *Came back*.** A1 says "a new **dated** underwriter note", and a
    verdict requires `source_date`. Undated notes are a real state, not an edge case: LP-909 §5
    measured them on S1-11, where a sheet with no header has no `date_printed` to resolve the year
@@ -280,8 +314,9 @@ Collected so it is not re-derived six times.
   `verbatim_text` and **is never logged** — log filter names and counts only (ADR-405, and
   `condition_import.py`'s own log lines are the pattern); a lender + seeded UWM codes in the fixture
   (D-6).
-- **LP-912:** ADR-408 first; one migration carrying eight columns, the event-kind swap, the
-  `ck_conditions_ownerhintsource` swap **and** its `_CASES` entry (D-4), plus the
+- **LP-912:** ADR-408 first, recording A1 to A7 as confirmed or still default (§5.0); A1 not wired
+  until §5.2 is answered; one migration carrying eight columns, the event-kind swap (eight kinds), the
+  `ck_conditions_ownerhintsource` swap (D-4; `_CASES` already watches it), plus the
   `readonly.conditions` rebuild above `def downgrade(`; every new enum mirrored into
   `frontend/lib/types/conditions.ts` and registered in `_MIRRORED`
   (`tests/test_condition_type_mirror.py:55`), or the TS side silently lacks it; the refusal sentences
@@ -289,7 +324,8 @@ Collected so it is not re-derived six times.
   and not mutual exclusion** — the lock narrows a window, it does not close it.
 - **LP-916:** the new one-condition events reader, and a line in the ticket closing LP-909's open
   question about `ix_condition_events_condition_occurred` (D-5).
-- **LP-913:** replaces `ImportedView`; two new `StatusToken` vocabularies in `lib/status.ts`
+- **LP-913:** replaces `ImportedView`; "Not known" follows the owner being `unknown`, not the source
+  being `none` (D-6, `1228`); two new `StatusToken` vocabularies in `lib/status.ts`
   (`CONDITION_PREP_STATUS`, `CONDITION_LENDER_STATUS`) typed `Record<Enum, StatusMeta>` so a new
   member breaks the build, with the tones the design README fixes: ours `to_do` neutral / `waiting`
   progress / `ready` verified / `with_underwriter` progress, lender `open` neutral / `not_cleared`
@@ -324,7 +360,8 @@ The UI primitives these need all exist: `components/status-token.tsx` (note: **n
 
 Stated plainly, because a survey that reads as exhaustive is worse than one that names its edges.
 
-- **No database was queried.** Every claim above is from source text. "All rows are `to_do`" is
+- **No database was queried.** Every claim above is from source text, except the fixture numbers in
+  §4 and D-6, which the review measured by running the readers and `load_seed("uwm")` (Review R5). "All rows are `to_do`" is
   therefore a claim about what the code can write, not a count (§2).
 - **No screen was rendered.** The Stage 2 PNGs were read and their Must-match lists checked against
   the fixtures *numerically*; no pixel comparison was made, and none is claimed. That is each UI
@@ -332,3 +369,31 @@ Stated plainly, because a survey that reads as exhaustive is worse than one that
 - **CI has not run and will not run on this branch.** Local `ruff`, `mypy`, `pytest`, `biome`, `tsc`
   and `vitest` are the gate for all six tickets.
 - **No real lender sheet was involved**, and none may enter the repo (ADR-405).
+
+## Review (of `b0dc8c10`)
+
+Each claim the builder flagged was checked against the code, and the fixture numbers were measured by
+running the readers, not read by eye. Wrong claims were corrected in place above rather than softened.
+
+| # | Finding | Fix |
+|---|---|---|
+| R1 | **A1 to A7 were never shown.** The spec's first instruction is to STOP AND ASK about them in this survey and record the answers before ADR-408. The survey did not list them. | §5.0 lists all seven as adopted-pending-answer; A1 marked blocked on R2. §6 tells ADR-408 to record which were confirmed. |
+| R2 | **§5.2 was wrong: the import cannot reliably tell a new note from an old one.** A paste has no `date_printed`, so its notes save undated; the same note on a later PDF is dated, `_note_key` differs, and `_new_notes` calls it new. `condition_enrich` does not repair saved notes. Under A1 this is a false *Came back* that moves our status to *To do*, on the spec's own path (paste a round, attach the PDF, import the next full round). | §5.2 rewritten as an open STOP AND ASK, with a recommended rule. `tests/conditions/test_note_identity.py` measures it on `uwm_round1`: the precondition, what the decision gets right (two tests), and the defect as a **strict xfail** that flips when LP-912 fixes it. |
+| R3 | **D-4 is right, and the guard was worse than it said.** Confirmed: no test, and no CI step (neither workflow runs Alembic), watches `ck_conditions_ownerhintsource`. Adding `MANUAL` with `_CASES` widened fails exactly that case (mutation-checked, reverted). Two more defects in `tests/test_activity_type_migrations.py` would have hit LP-912: (a) the swap reader returned the **first** swap in `upgrade()` for *any* constraint, so LP-912's two-swap migration would have read event kinds as owner-hint sources, and it already counted LP-909's event-kind swap as an **activity-type** definition, because that file names the activity constraint in its docstring; (b) names were matched as substrings, and `ck_conditions_ownerhint` is a prefix of `ck_conditions_ownerhintsource`. | `_CASES` now watches all ten condition-family CHECKs (the two nullable `lender_condition_codes` hints are not, since their `IS NULL OR` form isn't parsed). A swap is credited to the constraint its call or helper names, a helper naming none or several is reported as unreadable rather than guessed, and a file that only mentions a constraint no longer counts as defining it. Five new tests; restoring the old reading fails three of them. |
+| R4 | D-4 said "six new event kinds". The spec's single LP-912 migration adds **eight** (six plus LP-915's two). | Corrected in D-4 and §6. |
+| R5 | §4/D-6 numbers were read by eye. **All measured true** with `read_uwm` + `load_seed("uwm")`: round 1 = 11 in the 6/5 PTD/PTF split, round 2 = 6, absent = `7086 6132 6637 6178 0132` exactly, still open as stated, new = none, `0132` → `prior_to_docs`, the only `info_only` row is `0973` (on neither sheet), borrower = exactly `7086 6132 6637`, and `1947`/`6378` are `title`/`prefix`. Every letter change and expiry date matches. **Two things were wrong:** without a code map, *nine* conditions come back `unknown`, not all eleven (the prefix still sets `title`); and `1228` is `unknown` with source **`code_map`**, not `none`. The seed has **28** rows, not 29. | D-6 corrected; the `1228` rule added to D-6 and to §6's LP-913 line. |
+| R6 | The header claimed S2-08's numbers were checked against the fixtures. S2-08 needs round 3, which doesn't exist. | Cut. |
+| R7 | §1 said LP-909's three failures "still hold on this machine", but nothing was run at this commit. | Replaced with a pointer to the measured baseline below. |
+| — | **D-2 confirmed.** No test walks `app.main`'s routes for gates (`test_no_draft_save_route.py` walks `app.routes` only to check a path is absent). A route added to the existing `/loan-files` router *would* be caught (it must carry `ScopedLoanFileById`), so only a **new** router is invisible, as D-2 says. | None needed. |
+| — | **§5.1 (LP-917) confirmed.** Round 2's expiry row gives close-by and income `11/03/2026`, and 09/26 to 11/03 is 38 days. Done-when and S2-11 are right; the goal's "65 days" is stale. | None needed. |
+
+### Measured baseline
+
+- **Backend at `b0dc8c10`:** `uv lock --check`, `ruff check`, `ruff format --check` and `mypy app/`
+  clean; **pytest 8310 passed, 3 failed, 10 skipped, 1 xfailed** in 18 m 36 s. The three failures
+  are LP-909's: `test_cli_refuses_unpaced_bedrock` and the two `test_page_ocr` tesseract tests.
+- **Backend, this review's change:** the two changed test files alone, **44 passed, 1 xfailed**. That
+  is the whole delta: no app code changed, and neither file shares fixtures. The full suite was not
+  re-run after the edit. Ruff clean over `tests/`.
+- **Frontend at `b0dc8c10`** (unchanged by this review): biome clean over 438 files, `tsc` exit 0,
+  `CI=true TZ=UTC pnpm test` **1956 / 1956** in 159 files.
