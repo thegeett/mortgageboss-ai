@@ -402,6 +402,20 @@ Collected so it is not re-derived six times.
   (`tests/test_condition_type_mirror.py:55`), or the TS side silently lacks it; the refusal sentences
   taken verbatim from S2-04 / S2-05 (below); bulk inside `loan_file_needs_lock`, which is **advisory
   and not mutual exclusion** — the lock narrows a window, it does not close it.
+
+  **Three things LP-911's review hands forward** (LP-911 §Review, R1/R6/R8):
+  - **Narrow `came_back` in the commit that allows a manual verdict.** LP-911 ships it as "the lender
+    said not satisfied", which is the same set only while nothing but a note can produce
+    `not_cleared`. The moment LP-912 lets a processor record *Came back* by hand, the field must
+    become `verdict.source_kind == underwriter_note` or it starts claiming a note the lender never
+    wrote.
+  - **Add `verdict` and `pending_suggestion` to `ConditionPublic` typed, with their producers.** LP-911
+    shipped them and the review removed them: `dict[str, Any]` is a type LP-912 has to replace anyway,
+    and "add the key once to spare the mirror" does not survive the key being the wrong shape.
+  - **A `_gate_map()` entry is not a guard on its own.** LP-911 added one and the gating tests stayed
+    green with it deleted — it was decoration, measured. `test_every_condition_route_the_app_serves_is_in_the_walk`
+    now checks the map against `app.routes`, so LP-912's new routes are caught by that test rather
+    than by anyone remembering the map.
 - **LP-916:** the new one-condition events reader, and a line in the ticket closing LP-909's open
   question about `ix_condition_events_condition_occurred` (D-5).
 - **LP-913:** replaces `ImportedView`; "Not known" follows the owner being `unknown`, not the source
@@ -411,6 +425,21 @@ Collected so it is not re-derived six times.
   progress / `ready` verified / `with_underwriter` progress, lender `open` neutral / `not_cleared`
   attention / `cleared` verified / `waived` verified / `superseded` muted. Read through
   `resolveStatus`, never indexed directly — LP-909 fixed that exact bug in `round-reading.tsx`.
+
+  **Two things LP-911's review hands forward** (LP-911 §Review, R6 and its residual):
+  - **Read `X-Conditions-Capped`.** The cap is reported in a header, not the body, because the list's
+    response shape is a Done-when. `fetchConditions` returns `.data` only, so nothing reads it yet —
+    a capped list currently renders as a complete one. The header is in CORS `expose_headers` (it was
+    not, and a browser therefore saw it as absent), so the client *can* read it and must.
+  - **`q` IN THE URL IS A REAL EXPOSURE, AND LP-913 MAKES IT WORSE THAN LP-911 DID.** The spec puts
+    the filters in the browser URL *so a link can be shared*, and `q` searches `verbatim_text` — so a
+    shared link can carry a borrower's employer or an account ending into whatever the recipient
+    pastes it into, and into their history. Nothing in the app logs the term (`uvicorn.access` is at
+    WARNING, `errors.py` logs the path only) and ALB access logs are off on staging, so the server
+    side is recorded-and-accepted; the SHARED LINK is the part LP-913 introduces. **STOP AND ASK
+    candidate for LP-913:** keep `q` out of the shareable URL (hold it in component state, or strip it
+    when a link is copied) rather than shipping a share button that leaks the search. Recorded here
+    because LP-913 is where the decision has to be made, not discovered.
 - **LP-915:** `condition_rounds.comparison` is a new column and therefore a `readonly` decision (D-1);
   the `possible_match` id the "Reworded?" rule reads is written only for same-code /
   different-fingerprint, and points at the **oldest** such condition.
