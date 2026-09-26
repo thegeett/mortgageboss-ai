@@ -78,8 +78,6 @@ function condition(overrides: Partial<Condition> = {}): Condition {
     is_open: true,
     days_open: 0,
     came_back: false,
-    verdict: null,
-    pending_suggestion: null,
     superseded_by_id: null,
     ...overrides,
   };

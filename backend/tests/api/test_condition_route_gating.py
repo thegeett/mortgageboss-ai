@@ -273,3 +273,39 @@ def test_the_detection_finds_the_real_routes_gated() -> None:
     assert checked == len(should_reach), (
         f"the walk checked {checked} routes but the map names {len(should_reach)}"
     )
+
+
+def test_every_condition_route_the_app_serves_is_in_the_walk() -> None:
+    """THE MAP IS HAND-WRITTEN, SO THIS CHECKS IT AGAINST WHAT THE APP ACTUALLY SERVES (LP-911 review).
+
+    Measured before this test existed: deleting LP-911's `("conditions-by-id", ...)` entry from
+    `_gate_map()` left every test in this file green, because a router missing from the map is a
+    router the walk never visits. The entry only guarded anything for as long as nobody removed it,
+    and the next Stage 2 router would have been exactly as invisible until somebody remembered to add
+    it.
+
+    "A condition route" is any route `app.api.conditions` serves, or any path naming a condition
+    (which is how the inbound forward door was found). Each must be visited by the walk above.
+    """
+    from app.main import API_V1_PREFIX, app
+
+    walked = {
+        (method, API_V1_PREFIX + route.path)
+        for _name, router, _gates in _gate_map()
+        for route in _routes(router)
+        for method in _methods(route)
+    }
+    served = {
+        (method, route.path)
+        for route in app.routes
+        if isinstance(route, APIRoute)
+        and (route.endpoint.__module__ == "app.api.conditions" or "condition" in route.path)
+        for method in _methods(route)
+    }
+
+    assert served, "no condition routes found on the app; this check is looking in the wrong place"
+    missing = sorted(served - walked)
+    assert not missing, (
+        f"these condition routes are served but no router in _gate_map() carries them, so the gate "
+        f"walk never checks them. Add their router with its correct gate: {missing}"
+    )

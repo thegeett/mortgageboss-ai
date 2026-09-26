@@ -99,6 +99,7 @@ from app.services.conditions import (
     events_for_round,
     import_counts,
     import_counts_for_file,
+    imported_rounds_oldest_first,
     is_open,
     latest_imported_round,
     list_conditions_filtered,
@@ -999,25 +1000,29 @@ async def get_condition(condition: ScopedCondition, db: DbSession) -> ConditionD
     discarded round has no number and is therefore never "on the sheet", which is correct: its rows
     are not conditions yet.
 
-    THE NOTE IS MATCHED TO THE ROUND THAT BROUGHT IT, through the note's `first_seen_round_id`, so a
-    dated chip appears against the round it actually arrived in rather than against all of them.
+    THE NOTES ARE MATCHED TO THE ROUND THAT BROUGHT THEM, through each note's `first_seen_round_id`,
+    so a dated chip appears against the round it actually arrived in rather than against all of them.
     `first_seen_round_id` is stored as a string by the import, which is why it is compared as one.
+    EVERY note of a round, not one: a sheet can carry two notes on one condition, and the first
+    version kept only the last (LP-911 review).
 
-    OLDEST FIRST, unlike the round strip: this reads as a history of one condition ("R1 08/28 ✓,
-    R2 09/10 not on it"), where the strip answers "what is the newest sheet".
+    IMPORTED ROUNDS ONLY, OLDEST FIRST BY ROUND NUMBER (spec §LP-916, "one line per imported round").
+    The first version walked `list_rounds`, which also returns drafts, failed parses and discarded
+    sheets, so a draft under review read as a round this condition was "not on".
 
     THE HISTORY IS A SEPARATE CALL. `…/events` serves it, for the reason LP-909 gives about the
     round's: this response is fetched whenever the list refreshes, and the history is read only when
     somebody opens one sheet.
     """
-    rounds = await list_rounds(db, loan_file_id=condition.loan_file_id)
+    rounds = await imported_rounds_oldest_first(db, loan_file_id=condition.loan_file_id)
     numbers, _ = await appearances_for_file(db, loan_file_id=condition.loan_file_id)
     seen_on = set(numbers.get(condition.id, []))
-    notes_by_round = {
-        str(note.get("first_seen_round_id")): note
-        for note in (condition.underwriter_notes or [])
-        if isinstance(note, dict) and note.get("first_seen_round_id")
-    }
+    notes_by_round: dict[str, list[UnderwriterNotePublic]] = {}
+    for note in condition.underwriter_notes or []:
+        if isinstance(note, dict) and note.get("first_seen_round_id"):
+            notes_by_round.setdefault(str(note["first_seen_round_id"]), []).append(
+                UnderwriterNotePublic.model_validate(note)
+            )
 
     appearances = [
         ConditionRoundAppearancePublic(
@@ -1027,14 +1032,9 @@ async def get_condition(condition: ScopedCondition, db: DbSession) -> ConditionD
             date_printed=round_.date_printed,
             completeness=round_.completeness,
             on_sheet=round_.round_number is not None and round_.round_number in seen_on,
-            note=(
-                UnderwriterNotePublic.model_validate(notes_by_round[str(round_.id)])
-                if str(round_.id) in notes_by_round
-                else None
-            ),
+            notes=notes_by_round.get(str(round_.id), []),
         )
-        # `list_rounds` is newest-first for the strip; a condition's own story reads forwards.
-        for round_ in reversed(rounds)
+        for round_ in rounds
     ]
 
     public = _condition_public(

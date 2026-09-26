@@ -240,10 +240,12 @@ export function useRoundEvents(roundId: string | null) {
 /**
  * EVERY `conditions` QUERY FOR ONE FILE, whatever its filters — what an invalidation must name.
  *
- * `conditionsQueryKey` carries the params so two filter sets are two caches, and TanStack matches an
- * invalidation by PREFIX. Invalidating with the full three-element key would therefore match only the
- * unfiltered query and leave every filtered one stale: import a round with a filter applied and the
- * new conditions would not appear. This is the prefix every write invalidates.
+ * `conditionsQueryKey` carries the params so two filter sets are two caches, and an invalidation
+ * must reach all of them. Every write invalidates this two-element prefix, which says so on its face.
+ * (The full key would ALSO reach them today — TanStack matches `{}` against any params object — but
+ * that is a property of an empty object nobody reading the call would rely on. An earlier version of
+ * this comment said the full key matched only the unfiltered list; review checked
+ * `partialMatchKey` and that was wrong.)
  */
 export const conditionsQueryPrefix = (fileId: string) => ["conditions", fileId] as const;
 
@@ -370,9 +372,13 @@ function invalidateRound(
   roundId?: string,
 ) {
   void queryClient.invalidateQueries({ queryKey: conditionRoundsQueryKey(fileId) });
-  // THE PREFIX, NOT THE FULL KEY — see `conditionsQueryPrefix`. The full key would match only the
-  // unfiltered list, so an import performed with a filter applied would leave the visible list stale.
+  // THE PREFIX, NOT THE FULL KEY — see `conditionsQueryPrefix`.
   void queryClient.invalidateQueries({ queryKey: conditionsQueryPrefix(fileId) });
+  // AN OPEN DETAIL SHEET MOVES WITH THEM (LP-911 review). An import adds a round pill and a "seen
+  // again" line to every condition it touched, and these keys are per condition rather than per
+  // file, so the whole family is invalidated rather than guessing which ids the import reached.
+  void queryClient.invalidateQueries({ queryKey: ["condition"] });
+  void queryClient.invalidateQueries({ queryKey: ["condition-events"] });
   // THE SUMMARY MOVES WHENEVER THE CONDITIONS DO. An import changes every count on the bar, and a
   // processor who imports and sees the numbers unchanged will import again — the same reasoning this
   // function's own docstring gives for invalidating both lists rather than one.

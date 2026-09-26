@@ -419,11 +419,14 @@ class ConditionPublic(BaseModel):
     from its CONDITION_CREATED / CONDITION_SEEN_AGAIN events.
 
     THE STATUS FIELDS ARE HERE AS OF LP-911 — see the module docstring for why they were absent
-    before. Three of the fields below have **no producer yet** and are shipped anyway, which this
-    repo normally refuses ("a field nothing fills is an invitation"). Each is named with the ticket
-    that fills it, and the reason for shipping them now is narrow: `frontend/lib/types/conditions.ts`
-    mirrors this model, LP-913 renders the summary bar and the row from it, and adding keys to both
-    sides twice would churn the mirror guard for no gain. They are `None`/`False`, never a guess.
+    before. ONE field below has **no producer yet**, `superseded_by_id`, and ships anyway because its
+    final type is already fixed (the FK LP-912 creates), so adding it now changes nothing later.
+
+    `verdict` AND `pending_suggestion` SHIPPED HERE TOO AND WERE TAKEN OUT IN REVIEW. The argument
+    for shipping early was "add the key once, not twice", and it did not hold for either: `verdict`
+    was `dict[str, Any]`, which LP-912 must replace with a typed verdict anyway, and
+    `pending_suggestion` was a sentence, where LP-915's confirm button needs the round it came from.
+    A guessed type is the second change, not a saving. Each arrives with its producer.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -482,12 +485,6 @@ class ConditionPublic(BaseModel):
     #: else can produce `not_cleared` yet. LP-912 narrows it.
     came_back: bool
 
-    #: `None` until LP-912 records one. A verdict is who said so and where, and it is the ONLY thing
-    #: that may set `cleared` or `waived` (ADR-404).
-    verdict: dict[str, Any] | None = None
-    #: `None` until LP-915's round comparison proposes one. "Probably cleared" is always a question
-    #: with a button, never a status (design README rule 4).
-    pending_suggestion: str | None = None
     #: Set by LP-915 when the processor confirms a "reworded" pair. Nothing disappears: the replaced
     #: condition stays, struck through, pointing at the one that carries on from it.
     superseded_by_id: UUID | None = None
@@ -562,8 +559,6 @@ class ConditionPublic(BaseModel):
             is_open=is_open,
             days_open=days_open,
             came_back=condition.lender_status is ConditionLenderStatus.NOT_CLEARED,
-            verdict=None,
-            pending_suggestion=None,
             superseded_by_id=None,
         )
 
@@ -588,9 +583,10 @@ class ConditionRoundAppearancePublic(BaseModel):
     #: Whether this condition appeared on this round's sheet, from its appearance events — not from
     #: `first_round_id`/`last_seen_round_id`, which cannot express "on R1 and R3 but not R2".
     on_sheet: bool
-    #: The note that arrived IN this round, if any — matched on the note's `first_seen_round_id`, so
-    #: the chip appears against the round that actually brought it rather than against every round.
-    note: UnderwriterNotePublic | None = None
+    #: The notes that arrived IN this round — matched on each note's `first_seen_round_id`, so a
+    #: chip appears against the round that actually brought it. A LIST: one sheet can carry two notes
+    #: on one condition, and a single field kept only the last of them.
+    notes: list[UnderwriterNotePublic] = Field(default_factory=list)
 
 
 class ConditionDetailPublic(ConditionPublic):
@@ -606,7 +602,7 @@ class ConditionDetailPublic(ConditionPublic):
     only when somebody opens one sheet.
     """
 
-    #: Every round on the file, oldest first, each saying whether this condition was on it.
+    #: Every IMPORTED round on the file, oldest first, each saying whether this condition was on it.
     rounds: list[ConditionRoundAppearancePublic] = Field(default_factory=list)
 
 

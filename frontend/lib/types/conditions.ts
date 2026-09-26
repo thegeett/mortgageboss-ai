@@ -358,9 +358,9 @@ export interface DraftRow {
  * verdict and nothing else**; the rule moved from "the field does not exist" to "only a verdict sets
  * it".
  *
- * Three fields have no producer until a later ticket and are `null`/`false` until then, each named
- * with the ticket that fills it. They are here now because LP-913 renders the row from this type and
- * adding keys to both sides twice would churn the cross-stack mirror for no gain.
+ * `superseded_by_id` has no producer until LP-915 and is `null` until then; it is here because its
+ * type is already final. `verdict` and `pending_suggestion` arrive typed with their producers
+ * (LP-912, LP-915) — they shipped here first as guessed types and were taken out in review.
  */
 export interface Condition {
   id: string;
@@ -410,10 +410,6 @@ export interface Condition {
   days_open: number;
   /** The lender said "not satisfied". LP-912 narrows this to "because of an underwriter note". */
   came_back: boolean;
-  /** Who said it was cleared or waived, and where. Null until LP-912 records one. */
-  verdict: Record<string, unknown> | null;
-  /** LP-915's proposal, e.g. "probably cleared in round 2". Always a question with a button. */
-  pending_suggestion: string | null;
   /** Set by LP-915 when a "reworded" pair is confirmed. Nothing disappears; it points forward. */
   superseded_by_id: string | null;
   /**
@@ -486,13 +482,13 @@ export interface ConditionRoundAppearance {
   date_printed: string | null;
   completeness: ConditionRoundCompleteness;
   on_sheet: boolean;
-  /** The note that arrived IN this round, matched on the note's own `first_seen_round_id`. */
-  note: UnderwriterNote | null;
+  /** The notes that arrived IN this round, matched on each note's `first_seen_round_id`. */
+  notes: UnderwriterNote[];
 }
 
 /** One condition with its whole story — the detail sheet. Extends the row so the two cannot drift. */
 export interface ConditionDetail extends Condition {
-  /** Every round on the file, oldest first, each saying whether this condition was on it. */
+  /** Every IMPORTED round on the file, oldest first, each saying whether this condition was on it. */
   rounds: ConditionRoundAppearance[];
 }
 

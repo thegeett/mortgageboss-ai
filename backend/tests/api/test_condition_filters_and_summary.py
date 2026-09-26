@@ -17,17 +17,19 @@ rather than as a fixture that seeded nothing, so `_seeded_uwm_file` asserts the 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
 import structlog
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.jwt import create_access_token
 from app.core.security import hash_password
 from app.main import app
 from app.models import Company, User, UserRole
-from app.models.condition import Condition
+from app.models.condition import Condition, ConditionLenderStatus, ConditionPrepStatus
 from app.models.lender_condition_code import LenderCodeStatus, LenderConditionCode
 from app.models.loan_file import LoanFile
 from app.scripts.seed_lender_codes import seed_lender_codes
@@ -206,6 +208,8 @@ async def test_the_unfiltered_list_is_stage_ones_response_in_sheet_order(
 
     assert _codes(rows) == ROUND_1_CODES
     assert all(row["round_numbers"] == [1] for row in rows)
+    # Stage 1's response carried no fields that LP-911's producers do not fill yet (LP-911 review).
+    assert all("verdict" not in row and "pending_suggestion" not in row for row in rows)
     assert all(row["prep_status"] == "to_do" for row in rows)
     assert all(row["lender_status"] == "open" for row in rows)
 
@@ -269,9 +273,9 @@ async def test_the_bucket_filter_splits_the_sheet_six_and_five(
     docs = await _list(client, auth, loan_file, bucket_kind="prior_to_docs")
     funding = await _list(client, auth, loan_file, bucket_kind="prior_to_funding")
 
-    assert len(docs) == 6
-    assert "0132" in _codes(docs)
-    assert len(funding) == 5
+    # EXACT SETS, NOT COUNTS (review): six wrong rows would have passed a length check.
+    assert sorted(_codes(docs)) == sorted(["1228", "7086", "6132", "6637", "6178", "0132"])
+    assert sorted(_codes(funding)) == sorted(["1947", "1582", "0006", "0007", "6378"])
 
 
 async def test_filters_combine_with_and(
@@ -298,15 +302,39 @@ async def test_a_multi_valued_filter_is_an_or_within_itself(
     assert sorted(_codes(rows)) == sorted(["1947", "6378", "6178"])
 
 
+async def _import_pasted_round_2(
+    client: AsyncClient, auth: dict[str, str], loan_file: LoanFile
+) -> None:
+    """Round 2 as the portal paste: six of round 1's conditions, seen again."""
+    pasted = await client.post(
+        f"{API}/loan-files/{loan_file.id}/condition-rounds/paste",
+        json={"text": portal_excerpt(), "completeness": "partial"},
+        headers=auth,
+    )
+    assert pasted.status_code == 201, pasted.text
+    second = await client.post(f"{API}/condition-rounds/{pasted.json()['id']}/import", headers=auth)
+    assert second.status_code == 200, second.text
+    assert second.json()["seen_again"] == 6
+
+
 async def test_the_round_filter_answers_from_the_appearance_events(
     client: AsyncClient, imported: tuple[LoanFile, dict[str, str], str]
 ) -> None:
-    """Round 1 carried all eleven, and round 2 does not exist here — so round 1 returns everything and
-    round 2 returns nothing rather than erroring."""
+    """ "On the sheet of round N", with a round 2 that carried SIX of the eleven.
+
+    STRENGTHENED IN REVIEW. The first version had one round, so `round=1` returned all eleven and
+    `round=2` returned `[]` — which a filter answering "does round N exist" passes as well, and `[]`
+    is also what a broken filter returns. Two rounds with different contents is what makes this a
+    membership test.
+    """
     loan_file, auth, _round_id = imported
+    await _import_pasted_round_2(client, auth, loan_file)
 
     assert len(await _list(client, auth, loan_file, round=1)) == 11
-    assert await _list(client, auth, loan_file, round=2) == []
+    assert sorted(_codes(await _list(client, auth, loan_file, round=2))) == sorted(
+        ["1228", "1947", "1582", "0006", "0007", "6378"]
+    )
+    assert await _list(client, auth, loan_file, round=3) == []
 
 
 async def test_the_search_finds_the_wording_and_the_code(
@@ -320,6 +348,16 @@ async def test_the_search_finds_the_wording_and_the_code(
 
     assert _codes(by_words) == ["6637"]
     assert _codes(by_code) == ["6132"]
+
+
+async def test_the_search_ignores_case(
+    client: AsyncClient, imported: tuple[LoanFile, dict[str, str], str]
+) -> None:
+    """LP-911 REVIEW. The sheet prints "earnest money" in lower case and the letter's header prints
+    "Earnest Money Deposit"; a processor types either. `LIKE` found only the first."""
+    loan_file, auth, _round_id = imported
+
+    assert _codes(await _list(client, auth, loan_file, q="EARNEST Money")) == ["6637"]
 
 
 async def test_the_search_term_never_reaches_a_log_line(
@@ -372,13 +410,63 @@ async def test_the_code_sort_orders_as_strings_keeping_leading_zeros(
 async def test_the_owner_sort_groups_the_owners(
     client: AsyncClient, imported: tuple[LoanFile, dict[str, str], str]
 ) -> None:
-    """Each owner's rows are contiguous, which is what "group by waiting on" needs from the server."""
+    """Owners grouped, sheet order within each — an exact order, not merely contiguous runs.
+
+    STRENGTHENED IN REVIEW. The first version asserted only that each owner's rows were contiguous,
+    which any grouping passes whatever it does inside a group or between groups.
+    """
     loan_file, auth, _round_id = imported
 
-    owners = [row["effective_owner"] for row in await _list(client, auth, loan_file, sort="owner")]
+    rows = await _list(client, auth, loan_file, sort="owner")
 
-    runs = [owner for index, owner in enumerate(owners) if index == 0 or owner != owners[index - 1]]
-    assert len(runs) == len(set(runs)), f"an owner appeared in two runs: {owners}"
+    assert _codes(rows) == [
+        "7086", "6132", "6637",  # borrower
+        "0132",  # broker
+        "6178",  # insurance
+        "1582", "0006", "0007",  # processor
+        "1947", "6378",  # title
+        "1228",  # unknown
+    ]  # fmt: skip
+
+
+async def test_the_status_sort_puts_the_work_first(
+    client: AsyncClient, db_session: AsyncSession, imported: tuple[LoanFile, dict[str, str], str]
+) -> None:
+    """LP-911 REVIEW. The first version sorted on the stored strings, which is alphabetical:
+    `cleared` before `open`, and `ready` before `to_do`. The order is now the workflow's — came back,
+    then open (our steps in order), then answered — with sheet order inside each."""
+    loan_file, auth, _round_id = imported
+    came_back = await _one_condition(db_session, loan_file, "1228")
+    came_back.lender_status = ConditionLenderStatus.NOT_CLEARED
+    cleared = await _one_condition(db_session, loan_file, "7086")
+    cleared.lender_status = ConditionLenderStatus.CLEARED
+    ready = await _one_condition(db_session, loan_file, "0006")
+    ready.prep_status = ConditionPrepStatus.READY
+    await db_session.flush()
+
+    rows = await _list(client, auth, loan_file, sort="status")
+
+    assert _codes(rows) == [
+        "1228",  # came back
+        "6132", "6637", "6178", "0132", "1947", "1582", "0007", "6378",  # open · to do
+        "0006",  # open · ready to send
+        "7086",  # cleared
+    ]  # fmt: skip
+
+
+async def test_the_updated_sort_is_newest_change_first(
+    client: AsyncClient, db_session: AsyncSession, imported: tuple[LoanFile, dict[str, str], str]
+) -> None:
+    """Untested before review. One row touched after the import must lead."""
+    loan_file, auth, _round_id = imported
+    touched = await _one_condition(db_session, loan_file, "0132")
+    touched.updated_at = datetime.now(UTC) + timedelta(minutes=5)
+    await db_session.flush()
+
+    rows = await _list(client, auth, loan_file, sort="updated")
+
+    assert _codes(rows)[0] == "0132"
+    assert sorted(_codes(rows)) == sorted(ROUND_1_CODES)
 
 
 # --------------------------------------------------------------------------- #
@@ -452,7 +540,48 @@ async def test_one_condition_comes_back_with_every_round_and_whether_it_was_on_i
     assert appearance["on_sheet"] is True
     assert appearance["completeness"] == "full"
     # `6132` carries the sheet's dated note, and it arrived in THIS round.
-    assert appearance["note"]["text"]
+    assert [note["text"] for note in appearance["notes"]] == ["Not in Upload"]
+
+
+async def test_the_detail_lists_imported_rounds_only(
+    client: AsyncClient, db_session: AsyncSession, imported: tuple[LoanFile, dict[str, str], str]
+) -> None:
+    """LP-911 REVIEW. A pasted round still in DRAFT is on the strip but is not a round any condition
+    was or was not on. The first version listed every round, so this draft read as "not on it —"."""
+    loan_file, auth, round_id = imported
+    draft = await client.post(
+        f"{API}/loan-files/{loan_file.id}/condition-rounds/paste",
+        json={"text": portal_excerpt(), "completeness": "partial"},
+        headers=auth,
+    )
+    assert draft.status_code == 201, draft.text
+    condition = await _one_condition(db_session, loan_file, "6132")
+
+    body = (await client.get(f"{API}/conditions/{condition.id}", headers=auth)).json()
+
+    assert [appearance["round_id"] for appearance in body["rounds"]] == [round_id]
+
+
+async def test_every_note_of_a_round_is_on_its_pill(
+    client: AsyncClient, db_session: AsyncSession, imported: tuple[LoanFile, dict[str, str], str]
+) -> None:
+    """LP-911 REVIEW. One sheet can carry two notes on one condition; the first version keyed the
+    notes by round and kept only the last."""
+    loan_file, auth, round_id = imported
+    condition = await _one_condition(db_session, loan_file, "6132")
+    condition.underwriter_notes = [
+        {"date": "2026-08-27", "text": "Not in Upload", "first_seen_round_id": round_id},
+        {"date": "2026-08-28", "text": "Still missing page 2", "first_seen_round_id": round_id},
+    ]
+    await db_session.flush()
+
+    body = (await client.get(f"{API}/conditions/{condition.id}", headers=auth)).json()
+
+    (appearance,) = body["rounds"]
+    assert [note["text"] for note in appearance["notes"]] == [
+        "Not in Upload",
+        "Still missing page 2",
+    ]
 
 
 async def test_a_first_import_writes_only_created_even_for_a_condition_with_a_note(
@@ -495,15 +624,7 @@ async def test_one_conditions_history_is_its_own_events_newest_first(
     """
     loan_file, auth, _round_id = imported
 
-    pasted = await client.post(
-        f"{API}/loan-files/{loan_file.id}/condition-rounds/paste",
-        json={"text": portal_excerpt(), "completeness": "partial"},
-        headers=auth,
-    )
-    assert pasted.status_code == 201, pasted.text
-    second = await client.post(f"{API}/condition-rounds/{pasted.json()['id']}/import", headers=auth)
-    assert second.status_code == 200, second.text
-    assert second.json()["seen_again"] == 6
+    await _import_pasted_round_2(client, auth, loan_file)
 
     condition = await _one_condition(db_session, loan_file, "1228")
     response = await client.get(f"{API}/conditions/{condition.id}/events", headers=auth)
@@ -584,3 +705,34 @@ async def test_the_cap_is_reported_rather_than_truncating_in_silence(
     assert response.status_code == 200, response.text
     assert len(response.json()) == MAX_CONDITIONS
     assert response.headers.get("X-Conditions-Capped") == "true"
+
+
+async def test_an_uncapped_read_carries_no_cap_header(
+    client: AsyncClient, imported: tuple[LoanFile, dict[str, str], str]
+) -> None:
+    """The other half (LP-911 review): a server that set the header on every response passed the
+    test above."""
+    loan_file, auth, _round_id = imported
+
+    response = await client.get(f"{API}/loan-files/{loan_file.id}/conditions", headers=auth)
+
+    assert response.status_code == 200, response.text
+    assert "X-Conditions-Capped" not in response.headers
+
+
+async def test_the_browser_is_allowed_to_read_the_cap_header(
+    client: AsyncClient, imported: tuple[LoanFile, dict[str, str], str]
+) -> None:
+    """LP-911 REVIEW. The frontend calls the API cross-origin (`NEXT_PUBLIC_API_URL`), and a browser
+    reads only the CORS-safelisted response headers unless the server names them in
+    `Access-Control-Expose-Headers`. Unnamed, `X-Conditions-Capped` arrives as absent and a truncated
+    list reads as complete — the same silence `main.py`'s comment records for the page headers."""
+    loan_file, auth, _round_id = imported
+    origin = settings.cors_allowed_origins[0]
+
+    response = await client.get(
+        f"{API}/loan-files/{loan_file.id}/conditions", headers={**auth, "Origin": origin}
+    )
+
+    exposed = response.headers.get("access-control-expose-headers", "")
+    assert "x-conditions-capped" in exposed.lower()

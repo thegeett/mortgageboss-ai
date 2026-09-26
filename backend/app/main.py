@@ -14,6 +14,7 @@ from app.api.calculators import router as calculators_router
 from app.api.capabilities import router as capabilities_router
 from app.api.communications import message_router as messages_router
 from app.api.communications import router as communications_router
+from app.api.conditions import CAPPED_HEADER as CONDITIONS_CAPPED_HEADER
 from app.api.conditions import conditions_by_id_router
 from app.api.conditions import rounds_router as condition_rounds_router
 from app.api.conditions import router as conditions_router
@@ -140,6 +141,9 @@ app.add_middleware(
         "X-Page-Height-Points",
         "X-Page-Zoom",
         "X-Page-Count",
+        # The conditions list says here when it hit its cap (LP-911). Unexposed, the browser reads
+        # it as absent and a truncated list looks complete — the failure this list exists for.
+        CONDITIONS_CAPPED_HEADER,
     ],
 )
 

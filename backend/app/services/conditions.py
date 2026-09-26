@@ -43,11 +43,13 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from typing import cast
+from enum import StrEnum
+from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, Select, or_, select
+from sqlalchemy import ColumnElement, Select, case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
 
 from app.models.condition import (
     BucketKind,
@@ -467,13 +469,43 @@ def _apply_filters(
         # AUTOESCAPED, so a processor searching for "50%" or "_" gets those characters rather than
         # wildcards. The value is never logged (ADR-405); `ConditionFilters.names()` is what a log
         # line may say.
+        #
+        # CASE-INSENSITIVE (LP-911 review). `contains` compiles to `LIKE`, which is case-sensitive in
+        # Postgres, so "earnest money" found `6637` only because the sheet happens to print it in
+        # lower case; "Earnest Money", as the letter's own header prints it, found nothing.
         stmt = stmt.where(
             or_(
-                Condition.verbatim_text.contains(filters.q, autoescape=True),
-                Condition.lender_code.contains(filters.q, autoescape=True),
+                Condition.verbatim_text.icontains(filters.q, autoescape=True),
+                Condition.lender_code.icontains(filters.q, autoescape=True),
             )
         )
     return stmt
+
+
+#: The `status` sort's order: WORK FIRST (LP-911 review). The first version ordered by the columns'
+#: stored strings, which is alphabetical — `cleared` before `open`, and `ready` before `to_do` —
+#: an order nobody asked for. Came back leads because the lender has sent the work back; answered
+#: conditions trail; the two A4 reserves sit where they would mean something if they are ever used.
+_LENDER_STATUS_ORDER = (
+    ConditionLenderStatus.NOT_CLEARED,
+    ConditionLenderStatus.OPEN,
+    ConditionLenderStatus.PENDING_REVIEW,
+    ConditionLenderStatus.CLEARED,
+    ConditionLenderStatus.WAIVED,
+    ConditionLenderStatus.SUPERSEDED,
+)
+_PREP_STATUS_ORDER = (
+    ConditionPrepStatus.TO_DO,
+    ConditionPrepStatus.WAITING,
+    ConditionPrepStatus.REVIEW,
+    ConditionPrepStatus.READY,
+    ConditionPrepStatus.WITH_UNDERWRITER,
+)
+
+
+def _rank(column: InstrumentedAttribute[Any], order: tuple[StrEnum, ...]) -> ColumnElement[int]:
+    """`column`'s position in `order`, so a sort follows the workflow rather than the alphabet."""
+    return case({value: index for index, value in enumerate(order)}, value=column, else_=len(order))
 
 
 def _apply_sort(stmt: Select[tuple[Condition]], sort: ConditionSort) -> Select[tuple[Condition]]:
@@ -488,7 +520,11 @@ def _apply_sort(stmt: Select[tuple[Condition]], sort: ConditionSort) -> Select[t
         # codes, and putting it first would push hand-typed rows to the top of every list.
         return stmt.order_by(Condition.lender_code.asc().nulls_last(), Condition.sequence)
     if sort is ConditionSort.STATUS:
-        return stmt.order_by(Condition.lender_status, Condition.prep_status, Condition.sequence)
+        return stmt.order_by(
+            _rank(Condition.lender_status, _LENDER_STATUS_ORDER),
+            _rank(Condition.prep_status, _PREP_STATUS_ORDER),
+            Condition.sequence,
+        )
     if sort is ConditionSort.OWNER:
         return stmt.order_by(_effective_owner_column(), Condition.sequence)
     if sort is ConditionSort.UPDATED:
@@ -565,8 +601,9 @@ def summarise_conditions(conditions: list[Condition]) -> ConditionSummary:
     THE THREE BREAKDOWNS COUNT **OPEN** CONDITIONS ONLY, and that is a decision rather than an
     oversight. The summary bar exists to say what is still outstanding: S2-02 prints "Prior to docs
     open 1", which is a different number from "how many prior-to-docs conditions this file has ever
-    had". `by_prep_status` additionally excludes info-only rows, because an information line has no
-    preparation track at all (ADR-408).
+    had". Info-only rows are in none of them, because `is_open` is never true for one — so
+    `by_prep_status` needs no exclusion of its own (an earlier version carried one, which could not
+    change any number).
 
     The two headline bucket numbers are LOOKUPS INTO `by_bucket_kind`, never separate counts, so they
     cannot drift from the breakdown the filter row reads.
@@ -577,8 +614,7 @@ def summarise_conditions(conditions: list[Condition]) -> ConditionSummary:
     by_owner: dict[str, int] = defaultdict(int)
     by_bucket_kind: dict[str, int] = defaultdict(int)
     for condition in open_conditions:
-        if not condition.info_only:
-            by_prep_status[condition.prep_status.value] += 1
+        by_prep_status[condition.prep_status.value] += 1
         by_owner[effective_owner(condition).value] += 1
         by_bucket_kind[condition.bucket_kind.value] += 1
 
@@ -614,6 +650,25 @@ async def condition_summary(db: AsyncSession, *, loan_file_id: UUID) -> Conditio
     row and the bar must share.
     """
     return summarise_conditions(await list_conditions(db, loan_file_id=loan_file_id))
+
+
+async def imported_rounds_oldest_first(
+    db: AsyncSession, *, loan_file_id: UUID
+) -> list[ConditionRound]:
+    """The file's IMPORTED rounds, by round number — a condition's own story reads forwards (S2-03).
+
+    NOT `list_rounds`, and the difference is the defect LP-911's review found. `list_rounds` returns
+    every round the strip shows — drafts, failed parses and discarded sheets included, newest
+    CREATED first. The detail sheet reversed it and listed them all, so a draft still under review
+    rendered as a round this condition was "not on", and a round imported out of creation order sat in
+    the wrong place. Spec §LP-916: "one line per imported round".
+    """
+    stmt = select(ConditionRound).where(
+        ConditionRound.loan_file_id == loan_file_id,
+        ConditionRound.status == ConditionRoundStatus.IMPORTED,
+    )
+    stmt = only_active(stmt, ConditionRound).order_by(ConditionRound.round_number.asc())
+    return list((await db.execute(stmt)).scalars().all())
 
 
 async def latest_imported_round(db: AsyncSession, *, loan_file_id: UUID) -> ConditionRound | None:
@@ -653,6 +708,7 @@ __all__ = [
     "events_for_condition",
     "import_counts",
     "import_counts_for_file",
+    "imported_rounds_oldest_first",
     "is_open",
     "latest_imported_round",
     "list_conditions",
