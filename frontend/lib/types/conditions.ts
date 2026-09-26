@@ -131,16 +131,18 @@ export interface ConditionEvent {
   kind: ConditionEventKind;
   occurred_at: string;
   actor_user_id: string | null;
-  source_kind: string | null;
+  /** A closed enum on the wire, not an open string — an unrecognised value arrives as null. */
+  source_kind: ConditionSourceKind | null;
   reader: string | null;
-  reader_version: string | null;
   rows: number | null;
-  duplicates_dropped: number | null;
   round_number: number | null;
   created: number | null;
   seen_again: number | null;
-  from_status: string | null;
-  filled_from: string | null;
+  from_status: ConditionRoundStatus | null;
+  /** What an enrich actually did, so a line need not claim it filled what it did not. */
+  filled_header: boolean | null;
+  filled_expiry: boolean | null;
+  matched: number | null;
 }
 
 /** The paste endpoint's ceiling, enforced by the request schema (spec §LP-907). */

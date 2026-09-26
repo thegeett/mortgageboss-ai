@@ -141,9 +141,24 @@ async def events_for_round(db: AsyncSession, *, round_id: UUID) -> list[Conditio
     question from a round's and which nothing in this codebase asks. It does not get this function's
     justification, and it is named here so the next person to look does not assume it did.
 
-    ⚠️ OLDEST FIRST, WHICH IS THE OPPOSITE OF THE ROUND STRIP. A history is read downwards as a
-    sequence of events — pasted, then imported, then the PDF attached — so reversing it would make
-    the story run backwards. `list_rounds` is newest-first because a strip answers "what is current".
+    ⚠️ NEWEST FIRST, BECAUSE THE DESIGN DECIDED IT. The first version was oldest-first, argued from
+    first principles: "a history is read downwards as a sequence". But S1-09's mock runs
+    `4:31 → 4:22 → 4:20`, and its *May differ* covers only the sheet width and whether times show —
+    so the order is a Must-match, and reasoning my way to the other answer was re-deciding something
+    the design pack had already settled. Raised in review; as built the Visual check would have failed.
+
+    ⚠️ ROUND-LEVEL EVENTS ONLY — `condition_id IS NULL`. Without this a 30-row import renders thirty
+    "A condition was added" lines and the panel the README calls "a SHORT history" is anything but:
+    measured on a real paste → import → paste → import flow, round 2 came back with NINE lines, six of
+    them detail-less `CONDITION_SEEN_AGAIN`.
+
+    The cost, stated rather than hidden: a condition typed by hand into an existing imported round
+    writes only `CONDITION_CREATED`, so it leaves no round-level trace and does not appear here. That
+    is the right trade for a panel about the ROUND, and it is recorded in LP-909 rather than left for
+    someone to discover.
+
+    The index still serves this: `(round_id, occurred_at)` is used as a prefix, with the null check as
+    a filter.
 
     ⚠️ NO COMPANY FILTER HERE, AND THAT IS NOT AN OMISSION. The caller resolves the round through
     `get_scoped_round`, which filters `company_id` INSIDE its statement — so an id that reaches this
@@ -152,8 +167,8 @@ async def events_for_round(db: AsyncSession, *, round_id: UUID) -> list[Conditio
     """
     result = await db.execute(
         select(ConditionEvent)
-        .where(ConditionEvent.round_id == round_id)
-        .order_by(ConditionEvent.occurred_at, ConditionEvent.id)
+        .where(ConditionEvent.round_id == round_id, ConditionEvent.condition_id.is_(None))
+        .order_by(ConditionEvent.occurred_at.desc(), ConditionEvent.id.desc())
     )
     return list(result.scalars().all())
 

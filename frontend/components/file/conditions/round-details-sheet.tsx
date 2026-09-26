@@ -168,13 +168,28 @@ function historyStamp(iso: string): string {
  * can legitimately be absent, and the line says what happened without inventing a number for it.
  */
 function historyLine(event: ConditionEvent): string {
-  const { kind, rows, created, seen_again, round_number, reader, from_status } = event;
+  const { kind, rows, created, seen_again, reader, from_status } = event;
 
   switch (kind) {
     case "round_received":
-      return event.source_kind === "paste"
-        ? `Pasted${rows === null ? "" : ` · ${rows} conditions read`}`
-        : "Condition sheet received";
+      // ⚠️ FOUR SOURCES, AND "a sheet was received" IS FALSE FOR TWO OF THEM (LP-909 review). A
+      // MANUAL round is a condition somebody typed; nothing arrived. A paste is text, not a sheet.
+      // The old version said "Condition sheet received" for both, which is the class of statement
+      // this stage keeps deleting.
+      //
+      // ⚠️ AND NO ROW COUNT HERE. The paste writer stores `{source_kind, bytes}` — never `rows` — so
+      // the old `rows === null ? "" : …` arm was dead code that could not run, and the design's
+      // "6 conditions read" comes from the following `ROUND_PARSED`.
+      switch (event.source_kind) {
+        case "paste":
+          return "Pasted";
+        case "manual":
+          return "Typed by hand";
+        case "email":
+          return "Condition sheet forwarded";
+        default:
+          return "Condition sheet received";
+      }
     case "round_parsed":
       return reader === "split"
         ? `Split by AI${rows === null ? "" : ` · ${rows} rows`}`
@@ -184,15 +199,32 @@ function historyLine(event: ConditionEvent): string {
     case "round_reparse_requested":
       return `Read again${from_status ? ` (was ${from_status.replace(/_/g, " ")})` : ""}`;
     case "round_imported":
-      return `Imported${round_number === null ? "" : ` as round ${round_number}`}${
+      // No "as round N": the sheet's own title already says which round this is, and the design's
+      // line is "Imported: 0 new, 6 seen again".
+      return `Imported${
         created === null && seen_again === null
           ? ""
           : `: ${created ?? 0} new, ${seen_again ?? 0} seen again`
       }`;
     case "round_discarded":
       return "Discarded";
-    case "round_enriched":
-      return "PDF attached — letter details filled";
+    case "round_enriched": {
+      // ⚠️ IT USED TO CLAIM "letter details filled" UNCONDITIONALLY (LP-909 review). An enrich fills
+      // only what the round was missing — `if header and not round_.header` — so attaching a PDF to a
+      // paste that already carried its own letterhead fills nothing, and the line asserted otherwise.
+      // The same defect as `enrichSummary` counting a match as a fill, one panel over.
+      const filled = [
+        event.filled_header ? "letter details" : null,
+        event.filled_expiry ? "expiry dates" : null,
+      ].filter((part): part is string => part !== null);
+      const matched =
+        event.matched && event.matched > 0
+          ? ` · matched ${event.matched} condition${event.matched === 1 ? "" : "s"}`
+          : "";
+      return filled.length > 0
+        ? `PDF attached — ${filled.join(" and ")} filled${matched}`
+        : `PDF attached — nothing new to fill${matched}`;
+    }
     case "condition_created":
       return "A condition was added";
     case "condition_seen_again":

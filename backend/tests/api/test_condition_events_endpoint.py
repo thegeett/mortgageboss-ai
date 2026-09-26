@@ -21,12 +21,14 @@ from datetime import timedelta
 from uuid import uuid4
 
 import pytest
+from app.conditions.fingerprint import fingerprint
 from app.core.database import get_db
 from app.core.jwt import create_access_token
 from app.core.security import hash_password
 from app.main import app
 from app.models import Company, User, UserRole
 from app.models.base import utcnow
+from app.models.condition import BucketKind, Condition
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_round import ConditionRound, ConditionRoundCompleteness
 from app.services.condition_rounds import create_round_from_paste
@@ -169,6 +171,53 @@ async def test_the_lenders_words_do_not_travel(
     assert "verbatim_text" not in body
 
 
+async def test_npi_under_an_allow_listed_key_does_not_travel_either(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """⚠️ THE HALF THE FIRST NPI TEST NEVER CHECKED (LP-909 review).
+
+    That test put lender text under keys that are NOT on the allow-list — `text`, `verbatim_text`,
+    `borrower` — so it proved the KEY filter works and said nothing about VALUES. The projection typed
+    its strings as open `str`, so `detail={"reader": "Alex Rivera"}` would have travelled through a key
+    that IS on the list, and the test would have stayed green.
+
+    Every string exposed now comes from a closed vocabulary — an enum value, or one of `_READERS` —
+    and anything outside it becomes None. This is the assertion that makes that a boundary: a borrower
+    name under `reader`, a property address under `source_kind`, and a condition's wording under
+    `from_status`, none of which reach the client.
+    """
+    round_, company, token = await _round(db_session, slug="events-npi-allowlisted")
+    await _event(
+        db_session,
+        round_=round_,
+        company=company,
+        kind=ConditionEventKind.ROUND_PARSED,
+        detail={
+            "reader": "Alex Rivera",
+            "source_kind": "100 Example Ln, Columbia SC",
+            "from_status": "Provide an additional bank statement.",
+            "rows": 6,
+        },
+        minutes=1,
+    )
+
+    response = await client.get(_url(round_.id), headers=_auth(token))
+
+    assert response.status_code == 200, response.text
+    body = response.text
+    assert "Alex Rivera" not in body
+    assert "100 Example Ln" not in body
+    assert "Provide an additional bank statement" not in body
+
+    parsed = next(e for e in response.json() if e["kind"] == ConditionEventKind.ROUND_PARSED.value)
+    assert parsed["reader"] is None, "a value outside the vocabulary is dropped, not forwarded"
+    assert parsed["source_kind"] is None
+    assert parsed["from_status"] is None
+    # The well-formed key beside them still comes through, so this is a vocabulary check rather than
+    # the whole event being discarded.
+    assert parsed["rows"] == 6
+
+
 async def test_only_the_named_scalars_are_exposed(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
@@ -185,15 +234,21 @@ async def test_only_the_named_scalars_are_exposed(
         "actor_user_id",
         "source_kind",
         "reader",
-        "reader_version",
         "rows",
-        "duplicates_dropped",
         "round_number",
         "created",
         "seen_again",
         "from_status",
-        "filled_from",
+        # What an enrich actually did, so a line need not claim it filled what it did not.
+        "filled_header",
+        "filled_expiry",
+        "matched",
     }
+    # ⚠️ THREE FIELDS CAME OFF THIS LIST AND THAT IS THE POINT. `reader_version`,
+    # `duplicates_dropped` and `filled_from` were projected and read by no sentence — three open
+    # doors serving nothing. `filled_from` was also mis-documented as an enrich key: it is written
+    # once, on `CONDITION_EDITED`, so the arm that would have used it could never have seen it.
+    assert not {"reader_version", "duplicates_dropped", "filled_from"} & set(response.json()[0])
 
 
 # --------------------------------------------------------------------------- #
@@ -230,26 +285,84 @@ async def test_the_history_reads_oldest_first(
 
     kinds = [event["kind"] for event in response.json()]
 
-    # ⚠️ A RELATION OVER THE SEQUENCE, NOT AN EXACT LIST. The first version asserted exactly three
+    # ⚠️ A RELATION OVER THE SEQUENCE, NOT AN EXACT LIST. An earlier version asserted exactly three
     # kinds and failed on a correct implementation: a pasted round parses inline, so `ROUND_PARSED`
-    # sits between received and imported. Pinning the exact list makes this test break whenever a
-    # writer legitimately adds an event, which trains the next person to loosen it rather than read
-    # it — and the property is the ORDER, not the census.
+    # sits between received and imported. Pinning the census makes this break whenever a writer
+    # legitimately adds an event, which trains the next person to loosen it rather than read it.
+    #
+    # ⚠️ AND NEWEST FIRST, WHICH THIS TEST ALSO HAD BACKWARDS. It asserted oldest-first, following a
+    # commit that argued it from first principles — but S1-09's mock runs 4:31 → 4:22 → 4:20 and its
+    # *May differ* covers only the sheet width and whether times show. The order is a Must-match, so
+    # reasoning to the other answer was re-deciding something the design pack had settled.
     order = {kind: index for index, kind in enumerate(kinds)}
-    for earlier, later in (
-        (ConditionEventKind.ROUND_RECEIVED, ConditionEventKind.ROUND_PARSED),
-        (ConditionEventKind.ROUND_PARSED, ConditionEventKind.ROUND_IMPORTED),
-        (ConditionEventKind.ROUND_IMPORTED, ConditionEventKind.ROUND_ENRICHED),
+    for later, earlier in (
+        (ConditionEventKind.ROUND_ENRICHED, ConditionEventKind.ROUND_IMPORTED),
+        (ConditionEventKind.ROUND_IMPORTED, ConditionEventKind.ROUND_PARSED),
+        (ConditionEventKind.ROUND_PARSED, ConditionEventKind.ROUND_RECEIVED),
     ):
-        assert order[earlier.value] < order[later.value], (
-            f"{earlier.value} happened before {later.value} and must be listed before it — "
-            f"a history read downwards must not run the story backwards. Got: {kinds}"
+        assert order[later.value] < order[earlier.value], (
+            f"{later.value} happened after {earlier.value} and must be listed FIRST — S1-09 runs "
+            f"newest to oldest. Got: {kinds}"
         )
 
-    # And the timestamps are non-decreasing, which is the property the ordering rests on rather than
-    # an accident of insertion order.
+    # Non-increasing timestamps, which is the property the ordering rests on rather than an accident
+    # of insertion order.
     stamps = [event["occurred_at"] for event in response.json()]
-    assert stamps == sorted(stamps)
+    assert stamps == sorted(stamps, reverse=True)
+
+
+async def test_a_conditions_own_events_stay_out_of_the_rounds_history(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """⚠️ WITHOUT THIS FILTER A 30-ROW IMPORT RENDERS THIRTY "A condition was added" LINES, and the
+    README asks for "a SHORT history". Measured on a real paste → import → paste → import flow, round
+    2 came back with NINE lines, six of them detail-less `CONDITION_SEEN_AGAIN`.
+
+    The cost, asserted here rather than hidden: a condition typed into an existing imported round
+    writes only `CONDITION_CREATED`, so it leaves no round-level trace and does not appear. That is
+    the right trade for a panel about the ROUND, and it is recorded in LP-909.
+    """
+    round_, company, token = await _round(db_session, slug="events-condition-level")
+
+    # ⚠️ A REAL `Condition`, NOT A SENTINEL UUID. `condition_events.condition_id` carries
+    # `fk_condition_events_condition_id_conditions`, so `uuid4()` fails the insert rather than the
+    # assertion — the first version of this test died in its own setup with a ForeignKeyViolation.
+    condition = Condition(
+        company_id=company.id,
+        loan_file_id=round_.loan_file_id,
+        first_round_id=round_.id,
+        last_seen_round_id=round_.id,
+        sequence=1,
+        lender_code="1228",
+        bucket_heading="UW - Prior To Final Approval (PTD)",
+        bucket_kind=BucketKind.PRIOR_TO_DOCS,
+        verbatim_text="Final inspection is required.",
+        text_fingerprint=fingerprint("Final inspection is required."),
+        underwriter_notes=[],
+    )
+    db_session.add(condition)
+    await db_session.flush()
+
+    db_session.add(
+        ConditionEvent(
+            company_id=company.id,
+            loan_file_id=round_.loan_file_id,
+            round_id=round_.id,
+            # A condition-level event: it names a round, but it is about one row on it.
+            condition_id=condition.id,
+            kind=ConditionEventKind.CONDITION_SEEN_AGAIN,
+            detail={"lender_code": "1228", "changed": []},
+            occurred_at=utcnow() + timedelta(minutes=3),
+        )
+    )
+    await db_session.flush()
+
+    response = await client.get(_url(round_.id), headers=_auth(token))
+
+    kinds = [event["kind"] for event in response.json()]
+    assert ConditionEventKind.CONDITION_SEEN_AGAIN.value not in kinds
+    # The round-level events are still all there, so this is a filter rather than a truncation.
+    assert ConditionEventKind.ROUND_RECEIVED.value in kinds
 
 
 async def test_an_imports_numbers_come_through(

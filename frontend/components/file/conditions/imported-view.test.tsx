@@ -1,5 +1,10 @@
 // @vitest-environment jsdom
-import type { Condition, ConditionRound, ConditionSourceKind } from "@/lib/types/conditions";
+import type {
+  Condition,
+  ConditionEvent,
+  ConditionRound,
+  ConditionSourceKind,
+} from "@/lib/types/conditions";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -120,6 +125,32 @@ function round(
     condition_count: 11,
     created_at: "2026-08-28T10:00:00Z",
     updated_at: "2026-08-28T10:05:00Z",
+    ...overrides,
+  };
+}
+
+/**
+ * One history event, with every projected field defaulting to null.
+ *
+ * ⚠️ NULL BY DEFAULT BECAUSE THE SERVER PROJECTS ONLY WHAT A WRITER STORED. Spelling each field out
+ * per fixture is how the old one came to give `round_received` a `rows` that no writer sets — a shape
+ * the real app can never produce. Defaulting them makes a test say exactly which keys it is claiming.
+ */
+function event(overrides: Partial<ConditionEvent> = {}): ConditionEvent {
+  return {
+    kind: "round_received",
+    occurred_at: "2026-09-10T16:20:00Z",
+    actor_user_id: null,
+    source_kind: null,
+    reader: null,
+    rows: null,
+    round_number: null,
+    created: null,
+    seen_again: null,
+    from_status: null,
+    filled_header: null,
+    filled_expiry: null,
+    matched: null,
     ...overrides,
   };
 }
@@ -351,38 +382,36 @@ describe("the round-details sheet (S1-09)", () => {
     //
     // A test pinning an absence outlives the absence, which is the same shape as the comment above
     // it that claimed the mortgagee clause was missing from the server.
+    // ⚠️ THIS FIXTURE USED TO BE A SHAPE NO WRITER PRODUCES (LP-909 review). It gave
+    // `round_received` a `rows: 6` and asserted "Pasted · 6 conditions read" — but the paste writer
+    // stores `{source_kind, bytes}` with no `rows`, so that line could never render in the real app
+    // and the test passed against fiction. The same defect as my two earlier wrong tests, one level
+    // up: the fixture described the writers I expected rather than the ones that exist.
+    //
+    // It is now the real sequence — arrival with no count, then the parse that carries it — and
+    // NEWEST FIRST, because S1-09's mock runs 4:31 → 4:22 → 4:20.
     eventsQuery.mockReturnValue({
       data: [
-        {
-          kind: "round_received",
-          occurred_at: "2026-09-10T16:20:00Z",
-          actor_user_id: null,
-          source_kind: "paste",
-          reader: null,
-          reader_version: null,
-          rows: 6,
-          duplicates_dropped: null,
-          round_number: null,
-          created: null,
-          seen_again: null,
-          from_status: null,
-          filled_from: null,
-        },
-        {
+        event({
           kind: "round_imported",
           occurred_at: "2026-09-10T16:22:00Z",
           actor_user_id: "u1",
-          source_kind: null,
-          reader: null,
-          reader_version: null,
           rows: 6,
-          duplicates_dropped: null,
           round_number: 2,
           created: 0,
           seen_again: 6,
-          from_status: null,
-          filled_from: null,
-        },
+        }),
+        event({
+          kind: "round_parsed",
+          occurred_at: "2026-09-10T16:21:00Z",
+          reader: "uwm",
+          rows: 6,
+        }),
+        event({
+          kind: "round_received",
+          occurred_at: "2026-09-10T16:20:00Z",
+          source_kind: "paste",
+        }),
       ],
       isPending: false,
       isError: false,
@@ -394,8 +423,49 @@ describe("the round-details sheet (S1-09)", () => {
     // ⚠️ THE NUMBERS, NOT JUST THE LABELS. Each line is composed from projected scalars precisely
     // because `detail` is NPI and never travels — so asserting only that "Imported" appears would
     // pass for a version that rendered a kind map and dropped the counts the design asks for.
-    expect(screen.getByText("Pasted · 6 conditions read")).toBeDefined();
-    expect(screen.getByText("Imported as round 2: 0 new, 6 seen again")).toBeDefined();
+    expect(screen.getByText("Pasted")).toBeDefined();
+    expect(screen.getByText("Read by the rules (uwm) · 6 rows")).toBeDefined();
+    expect(screen.getByText("Imported: 0 new, 6 seen again")).toBeDefined();
+  });
+
+  it("⚠️ never says a sheet was received for a round somebody typed", () => {
+    // A MANUAL round's `ROUND_RECEIVED` is a condition entered by hand — nothing arrived. The old
+    // line said "Condition sheet received" for it, which is the class of false statement the
+    // reparse docstring itself names.
+    eventsQuery.mockReturnValue({
+      data: [event({ kind: "round_received", source_kind: "manual" })],
+      isPending: false,
+      isError: false,
+    });
+    render(<ImportedView fileId="f1" rounds={[round()]} {...handlers} />);
+    fireEvent.click(screen.getByRole("button", { name: "Letter details →" }));
+
+    expect(screen.getByText("Typed by hand")).toBeDefined();
+    expect(screen.queryByText(/Condition sheet received/)).toBeNull();
+  });
+
+  it("⚠️ does not claim an enrich filled anything when it filled nothing", () => {
+    // An enrich fills only what the round lacked, so attaching a PDF to a paste that already carried
+    // its letterhead fills nothing. The line used to assert "letter details filled" regardless — the
+    // same defect as `enrichSummary` counting a match as a fill.
+    eventsQuery.mockReturnValue({
+      data: [
+        event({
+          kind: "round_enriched",
+          filled_header: false,
+          filled_expiry: false,
+          matched: 6,
+        }),
+      ],
+      isPending: false,
+      isError: false,
+    });
+    render(<ImportedView fileId="f1" rounds={[round()]} {...handlers} />);
+    fireEvent.click(screen.getByRole("button", { name: "Letter details →" }));
+
+    expect(
+      screen.getByText("PDF attached — nothing new to fill · matched 6 conditions"),
+    ).toBeDefined();
   });
 
   it("⚠️ says the history could not be loaded rather than showing an empty one", () => {

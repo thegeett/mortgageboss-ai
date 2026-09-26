@@ -32,11 +32,13 @@ a confidence and the source line numbers it came from, and no identity of its ow
 #
 # Any field named after its own type hits this. This repo has `date`, `status`, `type` and `id`
 # fields throughout.
+from collections.abc import Callable
 from datetime import date as date_type
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.condition import (
@@ -134,19 +136,79 @@ class ConditionSourcePublic(BaseModel):
         )
 
 
-def _as_int(value: object) -> int | None:
+#: ⚠️ A LOGGER IN A SCHEMA MODULE, WHICH IS UNUSUAL HERE AND DELIBERATE. Every other schema in this
+#: repo is pure. The alternative is dropping a writer's drift in silence: a count stored as a string
+#: renders as a blank history line and nobody learns the writer changed shape. Flagged as a judgement
+#: rather than a mechanical fix (LP-909 review).
+log = structlog.get_logger(__name__)
+
+#: Every reader that can appear in a `ROUND_PARSED` detail. A CLOSED vocabulary, because the field is
+#: exposed and an open string is a hole — see `ConditionEventPublic`.
+_READERS = frozenset({"uwm", "champions", "generic", "paste", "split"})
+
+
+def _logged_mismatch(kind: object, key: str, expected: str) -> None:
+    """Report that a writer stored the wrong shape — by KEY NAME, never by value.
+
+    ⚠️ THE NAME AND NOTHING ELSE. `detail` is NPI-capable, so logging the value to explain a type
+    mismatch would put the lender's text in the log line to complain about its type. The key and the
+    event kind are enough to find the writer.
+    """
+    log.warning(
+        "condition_event_detail_shape",
+        event_kind=str(kind),
+        detail_key=key,
+        expected=expected,
+    )
+
+
+def _as_int(value: object, *, kind: object = None, key: str = "") -> int | None:
     """An int from `detail`, or None — never a coercion and never a raise.
 
-    `detail` is free-form JSONB written by six different call sites. A history panel must not 500
-    because one of them stored a string where this reads a count, and a coerced `"6"` → 6 would be
-    this layer inventing agreement that the writers do not have.
+    `detail` is free-form JSONB written by fifteen different `ConditionEvent(...)` constructions. A
+    history panel must not 500 because one of them stored a string where this reads a count, and a
+    coerced `"6"` → 6 would be this layer inventing agreement the writers have not made.
+
+    ⚠️ `bool` IS EXCLUDED EXPLICITLY BECAUSE `True` IS AN `int` IN PYTHON. Without that check a flag
+    stored under a count's key renders as the number 1.
+
+    A PRESENT key of the wrong type is logged, because silence there is the failure mode: the line
+    renders blank and nobody learns the writer drifted (LP-909 review).
     """
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
+    if isinstance(value, bool) or not isinstance(value, int):
+        if value is not None and key:
+            _logged_mismatch(kind, key, "int")
+        return None
+    return value
 
 
-def _as_str(value: object) -> str | None:
-    """A string from `detail`, or None. Same reasoning as `_as_int`."""
-    return value if isinstance(value, str) else None
+def _as_bool(value: object, *, kind: object = None, key: str = "") -> bool | None:
+    """A bool from `detail`, or None. `1` is not `True` here, for the same reason as above."""
+    if not isinstance(value, bool):
+        if value is not None and key:
+            _logged_mismatch(kind, key, "bool")
+        return None
+    return value
+
+
+def _as_vocab[T](value: object, allowed: frozenset[str], build: Callable[[str], T]) -> T | None:
+    """A value from a CLOSED vocabulary, or None. Anything unrecognised does not travel.
+
+    ⚠️ THIS IS THE FIX FOR A HOLE THE ALLOW-LIST DID NOT CLOSE (LP-909 review). Projecting named keys
+    stops an unexpected KEY reaching the client and does nothing about an unexpected VALUE — so
+    `detail={"reader": "Alex Rivera"}` would have passed straight through a key that is on the list,
+    and the NPI test stayed green because it only ever put text under keys that were NOT.
+
+    Every string this schema exposes is drawn from a fixed set the writers choose from: an enum value,
+    or one of five reader names. Refusing anything outside that set turns "no writer does this today"
+    into "no writer can".
+    """
+    if not isinstance(value, str) or value not in allowed:
+        return None
+    try:
+        return build(value)
+    except ValueError:  # pragma: no cover — `allowed` already gates this
+        return None
 
 
 class ConditionEventPublic(BaseModel):
@@ -159,11 +221,24 @@ class ConditionEventPublic(BaseModel):
     Passing the dict through would export a column the readonly layer deliberately refuses, through a
     door built for a history panel.
 
-    So each field below is projected BY NAME from the keys the writers actually use, and anything
-    else they put there stays server-side. The set is the union of what the six writers store:
-    `source_kind`/`bytes` on receipt, `reader`/`reader_version`/`rows`/`duplicates_dropped` on a
-    parse, `round_number`/`rows`/`created`/`seen_again` on import, `from_status` on a reparse,
-    `filled_from` on an enrich, `rows` on a discard.
+    ⚠️ AND THE KEYS ARE NOT ENOUGH — THE VALUES ARE CLOSED TOO. The first version projected named keys
+    as open `str`, which stops an unexpected KEY arriving and does nothing about an unexpected VALUE:
+    `detail={"reader": "Alex Rivera"}` would have travelled through a key that IS on the list. The NPI
+    test passed only because it put text under keys that were not. Every string exposed here is now
+    drawn from a fixed vocabulary — an enum value, or one of `_READERS` — and anything outside it
+    becomes None (LP-909 review).
+
+    ⚠️ AND THE SET IS AS SMALL AS THE SCREEN NEEDS. `reader_version`, `duplicates_dropped` and
+    `filled_from` were projected and read by nothing: `historyLine` never touches them. Three open
+    doors serving no sentence. `filled_from` was also mis-documented as "on an enrich" — it is written
+    once, on `CONDITION_EDITED` (`condition_enrich.py:273`), and `ROUND_ENRICHED` stores no such key,
+    so the arm that would have used it could never have seen it.
+
+    What the fifteen `ConditionEvent(...)` constructions across `condition_rounds`, `condition_import`,
+    `condition_enrich` and `tasks/conditions` actually store, of what is exposed: `source_kind` and
+    `bytes` on receipt; `reader` and `rows` on a parse; `round_number`/`rows`/`created`/`seen_again` on
+    import; `from_status` on a reparse; `filled_header`/`filled_expiry`/`filled_date_printed`/`matched`
+    on an enrich; `rows` on a discard.
 
     ⚠️ `actor_user_id` IS NULL FOR A SYSTEM EVENT, DELIBERATELY. The model says why: "a parse task has
     no actor, and naming the processor who uploaded the sheet as the actor of the parse would make the
@@ -182,42 +257,60 @@ class ConditionEventPublic(BaseModel):
     #: Null for a system event — see the class docstring.
     actor_user_id: UUID | None = None
 
-    #: How the round arrived (`ROUND_RECEIVED`): `pdf_upload`, `email`, `paste` or `manual`.
-    source_kind: str | None = None
-    #: Which reader ran, and its version (`ROUND_PARSED`). `"split"` after an AI split.
+    #: How the round arrived (`ROUND_RECEIVED`). A CLOSED enum, not a string.
+    source_kind: ConditionSourceKind | None = None
+    #: Which reader ran (`ROUND_PARSED`) — one of `_READERS`. `"split"` after an AI split.
     reader: str | None = None
-    reader_version: str | None = None
     #: How many rows the event concerned — read on a parse, imported on an import, thrown away on a
     #: discard. The three are different facts under one key because the writers named it that way.
+    #:
+    #: ⚠️ A PASTE'S `ROUND_RECEIVED` HAS NO `rows`. It stores `{source_kind, bytes}`, so the count for
+    #: "6 conditions read" comes from the following `ROUND_PARSED`, not from the arrival.
     rows: int | None = None
-    duplicates_dropped: int | None = None
     #: What an import did (`ROUND_IMPORTED`) — the numbers S1-09's line quotes.
     round_number: int | None = None
     created: int | None = None
     seen_again: int | None = None
-    #: What a reparse came back from (`ROUND_REPARSE_REQUESTED`).
-    from_status: str | None = None
-    #: What an enrich filled the round from (`ROUND_ENRICHED`).
-    filled_from: str | None = None
+    #: What a reparse came back from (`ROUND_REPARSE_REQUESTED`). A CLOSED enum.
+    from_status: ConditionRoundStatus | None = None
+    #: What an enrich actually did (`ROUND_ENRICHED`), so the line can stop claiming it filled the
+    #: letter details when it filled nothing (LP-909 review).
+    #: ⚠️ NO `filled_date_printed`. `ConditionEnrichResult` carries one, but the EVENT writer does not
+    #: store it (`condition_enrich.py` writes `reader`, `matched`, `added`, `unmatched_existing`,
+    #: `filled_header`, `filled_expiry`) — so projecting it would add a field nothing fills, which is
+    #: the shape this stage keeps deleting. `added` and `unmatched_existing` are stored and unused by
+    #: any sentence, so they stay unprojected for the same reason in reverse.
+    filled_header: bool | None = None
+    filled_expiry: bool | None = None
+    matched: int | None = None
 
     @classmethod
     def from_model(cls, event: ConditionEvent) -> "ConditionEventPublic":
-        """Project the allow-list. Anything else in `detail` does not travel."""
+        """Project the allow-list, with every string drawn from a closed vocabulary."""
         detail = event.detail or {}
+        kind = event.kind
         return cls(
-            kind=event.kind,
+            kind=kind,
             occurred_at=event.occurred_at,
             actor_user_id=event.actor_user_id,
-            source_kind=_as_str(detail.get("source_kind")),
-            reader=_as_str(detail.get("reader")),
-            reader_version=_as_str(detail.get("reader_version")),
-            rows=_as_int(detail.get("rows")),
-            duplicates_dropped=_as_int(detail.get("duplicates_dropped")),
-            round_number=_as_int(detail.get("round_number")),
-            created=_as_int(detail.get("created")),
-            seen_again=_as_int(detail.get("seen_again")),
-            from_status=_as_str(detail.get("from_status")),
-            filled_from=_as_str(detail.get("filled_from")),
+            source_kind=_as_vocab(
+                detail.get("source_kind"),
+                frozenset(member.value for member in ConditionSourceKind),
+                ConditionSourceKind,
+            ),
+            reader=_as_vocab(detail.get("reader"), _READERS, str),
+            rows=_as_int(detail.get("rows"), kind=kind, key="rows"),
+            round_number=_as_int(detail.get("round_number"), kind=kind, key="round_number"),
+            created=_as_int(detail.get("created"), kind=kind, key="created"),
+            seen_again=_as_int(detail.get("seen_again"), kind=kind, key="seen_again"),
+            from_status=_as_vocab(
+                detail.get("from_status"),
+                frozenset(member.value for member in ConditionRoundStatus),
+                ConditionRoundStatus,
+            ),
+            filled_header=_as_bool(detail.get("filled_header"), kind=kind, key="filled_header"),
+            filled_expiry=_as_bool(detail.get("filled_expiry"), kind=kind, key="filled_expiry"),
+            matched=_as_int(detail.get("matched"), kind=kind, key="matched"),
         )
 
 
