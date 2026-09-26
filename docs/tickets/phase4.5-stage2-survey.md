@@ -251,22 +251,31 @@ counts**, and a fixture that disagreed would have been found halfway through LP-
 
 ## 5. Decisions taken without the product owner
 
-### 5.0 Defaults A1 to A7: not yet shown to the product owner *(added in review, R1)*
+### 5.0 Defaults A1 to A7, and D1 to D4: ACCEPTED by the product owner *(R1, corrected in follow-up)*
 
-The spec's first instruction is to STOP AND ASK about A1 to A7, show them to the product owner here,
-and record the answers **before ADR-408 is written**. This survey did not list them. They are
-recorded here as **adopted as written, pending the product owner's answer**. ADR-408 must say which
-ones were confirmed and which are still defaults.
+The spec tells this survey to STOP AND ASK about A1 to A7 before ADR-408 is written. **They have
+already been answered.** The product owner's build instruction for Stage 2 states, in as many words,
+that "D1-D4 and defaults A1-A7 in §1 of the tickets file are ACCEPTED" and that they are not to be
+re-asked. The review recorded them as "pending an answer" (R1) because that instruction is not in the
+repository — it reached the builder directly — so this is the more accurate record, not a softer one.
+
+ADR-408 therefore records A1 to A7 as **accepted**, citing this paragraph rather than claiming a
+conversation that did not happen in the tickets file.
 
 | # | Default | Status |
 |---|---|---|
-| A1 | A new dated underwriter note sets *Came back* and moves our status to *To do* | **Open, and blocked on §5.2:** a note first saved from a paste is judged new when a PDF carries it |
-| A2 | The processor can change "who it's waiting on" by hand | Adopted, pending answer |
-| A3 | No "Draft email to borrower" in Stage 2 | Adopted, pending answer |
-| A4 | `review` and `pending_review` stay in the database, never offered | Adopted, pending answer |
-| A5 | Hand-added conditions are never "probably cleared" | Adopted, pending answer |
-| A6 | "Probably cleared" compares against every open condition on the file | Adopted, pending answer |
-| A7 | An imported round can switch from *Just some* to *Full list* | Adopted, pending answer |
+| A1 | A new dated underwriter note sets *Came back* and moves our status to *To do* | **Accepted as intent.** Its *mechanism* had a defect — see §5.2, which is now decided, not open |
+| A2 | The processor can change "who it's waiting on" by hand | Accepted |
+| A3 | No "Draft email to borrower" in Stage 2 | Accepted |
+| A4 | `review` and `pending_review` stay in the database, never offered | Accepted |
+| A5 | Hand-added conditions are never "probably cleared" | Accepted |
+| A6 | "Probably cleared" compares against every open condition on the file | Accepted |
+| A7 | An imported round can switch from *Just some* to *Full list* | Accepted |
+
+**Accepting A1 did not settle §5.2, and the two must not be confused.** A1 is a statement of intent —
+"the lender's own dated note is the lender reopening the condition". R2 found that the *mechanism* A1
+would be wired to cannot tell one case apart. Accepting the intent says nothing about which notes
+qualify, which is what §5.2 decides.
 
 ### 5.1 to 5.5: the spec's contradictions and marked STOP AND ASK points
 
@@ -280,18 +289,45 @@ never clears, removes or changes a condition's status without a person's click.
    so the soonest is `11/03/2026`, and 09/26 → 11/03 is 38 days. **Decision: build to Done-when and
    S2-11; the goal's example is stale.** (Raised independently by the review session.)
 2. **LP-912's named STOP AND ASK — "if Stage 1's import cannot tell a new note from an old one
-   reliably (for example, the same note pasted twice)" — IS a stop, and it is open.** *(This item
-   first said the opposite; review measured it wrong, R2.)* `_note_key` is `(date, text)`, and a
-   note's date is resolved from the sheet's `date_printed`. **A paste has no `date_printed`**, so a
-   note first saved from a paste is `(None, "Not in Upload")`; when a later PDF carries the same note
-   it is `("2026-08-28", "Not in Upload")`, the keys differ, and `_new_notes` calls it new. Attaching
-   the PDF to the pasted round does not repair the saved note (`condition_enrich` fills holes and
-   leaves matched rows' notes alone). Under A1 as written, the next full PDF round would set
-   *Came back* and move our status to *To do* on a note the lender wrote weeks before. Measured on
-   `uwm_round1` in `tests/conditions/test_note_identity.py` (a strict xfail).
-   **Recommended for the product owner:** a saved **undated** note matches an incoming **dated** note
-   with the same text: it is not new, its date is filled in place, and no event is written. Same text
-   under two *different* dates stays two notes. LP-912 must not wire A1 until this is answered.
+   reliably (for example, the same note pasted twice)" — is a REAL stop, and it is DECIDED here
+   rather than left open.** *(This item first said the mechanism was reliable; review measured that
+   wrong, R2, and its correction stands.)* `_note_key` is `(date, text)`, and a note's date is
+   resolved from the sheet's `date_printed`. **A paste has no `date_printed`**, so a note first saved
+   from a paste is `(None, "Not in Upload")`; when a later PDF carries the same note it is
+   `("2026-08-28", "Not in Upload")`, the keys differ, and `_new_notes` calls it new. Attaching the
+   PDF to the pasted round does not repair the saved note (`condition_enrich` fills holes and leaves
+   matched rows' notes alone). Under A1 as written, the next full PDF round would set *Came back* and
+   move our status to *To do* on a note the lender wrote weeks before — on the spec's own acceptance
+   path. Measured on `uwm_round1` in `tests/conditions/test_note_identity.py` (a strict xfail).
+
+   **Decision (taken without the product owner, standing instruction: choose the option that never
+   changes a status without a person's click). Two parts, and the split is the point:**
+
+   **(i) The safety lives in A1's trigger, not only in `_new_notes`.** A1 fires only when the
+   incoming note is evidence the lender *re-issued* something. It is not evidence when the note it
+   would be compared against has **no known date**: the two may be the same note seen twice, and
+   nothing in the data distinguishes that from a re-issue. So — a new note whose text matches a saved
+   note with `date: null` **never sets `not_cleared` and never moves our status**, whatever its own
+   date. Two notes with the same text under two *known and different* dates **do** fire A1: that is a
+   genuine re-issue and the signal is kept.
+
+   **(ii) The undated saved note has its date filled in place** when a dated note with identical text
+   arrives, with **no event written and no status change** — a data repair, not a lender statement.
+   This is the review's recommended rule and it is adopted for the *storage* question.
+
+   **Why (i) is stronger than (ii) alone, which is why both are here.** Text-only matching would also
+   swallow a *real* re-issue: a lender that prints the identical note text on two dates ("Not in
+   Upload" appears twice in the round-1 fixture alone) would have the second occurrence absorbed into
+   the first if the first was undated. Part (i) makes the *status* consequence conditional on a known
+   date rather than on the merge, so the false *Came back* is impossible **and** the true one survives
+   once both dates are known. A missed *Came back* is recoverable — the processor records the lender's
+   answer by hand, which is what LP-912's verdict endpoint is for. A false one silently reopens a
+   condition and moves work backwards.
+
+   **LP-912 therefore wires A1**, with (i) as a guard on its came-back rule and (ii) in the note
+   merge, and the strict xfail in `test_note_identity.py` becomes a normal passing test — the
+   alternative the review's own xfail reason offers ("either fix `_new_notes` or move this assertion
+   onto its came-back rule"). A test for (i) that fails without the guard is part of the same commit.
 3. **An UNDATED new note does not set *Came back*.** A1 says "a new **dated** underwriter note", and a
    verdict requires `source_date`. Undated notes are a real state, not an edge case: LP-909 §5
    measured them on S1-11, where a sheet with no header has no `date_printed` to resolve the year
@@ -314,8 +350,10 @@ Collected so it is not re-derived six times.
   `verbatim_text` and **is never logged** — log filter names and counts only (ADR-405, and
   `condition_import.py`'s own log lines are the pattern); a lender + seeded UWM codes in the fixture
   (D-6).
-- **LP-912:** ADR-408 first, recording A1 to A7 as confirmed or still default (§5.0); A1 not wired
-  until §5.2 is answered; one migration carrying eight columns, the event-kind swap (eight kinds), the
+- **LP-912:** ADR-408 first, recording A1 to A7 as **accepted** (§5.0); A1 **is** wired, carrying
+  §5.2's two-part rule — the came-back guard (a note matching an undated saved note never changes a
+  status) and the date fill-in — which turns `test_note_identity.py`'s strict xfail into a passing
+  test and needs its own test for the guard; one migration carrying eight columns, the event-kind swap (eight kinds), the
   `ck_conditions_ownerhintsource` swap (D-4; `_CASES` already watches it), plus the
   `readonly.conditions` rebuild above `def downgrade(`; every new enum mirrored into
   `frontend/lib/types/conditions.ts` and registered in `_MIRRORED`
