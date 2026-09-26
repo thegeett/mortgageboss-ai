@@ -3,12 +3,12 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
-import { hasPdf, useImportRound, useUpdateDraft } from "@/lib/api/conditions";
+import { hasPdf, useConditions, useImportRound, useUpdateDraft } from "@/lib/api/conditions";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import { COMPLETENESS_CHIP, FORMAT_LABEL, LAYOUT_NAME } from "@/lib/types/conditions";
 import type { ConditionRound, ConditionSourceKind, DraftRow } from "@/lib/types/conditions";
-import { CircleCheck, Sparkles, TriangleAlert } from "lucide-react";
+import { CircleCheck, Info, Sparkles, TriangleAlert } from "lucide-react";
 import { useId, useState } from "react";
 import { FLAGGED_BELOW, ReviewRows } from "./review-rows";
 import { ReviewSidePanel } from "./review-side-panel";
@@ -146,6 +146,16 @@ export function RoundReview({
   const [checked, setChecked] = useState(false);
   const save = useUpdateDraft(fileId);
   const importRound = useImportRound(fileId);
+  /**
+   * The file's existing conditions, for the "just some" callout's own numbers (S1-07).
+   *
+   * ⚠️ FETCHED HERE BECAUSE NOTHING ABOVE HOLDS IT. `useConditions` is called only in
+   * `imported-view.tsx`, which is this screen's SIBLING rather than its ancestor — the dashboard
+   * renders one or the other — so the query is not already warm and the count cannot be passed down.
+   * The design's sentence names the number, and rewording to dodge it would trade a Must-match line
+   * for a saving that does not exist: this is one GET on a screen that already polls its round.
+   */
+  const conditions = useConditions(fileId);
 
   const report = round.parse_report;
   const unassigned = report.unassigned_lines ?? [];
@@ -317,6 +327,33 @@ export function RoundReview({
           </div>
         </CardContent>
       </Card>
+
+      {/* ⚠️ WHAT "just some" ACTUALLY DOES AT IMPORT (S1-07 Must-match). The toggle above states the
+          answer; this states the consequence, which is the part a processor is deciding about — that
+          importing a partial round compares it against what is already on the file and leaves
+          everything it did not mention alone. Design rule 3 in one sentence, at the moment it
+          applies.
+
+          ⚠️ IT READS THE LOCAL `completeness`, like the chip, so it appears and disappears as the
+          toggle is used rather than describing the value the round arrived with.
+
+          ⚠️ AND THE FIRST CLAUSE IS DROPPED WHEN THE FILE IS EMPTY. On a round 1 pasted as "just
+          some" there is nothing to compare against, and "the 0 conditions already on this file are
+          compared with these 6" is a sentence about nothing. The design's own second half still
+          holds exactly, so that is what shows — a truncation of its wording rather than replacement
+          copy invented here. */}
+      {completeness === "partial" ? (
+        <p className="flex items-start gap-2 rounded-md border border-input bg-muted/40 p-2.5 text-xs text-muted-foreground">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span>
+            <span className="font-medium text-foreground-2">Just some:</span>{" "}
+            {(conditions.data?.length ?? 0) > 0
+              ? `the ${conditions.data?.length} conditions already on this file are compared with these ${rows.length} when you import. `
+              : null}
+            Anything not in this paste stays exactly as it is.
+          </span>
+        </p>
+      ) : null}
 
       {needsCheck || report.warnings.length > 0 ? (
         <Card className="border-warning/40">

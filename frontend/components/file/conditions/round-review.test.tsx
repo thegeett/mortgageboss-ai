@@ -22,6 +22,13 @@ vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/conditions")>()),
   useUpdateDraft: () => ({ mutate: saveMutate, isPending: false }),
   useImportRound: () => ({ mutate: importMutate, isPending: false }),
+  // ⚠️ MOCKED BECAUSE THE SCREEN NOW READS THE FILE'S CONDITIONS. S1-07's "just some" callout names
+  // how many are already on the file, and the real hook is a `useQuery` with no `QueryClientProvider`
+  // in this file's `render` — so omitting this throws inside `RoundReview` before a single assertion
+  // runs, and all 28 tests fail as one missing line. `imported-view.test.tsx` already mocks it for
+  // the same reason. Empty by default: these cases pin the screen WITHOUT the callout's first clause,
+  // which is the round-1 shape anyway.
+  useConditions: () => ({ data: [], isPending: false, isError: false }),
 }));
 
 vi.mock("@/lib/toast", () => ({
