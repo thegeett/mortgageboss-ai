@@ -440,6 +440,14 @@ Collected so it is not re-derived six times.
     candidate for LP-913:** keep `q` out of the shareable URL (hold it in component state, or strip it
     when a link is copied) rather than shipping a share button that leaks the search. Recorded here
     because LP-913 is where the decision has to be made, not discovered.
+    *(Review of `ee74b48d`: this is not a new kind of exposure, and the decision is ADR-405's rather
+    than one ticket's. The pipeline LP-913's spec names as its model already writes `search` into the
+    URL (`dashboard/page.tsx` → `writePipelineUrl`), and that search matches borrower NAMES
+    (`services/loan_files.py`, `ilike` on first + last name). So a shared pipeline link has carried
+    a borrower's name since the saved-views work. Keeping `q` out of the conditions URL is still
+    the right default for LP-913, because it is cheap and every other filter stays shareable. But
+    record it as an ADR-405 amendment that names the pipeline as the same exposure, or the app ends
+    up with one rule for conditions and the opposite for borrowers.)*
 - **LP-915:** `condition_rounds.comparison` is a new column and therefore a `readonly` decision (D-1);
   the `possible_match` id the "Reworded?" rule reads is written only for same-code /
   different-fingerprint, and points at the **oldest** such condition.
