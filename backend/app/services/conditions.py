@@ -186,9 +186,72 @@ def rows_on_sheet(round_: ConditionRound, imported_counts: dict[UUID, int]) -> i
     return len(round_.draft_rows or [])
 
 
+async def import_counts_for_file(
+    db: AsyncSession, *, loan_file_id: UUID
+) -> dict[UUID, tuple[int, int]]:
+    """What each import recorded — `(created, seen_again)`, keyed by round id.
+
+    ONE QUERY FOR THE WHOLE FILE, the rule `appearances_for_file` states: the round strip draws every
+    card at once, so a per-card query is the N+1 that helper exists to avoid.
+
+    ⚠️ THE NUMBERS LIVE IN AN EVENT, NOT ON THE ROW. `condition_rounds` stores neither count.
+    `condition_import.py` writes them into the `ROUND_IMPORTED` detail and returns them to whoever
+    called the import — and that response is gone by the next page load, which is why the card could
+    not show them. The event is the only durable record of what an import did.
+
+    ⚠️ NEWEST WINS, DELIBERATELY. `condition_events` is APPEND-ONLY, so a round imported twice has
+    two `ROUND_IMPORTED` rows and the later one describes the file as it stands. `occurred_at DESC,
+    id DESC` is the same tie-break `events_for_round` uses, and keeping the first row seen per round
+    is what makes "newest" the answer rather than "whichever the planner returned".
+
+    ⚠️ A DETAIL THAT CANNOT ANSWER IS SKIPPED, NOT ZEROED. Recording a malformed or partial detail as
+    `(0, 0)` would put a confident wrong number on the card — precisely the failure
+    `condition_count`'s own default produced. Absent here becomes `None` on the wire.
+    """
+    stmt = (
+        select(ConditionEvent.round_id, ConditionEvent.detail)
+        .where(
+            ConditionEvent.loan_file_id == loan_file_id,
+            ConditionEvent.kind == ConditionEventKind.ROUND_IMPORTED,
+            ConditionEvent.round_id.is_not(None),
+        )
+        .order_by(ConditionEvent.occurred_at.desc(), ConditionEvent.id.desc())
+    )
+
+    def _count(value: object) -> int | None:
+        # `bool` is an `int` in Python, so a writer that stored `True` would otherwise read as 1.
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+    counts: dict[UUID, tuple[int, int]] = {}
+    for round_id, detail in (await db.execute(stmt)).all():
+        if round_id is None or round_id in counts:
+            continue
+        created = _count((detail or {}).get("created"))
+        seen_again = _count((detail or {}).get("seen_again"))
+        if created is not None and seen_again is not None:
+            counts[round_id] = (created, seen_again)
+    return counts
+
+
+def import_counts(
+    round_: ConditionRound, counts: dict[UUID, tuple[int, int]]
+) -> tuple[int | None, int | None]:
+    """The `(created, seen_again)` this round's card should show, or `(None, None)`.
+
+    ⚠️ ONLY AN IMPORTED ROUND HAS AN ANSWER — the same status-dependence `rows_on_sheet` documents
+    one function above, and for the same reason. A draft has never been imported, so "0 new" would
+    be a statement about an event that never happened rather than a count of nothing.
+    """
+    if round_.status is not ConditionRoundStatus.IMPORTED:
+        return (None, None)
+    return counts.get(round_.id, (None, None))
+
+
 __all__ = [
     "APPEARED_ON",
     "appearances_for_file",
+    "import_counts",
+    "import_counts_for_file",
     "list_conditions",
     "list_rounds",
     "rows_on_sheet",

@@ -123,6 +123,11 @@ function round(
     },
     header: { lender_team: [], loan_facts: {} },
     condition_count: 11,
+    // Null rather than a number: these fixtures pin what the card says WITHOUT the counts, and a
+    // value here would append "· N new" to the "11 on sheet" line every existing assertion reads.
+    // A round imported before LP-909 §5 has the same shape — the counts are read from its event.
+    created: null,
+    seen_again: null,
     created_at: "2026-08-28T10:00:00Z",
     updated_at: "2026-08-28T10:05:00Z",
     ...overrides,

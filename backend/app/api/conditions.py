@@ -66,6 +66,8 @@ from app.services.condition_rounds import (
 from app.services.conditions import (
     appearances_for_file,
     events_for_round,
+    import_counts,
+    import_counts_for_file,
     list_conditions,
     list_rounds,
     rows_on_sheet,
@@ -327,6 +329,34 @@ async def upload_condition_sheet(
     return ConditionRoundPublic.from_model(round_)
 
 
+def _round_public(
+    round_: ConditionRound,
+    *,
+    per_round: dict[UUID, int],
+    imports: dict[UUID, tuple[int, int]],
+) -> ConditionRoundPublic:
+    """One round as the wire sees it, with every derived count filled in.
+
+    ⚠️ ONE PLACE, BECAUSE THESE DEFAULTS DO NOT FAIL LOUDLY. `_round_card` below already records
+    what happens otherwise: `condition_count` "defaults to 0 and must be supplied, which is easy to
+    forget precisely because forgetting it looks like data rather than like a bug" — and
+    `paste_conditions` forgets it to this day, answering "0 on sheet" for a round it just filled.
+    Adding `created` and `seen_again` as two more optional aggregates across three separate call
+    sites would triple that surface, so the call sites now ASK for a round rather than assemble one.
+
+    The counts still arrive as arguments rather than being fetched here: both are one-query-per-file
+    aggregates, and fetching inside this function would turn the round strip into an N+1 — the exact
+    thing `appearances_for_file` exists to prevent.
+    """
+    created, seen_again = import_counts(round_, imports)
+    return ConditionRoundPublic.from_model(
+        round_,
+        condition_count=rows_on_sheet(round_, per_round),
+        created=created,
+        seen_again=seen_again,
+    )
+
+
 @router.get("/{loan_file_id}/condition-rounds", response_model=list[ConditionRoundPublic])
 async def list_condition_rounds(
     loan_file: ScopedLoanFileById, db: DbSession
@@ -343,10 +373,10 @@ async def list_condition_rounds(
     """
     rounds = await list_rounds(db, loan_file_id=loan_file.id)
     _, per_round = await appearances_for_file(db, loan_file_id=loan_file.id)
-    return [
-        ConditionRoundPublic.from_model(round_, condition_count=rows_on_sheet(round_, per_round))
-        for round_ in rounds
-    ]
+    # A SECOND whole-file aggregate, on the same rule as the first: one query for the strip, never
+    # one per card. The counts live in each round's `ROUND_IMPORTED` event, not on the row.
+    imports = await import_counts_for_file(db, loan_file_id=loan_file.id)
+    return [_round_public(round_, per_round=per_round, imports=imports) for round_ in rounds]
 
 
 @rounds_router.get("/{round_id}", response_model=ConditionRoundPublic)
@@ -362,7 +392,8 @@ async def get_condition_round(round_: ScopedRound, db: DbSession) -> ConditionRo
     tenant's round is unfetchable rather than fetched and then refused.
     """
     _, per_round = await appearances_for_file(db, loan_file_id=round_.loan_file_id)
-    return ConditionRoundPublic.from_model(round_, condition_count=rows_on_sheet(round_, per_round))
+    imports = await import_counts_for_file(db, loan_file_id=round_.loan_file_id)
+    return _round_public(round_, per_round=per_round, imports=imports)
 
 
 @router.get("/{loan_file_id}/conditions", response_model=list[ConditionPublic])
@@ -515,7 +546,11 @@ async def _round_card(db: DbSession, round_: ConditionRound) -> ConditionRoundPu
     call sites looked like one defect).
     """
     _, per_round = await appearances_for_file(db, loan_file_id=round_.loan_file_id)
-    return ConditionRoundPublic.from_model(round_, condition_count=rows_on_sheet(round_, per_round))
+    # ⚠️ THE IMPORT ENDPOINT ANSWERS THROUGH HERE, WHICH IS WHERE THESE COUNTS FIRST EXIST. The
+    # import writes `ROUND_IMPORTED` and returns; without this the one response that could report
+    # what the import just did would be the only one that could not.
+    imports = await import_counts_for_file(db, loan_file_id=round_.loan_file_id)
+    return _round_public(round_, per_round=per_round, imports=imports)
 
 
 @rounds_router.post(

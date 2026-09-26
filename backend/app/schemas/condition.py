@@ -472,6 +472,20 @@ class ConditionRoundPublic(BaseModel):
     #: paste, which has no letter — the panel then says so rather than rendering empty fields.
     header: dict[str, Any] | None = None
     condition_count: int = 0
+    #: What the import recorded — "11 on sheet · 11 new", "· 0 new · 6 seen again" (S1-05, S1-08).
+    #:
+    #: ⚠️ `None` RATHER THAN `0`, AND THE FIELD DIRECTLY ABOVE IS WHY. `condition_count` shipped as
+    #: `int = 0` with no producer at all, so every round card read "0 on sheet" for as long as anyone
+    #: looked — and 0 is a VALID count, so nothing failed and no test noticed. These two carry the
+    #: same hazard doubled: a DRAFT round has never been imported, so "0 new" is a confident wrong
+    #: answer where "the question does not apply" is the true one. `None` cannot be mistaken for a
+    #: measurement, and it is the difference between "nothing was new" and "nobody asked yet".
+    #:
+    #: ⚠️ THEY LIVE IN AN EVENT, NOT ON THE ROW. `condition_rounds` stores neither, so both are read
+    #: from the round's newest `ROUND_IMPORTED` detail. `condition_events` is append-only, so
+    #: "newest" is deliberate rather than incidental: a re-import would leave two.
+    created: int | None = None
+    seen_again: int | None = None
     created_at: datetime
     #: ⚠️ EXPOSED SO THE STALE-WRITE GUARD IS REACHABLE AT ALL (LP-909 §4). `ConditionDraftUpdate`
     #: says "the caller sends the `updated_at` it read" — and until now no caller could read it,
@@ -483,7 +497,12 @@ class ConditionRoundPublic(BaseModel):
 
     @classmethod
     def from_model(
-        cls, round_: ConditionRound, *, condition_count: int = 0
+        cls,
+        round_: ConditionRound,
+        *,
+        condition_count: int = 0,
+        created: int | None = None,
+        seen_again: int | None = None,
     ) -> "ConditionRoundPublic":
         return cls(
             id=round_.id,
@@ -508,6 +527,8 @@ class ConditionRoundPublic(BaseModel):
             parse_report=ParseReportPublic.model_validate(round_.parse_report or {}),
             header=round_.header,
             condition_count=condition_count,
+            created=created,
+            seen_again=seen_again,
             created_at=round_.created_at,
             updated_at=round_.updated_at,
         )

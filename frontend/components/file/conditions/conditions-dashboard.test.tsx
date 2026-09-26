@@ -110,6 +110,8 @@ function round(
     parse_report: report(),
     header: null,
     condition_count: 0,
+    created: null,
+    seen_again: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     ...overrides,

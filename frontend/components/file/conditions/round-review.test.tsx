@@ -89,6 +89,8 @@ function round(overrides: Partial<ConditionRound> = {}): ConditionRound {
     },
     header: { lender_team: [], loan_facts: {} },
     condition_count: 0,
+    created: null,
+    seen_again: null,
     created_at: "2026-08-28T10:00:00Z",
     updated_at: "2026-08-28T10:05:00Z",
     ...overrides,

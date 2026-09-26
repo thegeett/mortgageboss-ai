@@ -99,6 +99,15 @@ export function RoundStrip({
 
             <span className="text-xs text-muted-foreground">
               {round.condition_count} on sheet
+              {/* ⚠️ SHOWN ONLY WHEN THE SERVER SENT NUMBERS, and the two halves differ on purpose.
+                  S1-05 reads "11 on sheet · 11 new" — no "seen again" at all, because none was —
+                  while S1-08 reads "6 on sheet · 0 new · 6 seen again", where 0 IS the measurement
+                  and the whole point of the screen. So `created` shows whenever it exists (0
+                  included) and `seen_again` only above zero.
+                  A DRAFT sends null for both: it has never been imported, so "· 0 new" would
+                  describe an import that never happened. */}
+              {round.created !== null ? ` · ${round.created} new` : null}
+              {round.seen_again ? ` · ${round.seen_again} seen again` : null}
               {round.status === "discarded" ? " · discarded" : null}
             </span>
 

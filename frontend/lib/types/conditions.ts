@@ -359,6 +359,16 @@ export interface ConditionRound {
   /** The letter's own details for the side panel. Absent for a paste, which has no letter. */
   header: Record<string, unknown> | null;
   condition_count: number;
+  /**
+   * What the import recorded, or null when the question does not apply.
+   *
+   * ⚠️ NULL IS NOT ZERO. A draft has never been imported, so the server sends null rather than 0 —
+   * and "0 new" would describe an import that never happened. On an IMPORTED round 0 is a real
+   * measurement: "0 new · 6 seen again" is S1-08's own line, and it is the whole point of that
+   * screen that a second round added nothing and removed nothing.
+   */
+  created: number | null;
+  seen_again: number | null;
   created_at: string;
   /**
    * When the row last changed — the value `expected_updated_at` must echo on a draft save.
