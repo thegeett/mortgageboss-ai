@@ -615,17 +615,18 @@ def _split_header(lines: Sequence[Line]) -> tuple[dict[str, object], date | None
         )
         + r"):"
     )
-    # ⚠️ A ROLE PRINTED WITH NO VALUE IS STILL A ROLE. `Closer:` with nothing after it is the lender
-    # asserting the role exists and is unfilled; the pair regex above cannot match it (it requires a
-    # value), so it is picked up here. Omitting the entry would make "no closer assigned yet"
-    # indistinguishable from "this letter has no closer field", and LP-909's UI cannot recover the
-    # difference afterwards.
-    empty_role = re.compile(r"([A-Za-z][A-Za-z /]*?):\s*$")
+    # ⚠️ A ROLE PRINTED WITH NO VALUE IS STILL A ROLE, AND THE SCAN BELOW ALREADY KEEPS IT. `Closer:`
+    # with nothing after it is the lender asserting the role exists and is unfilled; omitting it
+    # would make "no closer assigned yet" indistinguishable from "this letter has no closer field".
+    # It needs no second pass: the closed-set scan matches the LABEL, so an empty value slices to
+    # "" and lands as `{"name": "", "phone_ext": None}`.
+    #
+    # There WAS a second pass, written when the generic pattern required a value. It outlived that
+    # pattern and appended the same role again, so every UWM sheet carried two empty `Closer`s — a
+    # duplicate row in S1-04's side panel and a React duplicate-key error, found in LP-909 §5's
+    # Visual check. The reader test could not see it: it indexed the team by role, and a dict
+    # quietly collapses exactly the duplicate it was meant to catch.
     for line in lines:
-        if (unfilled := empty_role.search(line.text)) is not None:
-            role = unfilled.group(1).strip()
-            if role in _TEAM_LABELS:
-                team.append({"role": role, "name": "", "phone_ext": None})
         # ⚠️ SLICED BETWEEN MATCHES, NOT `findall` PAIRS. The scan above captures the LABEL only, so
         # a value runs from the end of its own label to the start of the next one — which is what
         # bounds it now that a single space no longer separates columns.

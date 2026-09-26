@@ -129,7 +129,18 @@ def test_round1_lender_team_and_the_empty_closer() -> None:
     """§7.1 names five roles — and `Closer:` has no value, which must still not crash the pair
     scanner or invent a name."""
     sheet = _read(UWM_ROUND_1)
-    team = {entry["role"]: entry for entry in sheet.header["lender_team"]}  # type: ignore[index,union-attr]
+    members = sheet.header["lender_team"]  # type: ignore[index]
+    # ⚠️ THE LIST FIRST, THEN THE LOOKUP. This test used to go straight to `{role: entry}`, and a dict
+    # collapses duplicates — so it stayed green while every sheet carried TWO empty `Closer`s
+    # (LP-909 §5). Each role the sheet prints once must appear once, in the sheet's order.
+    assert [entry["role"] for entry in members] == [  # type: ignore[union-attr]
+        "Senior UW",
+        "UW II",
+        "UW Team",
+        "AE",
+        "Closer",
+    ]
+    team = {entry["role"]: entry for entry in members}  # type: ignore[union-attr]
 
     assert team["Senior UW"]["name"] == "Dana Okafor"
     assert team["Senior UW"]["phone_ext"] == "85210"

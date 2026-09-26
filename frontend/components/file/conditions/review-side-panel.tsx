@@ -157,9 +157,14 @@ export function LetterDetails({ round }: { round: ConditionRound }) {
             {team.length === 0 ? (
               <Row label="Not found on this sheet." value={null} />
             ) : (
-              team.map((member) => (
+              // ⚠️ KEYED BY POSITION AS WELL AS ROLE. A role is not unique on a real letter — two
+              // closers, or two UW IIs, is a thing a lender can print — and a role-only key raised a
+              // React duplicate-key error the first time this panel was opened in a browser
+              // (LP-909 §5), on a reader bug that emitted `Closer` twice. The reader is fixed; a
+              // sheet that genuinely repeats a role must still render both rows.
+              team.map((member, index) => (
                 <Row
-                  key={member.role}
+                  key={`${member.role}-${index}`}
                   label={member.role}
                   value={
                     member.name
