@@ -56,12 +56,16 @@ export function ImportedConditions({ conditions }: { conditions: Condition[] }) 
 
   return (
     <div className="flex flex-col gap-2">
-      {groups.map((group) => {
+      {groups.map((group, index) => {
         const label = BUCKET_KIND_LABEL[group.kind];
         const showChip = label.toLowerCase() !== group.heading.toLowerCase();
         return (
           <div
-            key={group.heading || "no-heading"}
+            // ⚠️ A GROUP IS A RUN OF ROWS, NOT A HEADING, so one heading can own two runs — a
+            // full round that leaves some conditions behind, or two hand-typed ones with no heading
+            // around a printed one. Keyed by heading alone, S1-08 raised a React duplicate-key
+            // error per repeat in a browser (LP-909 §5).
+            key={`${index}-${group.heading || "no-heading"}`}
             className="overflow-hidden rounded-lg border border-input bg-card"
           >
             <div className="flex items-center gap-2 border-b border-input bg-muted/40 px-3 py-2">

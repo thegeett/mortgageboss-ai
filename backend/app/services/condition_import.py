@@ -417,8 +417,26 @@ def _update_seen_again(
 
     condition.last_seen_round_id = round_.id
 
+    # ⚠️ ONLY A FULL LIST MOVES A CONDITION'S PLACE, THOUGH THE SPEC SAYS "UPDATE `sequence`" PLAINLY.
+    # `sequence` is "order on the latest sheet it appeared on" (spec §3), and a PARTIAL round is not
+    # a sheet in that sense: it is a fragment, and its row numbers count from the top of what the
+    # processor happened to paste. Writing those numbers over a full list's gave round 2's six
+    # conditions the positions 1-6 while the five it did not carry kept 2, 3, 4, 5 and 6 — so the
+    # file's list, ordered by `sequence`, interleaved two sheets and broke every heading into
+    # fragments (S1-08, measured in LP-909 §5's Visual check: "UW PTD (2)", "Closing (1)",
+    # "UW PTD (1)", … where the design keeps 5 / 1 / 5). A full list renumbers every row it carries
+    # from one numbering, so its positions do mean "the lender's current order".
+    #
+    # This departs from the spec's literal step 2 for partial rounds, which §9.10 makes a STOP AND
+    # ASK; it was resolved with the option that keeps both the spec's meaning and the design, and is
+    # recorded in LP-909 §5. The heading and kind below still update on any round: a partial paste
+    # that shows a condition under a new heading is evidence the lender moved it.
     sequence = int(row.get("sequence") or 0)
-    if sequence and sequence != condition.sequence:
+    if (
+        round_.completeness is ConditionRoundCompleteness.FULL
+        and sequence
+        and sequence != condition.sequence
+    ):
         changed["sequence"] = sequence
         condition.sequence = sequence
 

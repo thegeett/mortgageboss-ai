@@ -232,7 +232,7 @@ export function ReviewRows({
 
   return (
     <div className="flex flex-col gap-2">
-      {groups.map((group) => {
+      {groups.map((group, index) => {
         const label = BUCKET_KIND_LABEL[group.kind];
         // No chip when the kind adds nothing the heading has not already said.
         const showChip = label.toLowerCase() !== group.heading.toLowerCase();
@@ -244,7 +244,8 @@ export function ReviewRows({
 
         return (
           <div
-            key={group.heading}
+            // A run of rows, not a heading — see the same key in `imported-conditions.tsx`.
+            key={`${index}-${group.heading}`}
             className="overflow-hidden rounded-lg border border-input bg-card"
           >
             <div className="flex items-center gap-2 border-b border-input bg-muted/40 px-3 py-2">

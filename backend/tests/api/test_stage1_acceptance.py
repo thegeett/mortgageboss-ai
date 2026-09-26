@@ -271,6 +271,17 @@ async def test_the_uwm_file_end_to_end(
     assert len(conditions) == 11, "step 2: still 11 conditions, nothing removed"
     assert sum(1 for c in conditions if c["round_numbers"] == [1, 2]) == 6
     assert sum(1 for c in conditions if c["round_numbers"] == [1]) == 5
+    # ⚠️ AND STILL IN ROUND 1'S ORDER, ONE RUN PER HEADING. The API serves the list in `sequence`
+    # order and the screen groups consecutive rows by heading, so a partial round that renumbered
+    # its six conditions from 1 interleaved two sheets — S1-08 rendered seven fragments of three
+    # headings in a browser while every count above stayed green (LP-909 §5).
+    runs = [c["bucket_heading"] for c in conditions]
+    runs = [h for i, h in enumerate(runs) if i == 0 or h != runs[i - 1]]
+    assert runs == [
+        "UW - Prior To Final Approval (PTD)",
+        "Compliance - Prior To Closing (PTD)",
+        "Closing (PTF)",
+    ], "a partial round must not renumber the file"
 
     # "Every status unchanged" — not on the public schema, so read from the rows themselves.
     assert await _statuses(db_session, loan_file.id) == UNTOUCHED

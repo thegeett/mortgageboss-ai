@@ -26,7 +26,11 @@ from app.models.condition import (
     OwnerHintSource,
 )
 from app.models.condition_event import ConditionEvent, ConditionEventKind
-from app.models.condition_round import ConditionRound, ConditionRoundStatus
+from app.models.condition_round import (
+    ConditionRound,
+    ConditionRoundCompleteness,
+    ConditionRoundStatus,
+)
 from app.models.lender_condition_code import LenderCodeStatus, LenderConditionCode
 from app.schemas.condition import DraftRowPublic
 from app.services import condition_import
@@ -208,6 +212,7 @@ async def _second_round(
     first: ConditionRound,
     rows: list[dict[str, Any]],
     lender_id: Any = _KEEP,
+    completeness: ConditionRoundCompleteness = ConditionRoundCompleteness.FULL,
 ) -> ConditionRound:
     """Another sheet for the same file — built directly, because `make_round` takes a Company and
     the first round already carries the ids this needs."""
@@ -216,6 +221,7 @@ async def _second_round(
         loan_file_id=first.loan_file_id,
         lender_id=first.lender_id if lender_id is _KEEP else lender_id,
         status=ConditionRoundStatus.DRAFT,
+        completeness=completeness,
         round_date=first.round_date,
         sources=[],
         parse_report={},
@@ -247,6 +253,68 @@ async def test_a_returning_condition_is_seen_again(db_session: AsyncSession) -> 
     kinds = {e.kind for e in await _events(db_session, second.id)}
     assert ConditionEventKind.CONDITION_SEEN_AGAIN in kinds
     assert ConditionEventKind.CONDITION_CREATED not in kinds
+
+
+async def test_a_partial_round_does_not_renumber_the_file(db_session: AsyncSession) -> None:
+    """⚠️ S1-08, AS IT BROKE IN A BROWSER (LP-909 §5). A partial paste numbers its rows from the top of
+    the fragment, so writing those numbers over a full list's interleaved two sheets: round 2's
+    conditions took 1-2 while the one it did not carry kept 2, and the file's list — ordered by
+    `sequence` — split one heading into fragments around it.
+
+    Measured on the fixture flow before the fix: after importing the six-row round-2 paste over round
+    1's eleven, sequences read 1,2,2,3,3,4,4,5,5,6,6.
+    """
+    rows = [
+        _row(sequence=1, lender_code="1228", verbatim_text="Final inspection is required."),
+        _row(sequence=2, lender_code="7086", verbatim_text="Short funds to close."),
+        _row(sequence=3, lender_code="0006", verbatim_text=INVOICE),
+    ]
+    first, loan_file, _ = await _draft(db_session, rows=rows)
+    await import_round(db_session, round_=first)
+
+    # The processor pastes two of the three — the first and the LAST — so the paste numbers them 1, 2.
+    second = await _second_round(
+        db_session,
+        first=first,
+        rows=[rows[0], {**rows[2], "sequence": 2}],
+        completeness=ConditionRoundCompleteness.PARTIAL,
+    )
+    outcome = await import_round(db_session, round_=second)
+    assert (outcome.created, outcome.seen_again) == (0, 2)
+
+    by_code = {c.lender_code: c.sequence for c in await _conditions(db_session, loan_file.id)}
+    assert by_code == {"1228": 1, "7086": 2, "0006": 3}, "round 1's order stands"
+
+    # And the event does not claim a move that did not happen.
+    seen = [
+        e
+        for e in await _events(db_session, second.id)
+        if e.kind is ConditionEventKind.CONDITION_SEEN_AGAIN
+    ]
+    assert all("sequence" not in e.detail["changed"] for e in seen)
+
+
+async def test_a_full_round_still_renumbers(db_session: AsyncSession) -> None:
+    """The other half: a FULL list is the lender's current order, so its positions do move a
+    condition — the spec's step 2 as written, and `test_a_returning_condition_is_seen_again`'s
+    "its place on the LATEST sheet"."""
+    rows = [
+        _row(sequence=1, lender_code="1228", verbatim_text="Final inspection is required."),
+        _row(sequence=2, lender_code="0006", verbatim_text=INVOICE),
+    ]
+    first, loan_file, _ = await _draft(db_session, rows=rows)
+    await import_round(db_session, round_=first)
+
+    second = await _second_round(
+        db_session,
+        first=first,
+        rows=[{**rows[1], "sequence": 1}, {**rows[0], "sequence": 2}],
+        completeness=ConditionRoundCompleteness.FULL,
+    )
+    await import_round(db_session, round_=second)
+
+    by_code = {c.lender_code: c.sequence for c in await _conditions(db_session, loan_file.id)}
+    assert by_code == {"0006": 1, "1228": 2}
 
 
 async def test_a_new_underwriter_note_is_appended_once(db_session: AsyncSession) -> None:
