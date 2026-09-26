@@ -285,6 +285,23 @@ describe("the round strip (S1-05, S1-08)", () => {
     expect(screen.getByText("Full list")).toBeDefined();
   });
 
+  it("⚠️ runs Round 1 → Round 2 left to right, not newest first (S1-08)", () => {
+    // ⚠️ A POSITIONAL ASSERTION, BECAUSE THE TEST ABOVE PASSES EITHER WAY. It asserts both labels
+    // EXIST, which is true in both orders — so the strip rendered newest-first against a design that
+    // reads left to right, inside a passing suite.
+    //
+    // The server sends `created_at DESC` and `imported-view.tsx` documents the prop as "newest
+    // first", deriving `newest = rounds.find(imported) ?? rounds[0]` from exactly that. So the strip
+    // reverses for DISPLAY only: reversing the array before passing it in would redefine `newest`,
+    // which decides whether the "left as they are" sentence shows and which round it names.
+    show([round({ id: "r2", round_number: 2 }, ["paste"]), round()]);
+
+    const first = screen.getByText("Round 1");
+    const second = screen.getByText("Round 2");
+    // Node.DOCUMENT_POSITION_FOLLOWING === 4: `second` comes after `first` in document order.
+    expect(first.compareDocumentPosition(second) & 4).toBe(4);
+  });
+
   it("⚠️ keeps discarded rounds in the strip, because the file's history is not the work queue", () => {
     // The dashboard filters discarded rounds out of "what am I working on". This answers a different
     // question, and a round vanishing from it reads as data loss.
@@ -352,6 +369,21 @@ describe("the round strip (S1-05, S1-08)", () => {
   it("says what a partial round did NOT do, so absence does not read as removal", () => {
     show([round({ completeness: "partial" }, ["paste"])]);
     expect(screen.getByText(/were left as they are — nothing is removed or cleared/)).toBeDefined();
+  });
+
+  it("⚠️ draws that sentence as an info callout, not as the faintest text on the screen (S1-08)", () => {
+    // The assertion above passes on plain grey text, which is how it shipped. This is the sentence
+    // that stops a reader concluding the lender WITHDREW everything the round omitted — the same job
+    // as the callout above it — so its treatment is part of the requirement, not decoration.
+    //
+    // Asserted on the icon rather than on class names: "plain text" versus "callout" is a real DOM
+    // difference, and a class-string assertion would break on any restyle that kept the property.
+    show([round({ completeness: "partial" }, ["paste"])]);
+
+    const sentence = screen.getByText(/were left as they are — nothing is removed or cleared/);
+    const callout = sentence.closest("p");
+    expect(callout).not.toBeNull();
+    expect((callout as HTMLElement).querySelector("svg")).not.toBeNull();
   });
 
   it("does not claim a full round left anything alone", () => {

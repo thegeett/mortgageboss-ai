@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { COMPLETENESS_CHIP } from "@/lib/types/conditions";
 import type { ConditionRound } from "@/lib/types/conditions";
 import { cn } from "@/lib/utils";
 import { useRef } from "react";
@@ -98,7 +99,14 @@ export function RoundStrip({
         </span>
       </div>
 
-      {rounds.map((round) => {
+      {/* ⚠️ REVERSED HERE RATHER THAN BY THE CALLER, AND THAT IS THE WHOLE CARE OF THIS FIX (S1-08).
+          The design's strip runs Round 1 → Round 2 left to right; the server sends `created_at DESC`
+          and `imported-view.tsx` documents the prop as "Every round on the file, newest first", then
+          derives `newest = rounds.find(imported) ?? rounds[0]` from that order. Reversing the ARRAY
+          before passing it in would silently redefine `newest`, and `newest` is what decides whether
+          the "left as they are" sentence appears and which round number it names.
+          So the display order is reversed inside the render and the prop contract is untouched. */}
+      {[...rounds].reverse().map((round) => {
         const attachable = canAttachPdf(round);
         return (
           <div
@@ -127,7 +135,7 @@ export function RoundStrip({
                 </span>
               ))}
               <span className="rounded-md border border-input px-1 py-0.5 text-xs text-muted-foreground">
-                {round.completeness === "full" ? "Full list" : "Just some"}
+                {COMPLETENESS_CHIP[round.completeness]}
               </span>
             </div>
 

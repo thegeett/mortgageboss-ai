@@ -117,10 +117,18 @@ export function ImportedView({
       {newest && newest.completeness === "partial" && newest.status === "imported" ? (
         // S1-08: a round pasted as "just some" leaves everything it did not mention alone, and the
         // screen says so rather than letting absence read as removal.
-        <p className="text-xs text-muted-foreground">
-          Round {newest.round_number} was{" "}
-          {newest.sources.some((s) => s.kind === "paste") ? "pasted" : "read"} as just some.
-          Conditions that weren’t in it were left as they are — nothing is removed or cleared.
+        //
+        // ⚠️ AN INFO CALLOUT, NOT A GREY LINE (S1-08 Must-match, LP-909 §5). This is the sentence
+        // that stops a reader concluding the lender withdrew everything the round omitted — the same
+        // job as the callout eight lines above — and it was drawn as the faintest text on the screen.
+        // Matching that sibling's markup rather than inventing a third treatment.
+        <p className="flex items-start gap-2 rounded-md border border-input bg-muted/40 p-2.5 text-xs text-muted-foreground">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span>
+            Round {newest.round_number} was{" "}
+            {newest.sources.some((s) => s.kind === "paste") ? "pasted" : "read"} as just some.
+            Conditions that weren’t in it were left as they are — nothing is removed or cleared.
+          </span>
         </p>
       ) : null}
 

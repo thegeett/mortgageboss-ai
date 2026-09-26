@@ -3,6 +3,7 @@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRoundEvents } from "@/lib/api/conditions";
+import { COMPLETENESS_CHIP, FORMAT_LABEL } from "@/lib/types/conditions";
 import type { ConditionEnrichResult, ConditionEvent, ConditionRound } from "@/lib/types/conditions";
 import { CircleCheck } from "lucide-react";
 import { LetterDetails } from "./review-side-panel";
@@ -12,13 +13,6 @@ const SOURCE_LABEL: Record<string, string> = {
   email: "Forwarded PDF",
   paste: "Pasted",
   manual: "Typed",
-};
-
-const FORMAT_LABEL: Record<string, string> = {
-  uwm_approval_letter: "UWM · Loan Approval Conditions",
-  champions_certificate: "Champions · Conditional Approval",
-  generic: "Unrecognised layout",
-  pasted_text: "Plain text · no lender layout found",
 };
 
 /** `2026-09-10` → `09/10/2026`. */
@@ -125,7 +119,7 @@ export function RoundDetailsSheet({
               </span>
             ))}
             <span className="rounded-md border border-input px-1.5 py-0.5 text-xs text-muted-foreground">
-              {round.completeness === "full" ? "Full list" : "Just some"}
+              {COMPLETENESS_CHIP[round.completeness]}
             </span>
             <span className="rounded-md border border-input px-1.5 py-0.5 text-xs text-muted-foreground">
               {FORMAT_LABEL[round.sheet_format] ?? round.sheet_format}

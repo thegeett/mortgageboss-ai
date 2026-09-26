@@ -6,24 +6,40 @@ import { Spinner } from "@/components/ui/spinner";
 import { useImportRound, useUpdateDraft } from "@/lib/api/conditions";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { notifyError, notifySuccess } from "@/lib/toast";
-import type {
-  ConditionRound,
-  ConditionSheetFormat,
-  ConditionSourceKind,
-  DraftRow,
+import {
+  COMPLETENESS_CHIP,
+  COMPLETENESS_PROSE,
+  FORMAT_LABEL,
+  LAYOUT_NAME,
 } from "@/lib/types/conditions";
+import type { ConditionRound, ConditionSourceKind, DraftRow } from "@/lib/types/conditions";
 import { CircleCheck, Sparkles, TriangleAlert } from "lucide-react";
 import { useId, useState } from "react";
 import { FLAGGED_BELOW, ReviewRows } from "./review-rows";
 import { ReviewSidePanel } from "./review-side-panel";
+import { hasPdf } from "./round-strip";
 
-/** Which layout the reader recognised, in the words S1-04 and S1-10 print. */
-const FORMAT_LABEL: Record<ConditionSheetFormat, string> = {
-  uwm_approval_letter: "UWM · Loan Approval Conditions",
-  champions_certificate: "Champions · Conditional Approval",
-  generic: "Unrecognised layout",
-  pasted_text: "Plain text · no lender layout found",
-};
+/**
+ * What this round's header says was recognised, and where.
+ *
+ * ⚠️ `sheet_format` CANNOT TELL A RECOGNISED PASTE FROM AN UPLOADED LETTER (S1-07, LP-909 §5).
+ * `read_pasted_text` returns `UWM_APPROVAL_LETTER` for a paste whose columns survived the clipboard
+ * — the identical value an uploaded letter carries — so this header read "UWM · Loan Approval
+ * Conditions" on a round where no letter was ever sent to us. The design's line is "UWM layout ·
+ * recognised in the pasted text": the same recognition, without claiming the document.
+ *
+ * ⚠️ THE DISCRIMINATOR IS BYTES, NOT `kind`, AND `hasPdf` ALREADY ASKS THAT. Its docstring carries
+ * the reasoning — `kind` would need a list kept in step with the enum, and that list is what the
+ * strip got wrong once. Writing `sources.some(s => s.kind === "paste")` here would be a fifth copy
+ * of a rule this stage has just finished collapsing into one, and it would also mislabel a pasted
+ * round that has since been enriched: that round HAS the letter now.
+ */
+function formatLine(round: ConditionRound): string {
+  const layout = LAYOUT_NAME[round.sheet_format];
+  return layout && !hasPdf(round)
+    ? `${layout} · recognised in the pasted text`
+    : FORMAT_LABEL[round.sheet_format];
+}
 
 const SOURCE_LABEL: Record<ConditionSourceKind, string> = {
   pdf_upload: "PDF upload",
@@ -173,9 +189,7 @@ export function RoundReview({
               <span className="text-xs font-medium uppercase tracking-wide text-warning">
                 Review · not imported yet
               </span>
-              <p className="text-base font-semibold text-foreground">
-                {FORMAT_LABEL[round.sheet_format]}
-              </p>
+              <p className="text-base font-semibold text-foreground">{formatLine(round)}</p>
               <div className="flex flex-wrap items-center gap-1.5">
                 {round.sources.map((source) => (
                   <span
@@ -193,6 +207,16 @@ export function RoundReview({
                     Date printed {usDate(round.date_printed)}
                   </span>
                 ) : null}
+                {/* ⚠️ ONLY WHEN PARTIAL (S1-07, S1-10). The design asks for a "Just some" chip; a
+                    "Full list" chip would sit inches from a header sentence already saying "the
+                    lender's full list", and two statements of one fact on one screen is how they
+                    come to disagree. The label still comes from the shared vocabulary so it cannot
+                    drift from the strip's. */}
+                {round.completeness === "partial" ? (
+                  <span className="rounded-md border border-warning/50 px-1.5 py-0.5 text-xs text-warning">
+                    {COMPLETENESS_CHIP.partial}
+                  </span>
+                ) : null}
                 <span className="text-xs text-muted-foreground">{readerLine(round)}</span>
               </div>
             </div>
@@ -200,9 +224,7 @@ export function RoundReview({
               <span>
                 This sheet is{" "}
                 <span className="font-medium text-foreground-2">
-                  {round.completeness === "full"
-                    ? "the lender’s full list"
-                    : "just some conditions"}
+                  {COMPLETENESS_PROSE[round.completeness]}
                 </span>
               </span>
               <span>Round date {usDate(round.round_date)}</span>

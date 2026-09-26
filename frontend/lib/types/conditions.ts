@@ -76,6 +76,68 @@ export const BUCKET_KIND_CHIP: Record<BucketKind, string> = {
   unknown: "No heading",
 };
 
+/**
+ * Whether a round is the lender's whole list or only part of it, as a CHIP.
+ *
+ * ⚠️ ONE VOCABULARY, BECAUSE THERE WERE ALREADY FOUR (LP-909 §5). `round-strip.tsx` and
+ * `round-details-sheet.tsx` each wrote `completeness === "full" ? "Full list" : "Just some"` inline,
+ * `round-review.tsx` wrote a prose form of the same fact, and `paste-conditions-dialog.tsx` a third
+ * wording for its radio — and S1-07 and S1-10 needed a fifth. This is precisely what
+ * `BUCKET_KIND_CHIP` was split out for: a label copied until two copies disagree.
+ *
+ * ⚠️ AND A TERNARY IS NOT EXHAUSTIVE OVER THE UNION, WHICH IS THE PART THAT WILL BITE. With two
+ * members today, `completeness === "full" ? … : …` is right by accident — a third member would read
+ * as "Just some" in four places at once, silently, because the else-branch swallows it. A `Record`
+ * keyed on the union makes the compiler demand an answer for the new member.
+ *
+ * The paste dialog's radio keeps its own fuller wording ("Just some conditions") deliberately: a
+ * radio has to stand alone where a chip sits beside the round it describes.
+ */
+export const COMPLETENESS_CHIP: Record<ConditionRoundCompleteness, string> = {
+  full: "Full list",
+  partial: "Just some",
+};
+
+/** The same fact as a sentence fragment, for the review screen's header (S1-04). */
+export const COMPLETENESS_PROSE: Record<ConditionRoundCompleteness, string> = {
+  full: "the lender’s full list",
+  partial: "just some conditions",
+};
+
+/**
+ * Which layout the reader recognised, in the words S1-04 and S1-10 print.
+ *
+ * ⚠️ ONE COPY: this was defined identically in `round-review.tsx` and `round-details-sheet.tsx`, and
+ * the two had already drifted in TYPE — one keyed on the union, the other `Record<string, string>`
+ * with a `?? round.sheet_format` fallback for a value the union cannot hold. Keyed on the union, the
+ * fallback is unnecessary rather than merely unused.
+ */
+export const FORMAT_LABEL: Record<ConditionSheetFormat, string> = {
+  uwm_approval_letter: "UWM · Loan Approval Conditions",
+  champions_certificate: "Champions · Conditional Approval",
+  generic: "Unrecognised layout",
+  pasted_text: "Plain text · no lender layout found",
+};
+
+/**
+ * The layout's short name, for a round whose text was PASTED rather than uploaded (S1-07).
+ *
+ * ⚠️ `sheet_format` ALONE CANNOT TELL THOSE APART. `read_pasted_text` returns
+ * `UWM_APPROVAL_LETTER` for a paste it recognised — the same value an uploaded letter carries — so
+ * S1-07's header read "UWM · Loan Approval Conditions", naming a letter nobody sent us. The design's
+ * line is "UWM layout · recognised in the pasted text", which says what was actually recognised and
+ * where.
+ *
+ * `null` for the two formats that name no lender layout: "Unrecognised layout · recognised in the
+ * pasted text" would contradict itself.
+ */
+export const LAYOUT_NAME: Record<ConditionSheetFormat, string | null> = {
+  uwm_approval_letter: "UWM layout",
+  champions_certificate: "Champions layout",
+  generic: null,
+  pasted_text: null,
+};
+
 /** Who probably has to act. A HINT, never a decision — Stage 3 decides. */
 export type OwnerHint =
   | "borrower"

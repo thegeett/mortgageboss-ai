@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { ConditionRound, DraftRow } from "@/lib/types/conditions";
+import type { ConditionRound, ConditionSource, DraftRow } from "@/lib/types/conditions";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -97,6 +97,24 @@ function round(overrides: Partial<ConditionRound> = {}): ConditionRound {
 
 function show(overrides: Partial<ConditionRound> = {}) {
   render(<RoundReview round={round(overrides)} fileId="f1" onDiscard={vi.fn()} />);
+}
+
+/**
+ * One arrival, with `has_bytes` stated rather than inferred from `kind`.
+ *
+ * ⚠️ THE PAIR IS THE POINT. The format line asks `hasPdf`, which reads `has_bytes` — so a fixture
+ * that derived the flag from the kind would pass against a screen still keying on the kind, which is
+ * the bug `has_bytes` was added to close.
+ */
+function source(kind: ConditionSource["kind"], hasBytes: boolean): ConditionSource {
+  return {
+    kind,
+    at: null,
+    document_id: null,
+    inbound_attachment_id: null,
+    user_id: null,
+    has_bytes: hasBytes,
+  };
 }
 
 describe("reviewing a draft round", () => {
@@ -208,6 +226,38 @@ describe("what the screen says about the sheet", () => {
     expect(screen.getByText("Review · not imported yet")).toBeDefined();
     expect(screen.getByText("UWM · Loan Approval Conditions")).toBeDefined();
     expect(screen.getByText("Read by rules (uwm v1) — no AI")).toBeDefined();
+  });
+
+  it("⚠️ says a recognised PASTE was recognised in the pasted text, not that a letter arrived (S1-07)", () => {
+    // `read_pasted_text` returns `UWM_APPROVAL_LETTER` for a paste whose columns survived the
+    // clipboard — the SAME `sheet_format` an uploaded letter carries. So this header named a
+    // document nobody sent us, and `sheet_format` alone can never tell the two apart.
+    show({ sources: [source("paste", false)] });
+
+    expect(screen.getByText("UWM layout · recognised in the pasted text")).toBeDefined();
+    expect(screen.queryByText("UWM · Loan Approval Conditions")).toBeNull();
+  });
+
+  it("⚠️ and calls it the letter again once the PDF has been attached", () => {
+    // The other direction, and the reason this keys on BYTES rather than on `kind`: a pasted round
+    // that has been enriched carries BOTH arrivals, and it genuinely does have the letter now.
+    // A `kind === "paste"` test would keep calling it a paste forever.
+    show({ sources: [source("paste", false), source("pdf_upload", true)] });
+
+    expect(screen.getByText("UWM · Loan Approval Conditions")).toBeDefined();
+    expect(screen.queryByText(/recognised in the pasted text/)).toBeNull();
+  });
+
+  it("⚠️ marks a partial round with a Just some chip, and a full one with none (S1-07, S1-10)", () => {
+    show({ completeness: "partial" });
+    expect(screen.getByText("Just some")).toBeDefined();
+
+    cleanup();
+    show({ completeness: "full" });
+    // Not merely "Full list is absent": the chip itself must not appear, because a chip beside a
+    // header already saying "the lender's full list" is the same fact twice.
+    expect(screen.queryByText("Just some")).toBeNull();
+    expect(screen.queryByText("Full list")).toBeNull();
   });
 
   it("⚠️ names the AI split without doubling the reader into its own version", () => {
