@@ -10,15 +10,15 @@ reach n>=6 and can actually be calibrated. It measures the AI's REASONING about 
 is blocked; document EXTRACTION is separately calibrated (documented_monthly / employer_normalized both 100%),
 so re-testing it via fake PDFs would buy nothing (ADR: why Level 1).
 
-⚠️ COMPLETELY SEPARATE FROM LF-6T3N (the realism anchor). Own loan id / borrower ids / content-ids — NO
+COMPLETELY SEPARATE FROM LF-6T3N (the realism anchor). Own loan id / borrower ids / content-ids — NO
 collision. This module NEVER imports the LF-6T3N builders and they never import it (asserted both ways); merging
 scenario borrowers into LF-6T3N would destroy its realism and break its frozen tests. The two fixtures answer
 different questions: LF-6T3N = "do rules work on realistic data"; this = "scenario variety for measurement".
 
-⚠️ MINIMUM DOCUMENTS PER SCENARIO — each borrower carries ONLY the documents its scenario needs (a decline test
+MINIMUM DOCUMENTS PER SCENARIO — each borrower carries ONLY the documents its scenario needs (a decline test
 carries 2 W-2s; no bank statement, no DL, no MISMO beyond the borrower id). Extra documents are cost + noise.
 
-⚠️ ANTI-ANCHORING (LP-337) — the AMBIGUOUS scenarios carry NO encoded expected answer anywhere a labeling
+ANTI-ANCHORING (LP-337) — the AMBIGUOUS scenarios carry NO encoded expected answer anywhere a labeling
 worksheet could surface it. The clear-cut expectations live HERE (``CLEARCUT_EXPECTATIONS``) for the probe/tests
 + the doc — never written into a worksheet (that is LP-393-2/3, and Priya labels the ambiguous cases blind).
 

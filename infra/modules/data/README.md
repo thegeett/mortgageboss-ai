@@ -7,7 +7,7 @@ subnets with security groups admitting only the ECS tasks' group; RDS also sets
 `publicly_accessible = false`. No group in this stack permits `0.0.0.0/0` on 5432
 or 6379.
 
-## ⚠️ `DATABASE_URL` must use `?ssl=require` — `?sslmode=require` crashes the app
+## `DATABASE_URL` must use `?ssl=require` — `?sslmode=require` crashes the app
 
 The database enforces TLS (`rds.force_ssl = 1` in the custom parameter group), so
 the client's SSL behaviour is load-bearing. The application uses SQLAlchemy 2.0.50
@@ -38,7 +38,7 @@ pointing at an RDS CA bundle baked into the image; asyncpg reads that variable
 directly. It cannot be done through the URL. **That is a C3 image and
 task-definition requirement, not a Terraform one.**
 
-## ⚠️ `REDIS_URL` must use `rediss://` — and the two client libraries disagree
+## `REDIS_URL` must use `rediss://` — and the two client libraries disagree
 
 `transit_encryption_enabled = true` is unconditional here, so a `redis://` client
 cannot connect. The scheme must be `rediss://`.

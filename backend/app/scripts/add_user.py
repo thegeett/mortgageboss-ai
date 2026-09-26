@@ -19,17 +19,17 @@ Environment variables, ALL REQUIRED, no defaults:
 
     ADD_USER_ALLOWED_ENVIRONMENTS   comma-separated, defaults to "staging"
 
-⚠️ **A HASH, not a password** -- same reasoning as the bootstrap script: the
+**A HASH, not a password** -- same reasoning as the bootstrap script: the
 value travels through ``run-task --overrides`` and lands in CloudTrail.
 
-⚠️ **The company must already exist and must not be soft-deleted.** A typo'd
+**The company must already exist and must not be soft-deleted.** A typo'd
 slug silently creating a second company is the failure this refuses to allow,
 and a slug that resolves to a decommissioned tenant is the same failure wearing
 a disguise. It matters more than it looks: ``authenticate_user`` does not check
 the company at all, so a user attached to a stray or deleted one would log in
 perfectly well and see an empty, wrong tenant.
 
-⚠️ **Email is GLOBALLY unique**, not unique per company, so a collision with a
+**Email is GLOBALLY unique**, not unique per company, so a collision with a
 user in a different company is possible. That is reported as a refusal rather
 than left to surface as an IntegrityError traceback. The check is
 case-insensitive even though the database index is not — otherwise it would
@@ -136,7 +136,7 @@ async def add_user(
     # AddUserConfig, and this is the last point before a write.
     email = normalize_email(config.email, var_name="ADD_USER_EMAIL")
 
-    # ⚠️ `deleted_at IS NULL`, not just a slug match. Companies carry
+    # `deleted_at IS NULL`, not just a slug match. Companies carry
     # SoftDeleteMixin and are soft-deleted rather than removed, so the slug of a
     # decommissioned tenant still resolves. Attaching a user to one produces
     # exactly the outcome the refusal below is written to prevent -- and worse,
@@ -156,7 +156,7 @@ async def add_user(
             f"wrong, empty tenant."
         )
 
-    # ⚠️ Case-insensitive, unlike the unique index on `users.email`. Email is
+    # Case-insensitive, unlike the unique index on `users.email`. Email is
     # case-insensitive in practice but the index is not, so an exact-match guard
     # would let `Admin@example.com` through while `admin@example.com` exists --
     # two rows for one human, possibly in two different companies. That is the

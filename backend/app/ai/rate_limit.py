@@ -11,7 +11,7 @@ stall — which is precisely the shape that trips a per-minute server-side quota
 spacing keeps the instantaneous rate under the ceiling at every instant, which is what the
 provider actually measures.
 
-⚠️ **PROCESS-LOCAL.** This paces one process. Under N Celery worker tasks the effective
+**PROCESS-LOCAL.** This paces one process. Under N Celery worker tasks the effective
 rate is **N x the setting**. The deployed value must therefore be *the account quota
 divided by the task count*, never the quota itself — two tasks each pacing at 8 against a
 10 RPM account still throttle, and it looks like a broken limiter. There is no shared

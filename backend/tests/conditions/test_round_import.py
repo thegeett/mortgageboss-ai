@@ -1,6 +1,6 @@
 """A reviewed draft becoming the file's conditions (LP-909 section 2, spec §LP-909 steps 1-5).
 
-⚠️ THE PROPERTY MOST OF THESE PIN IS "NOTHING IS LOST AND NOTHING IS INVENTED". Import is the moment
+THE PROPERTY MOST OF THESE PIN IS "NOTHING IS LOST AND NOTHING IS INVENTED". Import is the moment
 a parse becomes the record, so the failures that matter are a condition duplicated across rounds, a
 condition silently replaced, a status moved that Stage 1 may not move, and a created condition with
 no event to say it appeared — the last of which actually happened in `condition_enrich.py`.
@@ -51,7 +51,7 @@ HOI = "Provide evidence of hazard insurance for the subject property."
 def _row(**overrides: Any) -> dict[str, Any]:
     """One draft row, in exactly the shape the readers store and the API serves.
 
-    ⚠️ THROUGH THE SCHEMA, NOT A DICT LITERAL. `draft_rows` is written by
+    THROUGH THE SCHEMA, NOT A DICT LITERAL. `draft_rows` is written by
     `draft_rows_json`, which routes every row through `DraftRowPublic.model_dump(mode="json")`
     precisely so that what is stored is what is served. A literal here would be a third
     representation, and it would keep passing after the schema moved under it.
@@ -132,7 +132,7 @@ async def test_a_draft_becomes_the_files_conditions(db_session: AsyncSession) ->
 
 
 async def test_the_lenders_words_are_stored_exactly(db_session: AsyncSession) -> None:
-    """⚠️ THE API IS THE LAST PLACE THIS COULD BE TIDIED. The wording is the lender's, quoted from a
+    """THE API IS THE LAST PLACE THIS COULD BE TIDIED. The wording is the lender's, quoted from a
     document, and a processor's edit on the review screen imports as they wrote it."""
     edited = "Provide the PAID invoice for the credit report, dated within 30 days."
     round_, loan_file, _ = await _draft(db_session, rows=[_row(verbatim_text=edited)])
@@ -144,7 +144,7 @@ async def test_the_lenders_words_are_stored_exactly(db_session: AsyncSession) ->
 
 
 async def test_every_created_condition_records_that_it_appeared(db_session: AsyncSession) -> None:
-    """⚠️ THE RULE THAT WAS ALREADY BROKEN ONCE. `condition_enrich.py` created conditions and emitted
+    """THE RULE THAT WAS ALREADY BROKEN ONCE. `condition_enrich.py` created conditions and emitted
     no `CONDITION_CREATED`, so they carried no round chips while their own NOT NULL `first_round_id`
     pointed at the round that made them. Every writer of a Condition emits this event."""
     round_, loan_file, _ = await _draft(
@@ -256,7 +256,7 @@ async def test_a_returning_condition_is_seen_again(db_session: AsyncSession) -> 
 
 
 async def test_a_partial_round_does_not_renumber_the_file(db_session: AsyncSession) -> None:
-    """⚠️ S1-08, AS IT BROKE IN A BROWSER (LP-909 §5). A partial paste numbers its rows from the top of
+    """S1-08, AS IT BROKE IN A BROWSER (LP-909 §5). A partial paste numbers its rows from the top of
     the fragment, so writing those numbers over a full list's interleaved two sheets: round 2's
     conditions took 1-2 while the one it did not carry kept 2, and the file's list — ordered by
     `sequence` — split one heading into fragments around it.
@@ -350,7 +350,7 @@ async def test_a_new_underwriter_note_is_appended_once(db_session: AsyncSession)
 async def test_same_code_different_words_creates_a_condition_and_names_the_possible_match(
     db_session: AsyncSession,
 ) -> None:
-    """⚠️ AN ID FOR STAGE 2, NOT A DECISION HERE. Same code with different wording is either a
+    """AN ID FOR STAGE 2, NOT A DECISION HERE. Same code with different wording is either a
     rewording or a different demand filed under one template, and Stage 1 cannot tell which —
     guessing would either merge two real conditions or duplicate one, silently."""
     first, loan_file, _ = await _draft(db_session)
@@ -376,7 +376,7 @@ async def test_same_code_different_words_creates_a_condition_and_names_the_possi
 async def test_a_condition_missing_from_the_new_sheet_is_not_touched(
     db_session: AsyncSession,
 ) -> None:
-    """⚠️ ADR-404. Stage 1 never clears, removes or merges away a condition. Absence is Stage 2's
+    """ADR-404. Stage 1 never clears, removes or merges away a condition. Absence is Stage 2's
     evidence to weigh, and only against a sheet claiming to be complete."""
     first, loan_file, _ = await _draft(db_session)
     await import_round(db_session, round_=first)
@@ -437,7 +437,7 @@ async def test_an_unknown_code_is_recorded_rather_than_dropped(
 
 
 async def test_a_mapped_code_is_counted_but_never_demoted(db_session: AsyncSession) -> None:
-    """⚠️ "BUMP THE COUNTERS, NEVER RESET THE MEANING". A person reviewed this code; a sheet
+    """ "BUMP THE COUNTERS, NEVER RESET THE MEANING". A person reviewed this code; a sheet
     mentioning it again is not a reason to forget that."""
     round_, _file, lender = await _draft(db_session)
     db_session.add(
@@ -465,7 +465,7 @@ async def test_a_mapped_code_is_counted_but_never_demoted(db_session: AsyncSessi
 async def test_the_map_fills_only_the_hint_the_sheet_did_not_give(
     db_session: AsyncSession,
 ) -> None:
-    """⚠️ THE HINTS ARE NOT EQUALLY GOOD. A marker the lender typed is far stronger evidence than a
+    """THE HINTS ARE NOT EQUALLY GOOD. A marker the lender typed is far stronger evidence than a
     default looked up from the map, and overwriting the first with the second would destroy the
     better answer while leaving the field just as populated."""
     rows = [
@@ -506,7 +506,7 @@ async def test_the_map_fills_only_the_hint_the_sheet_did_not_give(
 
 
 async def test_a_file_with_no_lender_still_imports(db_session: AsyncSession) -> None:
-    """⚠️ A REAL STATE, NOT AN EDGE CASE. `(lender, code)` is meaningless without the lender, so the
+    """A REAL STATE, NOT AN EDGE CASE. `(lender, code)` is meaningless without the lender, so the
     code-map step is skipped rather than guessed at — the conditions still land."""
     round_, loan_file, _ = await _draft(db_session, with_lender=False)
 
@@ -522,7 +522,7 @@ async def test_a_file_with_no_lender_still_imports(db_session: AsyncSession) -> 
 async def test_two_lenders_on_one_file_do_not_share_a_condition(
     db_session: AsyncSession,
 ) -> None:
-    """⚠️ SPEC STEP 2 SCOPES BOTH PASSES TO "the same file **and lender**", AND THE WORDING PASS DID
+    """SPEC STEP 2 SCOPES BOTH PASSES TO "the same file **and lender**", AND THE WORDING PASS DID
     NOT. Measured before the fix: lender B's sheet carrying lender A's exact wording produced
     `created=0 seen_again=1` — one condition, still owned by lender A, recorded as having appeared
     on lender B's round and carrying its chip. No error and no warning.
@@ -560,7 +560,7 @@ async def test_two_lenders_on_one_file_do_not_share_a_condition(
 async def test_a_condition_recorded_before_the_lender_was_known_is_adopted(
     db_session: AsyncSession,
 ) -> None:
-    """⚠️ `None` MEANS "NOT KNOWN YET", NEVER "A DIFFERENT LENDER", and the two need opposite
+    """`None` MEANS "NOT KNOWN YET", NEVER "A DIFFERENT LENDER", and the two need opposite
     handling. Refusing to match across `None` would duplicate the demand the moment the file's
     lender was set — the failure the fingerprint pass exists to prevent.
 
@@ -613,7 +613,7 @@ async def test_a_round_with_no_lender_matches_a_condition_that_has_one(
 async def test_possible_match_names_the_oldest_condition_under_a_shared_code(
     db_session: AsyncSession,
 ) -> None:
-    """⚠️ TWO CONDITIONS CAN SHARE `(lender, code)` BY DESIGN — a same-code/different-wording row
+    """TWO CONDITIONS CAN SHARE `(lender, code)` BY DESIGN — a same-code/different-wording row
     creates a second one, which is what `possible_match` exists for. The lookup keeps the FIRST of
     them, and `_existing_conditions` had no `ORDER BY` at all, so "first" was whatever the planner
     returned: the id in `possible_match` could differ from run to run on identical data.
@@ -644,7 +644,7 @@ async def test_possible_match_names_the_oldest_condition_under_a_shared_code(
 
 
 async def test_the_conditions_lookup_orders_deterministically(db_session: AsyncSession) -> None:
-    """⚠️ THE ONE MUTATION A BEHAVIOURAL TEST CANNOT CATCH, PINNED BY READING THE EMITTED SQL.
+    """THE ONE MUTATION A BEHAVIOURAL TEST CANNOT CATCH, PINNED BY READING THE EMITTED SQL.
 
     Removing the `ORDER BY` from `_existing_conditions` left all 27 tests green. That is not a gap in
     the tests above; it is unobservable behaviourally. The review session measured why: they forced a
@@ -653,14 +653,14 @@ async def test_the_conditions_lookup_orders_deterministically(db_session: AsyncS
     this query rather than a heap scan. There is no arrangement of rows a test may legitimately
     construct that makes the missing clause show.
 
-    So the test reads the statement instead. ⚠️ AND THIS IS NOT THE METADATA ASSERTION REJECTED FOR
+    So the test reads the statement instead. AND THIS IS NOT THE METADATA ASSERTION REJECTED FOR
     `uq_condition_rounds_file_number`: there, the model declaration and the database were two
     artifacts free to disagree, and asserting the declaration existed would have passed against one
     that never reached any database — which was the entire failure. Here the captured string IS what
     was sent to the server. It pins the statement, not that Postgres honours it; SQL semantics are
     not this test's job.
 
-    ⚠️ THE STRICT CLAUSE, NOT A PREFIX. `"ORDER BY conditions.created_at"` would also be true of
+    THE STRICT CLAUSE, NOT A PREFIX. `"ORDER BY conditions.created_at"` would also be true of
     `... DESC`, and true of a version that dropped the `conditions.id` tiebreak — and that tiebreak
     is what makes two rows with identical `created_at` deterministic, which is reachable inside a
     single import where several conditions are created in one flush.
@@ -683,7 +683,7 @@ async def test_the_conditions_lookup_orders_deterministically(db_session: AsyncS
         event.remove(bind, "before_cursor_execute", capture)
 
     selects = [sql for sql in statements if "FROM conditions" in sql]
-    # ⚠️ WITHOUT THIS THE TEST PASSES BY PROVING NOTHING. A listener that never fires leaves
+    # WITHOUT THIS THE TEST PASSES BY PROVING NOTHING. A listener that never fires leaves
     # `selects` empty, every assertion below is vacuously skipped, and the test reads as rigorous
     # while checking no statement at all — the exact shape this ticket has now corrected four times.
     assert selects, "no SELECT was captured: the listener never fired, so this test proves nothing"
@@ -712,7 +712,7 @@ async def test_the_second_import_takes_the_next_number(db_session: AsyncSession)
 async def test_the_import_recovers_when_another_claims_its_number(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """⚠️ THE RACE `loan_file_needs_lock` DOES NOT PREVENT. The lock is advisory — it yields
+    """THE RACE `loan_file_needs_lock` DOES NOT PREVENT. The lock is advisory — it yields
     `bool(acquired)`, every call site binds nothing, and its 30s timeout auto-expires a HELD lock —
     so two imports can compute the same `max + 1`. The unique index refuses the second, and this is
     the path that catches it, rolls back the savepoint, reloads the expired round and recomputes.
@@ -747,11 +747,11 @@ async def test_the_import_recovers_when_another_claims_its_number(
 async def test_the_retry_is_bounded(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """⚠️ NEVER AN UNBOUNDED LOOP. `max + 1` recomputed under contention can lose twice, and an
+    """NEVER AN UNBOUNDED LOOP. `max + 1` recomputed under contention can lose twice, and an
     unbounded retry would outlive the 30-second lock it holds — the very failure it exists to
     prevent. A typed refusal, not a silent give-up.
 
-    ⚠️ THE ATTEMPTS ARE COUNTED, AND WITHOUT THAT THIS TEST WAS BLIND TO ITS OWN SUBJECT (review).
+    THE ATTEMPTS ARE COUNTED, AND WITHOUT THAT THIS TEST WAS BLIND TO ITS OWN SUBJECT (review).
     It asserted only that a refusal carrying "Try again" came out — which is true of a bound of 3, of
     25, or of 250. Measured: with `MAX_NUMBER_ATTEMPTS = 25` this test still passed, and the only
     failure anywhere came from the recovery test noticing incidentally at a bound of 1.
@@ -780,7 +780,7 @@ async def test_the_retry_is_bounded(
     assert len(calls) == condition_import.MAX_NUMBER_ATTEMPTS, (
         "it tried exactly the stated number of times — not merely 'it gave up eventually'"
     )
-    # ⚠️ AND A CEILING, BECAUSE THE LINE ABOVE MOVES WITH THE CONSTANT IT CHECKS. Comparing the
+    # AND A CEILING, BECAUSE THE LINE ABOVE MOVES WITH THE CONSTANT IT CHECKS. Comparing the
     # attempt count to `MAX_NUMBER_ATTEMPTS` is true for ANY value of it — measured: setting the
     # constant to 25 left all 27 tests green, including this one, AFTER it had already been
     # corrected once for being blind to the bound. Same shape, one level down.

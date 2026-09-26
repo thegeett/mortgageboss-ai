@@ -1,6 +1,6 @@
 """Loading the synthetic condition sheets (LP-906, spec §7).
 
-⚠️ THE FIXTURES ARE EXTRACTED FROM THE SPEC MECHANICALLY, NOT TRANSCRIBED. Each `.txt` in
+THE FIXTURES ARE EXTRACTED FROM THE SPEC MECHANICALLY, NOT TRANSCRIBED. Each `.txt` in
 `fixtures/` is a copy of the fenced block in `docs/phases/phase4.5-stage0-1-build-spec.md`, cut with
 `sed` and verified with `diff`. That matters because the spec says "keep the spacing exactly as
 below — the readers depend on columns": the UWM expiry table is matched by COLUMN POSITION, so a
@@ -68,7 +68,7 @@ _ROUND_2_CONDITIONS_BLOCK = slice(39, 55)
 def portal_excerpt() -> str:
     """What a processor actually pastes: the headings and the rows, and nothing else (LP-907).
 
-    ⚠️ NEITHER THE TITLE NOR THE `CONDITIONS` MARKER IS INCLUDED, which is the whole difficulty.
+    NEITHER THE TITLE NOR THE `CONDITIONS` MARKER IS INCLUDED, which is the whole difficulty.
     `detect_format` keys on the first content line and `read_uwm` bounds its block with the marker,
     so a portal copy defeats both — it is recognised by its row shapes instead.
 

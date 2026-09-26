@@ -1,15 +1,15 @@
 """LP-485 — the date-compare family: CL-1 (rate lock), CR-13 (credit age), PR-6 (appraisal age).
 
-⚠️ CALENDAR MONTHS, NOT DAY APPROXIMATIONS. Fannie states both validity windows in months (B1-1-03: four
+CALENDAR MONTHS, NOT DAY APPROXIMATIONS. Fannie states both validity windows in months (B1-1-03: four
 months; B4-1.2-04: twelve months / four for an update). A 30-day approximation differs from the calendar by
 up to three days at four months — enough to pass a document the guide fails. ``_age_months_ceiling`` counts
 COMPLETE months and these pin the boundary behaviour.
 
-⚠️ PR-6 HAS THREE BANDS, and the middle one is a CONDITION, not a failure: an appraisal at six months is
+PR-6 HAS THREE BANDS, and the middle one is a CONDITION, not a failure: an appraisal at six months is
 usable WITH an update (Form 1004D). Reporting it ``fired`` would tell a processor the file is broken when it
 needs one more document. These pin that it is ``needs_review``, and that the band ordering is load-bearing.
 
-⚠️ NEVER CLEAR ON A MISSING DOCUMENT. A file with no loan estimate / credit report / appraisal must reach
+NEVER CLEAR ON A MISSING DOCUMENT. A file with no loan estimate / credit report / appraisal must reach
 couldnt_check, never "the lock is fine" / "the credit is current" / "the appraisal is current". Proven here
 at the recipe layer (the tag abstains to ``unknown``) and at the gate layer (an unknown tag → couldnt_check).
 """
@@ -113,7 +113,7 @@ def test_four_calendar_months_is_not_120_days() -> None:
 def test_a_document_past_its_window_does_not_clear_it(
     pulled: date, closing: date, days_old: int
 ) -> None:
-    """⚠️ THE REPORTED FN. Flooring to COMPLETE months while the rules compare with strict ``>`` meant
+    """THE REPORTED FN. Flooring to COMPLETE months while the rules compare with strict ``>`` meant
     ``floor(age) > 4`` only fired at FIVE complete months — so a credit report up to 4 months 30 days old
     (152 days) returned 4 and CLEARED a four-month limit. Every case here is genuinely over four months
     and must exceed the limit, not sit on it."""
@@ -144,7 +144,7 @@ def test_lock_expiring_before_closing_is_negative() -> None:
     value, reason = _rate_lock_days_to_closing(
         _with(closing="2026-09-15", lock="2026-09-01"), "loan", None
     )
-    # ⚠️ The reasoning must NOT also say "before" — `days` is signed, so "-14 day(s) BEFORE closing" is
+    # The reasoning must NOT also say "before" — `days` is signed, so "-14 day(s) BEFORE closing" is
     # the double negative the CL-1 spec was corrected for. This string is processor-visible too.
     assert value == "-14"
     assert "margin -14 day(s)" in reason
@@ -152,7 +152,7 @@ def test_lock_expiring_before_closing_is_negative() -> None:
 
 
 def test_no_loan_estimate_abstains_never_zero() -> None:
-    """⚠️ A file with no loan estimate must NOT read as 'the lock is fine'. Absent ≠ 0."""
+    """A file with no loan estimate must NOT read as 'the lock is fine'. Absent ≠ 0."""
     value, reason = _rate_lock_days_to_closing(_with(closing="2026-09-01"), "loan", None)
     assert value == _UNKNOWN
     assert "rate lock expiration" in reason
@@ -207,7 +207,7 @@ def test_documents_disagreeing_on_closing_date_abstain() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ PR-6's THREE BANDS — read off the spec's own ordered outcomes
+# PR-6's THREE BANDS — read off the spec's own ordered outcomes
 # --------------------------------------------------------------------------- #
 def _pr6_band(age_months: int) -> str:
     """Which outcome PR-6's ordered, first-match-wins body selects at a given age."""
@@ -231,7 +231,7 @@ def _pr6_band(age_months: int) -> str:
     [
         (0, "satisfied"),
         (4, "satisfied"),  # exactly four months needs no update
-        (5, "needs_review"),  # ⚠️ a CONDITION, not a failure
+        (5, "needs_review"),  # a CONDITION, not a failure
         (11, "needs_review"),
         (12, "needs_review"),  # twelve months is still within the limit
         (13, "fired"),  # beyond twelve → a NEW appraisal
@@ -242,7 +242,7 @@ def test_pr6_three_bands(age_months: int, expected: str) -> None:
 
 
 def test_pr6_middle_band_is_not_a_fired_verdict() -> None:
-    """⚠️ The whole point of the middle band: an appraisal needing an update is a condition to satisfy,
+    """The whole point of the middle band: an appraisal needing an update is a condition to satisfy,
     not a broken file. If this ever becomes `fired`, processors lose that distinction."""
     assert _pr6_band(6) == "needs_review"
     assert _pr6_band(6) != "fired"
@@ -256,7 +256,7 @@ def test_pr6_band_order_is_load_bearing() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ The gate: an unknown tag → couldnt_check, for every rule in the family
+# The gate: an unknown tag → couldnt_check, for every rule in the family
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
     ("rule_id", "tag_id"),
@@ -304,7 +304,7 @@ def test_cl1_carries_no_domain_threshold() -> None:
 # The DATE-SELECTION POLICY is per tag — the reported regression
 # --------------------------------------------------------------------------- #
 def test_an_appraisal_update_does_not_reset_the_twelve_month_clock() -> None:
-    """⚠️ THE REGRESSION. B4-1.2-04 measures BOTH bands from the ORIGINAL effective date, and the
+    """THE REGRESSION. B4-1.2-04 measures BOTH bands from the ORIGINAL effective date, and the
     classifier has one `appraisal` type — so a Form 1004D update is just a second appraisal date. Taking
     the MOST RECENT let the update reset the clock: a fifteen-month-old value reported as ~2 months and
     PR-6 defaulted to `satisfied`, contradicting its own "a NEW appraisal is required" band."""
@@ -322,7 +322,7 @@ def test_an_appraisal_update_does_not_reset_the_twelve_month_clock() -> None:
 
 
 def test_a_superseded_loan_estimate_cannot_mask_an_expired_lock() -> None:
-    """⚠️ THE REGRESSION. `rate_lock.expiration`'s VALUE is an expiry, not a document date, so taking the
+    """THE REGRESSION. `rate_lock.expiration`'s VALUE is an expiry, not a document date, so taking the
     latest meant "the most permissive lock anywhere in the file": an initial LE locked through September
     hid a re-lock that expired in July, and CL-1 passed an expired lock."""
     snap = _snapshot(

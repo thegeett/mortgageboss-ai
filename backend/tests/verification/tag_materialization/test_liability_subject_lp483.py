@@ -1,6 +1,6 @@
 """LP-483 B1/B2 — the ``liability`` production subject family, and the first produced ``liab.*`` tag.
 
-⚠️ WHY THIS FAMILY MATTERS BEYOND CR-1. ``KNOWN_SUBJECTS`` held only transaction/document/loan/borrower,
+WHY THIS FAMILY MATTERS BEYOND CR-1. ``KNOWN_SUBJECTS`` held only transaction/document/loan/borrower,
 so a tag declared ``entity: liability`` had nowhere to be produced — which is why ALL 14 ``liab.*`` tags
 sat in ``fact_tags.csv`` declared and unproduced. This family is the missing floor under the whole credit
 tag vocabulary, not CR-1 overhead.
@@ -89,7 +89,7 @@ def test_liability_is_a_known_subject() -> None:
 
 
 def test_subject_ids_match_the_rule_engine_enumerator_exactly() -> None:
-    """⚠️ THE CONTRACT. A production subject id that differs from ``per_liability``'s would materialize a
+    """THE CONTRACT. A production subject id that differs from ``per_liability``'s would materialize a
     tag under an id no rule ever reads — silently, forever. Both derive from ``liability_rows``."""
     snap = _snapshot(
         documents=[_tradeline_doc([{"creditor_name": "PENNYMAC", "monthly_payment": "4263"}])],
@@ -149,7 +149,7 @@ async def test_a_liability_without_a_payment_gets_no_tag() -> None:
 # LP-483 review fixes — live scope, canonical context names, and the PII backstop
 # --------------------------------------------------------------------------- #
 async def test_monthly_payment_materializes_under_the_LIVE_subject_scope() -> None:
-    """⚠️ The finding: the tests omit ``only_subjects`` (= everything) while the live orchestrator passes
+    """The finding: the tests omit ``only_subjects`` (= everything) while the live orchestrator passes
     ``_MATERIALIZED_SUBJECTS``, which did not contain ``liability`` — so this tag produced 2 values here
     and 0 on every real file. This asserts the LIVE call shape, not the permissive one."""
     from app.services.verification_run import _MATERIALIZED_SUBJECTS
@@ -176,7 +176,7 @@ def _context(row: object) -> dict[str, object]:
 
 
 def test_both_sources_present_the_same_canonical_keys_to_a_prompt() -> None:
-    """⚠️ The finding: the context splatted each source's OWN column names, so one prompt saw two schemas
+    """The finding: the context splatted each source's OWN column names, so one prompt saw two schemas
     (``type``/``unpaid_balance``/``holder_name`` vs ``account_type``/``balance``/``creditor_name``) and
     would silently under-read one leg of the union."""
     snap = _snapshot(
@@ -197,7 +197,7 @@ def test_both_sources_present_the_same_canonical_keys_to_a_prompt() -> None:
 
 
 def test_the_ai_context_scrubs_a_long_identifier_the_declared_redact_misses() -> None:
-    """⚠️ The finding: ``ListSpec.redact`` covers only the fields a spec NAMED, so an account number a
+    """The finding: ``ListSpec.redact`` covers only the fields a spec NAMED, so an account number a
     bureau prints inside ``creditor_name`` reached the reasoner unscrubbed. The universal backstop every
     other list-derived context applies now covers this one too."""
     snap = _snapshot(documents=[_tradeline_doc([{"creditor_name": "CHASE CARD 4111111111111111"}])])
@@ -209,7 +209,7 @@ def test_the_ai_context_scrubs_a_long_identifier_the_declared_redact_misses() ->
 
 
 def test_heloc_credit_limit_is_not_an_aliased_name() -> None:
-    """⚠️ The finding: it aliased onto ``credit_limit_or_high_credit``, which EVERY revolving tradeline
+    """The finding: it aliased onto ``credit_limit_or_high_credit``, which EVERY revolving tradeline
     fills — so declaring the parsed tag would have passed the D5 guard and fed HCLTV a credit card's
     limit. Removed until an account-type classifier exists."""
     from app.verification.tag_materialization.subjects import _LIABILITY_FIELD_ALIASES

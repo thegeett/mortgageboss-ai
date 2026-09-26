@@ -97,7 +97,7 @@ class W2Extraction(BaseModel):
 
     # --- LP-461 diff — verified scalar additions --------------------------- #
     control_number: TypedField[str] = Field(default_factory=TypedField)  # Box d
-    # Box 13 checkbox #3 (statutory + retirement already exist). ⚠️ null ≠ "unchecked": the prompt returns
+    # Box 13 checkbox #3 (statutory + retirement already exist). null ≠ "unchecked": the prompt returns
     # "checked"/"unchecked" when the box is VISIBLE, null only when Box 13 is not legible (LP-458 fix,
     # extended to all three Box-13 checkboxes).
     third_party_sick_pay_checked: TypedField[str] = Field(default_factory=TypedField)

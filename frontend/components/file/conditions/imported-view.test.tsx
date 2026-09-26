@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 /**
  * The file after a round has been imported (S1-05, S1-08, S1-09).
  *
- * ⚠️ THE PROPERTY THIS WHOLE SCREEN EXISTS TO PROTECT IS AN ABSENCE. Stage 1 has no status controls:
+ * THE PROPERTY THIS WHOLE SCREEN EXISTS TO PROTECT IS AN ABSENCE. Stage 1 has no status controls:
  * nothing says cleared, done, satisfied, open or to do, and a condition missing from a later round
  * is not marked missing, removed or cleared either (design rule 3, ADR-404). So most of what is
  * asserted here is that a control is NOT rendered — which is exactly the kind of test that passes
@@ -69,7 +69,7 @@ function condition(overrides: Partial<Condition> = {}): Condition {
 }
 
 /**
- * ⚠️ `has_bytes` IS AN INPUT HERE, NOT DERIVED FROM `kind`, AND THAT IS THE POINT OF THIS FIXTURE.
+ * `has_bytes` IS AN INPUT HERE, NOT DERIVED FROM `kind`, AND THAT IS THE POINT OF THIS FIXTURE.
  *
  * The client used to decide "does this round have a PDF" from a list of `kind` values — exactly the
  * list `_has_pdf_source`'s comment warns against — because `storage_path` was not serialised. It now
@@ -137,7 +137,7 @@ function round(
 /**
  * One history event, with every projected field defaulting to null.
  *
- * ⚠️ NULL BY DEFAULT BECAUSE THE SERVER PROJECTS ONLY WHAT A WRITER STORED. Spelling each field out
+ * NULL BY DEFAULT BECAUSE THE SERVER PROJECTS ONLY WHAT A WRITER STORED. Spelling each field out
  * per fixture is how the old one came to give `round_received` a `rows` that no writer sets — a shape
  * the real app can never produce. Defaulting them makes a test say exactly which keys it is claiming.
  */
@@ -179,7 +179,7 @@ describe("the imported list (S1-05)", () => {
     expect(screen.getByText("Final inspection is required.")).toBeDefined();
   });
 
-  it("⚠️ offers NO edit or remove control, and no status control of any kind", () => {
+  it("offers NO edit or remove control, and no status control of any kind", () => {
     // Design rule 3 and ADR-404. The review screen is where a round is changed; once imported this
     // is the lender's record of what they asked for, and only the lender clears a condition.
     // Asserted alongside a positive check so it cannot pass by rendering nothing at all.
@@ -189,7 +189,7 @@ describe("the imported list (S1-05)", () => {
     expect(screen.queryByRole("button", { name: "Edit the wording" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Remove this row" })).toBeNull();
 
-    // ⚠️ SCANNED WITHIN THE ROW, NOT THE SCREEN, AND THE FIRST VERSION COULD NEVER PASS. An unscoped
+    // SCANNED WITHIN THE ROW, NOT THE SCREEN, AND THE FIRST VERSION COULD NEVER PASS. An unscoped
     // `/cleared/i` matches the design's own callout — "Only the lender clears a condition — nothing
     // here is marked cleared or removed" — which is the sentence that PROVES the property. The guard
     // failed on its own evidence. Scoped to the row it still catches a status chip appearing on a
@@ -202,7 +202,7 @@ describe("the imported list (S1-05)", () => {
     }
   });
 
-  it("⚠️ shows the note as a chip and not inside the lender's wording (S1-05)", () => {
+  it("shows the note as a chip and not inside the lender's wording (S1-05)", () => {
     // The same design rule 5 cut as the review screen, asserted AGAIN here because this list is a
     // second renderer of the same string. A property demonstrated on one screen and assumed on the
     // other is the shape this stage has been wrong about repeatedly — and both screens were in fact
@@ -232,7 +232,7 @@ describe("the imported list (S1-05)", () => {
     expect(screen.getByText("8/28")).toBeDefined();
   });
 
-  it("⚠️ shows no kind chip when the lender's heading already says it", () => {
+  it("shows no kind chip when the lender's heading already says it", () => {
     // `BUCKET_KIND_LABEL.master` is "Master (applies to the whole file)", which can never equal a
     // heading of "Master" — so the "the kind adds nothing new" comparison never fired and a chip
     // appeared that the design omits. The long form's ABSENCE is what fails if the select's map
@@ -252,7 +252,7 @@ describe("the imported list (S1-05)", () => {
     ).toBeDefined();
   });
 
-  it("⚠️ chips every round a condition appeared on, and does not mark the rounds it missed", () => {
+  it("chips every round a condition appeared on, and does not mark the rounds it missed", () => {
     // S1-08: six conditions seen again show `R1 R2`; the other five show `R1` only and are NOT
     // flagged as missing, removed or cleared. `round_numbers` is derived from events server-side
     // precisely because two columns cannot express "on R1 and R3 but not R2".
@@ -290,8 +290,8 @@ describe("the round strip (S1-05, S1-08)", () => {
     expect(screen.getByText("Full list")).toBeDefined();
   });
 
-  it("⚠️ runs Round 1 → Round 2 left to right, not newest first (S1-08)", () => {
-    // ⚠️ A POSITIONAL ASSERTION, BECAUSE THE TEST ABOVE PASSES EITHER WAY. It asserts both labels
+  it("runs Round 1 → Round 2 left to right, not newest first (S1-08)", () => {
+    // A POSITIONAL ASSERTION, BECAUSE THE TEST ABOVE PASSES EITHER WAY. It asserts both labels
     // EXIST, which is true in both orders — so the strip rendered newest-first against a design that
     // reads left to right, inside a passing suite.
     //
@@ -307,14 +307,14 @@ describe("the round strip (S1-05, S1-08)", () => {
     expect(first.compareDocumentPosition(second) & 4).toBe(4);
   });
 
-  it("⚠️ keeps discarded rounds in the strip, because the file's history is not the work queue", () => {
+  it("keeps discarded rounds in the strip, because the file's history is not the work queue", () => {
     // The dashboard filters discarded rounds out of "what am I working on". This answers a different
     // question, and a round vanishing from it reads as data loss.
     show([round({ id: "r2", round_number: null, status: "discarded" }, ["paste"]), round()]);
     expect(screen.getByText(/discarded/)).toBeDefined();
   });
 
-  it("⚠️ offers Attach the lender's PDF ONLY on a round that has none", () => {
+  it("offers Attach the lender's PDF ONLY on a round that has none", () => {
     show([round({ id: "r2", round_number: 2 }, ["paste"]), round()]);
 
     // One button, on the pasted round — not on the round that arrived as a PDF.
@@ -322,7 +322,7 @@ describe("the round strip (S1-05, S1-08)", () => {
     expect(buttons).toHaveLength(1);
   });
 
-  it("⚠️ follows the BYTES, not the source kind, when the two disagree", () => {
+  it("follows the BYTES, not the source kind, when the two disagree", () => {
     // THE FAILURE MODE `has_bytes` EXISTS TO CLOSE. The old check keyed on a list of `kind` values,
     // which held only because every bytes-carrying source happens to be written as `pdf_upload` or
     // `email` — a fact about the current writers, not a rule binding them. A `paste` that stored
@@ -335,14 +335,14 @@ describe("the round strip (S1-05, S1-08)", () => {
     expect(screen.queryByRole("button", { name: "Attach the lender’s PDF" })).toBeNull();
   });
 
-  it("⚠️ and offers it for a bytes-less arrival even on a kind that usually carries them", () => {
+  it("and offers it for a bytes-less arrival even on a kind that usually carries them", () => {
     // The other direction: a forward that stored nothing is still attachable, and a kind-based check
     // would refuse it.
     show([round({ id: "r3", round_number: 3 }, [["email", false]])]);
     expect(screen.getByRole("button", { name: "Attach the lender’s PDF" })).toBeDefined();
   });
 
-  it("⚠️ and NOT on a pasted round that has already been enriched", () => {
+  it("and NOT on a pasted round that has already been enriched", () => {
     // THE CASE `hasPdf` EXISTS FOR. `sources` is a LIST because a paste can gain a PDF (LP-907), so
     // a round enriched earlier carries BOTH `paste` and `pdf_upload`. Asking "was it pasted?" would
     // keep offering the attach on a round that already has the letter — and the server refuses it
@@ -351,7 +351,7 @@ describe("the round strip (S1-05, S1-08)", () => {
     expect(screen.queryByRole("button", { name: "Attach the lender’s PDF" })).toBeNull();
   });
 
-  it("⚠️ and NOT on a round the server would refuse for its STATUS", () => {
+  it("and NOT on a round the server would refuse for its STATUS", () => {
     // THE HALF THE GATE WAS MISSING (LP-909 review). `enrich_round_with_pdf` refuses on TWO counts:
     // a status outside `ENRICHABLE` (`draft` or `imported`), AND a round that already has stored
     // bytes. The strip checked only the second, so a DISCARDED round with no PDF — which this strip
@@ -365,7 +365,7 @@ describe("the round strip (S1-05, S1-08)", () => {
     expect(screen.queryByRole("button", { name: "Attach the lender’s PDF" })).toBeNull();
   });
 
-  it("⚠️ nor on a parse_failed round, for the same reason", () => {
+  it("nor on a parse_failed round, for the same reason", () => {
     // `parse_failed` is outside `ENRICHABLE` too. Reparse is its recovery, not attach.
     show([round({ id: "r2", round_number: null, status: "parse_failed" }, ["paste"])]);
     expect(screen.queryByRole("button", { name: "Attach the lender’s PDF" })).toBeNull();
@@ -376,7 +376,7 @@ describe("the round strip (S1-05, S1-08)", () => {
     expect(screen.getByText(/were left as they are — nothing is removed or cleared/)).toBeDefined();
   });
 
-  it("⚠️ draws that sentence as an info callout, not as the faintest text on the screen (S1-08)", () => {
+  it("draws that sentence as an info callout, not as the faintest text on the screen (S1-08)", () => {
     // The assertion above passes on plain grey text, which is how it shipped. This is the sentence
     // that stops a reader concluding the lender WITHDREW everything the round omitted — the same job
     // as the callout above it — so its treatment is part of the requirement, not decoration.
@@ -412,7 +412,7 @@ describe("the round-details sheet (S1-09)", () => {
     expect(screen.getByText("Close by")).toBeDefined();
   });
 
-  it("⚠️ shows no enrich callout when the sheet is merely opened", () => {
+  it("shows no enrich callout when the sheet is merely opened", () => {
     // The callout describes an attach that just happened. Showing it on every visit would tell a
     // processor a PDF had been attached each time they looked at the round.
     show([round()]);
@@ -420,7 +420,7 @@ describe("the round-details sheet (S1-09)", () => {
     expect(screen.queryByText(/Lender’s PDF attached/)).toBeNull();
   });
 
-  it("⚠️ opens on the round AFTER the attach, not the one captured before it", async () => {
+  it("opens on the round AFTER the attach, not the one captured before it", async () => {
     // Seen in a browser (LP-909 §5): the sheet an attach opens held the round OBJECT from the moment
     // of `onSuccess`, before the refetch — so under a callout saying the PDF had filled the letter
     // it showed "A paste has no letter…", no `PDF upload` chip and every expiry as "—". The strip
@@ -465,7 +465,7 @@ describe("the round-details sheet (S1-09)", () => {
     expect(within(sheet).getByText("11/03/2026")).toBeDefined();
   });
 
-  it("⚠️ does not call a match a fill, and can still say nothing was filled", async () => {
+  it("does not call a match a fill, and can still say nothing was filled", async () => {
     // `matched` COUNTS PASTED ROWS THE PDF RECOGNISED; it is not a thing the enrich filled. It sat
     // inside the Filled list, so an attach that filled nothing but matched six rows read "Filled the
     // codes on the 6 pasted conditions" — claiming work the result does not report — and the zero
@@ -497,7 +497,7 @@ describe("the round-details sheet (S1-09)", () => {
     expect(screen.queryByText(/Filled the codes/)).toBeNull();
   });
 
-  it("⚠️ shows the History, and this test asserted the opposite one commit ago", () => {
+  it("shows the History, and this test asserted the opposite one commit ago", () => {
     // It said "has no History section, because no endpoint serves one" — true at the time: there was
     // no route, no schema and no service reading `condition_events`, while LP-904 had built
     // `ix_condition_events_round_occurred` FOR this screen and paid a write on every event insert to
@@ -505,7 +505,7 @@ describe("the round-details sheet (S1-09)", () => {
     //
     // A test pinning an absence outlives the absence, which is the same shape as the comment above
     // it that claimed the mortgagee clause was missing from the server.
-    // ⚠️ THIS FIXTURE USED TO BE A SHAPE NO WRITER PRODUCES (LP-909 review). It gave
+    // THIS FIXTURE USED TO BE A SHAPE NO WRITER PRODUCES (LP-909 review). It gave
     // `round_received` a `rows: 6` and asserted "Pasted · 6 conditions read" — but the paste writer
     // stores `{source_kind, bytes}` with no `rows`, so that line could never render in the real app
     // and the test passed against fiction. The same defect as my two earlier wrong tests, one level
@@ -543,7 +543,7 @@ describe("the round-details sheet (S1-09)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Letter details →" }));
 
     expect(screen.getByText("History")).toBeDefined();
-    // ⚠️ THE NUMBERS, NOT JUST THE LABELS. Each line is composed from projected scalars precisely
+    // THE NUMBERS, NOT JUST THE LABELS. Each line is composed from projected scalars precisely
     // because `detail` is NPI and never travels — so asserting only that "Imported" appears would
     // pass for a version that rendered a kind map and dropped the counts the design asks for.
     expect(screen.getByText("Pasted")).toBeDefined();
@@ -551,7 +551,7 @@ describe("the round-details sheet (S1-09)", () => {
     expect(screen.getByText("Imported: 0 new, 6 seen again")).toBeDefined();
   });
 
-  it("⚠️ never says a sheet was received for a round somebody typed", () => {
+  it("never says a sheet was received for a round somebody typed", () => {
     // A MANUAL round's `ROUND_RECEIVED` is a condition entered by hand — nothing arrived. The old
     // line said "Condition sheet received" for it, which is the class of false statement the
     // reparse docstring itself names.
@@ -567,7 +567,7 @@ describe("the round-details sheet (S1-09)", () => {
     expect(screen.queryByText(/Condition sheet received/)).toBeNull();
   });
 
-  it("⚠️ does not claim an enrich filled anything when it filled nothing", () => {
+  it("does not claim an enrich filled anything when it filled nothing", () => {
     // An enrich fills only what the round lacked, so attaching a PDF to a paste that already carried
     // its letterhead fills nothing. The line used to assert "letter details filled" regardless — the
     // same defect as `enrichSummary` counting a match as a fill.
@@ -591,7 +591,7 @@ describe("the round-details sheet (S1-09)", () => {
     ).toBeDefined();
   });
 
-  it("⚠️ says the history could not be loaded rather than showing an empty one", () => {
+  it("says the history could not be loaded rather than showing an empty one", () => {
     // A round always has at least its `ROUND_RECEIVED` event, so "no history" is not a real state.
     // Rendering nothing on a failed fetch would make a broken endpoint look like a quiet round.
     eventsQuery.mockReturnValue({ data: undefined, isPending: false, isError: true });

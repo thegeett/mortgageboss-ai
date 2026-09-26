@@ -4,11 +4,11 @@
 # the file and must meet the agency's coverage floor. A unit owner's HO-6 walls-in policy does not cover
 # the building; if the master policy is missing or thin, the collateral is effectively uninsured.
 #
-# ⚠️ THIS IS A DIFFERENT TEST ON A DIFFERENT DOCUMENT FROM IH-1. IH-1 reads the borrower's own
+# THIS IS A DIFFERENT TEST ON A DIFFERENT DOCUMENT FROM IH-1. IH-1 reads the borrower's own
 # homeowners binder (its dwelling loss-settlement basis); IH-7 reads the ASSOCIATION's master policy.
 # IH-1's spec says so explicitly and needs no condo exclusion because it never reads a master policy.
 #
-# ⚠️ LOAN-SCOPED, NOT PER-DOCUMENT — and the reason is structural. "absent" is a statement about the
+# LOAN-SCOPED, NOT PER-DOCUMENT — and the reason is structural. "absent" is a statement about the
 # FILE, and no per-document tag can be produced for a document that is not there. A per-document rule
 # here could only ever judge master policies that already exist, which is the one case that needs the
 # least checking.
@@ -18,7 +18,7 @@
 #     Fannie Mae Selling Guide B7-4-01, "General Liability Insurance Requirements for Project
 #     Developments", page dated 08/05/2026: "The amount of coverage must be at least $1 million for
 #     bodily injury and property damage for any single occurrence."
-#     ⚠️ B7-4-01, NOT B7-3-03 — B7-3-03 covers MASTER PROPERTY insurance and states no liability limit.
+#     B7-4-01, NOT B7-3-03 — B7-3-03 covers MASTER PROPERTY insurance and states no liability limit.
 #     The catalog rationale points at "master policy present + adequate" without naming a section; the
 #     liability floor genuinely lives in a different chapter.
 #   replacement-cost basis
@@ -28,7 +28,7 @@
 #     elements and residential structures." The same section accepts GUARANTEED and EXTENDED replacement
 #     cost as ways to substantiate it, so both are in the recognised vocabulary below.
 #
-# ⚠️ WHAT THIS RULE DOES **NOT** CHECK, recorded rather than silently omitted. Fannie also requires
+# WHAT THIS RULE DOES **NOT** CHECK, recorded rather than silently omitted. Fannie also requires
 # FIDELITY/CRIME coverage for projects above a unit-count threshold (B7-4-02). The unit count lives on
 # the condo questionnaire (`total_units`), which fills on 0 of the 1 questionnaire in the corpus, and
 # the master policy document carries `fidelity_crime_coverage_present` but no unit count. Building the
@@ -63,7 +63,7 @@ reference_values:
   values:
     # B7-4-01 (08/05/2026) — see the provenance block above.
     min_general_liability_per_occurrence: "1000000"
-    # ⚠️ THE COVERAGE-BASIS VOCABULARY, and a DELIBERATE WIDENING OF ADR-376 — stated rather than
+    # THE COVERAGE-BASIS VOCABULARY, and a DELIBERATE WIDENING OF ADR-376 — stated rather than
     # slipped in. CR-12's rule is EXACT match against a closed set. This field is not a code, it is
     # PROSE; the four master policies in the corpus read:
     #   "Guaranteed Replacement Cost"
@@ -139,7 +139,7 @@ spec_version: 1
 # The MACHINE-READABLE deterministic body (LP-324). An "unknown" tag coerces through the gate to
 # couldnt_check BEFORE this body runs.
 deterministic:
-  # ⚠️ THE CONDO SCOPING IS AN APPLICABILITY PREDICATE, NOT AN OUTCOME — and the difference is
+  # THE CONDO SCOPING IS AN APPLICABILITY PREDICATE, NOT AN OUTCOME — and the difference is
   # load-bearing. The spec schema does not allow a `not_applicable` outcome, and it is right not to:
   # the applicability layer resolves an ABSENT or "unknown" predicate tag to COULDNT_CHECK and only a
   # DEFINITELY-FALSE one to not_applicable. Encoding the scoping as an outcome would have needed the
@@ -187,7 +187,7 @@ deterministic:
         occurrence. If the association will not increase coverage, the project may be ineligible and the
         loan needs a project-eligibility review before it proceeds.
     - verdict: couldnt_check
-      # ⚠️ THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. A `satisfied` default would turn an unreadable
+      # THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. A `satisfied` default would turn an unreadable
       # certificate into a silent all-clear on the collateral's only building coverage.
       default: true
       reasoning: >-

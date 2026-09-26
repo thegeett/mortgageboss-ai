@@ -1,30 +1,30 @@
-# CR-1 — Undisclosed liability — AI structural rule SPEC (LP-490). ⚠️ BUILDS INERT.
+# CR-1 — Undisclosed liability — AI structural rule SPEC (LP-490). BUILDS INERT.
 #
-# ⚠️ INERT BY DESIGN, NOT BY OVERSIGHT. CR-1 gates on `liab.in_application`, an AI tag with NO measured
+# INERT BY DESIGN, NOT BY OVERSIGHT. CR-1 gates on `liab.in_application`, an AI tag with NO measured
 # accuracy. Its bar is `not-calibratable-yet`, for which `is_eligible()` returns False (LP-484), so CR-1
 # is NOT in ACTIVE_RULE_IDS and does not run on a live file. The deliverable is a correct, CALIBRATABLE
 # build; scoring is a later run against it.
 #
-# ⚠️ ONE MATCHER, TWO VIEWS — the reason this spec adds no producer of its own. LP-483 built the
+# ONE MATCHER, TWO VIEWS — the reason this spec adds no producer of its own. LP-483 built the
 # comparison once, as the `credit_profile` AI group on the LIABILITY subject (ADR-375). CR-1 reads that
 # per-liability judgment DIRECTLY, so the finding names WHICH debt; CR-4 reads
 # `credit.undisclosed_tradeline`, a deterministic borrower-level rollup OVER THE SAME TAG. Writing a
 # second matcher here would let CR-1 and CR-4 disagree about one file — the thing a shared source of
 # truth exists to prevent. `test_cr1_and_cr4_cannot_disagree` pins it.
 #
-# ⚠️ THE DIRECTION THIS RULE CHECKS. CR-1 asks, of each tradeline the CREDIT REPORT reports: is this debt
+# THE DIRECTION THIS RULE CHECKS. CR-1 asks, of each tradeline the CREDIT REPORT reports: is this debt
 # on the application? A MISMO STATED liability with no matching tradeline is the REVERSE direction and is
 # NOT a CR-1 finding — the applicability predicate below scopes the subject set to
 # `credit_report_reported` so a stated-only liability produces no finding at all, rather than a
 # permanent, unfixable couldnt_check. That is CR-12's lesson (LP-486): a file with 8 stated liabilities
 # produced 8 unanswerable couldnt_checks before its predicate was added.
 #
-# ⚠️ THE FAILURE DIRECTION IS TWO-SIDED, and whoever sets the bar must weigh both. A false MATCH hides a
+# THE FAILURE DIRECTION IS TWO-SIDED, and whoever sets the bar must weigh both. A false MATCH hides a
 # real undisclosed debt — Priya's #1 source of underwriting conditions and the reason this rule exists.
 # A false NON-MATCH fabricates a condition on a clean file and sends a processor chasing a debt that was
 # always disclosed. Neither is the safe direction; the prompt says so in those words.
 #
-# ⚠️ MATCHING HAS NO ACCOUNT NUMBER TO WORK WITH. The MISMO side carries only type, monthly_payment,
+# MATCHING HAS NO ACCOUNT NUMBER TO WORK WITH. The MISMO side carries only type, monthly_payment,
 # unpaid_balance and holder_name — no account number — so the match rests on name, amounts and type.
 # Names differ by convention ("NR/SMS/CAL" against "PENNYMAC LOAN SERVICES"), which is precisely the
 # narrow judgment the AI is asked for, one pair at a time.
@@ -70,7 +70,7 @@ required_inputs:
     description: >-
       whether THIS tradeline is reflected in the application's stated liabilities (AI, LP-483, the
       `credit_profile` group on the liability subject): "yes" / "no", or "unknown" when the match cannot
-      be determined. ⚠️ UNCALIBRATED — no measured accuracy, which is why CR-1 is inert.
+      be determined. UNCALIBRATED — no measured accuracy, which is why CR-1 is inert.
 
 subject_enumeration: per_liability   # LP-480 — one subject per tradeline row (and per stated liability)
 subject_key_fields: [liability]
@@ -93,7 +93,7 @@ spec_version: 1
 # The MACHINE-READABLE body (LP-324). An "unknown" tag coerces through the gate to couldnt_check BEFORE
 # this body runs, so an unresolvable pair can never reach the default and read as disclosed.
 deterministic:
-  # ⚠️ SCOPE THE SUBJECT SET — CR-12's lesson. per_liability UNIONS credit-report tradelines with the
+  # SCOPE THE SUBJECT SET — CR-12's lesson. per_liability UNIONS credit-report tradelines with the
   # application's MISMO stated liabilities, and only the report leg has an "is this on the application?"
   # question to answer. Without this predicate every stated liability became a permanent, unfixable
   # couldnt_check. This narrows the SUBJECTS, never the abstain: a tradeline the AI could not resolve
@@ -155,7 +155,7 @@ deterministic:
       reasoning: >-
         this debt is reflected in the liabilities stated on the application
     - verdict: couldnt_check
-      # ⚠️ THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. A `satisfied` default would read an unresolvable
+      # THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. A `satisfied` default would read an unresolvable
       # pair as "disclosed" — the false match that hides the undisclosed debt this rule exists to catch.
       default: true
       reasoning: >-

@@ -72,7 +72,7 @@ on the three secret ARNs, `kms:Decrypt` on the secrets CMK, and CloudWatch Logs 
 services share it. **No task role needs `GetSecretValue`** — injection happens before the process
 exists.
 
-### ⚠️ Health checks — three separate traps
+### Health checks — three separate traps
 
 **1. Use `/health/live`.** There are three endpoints and two of them return **503** when Postgres
 or Redis is unreachable. An ALB target group pointed at either would deregister every `api` task
@@ -90,7 +90,7 @@ cannot distinguish "alive" from "alive but not consuming" — a worker that lost
 connection looks healthy and silently stops processing. Keep C1's `celery inspect ping`. Set
 `startPeriod` generously; a cold start plus DB connection takes time.
 
-### ⚠️ Configuration that fails silently if wrong
+### Configuration that fails silently if wrong
 
 | Variable | Value | If wrong |
 |---|---|---|
@@ -113,7 +113,7 @@ crash exactly like `sslmode`.
 so with `desired_count = 1` set it to `8`. State in the result doc that scaling the worker
 requires dividing this value by the task count.
 
-### ⚠️ CPU architecture — the most likely first failure
+### CPU architecture — the most likely first failure
 
 C1's images were built on a **Mac**. If that is Apple Silicon, `docker build` produces
 **arm64** images by default. Fargate task definitions default to `X86_64`.
@@ -135,7 +135,7 @@ Report which you found. Do not guess.
 If ARM64 is chosen, verify nothing in the image is x86-only — check whether any wheel in
 `uv.lock` ships platform-specific binaries.
 
-### ⚠️ You will need to debug a task you cannot SSH into
+### You will need to debug a task you cannot SSH into
 
 Fargate has no SSH. Without **ECS Exec** the only diagnostic surface is CloudWatch logs, and
 several of the failure modes enumerated above (empty secret, wrong `STORAGE_BACKEND`, TLS
@@ -210,7 +210,7 @@ role has no `bedrock:*` and the `worker` role has no `s3:PutObject`.
 - Two target groups, `ip` type (required for Fargate/awsvpc)
 - Path routing:
   - `/api/*` → api
-  - `/health/*` → api ⚠️ **the health endpoints are at the app root, not under `/api/`** — verify
+  - `/health/*` → api **the health endpoints are at the app root, not under `/api/`** — verify
     against `backend/app/main.py` and report the actual paths. Without this rule the ALB health
     check has no route.
   - default → frontend
@@ -227,14 +227,14 @@ Create a separate task definition, same image, command `uv run alembic upgrade h
 api task role and the shared execution role. It is invoked manually via `aws ecs run-task`; give
 the exact command in the result doc.
 
-⚠️ `alembic/env.py:25` reuses the **asyncpg** `DATABASE_URL`, so the same `?ssl=require` applies.
+`alembic/env.py:25` reuses the **asyncpg** `DATABASE_URL`, so the same `?ssl=require` applies.
 Note that C2's `scripts/check-stack.sh` guard is local-only and does not protect this path —
 flag it if that matters.
 
 ### 5. `envs/dev` wiring
 
 Consume outputs from `envs/dev` (network, data, secrets) and from `infra/shared` (ECR image
-URIs). ⚠️ `shared` is a **third state file** — use `terraform_remote_state` or a data source, and
+URIs). `shared` is a **third state file** — use `terraform_remote_state` or a data source, and
 say which and why.
 
 New outputs: ALB DNS name, cluster name, service names, task definition ARNs, the migration task

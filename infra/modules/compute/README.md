@@ -160,7 +160,7 @@ does not exist yet**. Scaling on CPU is actively wrong for this worker: it is
 rate-limited to a few requests per minute against Bedrock and spends most of its
 time waiting on I/O, so CPU stays low precisely when the backlog is deepest.
 
-⚠️ **Raising the worker's `desired_count` requires dividing
+**Raising the worker's `desired_count` requires dividing
 `AI_REQUESTS_PER_MINUTE_BEDROCK` by the new count.** That limiter is process-local:
 N tasks pace at N × the value, and the account is at 10 RPM.
 

@@ -8,7 +8,7 @@ Built by C4 on the modules C2 and C3 validated against `../dev`. Every differenc
 between the two is a **value**, not code — no module was edited to make staging
 work, which was the acceptance test for §6b.
 
-## ⚠️ Applying this takes TWO runs
+## Applying this takes TWO runs
 
 ACM validates by DNS, and the zone's nameservers must be live at the registrar
 before validation can succeed — but they do not exist until the zone is created.
@@ -53,7 +53,7 @@ Do **not** use `-target` to work around the ordering. Full walkthrough in
 | `budget_limit_usd` | `150` | **`300`** | dev's would fire immediately here. |
 | `vpc_cidr` | `10.20.0.0/16` | **`10.30.0.0/16`** | Identical ranges cannot be peered. |
 
-## ⚠️ Starts empty
+## Starts empty
 
 No document sync from dev, no database seed. Dev documents are development
 artifacts and have no place in an environment holding borrower NPI. The schema

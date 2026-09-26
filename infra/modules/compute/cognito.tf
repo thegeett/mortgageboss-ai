@@ -7,7 +7,7 @@
 # reaches a task at all — the application's own auth is not the only thing standing
 # between the internet and borrower NPI.
 #
-# ⚠️ NO CIRCULAR DEPENDENCY, by construction. The callback URL is built from the
+# NO CIRCULAR DEPENDENCY, by construction. The callback URL is built from the
 # DOMAIN NAME (a variable, known before anything is created), not from the ALB's
 # generated DNS name. Deriving it from the ALB would make Cognito depend on the
 # load balancer while the listener depends on Cognito — a cycle Terraform cannot

@@ -1,6 +1,6 @@
 """LP-508 / ADR-377 — the distrusted-field guard: the gate's FIFTH defence.
 
-⚠️ THE HOLE THIS CLOSES. ``gate.py`` had four defences — absent, ``"unknown"``, contradiction, low
+THE HOLE THIS CLOSES. ``gate.py`` had four defences — absent, ``"unknown"``, contradiction, low
 confidence — and a confidently-WRONG parsed value defeats all four by construction: it is present, it is
 not ``"unknown"``, nothing contradicts it, and the parsed producer sets ``confidence=None``, which the
 confidence minimum FILTERS OUT and skips entirely when every load-bearing tag is parsed.
@@ -9,7 +9,7 @@ confidence minimum FILTERS OUT and skips entirely when every load-bearing tag is
 all, and doc 104 (a "coinsurance contract" basis read off a replacement-cost HO3) auto-asserted an
 insurance-adequacy verdict.
 
-⚠️ THE BOUNDARY, PINNED HERE TOO. This layer keys on the FIELD, not on whether a given extraction was
+THE BOUNDARY, PINNED HERE TOO. This layer keys on the FIELD, not on whether a given extraction was
 wrong — so it is cruder than LP-474's per-extraction checks and broader. It does NOT cover doc 253 (a lone
 $224k gift amount with no sibling to contradict it), because no field-level or consistency-level layer can:
 there is nothing internal to compare against. That case still passes, and the test below says so.
@@ -45,7 +45,7 @@ def _parsed(value: str) -> Tag:
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ The motivating case: doc 104 → IH-1 no longer auto-asserts
+# The motivating case: doc 104 → IH-1 no longer auto-asserts
 # --------------------------------------------------------------------------- #
 def test_ih1_no_longer_auto_asserts_on_the_distrusted_basis() -> None:
     result = evaluate_gate(
@@ -81,7 +81,7 @@ def _gated_tags(rule_id: str) -> set[str]:
 
 @pytest.mark.parametrize("rule_id", ["IH-1", "ID-5", "ID-3", "CR-13", "PR-6"])
 def test_each_protected_rule_actually_gates_on_a_distrusted_tag(rule_id: str) -> None:
-    """⚠️ THE ASSERTION THAT WAS MISSING, and why the gap shipped green.
+    """THE ASSERTION THAT WAS MISSING, and why the gap shipped green.
 
     The previous version called ``evaluate_gate`` with a HAND-BUILT map keyed by the parsed tag ids —
     but no rule ever passes those to the gate. ID-5 gates on ``id.borrower_id_expiration``, CR-13 on
@@ -115,7 +115,7 @@ def test_every_distrusted_field_reaches_a_rule() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ It must not degrade everything — a clean input still passes
+# It must not degrade everything — a clean input still passes
 # --------------------------------------------------------------------------- #
 def test_a_clean_field_still_passes() -> None:
     """The guard is narrow by construction: only listed fields degrade."""
@@ -138,10 +138,10 @@ def test_a_rule_reading_only_clean_fields_is_untouched() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ The boundary — what this layer does NOT cover
+# The boundary — what this layer does NOT cover
 # --------------------------------------------------------------------------- #
 def test_the_253_class_still_passes_and_that_is_the_boundary() -> None:
-    """⚠️ Doc 253 read a gift as $224,307.94 instead of $24,307.94. ``gift_letter.gift_amount`` is NOT on
+    """Doc 253 read a gift as $224,307.94 instead of $24,307.94. ``gift_letter.gift_amount`` is NOT on
     the distrust list, so a rule reading it PASSES the gate — exactly as before this ticket.
 
     That is deliberate and it is the boundary of the whole approach: LP-474 recorded 253 as uncatchable by
@@ -172,7 +172,7 @@ def test_unknown_still_beats_distrusted() -> None:
 
 
 def test_distrusted_is_a_fifth_state_not_one_of_the_four() -> None:
-    """⚠️ Absent ≠ empty ≠ unknown ≠ low-confidence ≠ distrusted. The value is there, the extractor was
+    """Absent ≠ empty ≠ unknown ≠ low-confidence ≠ distrusted. The value is there, the extractor was
     confident, nothing contradicts it — and it is still not to be relied on."""
     distrusted = evaluate_gate(
         {"ins.dwelling_settlement_basis": _parsed("replacement_cost")}, confidence_floor=_FLOOR
@@ -187,7 +187,7 @@ def test_distrusted_is_a_fifth_state_not_one_of_the_four() -> None:
 
 
 def test_every_list_entry_carries_a_reason() -> None:
-    """⚠️ A bare field name is unreviewable and cannot be pruned with confidence. The loader rejects one,
+    """A bare field name is unreviewable and cannot be pruned with confidence. The loader rejects one,
     and every shipped entry names its document and what was wrong."""
     for (doc_type, field), reason in load_distrusted_fields().items():
         assert len(reason) > 40, f"{doc_type}.{field} needs a real reason, not a stub"
@@ -208,7 +208,7 @@ def test_the_motivating_tags_are_all_resolved() -> None:
 
 
 def test_an_entry_naming_an_unknown_tag_is_rejected(tmp_path, monkeypatch) -> None:
-    """⚠️ The previous version asserted ``DistrustError is not None`` — true of any imported name, so
+    """The previous version asserted ``DistrustError is not None`` — true of any imported name, so
     deleting the guard it claims to pin left the suite green. This exercises the guard."""
     bogus = tmp_path / "distrusted_fields.yaml"
     bogus.write_text("tags:\n  not.a.real.tag: because reasons\n", encoding="utf-8")

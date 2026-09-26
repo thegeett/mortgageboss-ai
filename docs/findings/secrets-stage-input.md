@@ -202,7 +202,7 @@ aws secretsmanager put-secret-value \
 rm -f /tmp/dburl; unset PW
 ```
 
-⚠️ **Do not build this with a heredoc.** A heredoc appends `\n`, and asyncpg carries
+**Do not build this with a heredoc.** A heredoc appends `\n`, and asyncpg carries
 it into the DSN. `printf '%s'` is what the stage's own `put_secret` uses, for exactly
 this reason.
 
@@ -231,7 +231,7 @@ Check your copy without either of us echoing it:
 printf '%s' 'YOUR_COPY' | shasum -a 256 | cut -c1-12     # must print 77892c47d94f
 ```
 
-⚠️ **Your copy is probably wrong in a specific way.** You said the password contains
+**Your copy is probably wrong in a specific way.** You said the password contains
 `(`, `;` **and `)`**. It does **not** contain `)`. It contains only `(` and `;`. If
 you added a `)`, or percent-encoded one that is not there, the password will not
 match — and the failure appears as an authentication error from Postgres at task
@@ -300,10 +300,10 @@ aws elasticache describe-replication-groups --replication-group-id mbai-staging 
   --query 'ReplicationGroups[0].{auth:AuthTokenEnabled,status:Status}'
 ```
 
-⚠️ Do not proceed while `auth` is still `false`. ⚠️ `$TOKEN` is in your shell history
+Do not proceed while `auth` is still `false`. `$TOKEN` is in your shell history
 and environment — populate the secret in the same session, then `unset TOKEN`.
 
-### ⚠️ The suggested Redis URL the stage builds is malformed
+### The suggested Redis URL the stage builds is malformed
 
 `terraform output -raw redis_url_scheme` returns **`rediss`** — the bare scheme. The
 output's own description says "Always rediss://", but the value
@@ -369,7 +369,7 @@ with the comment: *"the set below is narrowed further so the value is genuinely 
 to paste into a URL without percent-encoding"*. `/ @ " space : # ? %` are all
 excluded deliberately.
 
-⚠️ **`%` is the trap that makes encoding risky, and it is why the charset excludes
+**`%` is the trap that makes encoding risky, and it is why the charset excludes
 it.** SQLAlchemy decodes on parse, so a literal `%` in a password is silently
 mangled — verified: `has%20space` parses as `has space`. Since the generated password
 can never contain `%`, encoding buys nothing and adds a way to get it subtly wrong
@@ -395,7 +395,7 @@ keeps it off the command line, so no shell mangling either.
    run `./scripts/deploy staging secrets` and it will skip the two you populated by
    hand and generate the other two.
 
-⚠️ Step 5 is the reason to fix the stage rather than do all four by hand: the
+Step 5 is the reason to fix the stage rather than do all four by hand: the
 `encryption-key` path validates the generated Fernet key by construction and prints
 it once with the "store this outside AWS" warning. Generating it by hand skips both.
 

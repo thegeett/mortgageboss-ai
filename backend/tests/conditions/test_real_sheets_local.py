@@ -1,11 +1,11 @@
 """The local smoke test over the product owner's real condition sheets (LP-906, spec §7.5).
 
-⚠️ NEVER RUNS IN CI, AND NO REAL SHEET EVER ENTERS THE REPO (ADR-405). It is skipped unless
+NEVER RUNS IN CI, AND NO REAL SHEET EVER ENTERS THE REPO (ADR-405). It is skipped unless
 `CONDITION_SHEETS_DIR` points at a folder OUTSIDE the repository — the product owner has one. Every
 other fixture in this package is synthetic; this is the only thing that reads a lender's actual PDF,
 and it reads it from a machine the repo cannot see.
 
-⚠️ IT PRINTS COUNTS, CODES, READER NAMES AND WARNINGS — NEVER CONDITION TEXT, NAMES OR AMOUNTS
+IT PRINTS COUNTS, CODES, READER NAMES AND WARNINGS — NEVER CONDITION TEXT, NAMES OR AMOUNTS
 (spec §9.4). A smoke test whose output carried a borrower's name would put NPI into a terminal, a CI
 log or a transcript, which is exactly what the readonly layer and the logging rules exist to prevent.
 Lender codes are safe: they are the lender's own vocabulary, not the borrower's data.
@@ -16,7 +16,7 @@ is exactly `[6, 11, 12, 16, 28]`. The multiset is the load-bearing one — `unas
 satisfied TRIVIALLY by a sheet that produced no lines at all, so on a machine without an OCR engine a
 scanned sheet would sail through the emptiness check and be caught only by its row count of 0.
 
-⚠️ THIS WILL FAIL ON UWM PDFs UNTIL LP-905, AND THAT IS DELIBERATE. `read_uwm` refuses PDF input by
+THIS WILL FAIL ON UWM PDFs UNTIL LP-905, AND THAT IS DELIBERATE. `read_uwm` refuses PDF input by
 design (`NotImplementedError`): heading detection needs a column threshold in points, which could not
 be calibrated while no PDF fixture existed. Section 3 authored one, so LP-905 is where that closes.
 Until then this test reports the refusal rather than pretending to a result — and because it is
@@ -79,13 +79,13 @@ def test_every_real_sheet_is_recognised_and_fully_assigned() -> None:
 
     for index, path in enumerate(pdfs, start=1):
         sheet = _read(path)
-        # ⚠️ The file is identified by its POSITION, never its name — a real sheet's filename
+        # The file is identified by its POSITION, never its name — a real sheet's filename
         # routinely carries the borrower's surname and the loan number.
         print(f"sheet {index}: format={sheet.sheet_format.value} rows={len(sheet.rows)}")
         print(f"  codes: {[row.lender_code for row in sheet.rows]}")
         print(f"  warnings: {len(sheet.warnings)} unassigned: {len(sheet.unassigned_lines)}")
         for warning in sheet.warnings:
-            # ⚠️ THE CATEGORY ONLY, NEVER THE WHOLE WARNING. Several reader warnings deliberately
+            # THE CATEGORY ONLY, NEVER THE WHOLE WARNING. Several reader warnings deliberately
             # embed a fragment of the sheet so they are useful on a synthetic fixture —
             # `unrecognised loan-information line: 'Borrower  …'`, `unparseable Date Printed: '…'`.
             # On a REAL sheet that fragment is a borrower's name or a figure. §7.5 permits printing
@@ -105,7 +105,7 @@ def test_every_real_sheet_is_recognised_and_fully_assigned() -> None:
 def test_the_corpus_produces_the_expected_row_counts() -> None:
     """§7.5's second assertion, and the one that actually carries weight.
 
-    ⚠️ THIS IS WHAT CATCHES A SHEET THAT READ NOTHING. `unassigned_lines == []` is satisfied by an
+    THIS IS WHAT CATCHES A SHEET THAT READ NOTHING. `unassigned_lines == []` is satisfied by an
     empty parse; a row count of 0 is not. On a machine with no OCR engine a scanned page yields no
     lines at all — silently, with no error — so this multiset is the only assertion standing between
     that and a green run.

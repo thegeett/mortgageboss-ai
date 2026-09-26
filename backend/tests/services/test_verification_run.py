@@ -522,7 +522,7 @@ def test_retire_guard_covers_every_document_derived_shape() -> None:
     # / per_liability (LP-480) all derive their subjects from the documents section, so a rule on ANY of
     # them is covered automatically — no per-shape special-casing left to forget.
     #
-    # ⚠️ Asserted against KNOWN_ENUMERATORS rather than a hand-written literal (the LP-480 review): the
+    # Asserted against KNOWN_ENUMERATORS rather than a hand-written literal (the LP-480 review): the
     # literal form silently went stale when per_liability was added, which is exactly the omission that
     # would have let a degraded run retire every prior tradeline finding. Now a NEW enumerator fails this
     # test until someone classifies it. ``loan`` is the sole document-INDEPENDENT shape (always exactly

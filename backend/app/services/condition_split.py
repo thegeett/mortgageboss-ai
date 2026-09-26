@@ -1,18 +1,18 @@
 """Splitting an unstructured condition sheet with AI (LP-908, spec §LP-908).
 
-⚠️ USED ONLY WHEN `needs_ai` IS SET, AND IT SPLITS RATHER THAN INTERPRETS. The rules read a layout we
+USED ONLY WHEN `needs_ai` IS SET, AND IT SPLITS RATHER THAN INTERPRETS. The rules read a layout we
 know and give the lender's words exactly, every time, for nothing. This runs when the rules could not
 find where one condition ends and the next begins — and even then the model's only job is to draw
 those boundaries. It never decides what a condition MEANS, never fills a code the sheet does not
 show, and never sees the loan file.
 
-⚠️ EVERY RETURNED STRING IS CHECKED AGAINST THE INPUT BY CODE (spec §9.3). A `verbatim` that is not a
+EVERY RETURNED STRING IS CHECKED AGAINST THE INPUT BY CODE (spec §9.3). A `verbatim` that is not a
 whitespace-normalised substring of the text is DROPPED with a warning, not stored. That check is what
 makes "AI only splits" an enforced property rather than a prompt instruction — a model that
 paraphrases, tidies or invents cannot get that text into `verbatim_text`, which is the field ADR-405
 says carries the lender's own words.
 
-⚠️ NO LOAN SNAPSHOT EVER REACHES THIS CALL (spec §9.4). The only input is the text the processor
+NO LOAN SNAPSHOT EVER REACHES THIS CALL (spec §9.4). The only input is the text the processor
 pasted, or OCR of rasterized pages. Not the borrower, not the property, not the stated financials —
 and not the PDF's raw text layer either, which can carry invisible text (the Phase 4 rasterize-first
 decision).
@@ -42,7 +42,7 @@ from app.models.condition_round import ConditionSheetFormat
 
 logger = structlog.get_logger(__name__)
 
-#: ⚠️ `.txt`, WHERE SPEC §LP-908 WRITES `split_v1.md`. Every one of the 125 prompts in the tree is
+#: `.txt`, WHERE SPEC §LP-908 WRITES `split_v1.md`. Every one of the 125 prompts in the tree is
 #: `.txt` and `load_prompt` takes whatever relative path it is given, so the extension carries no
 #: meaning — which makes consistency with the repo the only thing at stake. Recorded as a deviation
 #: in the ticket rather than taken silently.
@@ -60,7 +60,7 @@ _MAX_TOKENS = 8192
 class ConditionSplitUnavailable(Exception):
     """The model could not be reached, or returned nothing usable.
 
-    ⚠️ TYPED, AND THE ROUND MUST NOT BE LEFT LOOKING SUCCESSFUL (spec §9.8). The caller records a
+    TYPED, AND THE ROUND MUST NOT BE LEFT LOOKING SUCCESSFUL (spec §9.8). The caller records a
     failure a processor can act on; it never silently presents an empty split as a read sheet.
     """
 
@@ -87,7 +87,7 @@ class SplitOutcome:
 def _collapse(text: str) -> str:
     """The form both sides of the check are compared in: whitespace collapsed, case preserved.
 
-    ⚠️ COLLAPSED ON BOTH SIDES, because the model re-emits a wrapped condition as one line. The
+    COLLAPSED ON BOTH SIDES, because the model re-emits a wrapped condition as one line. The
     sheet prints "Final inspection is required\\n   to confirm..."; the model returns "Final
     inspection is required to confirm...". Those are the same words, and a check that compared them
     literally would call the correct answer an invention. Case is NOT folded: the lender's
@@ -100,7 +100,7 @@ def _collapse(text: str) -> str:
 class _Coverage:
     """Which stretches of the input have been accounted for, as a PARTITION.
 
-    ⚠️ SPANS, NOT `in`, AND NOT A SET OF SEEN LINES. Both simplifications fail, in ways the substring
+    SPANS, NOT `in`, AND NOT A SET OF SEEN LINES. Both simplifications fail, in ways the substring
     idea alone cannot see, because substring-ness is a property of each row ALONE and says nothing
     about the relationships between rows:
 
@@ -119,7 +119,7 @@ class _Coverage:
     So every character of the input is assigned to exactly one condition, heading or ignored entry,
     and what nothing claims goes to `unassigned_lines` (spec §LP-908, §9.2).
 
-    ⚠️ WHAT THIS DOES **NOT** CHECK, AND THE LIST ABOVE WOULD OTHERWISE IMPLY IT DOES: WHERE THE CUTS
+    WHAT THIS DOES **NOT** CHECK, AND THE LIST ABOVE WOULD OTHERWISE IMPLY IT DOES: WHERE THE CUTS
     FELL. A partition constrains COVERAGE, not BOUNDARY PLACEMENT. `claim` asks only whether a span
     is unclaimed and `unclaimed` reports only gaps — neither asks whether a cut landed in the right
     place, so ANY set of non-overlapping spans that happens to tile the input passes, and the correct
@@ -189,7 +189,7 @@ def _rows_from(
 ) -> list[ParsedRow]:
     """Build rows, dropping any whose text the input does not actually contain.
 
-    ⚠️ CLAIMING A SPAN, NOT TESTING MEMBERSHIP. A row is kept only when it can take a stretch of the
+    CLAIMING A SPAN, NOT TESTING MEMBERSHIP. A row is kept only when it can take a stretch of the
     sheet that nothing else has taken — so a row assembled from distant fragments, and a second copy
     of a row already returned, are both refused here rather than reaching a processor.
     """
@@ -205,7 +205,7 @@ def _rows_from(
         if not isinstance(verbatim, str) or not verbatim.strip():
             continue
         if not coverage.claim(verbatim):
-            # ⚠️ DROPPED, AND THE TEXT IS NOT LOGGED. It is a string the MODEL produced, so it is the
+            # DROPPED, AND THE TEXT IS NOT LOGGED. It is a string the MODEL produced, so it is the
             # one thing here most likely to be wrong — and it could contain anything.
             outcome.rejected += 1
             continue
@@ -230,7 +230,7 @@ def _rows_from(
                     if isinstance(heading, str) and heading.strip()
                     else ""
                 ),
-                # ⚠️ ALWAYS UNKNOWN. The heading is carried through as printed, but reading it as a
+                # ALWAYS UNKNOWN. The heading is carried through as printed, but reading it as a
                 # bucket is INTERPRETATION, and this module does not interpret. The review screen
                 # asks the processor, and LP-906's mapping applies only to layouts we know.
                 bucket_kind=BucketKind.UNKNOWN,

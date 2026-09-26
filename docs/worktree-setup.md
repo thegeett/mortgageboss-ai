@@ -133,9 +133,9 @@ docker ps --format '{{.Names}}\t{{.Ports}}' | sort    # confirm both stacks
 docker volume ls | grep postgres-data                # confirm separate volumes
 ```
 
-> ⚠️ **`docker compose down -v` DESTROYS the volume and every row in it.**
+> **`docker compose down -v` DESTROYS the volume and every row in it.**
 >
-> ⚠️ **Never run `docker compose down` or `down -v` in the main worktree.** That stack has
+> **Never run `docker compose down` or `down -v` in the main worktree.** That stack has
 > been up for weeks with live dev data. Use `stop` / `start` if you need to free memory —
 > `down` removes containers, and `down -v` removes the data.
 

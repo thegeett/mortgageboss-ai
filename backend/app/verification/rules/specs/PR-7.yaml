@@ -3,28 +3,28 @@
 # Does the appraisal describe the property the loan is secured by? An appraisal for the wrong address
 # values the wrong asset.
 #
-# ⚠️ NO CATALOG EDIT WAS NEEDED, and that is the finding. LP-487 asked of every `ai_fuzzy_match` row
+# NO CATALOG EDIT WAS NEEDED, and that is the finding. LP-487 asked of every `ai_fuzzy_match` row
 # whether typed extraction has already spent the perception step; here it has (both real appraisals state
 # `subject_property_address`). But PC-3 — LIVE, catalogued `ai_fuzzy_match`, comparing the CONTRACT's
 # address to the same MISMO address — already carries a fully deterministic body on a
 # `no-ai-dependency` bar. PR-7 is that rule's twin, so it follows the same route: a deterministic
 # producer, no model, no derivation, no ratification load, and the catalog row left alone.
-# ⚠️ Both PC-3's and PR-7's rows are arguably stale in the IH-2/TI-1 sense. Reported, not edited — an
+# Both PC-3's and PR-7's rows are arguably stale in the IH-2/TI-1 sense. Reported, not edited — an
 # edit that buys nothing is churn, and the loader is satisfied either way.
 #
-# ⚠️ IT REUSES PC-3's CANONICALISERS rather than cloning them (`_norm_address`: street suffixes, US state
+# IT REUSES PC-3's CANONICALISERS rather than cloning them (`_norm_address`: street suffixes, US state
 # names, ZIP+4 → ZIP5), so a fix to address handling reaches both rules.
 #
-# ⚠️ THE MAILING-ADDRESS TRAP (LP-407-4 D1). The producer reads the MISMO SUBJECT-property address only —
+# THE MAILING-ADDRESS TRAP (LP-407-4 D1). The producer reads the MISMO SUBJECT-property address only —
 # never a borrower's `current_address`, which the parser can fill with a MAILING address. A file lacking
 # a COMPLETE subject address (street + city + state + postal) resolves to couldnt_check rather than
 # comparing against a partial or wrong-typed one.
 #
-# ⚠️ A MISMATCH IS `fired`, and the direction is argued rather than inherited. IH-2 and TI-1 both chose
+# A MISMATCH IS `fired`, and the direction is argued rather than inherited. IH-2 and TI-1 both chose
 # needs_review because a NAME difference is frequently legitimate — a trust, an assignment, a marriage.
 # An ADDRESS is not ambiguous in that way: after canonicalisation, two renderings of the same property
 # agree, and a residual mismatch means the appraisal describes a DIFFERENT property. That is a defect,
-# not a difference. ⚠️ The residual risk is a surface form the canonicaliser does not resolve — a unit
+# not a difference. The residual risk is a surface form the canonicaliser does not resolve — a unit
 # designator is the known case (ADR-325) — which is why PC-3 routes ITS mismatch to needs_review. PR-7
 # fires because its consequence is larger: PC-3's mismatch means two documents disagree, PR-7's means the
 # value in the file may belong to another property. Logged for Priya either way.
@@ -97,7 +97,7 @@ deterministic:
       when_tags:
         - {tag: property.appraisal_address_match, op: eq, value: "yes"}
       reasoning: the appraisal values the subject property on this loan file
-    # ⚠️ needs_review, NOT fired (reported finding). `_norm_address` deliberately does not canonicalise
+    # needs_review, NOT fired (reported finding). `_norm_address` deliberately does not canonicalise
     # UNIT DESIGNATORS (ADR-325), and both real appraisals in the corpus are condominiums — so
     # "34 Birch Rd Unit 4B" against MISMO's "34 Birch Rd" + "#4B" normalises to
     # "... unit 4b" vs "... 4b" and reported two DIFFERENT PROPERTIES for one condo unit. PC-3 shares
@@ -123,5 +123,5 @@ deterministic:
         subject address, or the file states no complete subject-property address (street, city, state and
         postal code are all required)
       how_to_fix: >-
-        Confirm the loan file carries a complete subject-property address. ⚠️ A borrower's current
+        Confirm the loan file carries a complete subject-property address. A borrower's current
         address is not used for this check — it can be a mailing address for a different property.

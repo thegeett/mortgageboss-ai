@@ -5,7 +5,7 @@ locals {
   # that is port 80; after, port 443 (port 80 becomes a redirect and serves nothing).
   app_listener_arn = var.enable_tls ? aws_lb_listener.https[0].arn : aws_lb_listener.http.arn
 
-  # ⚠️ Cognito requires HTTPS. The ALB will not attach an authenticate-cognito
+  # Cognito requires HTTPS. The ALB will not attach an authenticate-cognito
   # action to an HTTP listener, so auth is only live once TLS is.
   cognito_active = var.enable_tls && var.enable_cognito
 }
@@ -48,7 +48,7 @@ resource "aws_lb" "this" {
 # --------------------------------------------------------------------------- #
 # Target groups — target_type "ip" is REQUIRED for Fargate.
 #
-# ⚠️ HEALTH CHECKS ARE UNAFFECTED BY LISTENER RULES, INCLUDING THE COGNITO ACTION.
+# HEALTH CHECKS ARE UNAFFECTED BY LISTENER RULES, INCLUDING THE COGNITO ACTION.
 #
 # The load balancer probes each registered target DIRECTLY at its IP and port; the
 # probe never traverses a listener, so it never meets the authentication action. If
@@ -166,7 +166,7 @@ resource "aws_lb_listener" "https" {
   # gain; a 1.3-only policy would break those clients for little.
   ssl_policy = var.ssl_policy
 
-  # ⚠️ THE DEFAULT ACTION IS WHERE AUTHENTICATION LIVES.
+  # THE DEFAULT ACTION IS WHERE AUTHENTICATION LIVES.
   #
   # It covers every request that matches no explicit rule. The explicit rules below
   # ALSO carry the action — see the comment there, which is the part that is easy
@@ -183,7 +183,7 @@ resource "aws_lb_listener" "https" {
         user_pool_client_id = aws_cognito_user_pool_client.this[0].id
         user_pool_domain    = aws_cognito_user_pool_domain.this[0].domain
 
-        # ⚠️ DELIBERATELY LONG — see the module README. A session that expires
+        # DELIBERATELY LONG — see the module README. A session that expires
         # mid-use turns an in-flight fetch() into a 302 toward a login page, which
         # browser JavaScript cannot follow; the application then fails in ways that
         # look like application bugs. A long session moves expiry to BETWEEN visits.
@@ -206,7 +206,7 @@ resource "aws_lb_listener" "https" {
 # --------------------------------------------------------------------------- #
 # Listener rules
 #
-# ⚠️ THE SUBTLETY THAT DECIDES WHETHER THIS IS SECURE.
+# THE SUBTLETY THAT DECIDES WHETHER THIS IS SECURE.
 #
 # An ALB evaluates rules in priority order and applies the FIRST match. The default
 # action runs only when NOTHING matches. So a plain forward rule for /api/* does
@@ -261,7 +261,7 @@ resource "aws_lb_listener_rule" "api" {
 # This rule being behind Cognito does NOT affect the target group health check,
 # which probes targets directly and never traverses a listener.
 #
-# ⚠️ FIVE CONDITION VALUES, MAXIMUM — per RULE, counted across every condition
+# FIVE CONDITION VALUES, MAXIMUM — per RULE, counted across every condition
 # block, not per block. This shipped with six (/health, /health/*, /docs, /docs/*,
 # /redoc, /openapi.json) and failed the C5 phase-1 apply with:
 #   ValidationError: A rule can only have '5' condition values and regex values

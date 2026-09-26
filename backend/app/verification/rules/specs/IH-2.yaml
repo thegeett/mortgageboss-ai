@@ -4,7 +4,7 @@
 # entity means the lender is not on the policy: a loss cheque goes to a stranger, and the servicer
 # never receives the cancellation notice.
 #
-# ⚠️ THE CATALOG KIND WAS CHANGED FOR THIS RULE (rule_kinds.csv, LP-487): ai_fuzzy_match →
+# THE CATALOG KIND WAS CHANGED FOR THIS RULE (rule_kinds.csv, LP-487): ai_fuzzy_match →
 # deterministic_only. That kind predates typed extraction. The PERCEPTION step — reading the clause off
 # the binder — is already spent by the extractor, which lands the mortgagee in the typed-core
 # `mortgagee_name` field on 14 of 15 binders in the corpus. What remains is comparing two strings that
@@ -13,7 +13,7 @@
 # Mortgage, LLC ISAOA" · "United Wholesale Mortgage ISAOA/ATIMA". Running a model over that is spending
 # a call to do a string compare.
 #
-# ⚠️ A MISMATCH IS `needs_review`, NEVER `fired` — the decision this rule turns on. The corpus's ONE
+# A MISMATCH IS `needs_review`, NEVER `fired` — the decision this rule turns on. The corpus's ONE
 # file pairing a binder with a Closing Disclosure reads "Sistar Mortgage Company" on the CD against
 # "United Wholesale Mortgage" in the clause. In broker and correspondent deals the CD names the
 # CREDITOR and the clause names the INVESTOR/SERVICER who will hold the loan, and they legitimately
@@ -21,14 +21,14 @@
 # file's lender is Y — confirm", which is what a processor needs to see anyway, and never asserts that
 # the clause is wrong.
 #
-# ⚠️ THE LENDER NAME IS SCOPED TO TWO DOCUMENT TYPES. `lender_name` is a field on TEN document types
+# THE LENDER NAME IS SCOPED TO TWO DOCUMENT TYPES. `lender_name` is a field on TEN document types
 # whose meanings differ — form_1098.lender_name is the CURRENT SERVICER of an existing mortgage,
 # voe.lender_name is whoever ORDERED the verification, other_property_note.lender_name is a DIFFERENT
 # property's lender. Only the Closing Disclosure (authoritative) and the Loan Estimate (fallback, for a
 # file too early to have a CD) are read. An unscoped read would compare the clause against a name that
 # was never this loan's creditor.
 #
-# ⚠️ THE IH-1 / IH-3 BOUNDARY. IH-1 reads the binder's SETTLEMENT BASIS, IH-3 its DATES, IH-2 its
+# THE IH-1 / IH-3 BOUNDARY. IH-1 reads the binder's SETTLEMENT BASIS, IH-3 its DATES, IH-2 its
 # MORTGAGEE. Three different fields on the same document; they never overlap.
 
 rule_id: IH-2
@@ -59,7 +59,7 @@ reference_values:
   priya_validated: false          # must equal rule_kinds.csv
   threshold_needs_signoff: false  # must equal rule_kinds.csv — no threshold; this is a vocabulary
   values:
-    # ⚠️ THE DECLARED NORMALISATION VOCABULARY — pipe-delimited, case-insensitive. The recipe mirrors
+    # THE DECLARED NORMALISATION VOCABULARY — pipe-delimited, case-insensitive. The recipe mirrors
     # these exactly and test_ih2_vocabulary_matches_the_spec pins them identical, so the spec (where
     # they are reviewed) and the recipe (which runs) cannot drift — the CR-12 arrangement.
     #
@@ -141,7 +141,7 @@ deterministic:
         - {tag: ins.mortgagee_clause_correct, op: eq, value: "yes"}
       reasoning: >-
         the binder's mortgagee clause names this loan's lender
-    # ⚠️ needs_review, NOT fired — see the header. A correspondent's creditor and the investor who will
+    # needs_review, NOT fired — see the header. A correspondent's creditor and the investor who will
     # hold the loan differ legitimately, and the file is not failed on a difference that is frequently
     # correct.
     - verdict: needs_review
@@ -157,7 +157,7 @@ deterministic:
         file. If the clause names an unrelated entity, or a prior lender from a refinance, request a
         corrected binder with the current mortgagee clause and loan number before closing.
     - verdict: couldnt_check
-      # ⚠️ THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. The gate already routes an absent/"unknown" tag to
+      # THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. The gate already routes an absent/"unknown" tag to
       # couldnt_check before this body runs, so this branch should be unreachable — but a `satisfied`
       # default would turn any future third value into a silent all-clear.
       default: true

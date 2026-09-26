@@ -1,12 +1,12 @@
 """Importing, discarding, editing a draft, and adding a condition by hand (LP-909 section 2).
 
-⚠️ THESE DRIVE THE REAL REDIS LOCK. `import` and `POST conditions` enter `loan_file_needs_lock`, and
+THESE DRIVE THE REAL REDIS LOCK. `import` and `POST conditions` enter `loan_file_needs_lock`, and
 nothing here stubs it — `tests/services/test_needs_engine.py` already exercises the real lock against
 the real Redis, so this follows existing practice rather than inventing a fake. If Redis is down these
 fail loudly, which is the honest outcome: a passing suite that silently skipped the lock would say
 nothing about the path that actually runs in production.
 
-⚠️ AND THE HANDLERS COMMIT, WHICH conftest's DOCSTRING WARNS AGAINST. `db_session` binds a session to
+AND THE HANDLERS COMMIT, WHICH conftest's DOCSTRING WARNS AGAINST. `db_session` binds a session to
 a connection with an already-begun transaction and rolls it back afterwards, and its docstring says
 "a commit would defeat the isolation". Measured before writing any of this: under SQLAlchemy 2.0 the
 session joins that transaction with a savepoint, so `commit()` releases the savepoint and the outer
@@ -109,7 +109,7 @@ async def _conditions(db: AsyncSession, loan_file_id: Any) -> list[Condition]:
 async def test_importing_a_draft_answers_the_result_and_settles_the_round(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ 200 AND NOT 201, THOUGH CONDITIONS ARE CREATED — the resource addressed is the round, and
+    """200 AND NOT 201, THOUGH CONDITIONS ARE CREATED — the resource addressed is the round, and
     it already existed. The round is settled in place, from DRAFT to IMPORTED."""
     loan_file, round_, token = await _draft(db_session, slug="imp-ok")
     rows = len(round_.draft_rows or [])
@@ -143,7 +143,7 @@ async def test_importing_a_round_twice_is_refused(
     again = await client.post(f"/api/v1/condition-rounds/{round_.id}/import", headers=_auth(token))
 
     assert again.status_code == 409, again.text
-    # ⚠️ `["error"]["message"]`, NOT FastAPI's DEFAULT `["detail"]`. `app/core/errors.py` registers a
+    # `["error"]["message"]`, NOT FastAPI's DEFAULT `["detail"]`. `app/core/errors.py` registers a
     # `StarletteHTTPException` handler that reshapes every error body, and seven existing endpoint
     # tests read this shape. All four refusal tests here were written against `["detail"]` and all
     # four failed with `KeyError` — while every status code was already correct, so the handlers were
@@ -155,7 +155,7 @@ async def test_importing_a_round_twice_is_refused(
 async def test_another_companys_round_cannot_be_imported(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ 404 RATHER THAN 403, AND THE INDISTINGUISHABILITY IS THE POINT. Confirming the id exists
+    """404 RATHER THAN 403, AND THE INDISTINGUISHABILITY IS THE POINT. Confirming the id exists
     would be an oracle over another tenant's rows. The gating test proves the dependency is
     DECLARED; this proves it refuses."""
     _file, round_, _token = await _draft(db_session, slug="imp-mine")
@@ -198,7 +198,7 @@ async def test_a_draft_can_be_discarded_and_stays_on_the_strip(
 async def test_an_imported_round_cannot_be_discarded(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ THE DECISION THE SPEC DOES NOT MAKE. LP-904's index keeps a discarded-after-import round's
+    """THE DECISION THE SPEC DOES NOT MAKE. LP-904's index keeps a discarded-after-import round's
     number and ADR-404 forbids deleting its conditions, so discarding one would leave every
     condition alive and still chipped to it — "discarded" would mean one thing for a draft and
     another for an imported round, in the same strip, under one word."""
@@ -231,7 +231,7 @@ def _edited_rows(round_: ConditionRound, *, text: str) -> list[dict[str, Any]]:
 async def test_an_edited_row_is_stored_and_imports_as_edited(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ SPEC §8's ACTUAL REQUIREMENT: "editing a row and importing sends the edited text". The
+    """SPEC §8's ACTUAL REQUIREMENT: "editing a row and importing sends the edited text". The
     fingerprint is taken of what is IMPORTED, not of what was read, so an edited row may match a
     different condition or none — which is correct rather than unfortunate."""
     loan_file, round_, token = await _draft(db_session, slug="draft-edit")
@@ -261,7 +261,7 @@ async def test_an_edited_row_is_stored_and_imports_as_edited(
 async def test_a_stale_expected_updated_at_is_refused(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ TWO TABS ON ONE DRAFT, AND ALSO AN ENRICH THAT LANDED UNDERNEATH ONE. `updated_at` is
+    """TWO TABS ON ONE DRAFT, AND ALSO AN ENRICH THAT LANDED UNDERNEATH ONE. `updated_at` is
     bumped by ANY modification, so this refuses both — they are the same hazard: overwriting work
     the caller never saw."""
     _file, round_, token = await _draft(db_session, slug="draft-stale")
@@ -325,7 +325,7 @@ async def test_an_imported_round_cannot_be_edited(
 async def test_a_hand_typed_condition_opens_round_one_when_there_is_none(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ THE ROUND IT CREATES IS `PARTIAL`, AND THAT IS THE ONE THAT WOULD BITE SILENTLY. ADR-404
+    """THE ROUND IT CREATES IS `PARTIAL`, AND THAT IS THE ONE THAT WOULD BITE SILENTLY. ADR-404
     lets only a FULL round's absences mean anything, so a FULL round holding whatever a processor
     happened to type would entitle Stage 2 to propose that everything nobody typed had been cleared.
     """
@@ -410,7 +410,7 @@ async def test_a_hand_typed_condition_sorts_after_the_sheets_rows(
 async def test_a_hand_typed_condition_does_not_invent_a_lender_heading(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ THE HEADING IS THE LENDER'S VOCABULARY. "Prior To Docs (PTD)" is their phrase, and
+    """THE HEADING IS THE LENDER'S VOCABULARY. "Prior To Docs (PTD)" is their phrase, and
     manufacturing one for a row they never wrote would put words in their mouth. Empty means the
     processor filed it under no heading."""
     company, token = await _user(db_session, slug="manual-heading")

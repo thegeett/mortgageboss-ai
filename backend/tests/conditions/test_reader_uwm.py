@@ -1,6 +1,6 @@
 """The UWM reader against the spec's three fixtures (LP-906 section 2, spec §7.1-7.3).
 
-⚠️ EVERY EXPECTED VALUE HERE IS THE SPEC'S, NOT MINE. §7.1-7.3 state the exact row counts, the code
+EVERY EXPECTED VALUE HERE IS THE SPEC'S, NOT MINE. §7.1-7.3 state the exact row counts, the code
 order, the note dates and texts, the owner hints, the expiry dates and the duplicate count. Writing
 the reader first and then asserting whatever it produced would test that the code does what it does.
 So these assertions were transcribed from the spec's expected tables before the reader ran once.
@@ -64,7 +64,7 @@ def test_round1_has_eleven_rows_in_the_spec_order() -> None:
 
 
 def test_round1_buckets_follow_the_parenthetical_not_the_words() -> None:
-    """⚠️ `UW - Prior To Final Approval (PTD)` is PRIOR_TO_DOCS. Reading the WORDS would file it
+    """`UW - Prior To Final Approval (PTD)` is PRIOR_TO_DOCS. Reading the WORDS would file it
     under approval — the kind follows the parenthetical, which is spec rule 3."""
     sheet = _read(UWM_ROUND_1)
     kinds = {row.lender_code: row.bucket_kind for row in sheet.rows}
@@ -83,7 +83,7 @@ def test_round1_buckets_follow_the_parenthetical_not_the_words() -> None:
 def test_round1_underwriter_notes_and_the_three_asterisk_trap() -> None:
     """§7.1: 6132 and 6637 carry a 2026-08-28 "Not in Upload" note; 0132 has NONE.
 
-    ⚠️ `***NOTE***` IS LENDER TEXT, NOT AN UNDERWRITER NOTE. 0132's text contains it twice. The rule
+    `***NOTE***` IS LENDER TEXT, NOT AN UNDERWRITER NOTE. 0132's text contains it twice. The rule
     is "asterisks THEN a date" — three asterisks with no date must not match, or every lender aside
     would be misattributed to the underwriter.
     """
@@ -130,7 +130,7 @@ def test_round1_lender_team_and_the_empty_closer() -> None:
     scanner or invent a name."""
     sheet = _read(UWM_ROUND_1)
     members = sheet.header["lender_team"]  # type: ignore[index]
-    # ⚠️ THE LIST FIRST, THEN THE LOOKUP. This test used to go straight to `{role: entry}`, and a dict
+    # THE LIST FIRST, THEN THE LOOKUP. This test used to go straight to `{role: entry}`, and a dict
     # collapses duplicates — so it stayed green while every sheet carried TWO empty `Closer`s
     # (LP-909 §5). Each role the sheet prints once must appear once, in the sheet's order.
     assert [entry["role"] for entry in members] == [  # type: ignore[union-attr]
@@ -150,7 +150,7 @@ def test_round1_lender_team_and_the_empty_closer() -> None:
     assert team["AE"]["name"] == "Sam Moreno"
     assert team["AE"]["phone_ext"] == "5120"
 
-    # ⚠️ `Closer:` IS PRINTED WITH NO VALUE, AND THE ROLE IS STILL KEPT. The lender is asserting the
+    # `Closer:` IS PRINTED WITH NO VALUE, AND THE ROLE IS STILL KEPT. The lender is asserting the
     # role exists and is unfilled. Omitting it would make "no closer assigned yet" indistinguishable
     # from "this letter has no closer field", and LP-909's UI cannot recover that difference later.
     assert team["Closer"]["name"] == ""
@@ -172,7 +172,7 @@ def test_round1_loan_facts() -> None:
 
 
 def test_round1_expiry_dates_are_assigned_by_column_not_by_order() -> None:
-    """⚠️ THE TEST THE WHOLE POSITIONAL LINE MODEL EXISTS FOR.
+    """THE TEST THE WHOLE POSITIONAL LINE MODEL EXISTS FOR.
 
     Six of the twelve columns are blank. There are 6 dates and 12 headers, so the Nth date is NOT the
     Nth header — matching by order would put insurance under `other` and nothing would look wrong.
@@ -260,7 +260,7 @@ def test_round2_expiry_and_clean_read() -> None:
 def test_pagebreak_sixteen_rows_after_dropping_two_duplicates() -> None:
     """§7.3: 16 rows and exactly 2 duplicates dropped.
 
-    ⚠️ THE THREE `0571` ROWS ARE NOT DUPLICATES OF EACH OTHER. UWM lists 0571 once per change of
+    THE THREE `0571` ROWS ARE NOT DUPLICATES OF EACH OTHER. UWM lists 0571 once per change of
     circumstance and all three texts differ (815000 → 805000 and so on). Only the page-overlap
     repeat — the SAME code with the SAME text — is dropped. A reader that deduplicated on code
     alone would silently delete two genuine conditions.
@@ -347,7 +347,7 @@ def test_pagebreak_expiry_dates() -> None:
 
 
 def test_pagebreak_mortgagee_clause_mid_list_is_an_artifact_not_a_row() -> None:
-    """⚠️ THE CLAUSE BREAKS INTO THE MIDDLE OF THE CONDITIONS LIST at the page boundary, between a
+    """THE CLAUSE BREAKS INTO THE MIDDLE OF THE CONDITIONS LIST at the page boundary, between a
     `0571` row and a `Closing (PTF)` heading. §7.3 expects NO unassigned lines: it is a known
     artifact, captured once, and it must not be appended to the row above it as a continuation."""
     sheet = _read(UWM_PAGEBREAK)
@@ -377,7 +377,7 @@ def test_pagebreak_warns_once_per_duplicate_and_once_for_the_missing_header() ->
 
 
 def test_a_label_word_inside_a_value_is_not_a_label() -> None:
-    """⚠️ THE DEFECT THAT LOST A BORROWER'S NAME.
+    """THE DEFECT THAT LOST A BORROWER'S NAME.
 
     The scan was a free `str.find` over the line, so a label word appearing inside a VALUE matched.
     Measured before the fix: `Borrower  Termaine Willis` produced `{"Term": "aine Willis"}` and the
@@ -408,7 +408,7 @@ def test_a_label_word_inside_a_value_is_not_a_label() -> None:
 
 
 def test_a_pdf_sheet_with_no_conditions_block_is_not_an_error() -> None:
-    """⚠️ THIS TEST USED TO ASSERT A `NotImplementedError`, AND THAT REFUSAL IS DELIBERATELY GONE.
+    """THIS TEST USED TO ASSERT A `NotImplementedError`, AND THAT REFUSAL IS DELIBERATELY GONE.
 
     `read_uwm` refused PDF input entirely while `indent` was the only answer to heading-versus-
     continuation, because `indent` is None for PDF-built lines. A derived column threshold replaced
@@ -431,7 +431,7 @@ def test_a_pdf_sheet_with_no_conditions_block_is_not_an_error() -> None:
 
 
 def test_unassigned_lines_are_collected_never_dropped() -> None:
-    """⚠️ THE §9.2 INVARIANT, EXERCISED RATHER THAN ASSUMED.
+    """THE §9.2 INVARIANT, EXERCISED RATHER THAN ASSUMED.
 
     All three §7 fixtures read cleanly, so every existing assertion is `unassigned_lines == []` and
     the branch that APPENDS to it had never executed — a property asserted everywhere and
@@ -468,7 +468,7 @@ def test_unassigned_lines_are_collected_never_dropped() -> None:
 
 
 def test_a_note_dated_after_the_sheet_rolls_back_a_year() -> None:
-    """⚠️ DATE ARITHMETIC THAT NO FIXTURE RUNS.
+    """DATE ARITHMETIC THAT NO FIXTURE RUNS.
 
     Round 1's note is 8/28 on a sheet printed 8/28 — equal, not greater, so no rollback. The
     page-break fixture has no header, so `date_printed` is None and its notes stay unresolved. The
@@ -487,7 +487,7 @@ def test_a_note_dated_after_the_sheet_rolls_back_a_year() -> None:
 
 
 def test_two_asterisks_without_a_date_are_not_a_note() -> None:
-    """⚠️ IT IS THE DIGITS THAT SAVE THIS LINE, NOT THE ASTERISKS.
+    """IT IS THE DIGITS THAT SAVE THIS LINE, NOT THE ASTERISKS.
 
     Champions §7.4 row 171 begins `**AM to pull SSN Verification.` — two asterisks, exactly the
     marker `_NOTE` looks for, and it must stay lender text. What rejects it is the required date

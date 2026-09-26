@@ -121,7 +121,7 @@ def test_a_two_document_fix_says_what_to_do_when_one_is_already_there(rule_id: s
 
 
 def test_pc7_does_not_ask_for_the_second_document_it_does_not_need() -> None:
-    """⚠️ PC-7 IS NOT LIKE THE OTHER EIGHT, and a uniform clause got it wrong before this test.
+    """PC-7 IS NOT LIKE THE OTHER EIGHT, and a uniform clause got it wrong before this test.
 
     Its two document groups are ALTERNATIVES for one fact — the closing date comes from the purchase
     agreement OR the Closing Disclosure — not two sides of a comparison. "Upload only the other" would

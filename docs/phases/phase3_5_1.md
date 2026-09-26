@@ -163,7 +163,7 @@ A rule-table completeness view would over-count live coverage 3.6×. See docs/au
 - Surface rule `params` in the overlay-admin UI; edits take effect next run; audit-logged.
   **Acceptance criteria:**
 - [ ] A threshold changed via UI affects the next verification run.
-- [ ] ⚠️ **Priya-validate:** thresholds ship as grounded-starters; UI marks unvalidated params.
+- [ ] **Priya-validate:** thresholds ship as grounded-starters; UI marks unvalidated params.
 - [ ] Changes audit-logged.
 
 ## LP-123 — Migrate remaining live rules into the registry
@@ -206,14 +206,14 @@ values available to the calculators even after retiring the finding-emitter path
 - [ ] Each a registry row using threshold_compare / continuity_check / reconcile_list.
 - [ ] AS-10's month-count comes from DU findings (when available) or config, SHARED with the needs list (LP-108).
 - [ ] AS-8 (chaining) and AS-10 (enough months) are distinct — chaining only when 2+ statements exist.
-- [ ] ⚠️ **Priya-validate:** large-deposit % (AS-1), recency window (AS-10), NSF tolerance (AS-7).
+- [ ] **Priya-validate:** large-deposit % (AS-1), recency window (AS-10), NSF tolerance (AS-7).
 
 ## LP-125 — Seed: income rules
 **Type:** Story · **Epic:** C · **Depends:** LP-120
 **Rules:** IN-2 paystub recency, IN-3 YTD consistency, IN-6 paystub↔W2 coverage. *(IN-5 employer consistency already landed in LP-120.)*
 **Acceptance criteria:**
 - [ ] IN-6 uses cross_source_match with DET-FUZZY confidence.
-- [ ] ⚠️ **Priya-validate:** paystub recency window, YTD variance tolerance.
+- [ ] **Priya-validate:** paystub recency window, YTD variance tolerance.
 
 ## LP-126 — Seed: credit-from-MISMO rules
 **Type:** Story · **Epic:** C · **Depends:** LP-120
@@ -229,7 +229,7 @@ values available to the calculators even after retiring the finding-emitter path
 **Acceptance criteria:**
 - [ ] IH-1/IH-2/DT-5 depend on the insurance schema (per LP-116 — extend or build).
 - [ ] MI-1 fires only Conv + LTV>80%; MI-4 fires only FHA.
-- [ ] ⚠️ **Priya-validate:** coverage/threshold values.
+- [ ] **Priya-validate:** coverage/threshold values.
 
 ## LP-128 — Seed: contract & identity rules
 **Type:** Story · **Epic:** C · **Depends:** LP-120, LP-116 (SSN/DOB extraction)
@@ -299,7 +299,7 @@ values available to the calculators even after retiring the finding-emitter path
 **Acceptance criteria:**
 - [ ] Each unblocked rule added as a row; runs only when its schema data is present.
 - [ ] Until a schema lands, its rules stay **awaiting-data**, never passing.
-- [ ] ⚠️ **Priya-validate:** seasoning windows (CR-6), min-score (CR-7), student-loan calc (CR-9).
+- [ ] **Priya-validate:** seasoning windows (CR-6), min-score (CR-7), student-loan calc (CR-9).
 
 ---
 
@@ -311,7 +311,7 @@ values available to the calculators even after retiring the finding-emitter path
 **Acceptance criteria:**
 - [ ] Condo-doc schema extracts questionnaire answers, master policy, budget/reserves.
 - [ ] Priority set by condo volume (LP-117) — defer within V1 if low.
-- [ ] ⚠️ **Priya-validate:** reserve %, delinquency/concentration thresholds.
+- [ ] **Priya-validate:** reserve %, delinquency/concentration thresholds.
 
 ## LP-137 — Uncommon income types
 **Type:** Story · **Epic:** E · **Depends:** LP-117 (mix)
@@ -319,7 +319,7 @@ values available to the calculators even after retiring the finding-emitter path
 **Acceptance criteria:**
 - [ ] Some need Schedule E / award-letter / retirement-statement extraction (confirm via LP-116).
 - [ ] Priority set by borrower mix (LP-117).
-- [ ] ⚠️ **Priya-validate:** continuance window (typically 3 yrs).
+- [ ] **Priya-validate:** continuance window (typically 3 yrs).
 
 ## LP-138 — Product-boundary rules
 **Type:** Story · **Epic:** E
@@ -404,5 +404,5 @@ EPIC B (LP-118..123)  registry + evaluators + runner
 - **The employer fix (original LP-115 intent) is now LP-120** — built once as the reference DET-FUZZY rule proving the new engine, not a throwaway hand-coded fix. It doesn't get run standalone; it lands with the engine.
 - **EPIC F can run right after EPIC B** (depends on the engine's three-state output, not specific rules) — strong candidate given the "strengthen verification first" priority.
 - D/E estimates firm up after LP-117 (Priya formats/volume).
-- Every ⚠️ **Priya-validate** criterion is a hard gate: rule ships as config, goes live at full confidence only after Priya confirms the number.
+- Every **Priya-validate** criterion is a hard gate: rule ships as config, goes live at full confidence only after Priya confirms the number.
 ```

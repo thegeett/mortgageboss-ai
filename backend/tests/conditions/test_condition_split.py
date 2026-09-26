@@ -1,6 +1,6 @@
 """The AI structure split (LP-908, spec §LP-908).
 
-⚠️ THE MODEL IS MOCKED IN EVERY TEST HERE, AND WHAT IS BEING TESTED IS THE CODE AROUND IT. The spec's
+THE MODEL IS MOCKED IN EVERY TEST HERE, AND WHAT IS BEING TESTED IS THE CODE AROUND IT. The spec's
 done-when has two halves and both are about OUR validation rather than the model's skill: an
 unstructured paste of the six round-2 conditions splits into six rows with EXACT wording, and a
 response containing text that is not in the input is REJECTED.
@@ -79,7 +79,7 @@ async def test_six_conditions_split_with_exact_wording(monkeypatch: pytest.Monke
 
 
 async def test_text_that_is_not_in_the_input_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    """⚠️ SPEC §LP-908's DONE-WHEN, SECOND HALF, AND THE SAFETY PROPERTY OF THE WHOLE TICKET.
+    """SPEC §LP-908's DONE-WHEN, SECOND HALF, AND THE SAFETY PROPERTY OF THE WHOLE TICKET.
 
     "AI only splits" is not enforceable by instruction. It is enforced here: a model that
     paraphrases, summarises, tidies or invents cannot get that text into `verbatim_text`, because
@@ -106,7 +106,7 @@ async def test_text_that_is_not_in_the_input_is_rejected(monkeypatch: pytest.Mon
     assert [row.verbatim_text for row in outcome.sheet.rows] == [ROUND_2_TEXTS[3]]
     assert outcome.rejected == 1
     assert any("not found in the text you pasted" in w for w in outcome.sheet.warnings)
-    # ⚠️ The dropped string is NOT in the warning. It is text the MODEL produced — the one thing here
+    # The dropped string is NOT in the warning. It is text the MODEL produced — the one thing here
     # most likely to be wrong, and it could contain anything (spec §9.5).
     assert all("credit report fee" not in w for w in outcome.sheet.warnings)
 
@@ -114,7 +114,7 @@ async def test_text_that_is_not_in_the_input_is_rejected(monkeypatch: pytest.Mon
 async def test_the_same_span_returned_twice_yields_one_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """⚠️ A PER-ROW CHECK PASSES A DUPLICATE TWICE OVER, because substring-ness says nothing about
+    """A PER-ROW CHECK PASSES A DUPLICATE TWICE OVER, because substring-ness says nothing about
     the relationship BETWEEN rows. Both copies are genuinely in the input.
 
     Nothing downstream would remove them either: rule 6's duplicate dedup lives in the READER, and
@@ -142,7 +142,7 @@ async def test_the_same_span_returned_twice_yields_one_row(
 async def test_a_row_assembled_from_two_distant_fragments_is_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """⚠️ THE REASON THE CHECK IS NOT `in`. Every word below appears in the input — just never
+    """THE REASON THE CHECK IS NOT `in`. Every word below appears in the input — just never
     together. A membership test on the joined text would accept this; claiming a contiguous span
     cannot, because no such stretch of the sheet exists."""
     stitched = "Provide copy of invoice for credit report. TC: Title company to include lender"
@@ -163,7 +163,7 @@ async def test_a_row_assembled_from_two_distant_fragments_is_rejected(
 async def test_a_span_crossing_a_real_boundary_leaves_the_rest_unassigned(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """⚠️ THE AI'S MOST NATURAL ERROR ON UNSTRUCTURED TEXT, and the one every per-row check misses.
+    """THE AI'S MOST NATURAL ERROR ON UNSTRUCTURED TEXT, and the one every per-row check misses.
 
     The tail of one condition plus the head of the next IS a contiguous substring, reads as
     plausible prose, and is a demand the lender never made. It passes the span claim — correctly, it
@@ -192,7 +192,7 @@ async def test_a_span_crossing_a_real_boundary_leaves_the_rest_unassigned(
 async def test_a_wrapped_condition_rejoined_by_the_model_is_accepted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """⚠️ WHY THE CHECK COLLAPSES WHITESPACE ON BOTH SIDES. A sheet prints one condition across
+    """WHY THE CHECK COLLAPSES WHITESPACE ON BOTH SIDES. A sheet prints one condition across
     several lines; the model returns it as one. A literal `in` test would call the correct answer an
     invention and drop the row — rejecting the model for being right."""
     wrapped = "Provide a copy of the\n    Third Party Processing Invoice."
@@ -219,7 +219,7 @@ async def test_a_wrapped_condition_rejoined_by_the_model_is_accepted(
 async def test_tidied_capitalisation_is_still_a_rejection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """⚠️ CASE IS NOT FOLDED, DELIBERATELY. The lender's capitalisation is part of the wording, and a
+    """CASE IS NOT FOLDED, DELIBERATELY. The lender's capitalisation is part of the wording, and a
     check that ignored it would admit a model that "improved" a sentence into `verbatim_text`."""
     _mock(
         monkeypatch,
@@ -280,7 +280,7 @@ async def test_a_code_keeps_its_leading_zeros(monkeypatch: pytest.MonkeyPatch) -
 
 
 async def test_the_bucket_is_never_interpreted(monkeypatch: pytest.MonkeyPatch) -> None:
-    """⚠️ THE HEADING IS CARRIED, THE KIND IS NOT DERIVED. Reading "Closing (PTF)" as
+    """THE HEADING IS CARRIED, THE KIND IS NOT DERIVED. Reading "Closing (PTF)" as
     PRIOR_TO_FUNDING is interpretation, and this module does not interpret — LP-906's mapping applies
     only to layouts we recognise. The review screen asks the processor instead."""
     _mock(
@@ -344,7 +344,7 @@ async def test_page_furniture_the_model_ignored_is_not_unassigned(
 async def test_the_model_being_unreachable_is_a_typed_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """⚠️ NEVER AN EMPTY SHEET. "The model could not be reached" and "this page had no conditions on
+    """NEVER AN EMPTY SHEET. "The model could not be reached" and "this page had no conditions on
     it" lead a processor to different actions, and returning [] for both makes the first
     indistinguishable from the second (spec §9.8)."""
     monkeypatch.setattr(split_module, "complete", AsyncMock(side_effect=AIClientError("boom")))
@@ -389,7 +389,7 @@ async def test_an_empty_split_is_reported_rather_than_looking_successful(
 
 
 async def test_the_cost_counts_cached_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
-    """⚠️ `input_tokens` ALONE UNDERCOUNTS, and `AICompletion` says so in its own docstring: on a
+    """`input_tokens` ALONE UNDERCOUNTS, and `AICompletion` says so in its own docstring: on a
     cached call it is the UNCACHED REMAINDER. A cost built from it excludes the prompt that was
     cached — the LP-628 bug, one layer down."""
     _mock(
@@ -405,7 +405,7 @@ async def test_the_cost_counts_cached_tokens(monkeypatch: pytest.MonkeyPatch) ->
 
     outcome = await split_conditions(UNSTRUCTURED)
 
-    # ⚠️ COMPARED AGAINST THE UNCACHED FIGURE, BECAUSE `> 0` CANNOT FAIL. An earlier version of this
+    # COMPARED AGAINST THE UNCACHED FIGURE, BECAUSE `> 0` CANNOT FAIL. An earlier version of this
     # test asserted only that the cost was positive — which stays true with the cache fields zeroed,
     # since `input_tokens` alone is already non-zero. A mutation run that dropped
     # `cache_read_tokens` from the call left all 14 tests passing. A guard with no failure mode is
@@ -428,7 +428,7 @@ async def test_the_cost_counts_cached_tokens(monkeypatch: pytest.MonkeyPatch) ->
 async def test_the_model_never_receives_more_than_the_pasted_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """⚠️ SPEC §9.4: NO AI CALL RECEIVES THE LOAN SNAPSHOT. The only user content is the text itself
+    """SPEC §9.4: NO AI CALL RECEIVES THE LOAN SNAPSHOT. The only user content is the text itself
     — no borrower, no property, no stated financials — and this asserts the call's arguments rather
     than trusting the module not to have added any."""
     mock = _mock(

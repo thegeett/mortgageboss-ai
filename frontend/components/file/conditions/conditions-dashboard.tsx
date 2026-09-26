@@ -23,7 +23,7 @@ function isSettledAway(round: ConditionRound): boolean {
 }
 
 /**
- * ⚠️ THERE IS NO "ABANDONED BY AI" SCREEN ANY MORE, AND ITS REMOVAL IS THE FIX RATHER THAN A LOSS.
+ * THERE IS NO "ABANDONED BY AI" SCREEN ANY MORE, AND ITS REMOVAL IS THE FIX RATHER THAN A LOSS.
  *
  * This file used to carry a notice — "this sheet is waiting for a reader that will not come" — for a
  * non-paste round whose reader asked for the AI. It was accurate when written: `split_condition_round`
@@ -73,18 +73,18 @@ function Notice({
 /**
  * The Conditions tab (LP-909 §3).
  *
- * ⚠️ IT CHOOSES ON `status`, NEVER ON THE PRESENCE OF ROWS. A `parsing` round carries the
+ * IT CHOOSES ON `status`, NEVER ON THE PRESENCE OF ROWS. A `parsing` round carries the
  * rules-read rows too, so "has rows" would show a sheet as reviewable while the split was still
  * running — the trap `ConditionRound.draft_rows` warns about in its own comment.
  *
- * ⚠️ `onRetry` NOW EXISTS, AND THIS PARAGRAPH USED TO EXPLAIN WHY IT COULD NOT. It said no route
+ * `onRetry` NOW EXISTS, AND THIS PARAGRAPH USED TO EXPLAIN WHY IT COULD NOT. It said no route
  * re-read an existing round — true then, because `parse_condition_round.delay()` was called from
  * creation paths only — and concluded that "a button that cannot work is worse than an absent one".
  * `POST /condition-rounds/{id}/reparse` is that route, so both child screens are finally passed the
  * callback they have always accepted, and the copy on them that promised it stops being a dead
  * button wearing prose.
  *
- * ⚠️ NOT THE SAME THING AS THE `ErrorState` RETRY BELOW. That one refetches the LIST when the tab
+ * NOT THE SAME THING AS THE `ErrorState` RETRY BELOW. That one refetches the LIST when the tab
  * itself failed to load; this one asks the SERVER to read a stored sheet again. They read alike at
  * a glance and mean entirely different things, which is why the handler names differ.
  */
@@ -139,7 +139,7 @@ export function ConditionsDashboard({
   const current = live[0] as ConditionRound;
 
   if (current.status === "parsing") {
-    // ⚠️ THE RETRY IS OFFERED ONLY ONCE THE ROUND IS STRANDED, which `RoundReading` decides for
+    // THE RETRY IS OFFERED ONLY ONCE THE ROUND IS STRANDED, which `RoundReading` decides for
     // itself — it renders the button only in that branch. Passing the callback unconditionally is
     // correct: the server refuses a round it is still reading, so a button shown too early would
     // 409 with "this sheet is still being read", and the screen already knows not to show it.
@@ -158,12 +158,12 @@ export function ConditionsDashboard({
     );
   }
 
-  // ⚠️ AN IMPORTED ROUND USED TO FALL THROUGH TO `RoundReview`, WHICH IS A SCREEN IT CANNOT USE.
+  // AN IMPORTED ROUND USED TO FALL THROUGH TO `RoundReview`, WHICH IS A SCREEN IT CANNOT USE.
   // `draft_rows` is CLEARED on import, so a processor who imported a sheet was put back on a review
   // screen with nothing to review and an "Import 0 conditions" button — the same class as a control
   // whose label promises what its handler cannot do.
   //
-  // ⚠️ THE STRIP GETS EVERY ROUND, NOT `live`. Discarded rounds are filtered out of "what am I
+  // THE STRIP GETS EVERY ROUND, NOT `live`. Discarded rounds are filtered out of "what am I
   // working on" and belong in "what has happened to this file"; a round vanishing from the history
   // reads as data loss.
   if (current.status === "imported") {

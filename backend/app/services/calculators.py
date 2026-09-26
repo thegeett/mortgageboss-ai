@@ -345,7 +345,7 @@ async def build_self_employed_view(
         ),
     ]
     if result.declining:
-        steps.append(CalcStep(label="⚠ Declining trend", value="most-recent year < prior — review"))
+        steps.append(CalcStep(label="Declining trend", value="most-recent year < prior — review"))
 
     return CalculatorView(
         calculator="self_employed",

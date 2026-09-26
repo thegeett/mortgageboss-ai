@@ -110,7 +110,7 @@ resource "aws_s3_bucket_public_access_block" "state" {
   restrict_public_buckets = true
 }
 
-# ⚠️ THERE IS NO DYNAMODB LOCK TABLE, deliberately.
+# THERE IS NO DYNAMODB LOCK TABLE, deliberately.
 #
 # State locking uses S3 conditional writes (`use_lockfile = true` in every
 # backend), which the S3 backend has supported since Terraform 1.10 and which

@@ -40,7 +40,7 @@ from app.conditions.readers.paste import read_pasted_text
 from app.conditions.readers.uwm import read_uwm, uwm_block_start
 from app.models.condition_round import ConditionSheetFormat
 
-#: ⚠️ THE READERS ARE VERSIONED BECAUSE A RE-PARSE MUST BE REPRODUCIBLE (spec §9.6). It is recorded
+#: THE READERS ARE VERSIONED BECAUSE A RE-PARSE MUST BE REPRODUCIBLE (spec §9.6). It is recorded
 #: in `parse_report.reader_version`, so a round read months ago can be told apart from one read by a
 #: reader that has since changed — without which "re-parse and compare" means nothing. Bump it when a
 #: reader's OUTPUT changes for input it already handled, not when a comment moves.

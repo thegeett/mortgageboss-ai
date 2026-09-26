@@ -63,7 +63,7 @@ every one — *because it applies the test*. AS-12 escalated all ten to a human 
 
 Two rules, same subjects, same guideline, opposite outcomes. The only difference is the materiality test.
 
-⚠️ **Correction to an earlier assessment in this work:** it was first stated that "a threshold would
+**Correction to an earlier assessment in this work:** it was first stated that "a threshold would
 remove none of this file's ten findings". That was wrong — it assumed a *trivial-deposit floor* (is it
 over $100?) rather than a *materiality threshold relative to income*. At the Fannie standard, the
 threshold removes all ten on its own.
@@ -101,7 +101,7 @@ The system models the narrowing as three tags:
 what lands in the bank) while gross monthly is ~$13,154. A threshold on gross therefore clears
 net-sized deposits comfortably.
 
-⚠️ **The fragility.** `income.qualifying_monthly` is AI-produced and the hardest of the three (continuity
+**The fragility.** `income.qualifying_monthly` is AI-produced and the hardest of the three (continuity
 and averaging are judgement calls). And on this very file IN-3 cannot resolve even the simpler
 `documented_monthly` — it abstains on conflicting figures across documents (LP-515).
 

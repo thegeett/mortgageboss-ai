@@ -19,12 +19,12 @@ Environment variables, ALL REQUIRED, no defaults:
 
     BOOTSTRAP_ALLOWED_ENVIRONMENTS  comma-separated, defaults to "staging"
 
-⚠️ **A HASH, not a password.** The value reaches the task through
+**A HASH, not a password.** The value reaches the task through
 ``run-task --overrides``, which is visible in ``describe-tasks`` for about an
 hour and recorded in the CloudTrail ``RunTask`` event. Hash locally with
 ``scripts/hash-password``; the plaintext never leaves your machine.
 
-⚠️ **This tool refuses to run against a populated database.** It is a bootstrap,
+**This tool refuses to run against a populated database.** It is a bootstrap,
 not a user-creation tool. To add users to an environment that already has some,
 use :mod:`app.scripts.add_user`.
 
@@ -124,7 +124,7 @@ async def bootstrap(
     validate_bcrypt_hash(config.admin_password_hash, var_name="BOOTSTRAP_ADMIN_PASSWORD_HASH")
     email = normalize_email(config.admin_email, var_name="BOOTSTRAP_ADMIN_EMAIL")
 
-    # ⚠️ GUARD (a). Counts EVERY user, including soft-deleted ones: a
+    # GUARD (a). Counts EVERY user, including soft-deleted ones: a
     # soft-deleted row still means this database has been used, and "bootstrap"
     # stops being an accurate description of what this would do.
     existing_users = await db.scalar(select(func.count()).select_from(User))

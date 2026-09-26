@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 /**
  * The review screen (S1-04, S1-07, S1-10, S1-11).
  *
- * ⚠️ THE FIRST TEST IS THE SPEC'S OWN ACCEPTANCE CRITERION — "a frontend test that editing a row
+ * THE FIRST TEST IS THE SPEC'S OWN ACCEPTANCE CRITERION — "a frontend test that editing a row
  * and importing sends the edited text" (§LP-909 done-when). It is asserted through the component
  * rather than against the hook, because the failure it guards is a screen that shows an edit and
  * imports the reader's original: every piece works alone and nothing joins them.
@@ -22,7 +22,7 @@ vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/conditions")>()),
   useUpdateDraft: () => ({ mutate: saveMutate, isPending: false }),
   useImportRound: () => ({ mutate: importMutate, isPending: false }),
-  // ⚠️ MOCKED BECAUSE THE SCREEN NOW READS THE FILE'S CONDITIONS. S1-07's "just some" callout names
+  // MOCKED BECAUSE THE SCREEN NOW READS THE FILE'S CONDITIONS. S1-07's "just some" callout names
   // how many are already on the file, and the real hook is a `useQuery` with no `QueryClientProvider`
   // in this file's `render` — so omitting this throws inside `RoundReview` before a single assertion
   // runs, and all 28 tests fail as one missing line. `imported-view.test.tsx` already mocks it for
@@ -111,7 +111,7 @@ function show(overrides: Partial<ConditionRound> = {}) {
 /**
  * One arrival, with `has_bytes` stated rather than inferred from `kind`.
  *
- * ⚠️ THE PAIR IS THE POINT. The format line asks `hasPdf`, which reads `has_bytes` — so a fixture
+ * THE PAIR IS THE POINT. The format line asks `hasPdf`, which reads `has_bytes` — so a fixture
  * that derived the flag from the kind would pass against a screen still keying on the kind, which is
  * the bug `has_bytes` was added to close.
  */
@@ -127,7 +127,7 @@ function source(kind: ConditionSource["kind"], hasBytes: boolean): ConditionSour
 }
 
 describe("reviewing a draft round", () => {
-  it("⚠️ THE SPEC'S ACCEPTANCE TEST: editing a row and importing sends the edited text", () => {
+  it("THE SPEC'S ACCEPTANCE TEST: editing a row and importing sends the edited text", () => {
     show();
 
     fireEvent.click(screen.getByRole("button", { name: "Edit the wording" }));
@@ -139,13 +139,13 @@ describe("reviewing a draft round", () => {
 
     const sent = saveMutate.mock.calls[0]?.[0];
     expect(sent.draft_rows[0].verbatim_text).toBe("Final inspection is required before docs.");
-    // ⚠️ AND THE STALE-WRITE GUARD IS ACTUALLY POPULATED. `expected_updated_at` was unreachable
+    // AND THE STALE-WRITE GUARD IS ACTUALLY POPULATED. `expected_updated_at` was unreachable
     // until `updated_at` was exposed on the round — every client sent null, so the 409 that exists
     // for two tabs on one draft could never fire.
     expect(sent.expected_updated_at).toBe("2026-08-28T10:05:00Z");
   });
 
-  it("⚠️ sends the token that belongs to the rows it holds, not the freshest one", () => {
+  it("sends the token that belongs to the rows it holds, not the freshest one", () => {
     // THE GUARD WAS BYPASSED RATHER THAN TRIPPED (LP-909 review). `rows` is seeded once; the
     // dashboard renders this component with NO `key`, so a refetch swaps the `round` prop under a
     // mounted component without resetting them. Sending `round.updated_at` therefore paired STALE
@@ -168,7 +168,7 @@ describe("reviewing a draft round", () => {
     expect(saveMutate.mock.calls[0]?.[0].expected_updated_at).toBe("2026-08-28T10:05:00Z");
   });
 
-  it("⚠️ imports only after the save resolves, never in parallel", () => {
+  it("imports only after the save resolves, never in parallel", () => {
     // The import reads `draft_rows` from the ROW, so firing both at once would race: the import
     // could read the pre-edit rows and a processor would have no way to tell.
     show();
@@ -198,7 +198,7 @@ describe("reviewing a draft round", () => {
 });
 
 describe("the flagged-rows gate (S1-10)", () => {
-  it("⚠️ disables import until the checkbox is ticked when a row is below 0.80", () => {
+  it("disables import until the checkbox is ticked when a row is below 0.80", () => {
     show({ draft_rows: [draftRow({ confidence: 0.6 })] });
 
     const importButton = screen.getByRole("button", { name: /Import 1 condition/ });
@@ -217,7 +217,7 @@ describe("the flagged-rows gate (S1-10)", () => {
     ).toBe(true);
   });
 
-  it("⚠️ and does not show the checkbox at all when there is nothing to check", () => {
+  it("and does not show the checkbox at all when there is nothing to check", () => {
     // A checkbox that is always present is one a processor learns to tick without reading, which
     // is worse than none — so its ABSENCE on a clean sheet is the property, not just its presence
     // on a flagged one.
@@ -237,7 +237,7 @@ describe("what the screen says about the sheet", () => {
     expect(screen.getByText("Read by rules (uwm v1) — no AI")).toBeDefined();
   });
 
-  it("⚠️ says a recognised PASTE was recognised in the pasted text, not that a letter arrived (S1-07)", () => {
+  it("says a recognised PASTE was recognised in the pasted text, not that a letter arrived (S1-07)", () => {
     // `read_pasted_text` returns `UWM_APPROVAL_LETTER` for a paste whose columns survived the
     // clipboard — the SAME `sheet_format` an uploaded letter carries. So this header named a
     // document nobody sent us, and `sheet_format` alone can never tell the two apart.
@@ -247,7 +247,7 @@ describe("what the screen says about the sheet", () => {
     expect(screen.queryByText("UWM · Loan Approval Conditions")).toBeNull();
   });
 
-  it("⚠️ and calls it the letter again once the PDF has been attached", () => {
+  it("and calls it the letter again once the PDF has been attached", () => {
     // The other direction, and the reason this keys on BYTES rather than on `kind`: a pasted round
     // that has been enriched carries BOTH arrivals, and it genuinely does have the letter now.
     // A `kind === "paste"` test would keep calling it a paste forever.
@@ -257,8 +257,8 @@ describe("what the screen says about the sheet", () => {
     expect(screen.queryByText(/recognised in the pasted text/)).toBeNull();
   });
 
-  it("⚠️ marks a partial round with a Just some chip, and a full one with none (S1-07, S1-10)", () => {
-    // ⚠️ THE CHIP IS IDENTIFIED BY WHAT IT IS NOT — THE TOGGLE. Both say "Just some": every review
+  it("marks a partial round with a Just some chip, and a full one with none (S1-07, S1-10)", () => {
+    // THE CHIP IS IDENTIFIED BY WHAT IT IS NOT — THE TOGGLE. Both say "Just some": every review
     // mock carries the toggle, and S1-07/S1-10 additionally carry a partial chip among the source
     // chips, so an unscoped query matches two elements on a partial round.
     //
@@ -279,10 +279,10 @@ describe("what the screen says about the sheet", () => {
     expect(chipsOutsideToggle("Full list")).toHaveLength(0);
   });
 
-  it("⚠️ the toggle starts on the server's answer, never on a guess by this screen", () => {
+  it("the toggle starts on the server's answer, never on a guess by this screen", () => {
     show({ completeness: "partial" });
 
-    // ⚠️ REAL `checked`, NOT AN `aria-checked` MIRROR OF IT. The control is a native radio, so this
+    // REAL `checked`, NOT AN `aria-checked` MIRROR OF IT. The control is a native radio, so this
     // asserts the state the browser actually holds; an ARIA attribute that disagrees with its own
     // control is the failure the semantic element removes the possibility of.
     expect((screen.getByRole("radio", { name: "Just some" }) as HTMLInputElement).checked).toBe(
@@ -293,7 +293,7 @@ describe("what the screen says about the sheet", () => {
     );
   });
 
-  it("⚠️ THE TOGGLE'S ANSWER REACHES THE SERVER, not merely the screen (S1-04)", () => {
+  it("THE TOGGLE'S ANSWER REACHES THE SERVER, not merely the screen (S1-04)", () => {
     // The first control on this screen that WRITES. `completeness` is what `import_round` reads to
     // decide whether conditions absent from a later round are left alone or compared — so a toggle
     // that changed only local state would be decorative on the one value that decides what import
@@ -309,8 +309,8 @@ describe("what the screen says about the sheet", () => {
     expect(sent.expected_updated_at).toBe("2026-08-28T10:05:00Z");
   });
 
-  it("⚠️ draws a named owner as a chip with its glyph, and an unknown one as plain text (S1-04)", () => {
-    // ⚠️ SCOPED WITHIN THE ROW, BECAUSE "Title" IS ALSO AN EXPIRY KEY in the side panel — the same
+  it("draws a named owner as a chip with its glyph, and an unknown one as plain text (S1-04)", () => {
+    // SCOPED WITHIN THE ROW, BECAUSE "Title" IS ALSO AN EXPIRY KEY in the side panel — the same
     // trap the provenance test below documents.
     show({
       draft_rows: [
@@ -330,7 +330,7 @@ describe("what the screen says about the sheet", () => {
     const chip = within(named).getByText("Title");
     expect(chip.querySelector("svg")).not.toBeNull();
 
-    // ⚠️ THE ABSENCE IS THE DESIGN, NOT A MISSING ICON. "Owner not known" draws as plain muted text
+    // THE ABSENCE IS THE DESIGN, NOT A MISSING ICON. "Owner not known" draws as plain muted text
     // with no chip and no glyph: a chip says "here is who acts", and an absence of evidence does not
     // belong in the same container as a named party.
     const anonymous = screen
@@ -341,7 +341,7 @@ describe("what the screen says about the sheet", () => {
     expect(plain.className).not.toContain("border");
   });
 
-  it("⚠️ names the AI split without doubling the reader into its own version", () => {
+  it("names the AI split without doubling the reader into its own version", () => {
     // `SPLIT_VERSION` is "split_v1" because it names the prompt file, so joining reader and version
     // printed "(split split_v1)". The design's line is "(split v1)".
     show({
@@ -355,7 +355,7 @@ describe("what the screen says about the sheet", () => {
     expect(screen.getByText("Split by AI (split v1) · rules found no rows")).toBeDefined();
   });
 
-  it("⚠️ and leaves no gap inside the parens when there is no version at all", () => {
+  it("and leaves no gap inside the parens when there is no version at all", () => {
     // The old AI arm produced "Split by AI (split ) · …". The stray space is INSIDE the parens,
     // where the `.trim()` it carried could never reach — while the rules arm patched its own copy
     // with `.replace(" )", ")")` and the fix was never carried across.
@@ -370,7 +370,7 @@ describe("what the screen says about the sheet", () => {
     expect(screen.getByText("Split by AI (split) · rules found no rows")).toBeDefined();
   });
 
-  it("⚠️ omits the Date printed chip when the sheet has none (S1-07, S1-11)", () => {
+  it("omits the Date printed chip when the sheet has none (S1-07, S1-11)", () => {
     // A paste has no letter and the page-break fixture has no header, so the chip would claim a
     // field exists and is blank.
     show({ date_printed: null });
@@ -386,7 +386,7 @@ describe("what the screen says about the sheet", () => {
     ).toBeDefined();
   });
 
-  it("⚠️ says a paste has no letter rather than rendering empty lender fields (S1-07)", () => {
+  it("says a paste has no letter rather than rendering empty lender fields (S1-07)", () => {
     show({ header: null });
     expect(screen.getByText(/A paste has no letter/)).toBeDefined();
   });
@@ -403,7 +403,7 @@ describe("what the screen says about the sheet", () => {
 });
 
 describe("how the rows are grouped and ordered", () => {
-  it("⚠️ groups by the LENDER's heading, not by the bucket kind", () => {
+  it("groups by the LENDER's heading, not by the bucket kind", () => {
     // Two headings that happen to share a kind stay separate: the kind is WHEN a condition is due,
     // the heading is what the lender printed. Grouping by kind would merge two of their sections.
     show({
@@ -417,7 +417,7 @@ describe("how the rows are grouped and ordered", () => {
     expect(screen.getByText("Compliance - Prior To Closing (PTD)")).toBeDefined();
   });
 
-  it("⚠️ puts rows below 0.80 first within their group (S1-10)", () => {
+  it("puts rows below 0.80 first within their group (S1-10)", () => {
     show({
       draft_rows: [
         draftRow({ sequence: 1, confidence: 1, verbatim_text: "Read by the rules." }),
@@ -439,11 +439,11 @@ describe("how the rows are grouped and ordered", () => {
     expect(screen.getAllByText(/Split by AI · 0\.60/)).toHaveLength(1);
   });
 
-  it("⚠️ renders underwriter notes as chips, never merged into the lender's wording", () => {
+  it("renders underwriter notes as chips, never merged into the lender's wording", () => {
     // Design rule 5. The lender wrote one string and the reader carried the note out of it as
     // structure; putting it back would make the underwriter's aside look like the condition.
     //
-    // ⚠️ THE NOTE IS IN BOTH PLACES, WHICH IS THE READER'S ACTUAL OUTPUT AND WAS THE BUG IN THIS
+    // THE NOTE IS IN BOTH PLACES, WHICH IS THE READER'S ACTUAL OUTPUT AND WAS THE BUG IN THIS
     // TEST. It used to set `verbatim_text` to a clean sentence and the note only as structure — so
     // "never merged into the wording" held over a fixture with nothing to merge, and passed for the
     // whole period the three screens were in fact rendering the note twice. Spec rule 1 keeps the
@@ -469,7 +469,7 @@ describe("how the rows are grouped and ordered", () => {
     expect(screen.getByText("8/28")).toBeDefined();
   });
 
-  it("⚠️ but the EDITOR shows the stored string whole, note included", () => {
+  it("but the EDITOR shows the stored string whole, note included", () => {
     // The other half of the same rule, and the one that protects the data: what this box holds is
     // what imports. Strip the note here too and an untouched Save would delete the lender's words —
     // a display concern quietly becoming a write.
@@ -490,7 +490,7 @@ describe("how the rows are grouped and ordered", () => {
     );
   });
 
-  it("⚠️ shows no kind chip when the lender's heading already says it (S1-04)", () => {
+  it("shows no kind chip when the lender's heading already says it (S1-04)", () => {
     // The chip vocabulary has to be the SHORT one for this to be reachable at all:
     // `BUCKET_KIND_LABEL.master` is "Master (applies to the whole file)", which can never equal a
     // heading of "Master", so the comparison always said "different" and S1-11 drew a chip the
@@ -508,7 +508,7 @@ describe("how the rows are grouped and ordered", () => {
       draft_rows: [draftRow({ owner_hint: "title", owner_hint_source: "prefix" })],
     });
 
-    // ⚠️ SCOPED TO THE ROW, BECAUSE "Title" IS ALSO AN EXPIRY KEY. The side panel renders all twelve
+    // SCOPED TO THE ROW, BECAUSE "Title" IS ALSO AN EXPIRY KEY. The side panel renders all twelve
     // of the lender's expiry rows — Title among them — so an unscoped `getByText("Title")` finds two
     // elements and fails. Loosening it to `getAllByText` would have passed while asserting nothing
     // about WHERE the label appeared, which is the whole point: the hint belongs on the row.

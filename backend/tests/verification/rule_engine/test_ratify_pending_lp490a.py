@@ -1,9 +1,9 @@
 """LP-490a / ADR-378 — the `ratify-pending` activation path and its guardrails.
 
-⚠️ THIS STATUS INVERTS THE GATE'S STATED PRINCIPLE ("activation never trusts what it hasn't measured").
+THIS STATUS INVERTS THE GATE'S STATED PRINCIPLE ("activation never trusts what it hasn't measured").
 Ratification is the entire safety substitute, so these tests exist to keep the substitute real.
 
-⚠️ SEVEN RULES ARE ON THIS STATUS (CR-1/CR-4/CR-6/CR-8/CR-10 at LP-490a, TI-2/TI-6 at LP-491). Every candidate failed a precondition (see LP-490a.md), so the
+SEVEN RULES ARE ON THIS STATUS (CR-1/CR-4/CR-6/CR-8/CR-10 at LP-490a, TI-2/TI-6 at LP-491). Every candidate failed a precondition (see LP-490a.md), so the
 mechanism ships proven-but-unused. These tests exercise it directly against constructed bars, which is
 legitimate for a LOADER contract; the rule-evaluation proof required by LP-487 lands with the first rule
 that actually activates, and `test_ratify_pending_wires_ratification_through_evaluation` below is written
@@ -44,7 +44,7 @@ def test_a_ratify_pending_bar_with_a_consistency_rate_is_eligible() -> None:
 
 
 def test_a_bar_carrying_both_numbers_is_rejected() -> None:
-    """⚠️ THE NON-NEGOTIABLE SEPARATION. `measured_accuracy` means a HUMAN said what the right answer
+    """THE NON-NEGOTIABLE SEPARATION. `measured_accuracy` means a HUMAN said what the right answer
     was; `self_consistency_rate` means the MODEL said the same thing twice. Collapsing them destroys the
     only signal telling a future reader which kind of number a bar carries.
 
@@ -54,7 +54,7 @@ def test_a_bar_carrying_both_numbers_is_rejected() -> None:
 
 
 def test_a_self_consistency_rate_cannot_satisfy_the_calibrated_path() -> None:
-    """⚠️ `calibratable-now` still requires a MEASURED accuracy. A consistency number must never open
+    """`calibratable-now` still requires a MEASURED accuracy. A consistency number must never open
     the calibrated door."""
     bar = parse_bar(
         "X-3",
@@ -77,7 +77,7 @@ def test_a_ratify_pending_bar_needs_a_rate_at_all() -> None:
 
 
 def test_a_rate_over_zero_cases_is_rejected() -> None:
-    """⚠️ A rate over ZERO cases is not a number. CR-5 (one inquiry row), CR-6 (zero derogatory events)
+    """A rate over ZERO cases is not a number. CR-5 (one inquiry row), CR-6 (zero derogatory events)
     and CR-10 (zero collection codes) have nothing to derive twice, and must stay held rather than
     activate on a vacuous 1.0."""
     with pytest.raises(ActivationBarError, match="not a number"):
@@ -91,7 +91,7 @@ def test_a_rate_without_a_case_count_is_rejected() -> None:
 
 
 def test_a_measured_and_failing_rule_can_never_take_this_path() -> None:
-    """⚠️ AS-4's `stmt.is_reserve_eligible` measured 0/5 against Priya's labels (LP-390-5) — a SYSTEMATIC
+    """AS-4's `stmt.is_reserve_eligible` measured 0/5 against Priya's labels (LP-390-5) — a SYSTEMATIC
     domain disagreement, which two independent derivations would score 1.0 on precisely because the model
     is consistently wrong. Measured-and-failing is not unmeasured. The gate requires
     `measured_accuracy is None`, so no consistency rate can override a real measurement."""
@@ -178,7 +178,7 @@ def test_a_blank_override_does_not_count_as_one() -> None:
 
 
 def test_every_ratify_pending_rule_is_wired_to_ratify() -> None:
-    """⚠️ THE SUBSTITUTE MUST BE REAL. `deterministic.py` never set `ratification_pending` before LP-490a,
+    """THE SUBSTITUTE MUST BE REAL. `deterministic.py` never set `ratification_pending` before LP-490a,
     so a ratify-pending ai_fuzzy_match rule would have shipped an unmeasured AI judgment as an AUTO
     verdict with no human in the loop.
 
@@ -221,7 +221,7 @@ def test_every_ratify_pending_rule_is_wired_to_ratify() -> None:
     }
     on_status = {r for r, b in load_activation_bars().items() if b.status == "ratify-pending"}
     assert on_status == _EXPECTED_RATIFY_PENDING, (
-        # ⚠️ The diff was against a HAND-LISTED set from two tickets ago (reported finding), so once
+        # The diff was against a HAND-LISTED set from two tickets ago (reported finding), so once
         # TI-2/TI-6 and the PR-* lane joined, the failure message printed a symmetric difference that
         # named rules which had NOT drifted. Diffing against the asserted set keeps the message true.
         f"a rule joined ratify-pending without a ratification proof: "

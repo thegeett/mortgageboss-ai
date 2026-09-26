@@ -40,10 +40,10 @@ nothing is billable yet.
 | 13 | Local Docker stack undisturbed | ✅ | `mbai-bedrock-{postgres,redis,worker}` all healthy |
 | 14 | NAT-vs-endpoints arithmetic + recommendation | ✅ | below |
 | 15 | Redis TLS/AUTH finding | ✅ | below |
-| 16 | `bedrock-runtime` / `bedrock-mantle` endpoint findings | ⚠️ **BLOCKED** | below — insufficient IAM permission |
-| 17 | RDS engine 16.x verified available | ⚠️ **BLOCKED, mitigated** | below |
+| 16 | `bedrock-runtime` / `bedrock-mantle` endpoint findings | **BLOCKED** | below — insufficient IAM permission |
+| 17 | RDS engine 16.x verified available | **BLOCKED, mitigated** | below |
 | 19 | Redis engine version correct | ✅ **CONFIRMED** | 7.1 GA all regions since Nov 2023; highest Redis OSS ElastiCache supports |
-| 18 | `terraform plan` resource count | ⚠️ **N/A by design** | ticket forbids `plan`; static count below |
+| 18 | `terraform plan` resource count | **N/A by design** | ticket forbids `plan`; static count below |
 
 **Two criteria could not be met** (16, 17) and both are IAM-permission blockers, not
 design problems. Details and exact commands in *Blocked verifications*.
@@ -180,7 +180,7 @@ A `redis://` client cannot connect to a TLS-required cache. `REDIS_URL` must use
 `rediss://`. Verified that this does not break the config layer: pydantic's
 `RedisDsn` accepts `rediss://` and `rediss://:token@host` without complaint.
 
-### 2. ⚠️ The two Redis clients disagree on certificate verification
+### 2. The two Redis clients disagree on certificate verification
 
 The application uses **two different Redis libraries**, both reading the same
 `REDIS_URL` (`celery_broker_url` falls back to `redis_url`,
@@ -227,7 +227,7 @@ The token itself is never in Terraform — it would land in state.
 
 ---
 
-## Bedrock endpoint findings — ⚠️ BLOCKED
+## Bedrock endpoint findings — BLOCKED
 
 **Neither could be verified.** The only working credentials are the SSO profile
 `mbai-dev`, which assumes `AWSReservedSSO_BedrockDeveloper`. That role is scoped to
@@ -351,7 +351,7 @@ terraform apply
 cd ../envs/dev
 terraform init
 
-# 3. ⚠️ READ THIS PLAN. This is where the resource count and cost become real.
+# 3. READ THIS PLAN. This is where the resource count and cost become real.
 terraform plan -out=dev.tfplan
 
 # 4. First billable moment.
@@ -364,7 +364,7 @@ costs money. Expect ~52 resources.
 ### 5. Populate the secrets
 
 ```bash
-# encryption-key — ⚠️ GENERATE ONCE. Rotating it permanently destroys every
+# encryption-key — GENERATE ONCE. Rotating it permanently destroys every
 # stored borrower SSN (single-key Fernet, no re-encryption path). See below.
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 aws secretsmanager put-secret-value \
@@ -376,7 +376,7 @@ aws secretsmanager put-secret-value \
   --secret-id mbai/dev/jwt-secret-key \
   --secret-string "$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
 
-# database-url — ⚠️ ?ssl=require, NOT ?sslmode=require.
+# database-url — ?ssl=require, NOT ?sslmode=require.
 terraform output rds_address     # host
 aws secretsmanager put-secret-value \
   --secret-id mbai/dev/database-url \

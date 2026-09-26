@@ -1,6 +1,6 @@
 # DNS — a delegated Route 53 hosted zone and the ACM certificate for it.
 #
-# ⚠️ THIS MODULE DELIBERATELY KNOWS NOTHING ABOUT THE LOAD BALANCER.
+# THIS MODULE DELIBERATELY KNOWS NOTHING ABOUT THE LOAD BALANCER.
 #
 # The alias A record that points the zone apex at the ALB is created by the
 # ENVIRONMENT, not here. That is not an oversight — it is what keeps the module

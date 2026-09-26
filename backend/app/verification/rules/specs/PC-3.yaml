@@ -5,7 +5,7 @@
 # application describe DIFFERENT properties — a real and serious finding. It branches on the derived
 # property.address_normalized_match enum (LP-407-4), which does the compare with the consistency normalizers.
 #
-# ⚠️ needs_review, NOT fired (LP-407-4 D2, ADR-325 — the SECOND instance after IN-6): the deterministic
+# needs_review, NOT fired (LP-407-4 D2, ADR-325 — the SECOND instance after IN-6): the deterministic
 # normalizers (casefold / drop_punct / collapse_ws) cannot expand "St" -> "Street" or "Apt" <-> "#" <-> "Unit",
 # so an exact-after-normalize mismatch carries a known false-positive residue (an abbreviation variant looks like
 # a mismatch). A confident "different property" FIRING on that residue would be noisy and alarming, so a mismatch
@@ -13,17 +13,17 @@
 # AI-tolerant match, property.address_normalized_match's fact_tags design, is the future refinement that reduces
 # this needs_review noise; it needs a calibration round — deferred.)
 #
-# ⚠️ THE MAILING-ADDRESS TRAP (LP-407-4 D1): the tag compares the MISMO SUBJECT-property address
+# THE MAILING-ADDRESS TRAP (LP-407-4 D1): the tag compares the MISMO SUBJECT-property address
 # (property.address_*), NEVER the borrower's current/mailing address and NEVER a retained-property tax bill (a
 # different property). A file without a complete subject-property address -> the tag is "unknown" -> couldnt_check
 # (never a comparison against the wrong address type).
 #
-# ⚠️ NO AI dependency (the tag is DERIVED, deterministic — not the AI-at-rule-time the CSV plans) and NO threshold
+# NO AI dependency (the tag is DERIVED, deterministic — not the AI-at-rule-time the CSV plans) and NO threshold
 # -> the no-ai-dependency gate; it ACTIVATES. Its input resolves on the address scenarios (LP-407-4). LF-6T3N has
 # no MISMO subject address (LP-414 added only property.purchase_price) -> PC-3 couldnt_checks there — an honest
 # absence, not a bug.
 #
-# ⚠️ SCOPE (D6): PC-3 compares the SUBJECT-PROPERTY address (contract vs 1003). ID-4 compares the BORROWER's
+# SCOPE (D6): PC-3 compares the SUBJECT-PROPERTY address (contract vs 1003). ID-4 compares the BORROWER's
 # RESIDENCE address across sources — a DIFFERENT comparison. No double-fire.
 #
 # REGISTRY DRIFT: rule_kinds.csv classifies PC-3 ai_fuzzy_match; it is built DETERMINISTIC here (the derived tag

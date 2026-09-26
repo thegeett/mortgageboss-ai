@@ -32,7 +32,7 @@ function today(): string {
 /**
  * What each answer to "What did you paste?" actually does, in one line each (S1-06).
  *
- * ⚠️ THE WORDING IS THE DESIGN'S, AND THE SECOND ONE IS A PROMISE ABOUT STAGE 2. "anything missing
+ * THE WORDING IS THE DESIGN'S, AND THE SECOND ONE IS A PROMISE ABOUT STAGE 2. "anything missing
  * from a full list can be proposed as 'probably cleared' — never cleared automatically" is the
  * distinction ADR-404 turns on, and softening it here would have Stage 1 implying an automatic
  * clear that the system must never do.
@@ -54,18 +54,18 @@ const ANSWERS: { value: ConditionRoundCompleteness; label: string; explains: str
 /**
  * Paste conditions copied from a lender portal or email (screen S1-06, LP-907's door).
  *
- * ⚠️ "JUST SOME" IS THE DEFAULT, AND THAT IS A SAFETY PROPERTY RATHER THAN A PREFERENCE. It is the
+ * "JUST SOME" IS THE DEFAULT, AND THAT IS A SAFETY PROPERTY RATHER THAN A PREFERENCE. It is the
  * answer that can never remove anything. The API refuses to guess — `completeness` is required with
  * no server-side default (ADR-404) — so the control defaults and the contract does not, which is
  * what makes this a decision a processor made rather than a fallback they never saw.
  *
- * ⚠️ THE COUNT IS LIVE AND THE LIMIT IS THE SERVER'S. `MAX_PASTE_CHARS` is mirrored from
+ * THE COUNT IS LIVE AND THE LIMIT IS THE SERVER'S. `MAX_PASTE_CHARS` is mirrored from
  * `app/schemas/condition.py` and pinned by `tests/test_condition_type_mirror.py`, so the number
  * shown here and the number enforced cannot drift into disagreeing — the failure the 20 MB upload
  * ceiling still has, where a client that is HIGHER lets a processor wait through an upload the
  * server then refuses.
  *
- * ⚠️ NO HARD BLOCK BELOW THE LIMIT. The design's *May differ* allows a live count only when well
+ * NO HARD BLOCK BELOW THE LIMIT. The design's *May differ* allows a live count only when well
  * under, and the button disables only when the text is empty or genuinely over — refusing to submit
  * at 99% would be inventing a limit the server does not have.
  */
@@ -83,7 +83,7 @@ export function PasteConditionsDialog({
   const answerName = useId();
 
   const [text, setText] = useState("");
-  // ⚠️ "partial" IS LOAD-BEARING, NOT A TASTE (ADR-404). "full" is what entitles Stage 2 to propose
+  // "partial" IS LOAD-BEARING, NOT A TASTE (ADR-404). "full" is what entitles Stage 2 to propose
   // a condition absent from a later sheet as "probably cleared"; "partial" can never remove
   // anything. The API refuses to guess — `completeness` is required with no server default — so
   // changing this line changes what a processor is taken to have CLAIMED, not just what is preselected.
@@ -106,7 +106,7 @@ export function PasteConditionsDialog({
       { text, completeness, round_date: roundDate || null },
       {
         onSuccess: (round) => {
-          // ⚠️ `notifyStarted`, NOT `notifySuccess`. A paste the rules cannot split comes back
+          // `notifyStarted`, NOT `notifySuccess`. A paste the rules cannot split comes back
           // `parsing` with the AI split queued, so "Conditions added" would be a claim about work
           // that has not finished. The round's own screen reports the outcome.
           notifyStarted({
@@ -152,7 +152,7 @@ export function PasteConditionsDialog({
             {/* Mono, because what is pasted is a lender's fixed-pitch layout — the columns are how
                 a processor recognises it, and a proportional font destroys them.
 
-                ⚠️ THE FAMILY AND THE HEIGHT, BUT NEVER THE SIZE. This carried `text-xs`, which
+                THE FAMILY AND THE HEIGHT, BUT NEVER THE SIZE. This carried `text-xs`, which
                 tailwind-merge resolves as the winner over the primitive's own `text-field
                 md:text-sm` — and a control computing under 16px makes mobile Safari zoom the
                 viewport on focus and never zoom back. On the widest paste box in the app that is

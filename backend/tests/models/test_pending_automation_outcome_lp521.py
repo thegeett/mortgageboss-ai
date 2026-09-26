@@ -7,7 +7,7 @@ every file, so the pending-checks pass emitted `pending_automation` on the first
 The insert was rejected, the rule-engine task retried, and each retry re-ran the whole AI pipeline —
 about six minutes and real Bedrock spend per attempt. Every verification on every file failed.
 
-⚠️ WHY THIS TEST READS MIGRATION FILES AND NOT THE DATABASE. `tests/conftest.py` builds the test schema
+WHY THIS TEST READS MIGRATION FILES AND NOT THE DATABASE. `tests/conftest.py` builds the test schema
 with `Base.metadata.create_all`, so a constraint SQLAlchemy derives from the enum is regenerated from
 that same enum on every run — it agrees with the enum by construction and can never catch drift. A
 first draft of this file asserted against the live test-DB constraint and passed whether or not the
@@ -27,7 +27,7 @@ _VERSIONS = Path(__file__).resolve().parents[2] / "alembic" / "versions"
 
 # The three constraints sharing one outcome list. A finding that cannot TRANSITION to an outcome is as
 # broken as one that cannot be written with it, so all three are guarded.
-# ⚠️ The finding_events names are DOUBLE-PREFIXED, read from the live schema rather than from LP-316's
+# The finding_events names are DOUBLE-PREFIXED, read from the live schema rather than from LP-316's
 # source. That migration passed an already-prefixed name to `sa.CheckConstraint(name=...)` inside
 # `create_table`, and the metadata naming convention prefixed it again. `findings` escaped it because
 # LP-316 created that one with raw ALTER TABLE. Using the source names made LP-521's first deploy fail
@@ -64,7 +64,7 @@ def _declared_values(path: Path) -> set[str]:
 
 @pytest.mark.parametrize("constraint", _CONSTRAINTS)
 def test_the_migrated_constraint_stores_every_python_outcome(constraint: str) -> None:
-    """⚠️ THE GUARD THAT WAS MISSING FOR TWO TICKETS. Expectation derived from the ENUM, checked against
+    """THE GUARD THAT WAS MISSING FOR TWO TICKETS. Expectation derived from the ENUM, checked against
     the MIGRATION — so a seventh outcome added without a migration fails here, in CI, rather than six
     minutes into a live AI pipeline on staging."""
     migration = _defining_migration(constraint)

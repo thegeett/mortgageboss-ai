@@ -1,9 +1,9 @@
-# CR-10 — Collections / charge-offs treatment — AI JUDGMENT rule SPEC (LP-490). ⚠️ BUILDS LIVE (ratify-pending since LP-490a).
+# CR-10 — Collections / charge-offs treatment — AI JUDGMENT rule SPEC (LP-490). BUILDS LIVE (ratify-pending since LP-490a).
 #
-# ⚠️ INERT. Its load-bearing tags are AI tags with no measured accuracy → `not-calibratable-yet` →
+# INERT. Its load-bearing tags are AI tags with no measured accuracy → `not-calibratable-yet` →
 # `is_eligible()` False (LP-484). LIVE in ACTIVE_RULE_IDS since LP-490a (ratify-pending).
 #
-# ⚠️ THERE IS NEVER ONE DOLLAR THRESHOLD ACROSS AGENCIES — Priya's ruling, and the reason this rule is a
+# THERE IS NEVER ONE DOLLAR THRESHOLD ACROSS AGENCIES — Priya's ruling, and the reason this rule is a
 # judgment over an occupancy/property-type matrix rather than a single numeric compare:
 #
 #   FANNIE DU
@@ -16,20 +16,20 @@
 #                                        outstanding balance as monthly debt
 #   MEDICAL collections are EXCLUDED from the Fannie payoff limits and treated differently under FHA.
 #
-# ⚠️ THE DU-vs-MANUAL AXIS DOES NOT EXIST AS A FACT (LP-501). No field carries it, and inventing
+# THE DU-vs-MANUAL AXIS DOES NOT EXIST AS A FACT (LP-501). No field carries it, and inventing
 # `loan.agency` or `loan.underwriting_method` to fill the gap would be fabricating an input. So this rule
 # builds the FANNIE DU branch, gates FHA on `program.type` (LP-488's applicability-predicate pattern),
 # and returns `manual_underwriting_not_supported` — an honest abstention — when the file is manually
 # underwritten. The prompt is told not to guess which path applies.
 #
-# ⚠️ OCCUPANCY AND PROPERTY TYPE DRIVE THE DU BRANCH, and an ABSENT one must ABSTAIN. Defaulting to the
+# OCCUPANCY AND PROPERTY TYPE DRIVE THE DU BRANCH, and an ABSENT one must ABSTAIN. Defaulting to the
 # permissive cell (one-unit primary, no payoff at any amount) would clear every collection on a file that
 # simply has not stated its occupancy yet.
 #
-# ⚠️ MORTGAGE CHARGE-OFFS ARE NOT ORDINARY COLLECTIONS. They carry a seasoning requirement (CR-6's
+# MORTGAGE CHARGE-OFFS ARE NOT ORDINARY COLLECTIONS. They carry a seasoning requirement (CR-6's
 # matrix) rather than a dollar test, and are deliberately kept out of this rule's dollar logic.
 #
-# ⚠️ ZERO COLLECTION OR CHARGE-OFF CODES EXIST ON ANY OF THE THREE REAL CREDIT REPORTS. The trigger is
+# ZERO COLLECTION OR CHARGE-OFF CODES EXIST ON ANY OF THE THREE REAL CREDIT REPORTS. The trigger is
 # entirely unexercised — this rule is built against the schema and the guideline, never observed firing.
 
 rule_id: CR-10
@@ -56,7 +56,7 @@ reference_values:
   priya_validated: false          # must equal rule_kinds.csv
   threshold_needs_signoff: false  # must equal rule_kinds.csv
   values:
-    # ⚠️ PROVENANCE TIER P — the domain expert's own rulings, given directly (LP-490). Recorded here as
+    # PROVENANCE TIER P — the domain expert's own rulings, given directly (LP-490). Recorded here as
     # declared data so the matrix is reviewable in one place rather than embedded in a prompt.
     du_one_unit_primary: "no payoff required regardless of amount"
     du_two_to_four_unit_or_second_home_aggregate: "5000"
@@ -86,7 +86,7 @@ required_inputs:
   - name: occupancy
     snapshot_path: 'tags.by_subject["loan"]["property.occupancy"]'
     description: >-
-      the subject property's stated occupancy (parsed, MISMO). ⚠️ Absent → abstain, never the permissive
+      the subject property's stated occupancy (parsed, MISMO). Absent → abstain, never the permissive
       cell.
   - name: property_type
     snapshot_path: 'tags.by_subject["loan"]["property.type"]'
@@ -107,7 +107,7 @@ guideline_reference: "Fannie Mae collection and charged-off account requirements
 
 judgment:
   subject: per_borrower
-  # ⚠️ THE GATE THIS RULE'S OWN TRIGGER PROSE ALREADY DESCRIBED (reported finding). applicability.trigger
+  # THE GATE THIS RULE'S OWN TRIGGER PROSE ALREADY DESCRIBED (reported finding). applicability.trigger
   # says "A borrower with none is not applicable", but the judgment block declared no predicate — so every
   # borrower on every file got an AI CALL and a needs_review finding, including the overwhelmingly common
   # zero-collection file (all three real reports carry none). The predicate DSL is eq/ne on a tag and
@@ -122,7 +122,7 @@ judgment:
     - property.occupancy
     - property.type
     - program.type
-    # ⚠️ THE INDIVIDUAL-THRESHOLD HALF OF THE DU MATRIX (reported finding). The prompt requires
+    # THE INDIVIDUAL-THRESHOLD HALF OF THE DU MATRIX (reported finding). The prompt requires
     # "payoff_required if any INDIVIDUAL collection is $250 or more, or the aggregate is above $1,000",
     # but only the aggregate was passed — so an investment property with one $300 collection gave
     # aggregate 300 (<= $1,000) with no per-collection view, and the model answered no_payoff_required

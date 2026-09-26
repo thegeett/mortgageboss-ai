@@ -123,7 +123,7 @@ async def materialize_tags(
     # sequential" and names it the least-known fact in it: 23 groups awaited in turn, each awaiting
     # its own batches in turn, nothing overlapping anything.
     #
-    # ⚠️ THE BOUNDS MULTIPLY. Each group may itself have `ai._MAX_CONCURRENT_BATCHES` (8) in flight,
+    # THE BOUNDS MULTIPLY. Each group may itself have `ai._MAX_CONCURRENT_BATCHES` (8) in flight,
     # so N groups here means up to N x 8 concurrent calls. That is why this bound is 4 and not 8: a
     # worst case of 32 already exceeds Stage B's 8, and §4 — not this ticket — is where a bound gets
     # raised, on measured TPM rather than on arithmetic.
@@ -136,7 +136,7 @@ async def materialize_tags(
     # four liability groups run 1-2. A realistic peak is a dozen concurrent calls and the 32 cap is
     # reachable, so this stage — not Stage B — is what sets the run's ceiling on requests in flight.
     #
-    # ⚠️ THE SHARED BREAKER NO LONGER SEES A SERIAL SEQUENCE. Each group's apply loop is atomic (it
+    # THE SHARED BREAKER NO LONGER SEES A SERIAL SEQUENCE. Each group's apply loop is atomic (it
     # contains no await), so a group's own batches still reach `AiInfraBreaker` in input order — but
     # the GROUPS reach it in completion order, so "5 consecutive failures" is now counted over an
     # interleaving that depends on which group finished first. A mix of failing and succeeding groups

@@ -3,7 +3,7 @@
 # A letter of explanation an underwriter can rely on states WHAT is being explained, WHEN it happened, and
 # carries the borrower's SIGNATURE. LO-2 reads those three legs off the letter's own extracted fields.
 #
-# ⚠️ THE APPROVED BUILD DIRECTIVE SAID "explanation_summary + referenced_date + borrower_signature_present,
+# THE APPROVED BUILD DIRECTIVE SAID "explanation_summary + referenced_date + borrower_signature_present,
 # document_type-scoped across ALL SIX LOX TYPES". THOSE THREE FIELDS EXIST ON EXACTLY ONE OF THEM, and
 # building the rule as written would have produced a false finding on most letters in the corpus. Verified
 # against every extractor in app/ai/extraction/ AND against the bench corpus (not one query — LP-494's
@@ -16,10 +16,10 @@
 #     letter_of_explanation_property       7  NO — reason_or_cause / letter_date / signature_date
 #     letter_of_explanation_income         2  NO — reason_or_cause / letter_date / signature_date
 #     letter_of_explanation_child_care     0  NO — no_expense_reason / letter_date
-#     credit_explanation_letter            4  ⚠️ NO EXTRACTOR AT ALL (bench status: `no_extractor`)
+#     credit_explanation_letter            4  NO EXTRACTOR AT ALL (bench status: `no_extractor`)
 #     application_loe                      0  signature only — no summary, no referenced_date
 #
-# ⚠️ PHASE A'S MEASURED "9/34 · 6/34 · 7/34" ARE CORRECT, BUT THEIR DENOMINATOR IS THE WHOLE FAMILY WHILE
+# PHASE A'S MEASURED "9/34 · 6/34 · 7/34" ARE CORRECT, BUT THEIR DENOMINATOR IS THE WHOLE FAMILY WHILE
 # THEIR NUMERATOR CAN ONLY COME FROM THE 9 BASE LETTERS. Read as a sparse fill across 34 letters they
 # invite a rule that reports 25 of 34 incomplete; read correctly they are 9/9, 6/9 and 7/9 on the only
 # type whose extractor HAS the fields. Same shape of error as LP-494's CO-3 drop and LP-495a's own RE-1 /
@@ -31,28 +31,28 @@
 # is whether a signature is on the page — different facts. Aliasing would answer LO-2's question with a
 # fact that is not its answer, which is precisely what the fidelity-coverage lesson (LP-494) warns about.
 #
-# ⚠️ SO EVERY LOE TYPE IS IN SCOPE AND NONE IS SILENTLY SKIPPED — THREE STATES, NOT TWO:
+# SO EVERY LOE TYPE IS IN SCOPE AND NONE IS SILENTLY SKIPPED — THREE STATES, NOT TWO:
 #     "no explanation letter exists"       -> not_applicable, NO finding (see applicability_expected below)
 #     "a letter exists, unreadable"        -> couldnt_check  ("present; completeness cannot be read")
 #     "a letter exists and is incomplete"  -> needs_review
 # These must not collapse into each other, and a test proves all three.
 #
-# ⚠️ `applicability_expected` IS FALSE, AND THAT IS LO-1's HELD QUESTION SHOWING THROUGH. Declaring a
+# `applicability_expected` IS FALSE, AND THAT IS LO-1's HELD QUESTION SHOWING THROUGH. Declaring a
 # missing LOE a gap would require knowing WHICH conditions require one — the lender- and AUS-driven list
 # that nothing in the file enumerates, and the exact reason LO-1 is held for Priya. LO-2 therefore never
 # reports a missing letter; it only judges letters that are there.
 #
-# ⚠️ THE AMOUNT LEG IS DELIBERATELY ABSENT. `referenced_amount` fills 0/34 across the family and 0/9 on
+# THE AMOUNT LEG IS DELIBERATELY ABSENT. `referenced_amount` fills 0/34 across the family and 0/9 on
 # the one type that declares it — the TI-3/4/5 block. A leg that never resolves cannot be load-bearing,
 # and asserting on it would make every letter incomplete.
 # Only `letter_of_explanation_asset` produces list rows (transfer_path_or_chronology, 8 rows across 7
 # documents); the base type's `explanation_items` produces NONE, so no per-item completeness read exists.
 #
-# ⚠️ INCOMPLETE ROUTES TO needs_review, NOT fired — AND THAT IS AN EVIDENCE-DRIVEN CHOICE. On the one type
+# INCOMPLETE ROUTES TO needs_review, NOT fired — AND THAT IS AN EVIDENCE-DRIVEN CHOICE. On the one type
 # with the fields, `referenced_date` fills 6/9 and `borrower_signature_present` 7/9. An empty field cannot
 # be distinguished from a field the extractor missed, so a `fired` verdict would assert a defect on a
 # letter that may well state its date on the page. `needs_review` costs a processor one glance and never
-# an automatic finding. ⚠️ Whether an unsigned LOE is a FINDING or a CONDITION is a genuine domain
+# an automatic finding. Whether an unsigned LOE is a FINDING or a CONDITION is a genuine domain
 # question and is logged in docs/domain/priya-open-questions.md rather than decided here.
 #
 # `borrower_signature_present` is a TYPED extractor field, so the catalog's "signature (AI for scans)"
@@ -83,7 +83,7 @@ applicability:
   scope: every letter of explanation in the loan file (all eight LOE-family document types)
   trigger: >-
     loe.is_explanation_letter == yes. A non-letter document is not_applicable; an UNCLASSIFIED document
-    couldnt_checks rather than being assumed not to be a letter. ⚠️ The predicate is a separate derived tag
+    couldnt_checks rather than being assumed not to be a letter. The predicate is a separate derived tag
     rather than document.document_type because the applicability DSL has only eq/ne and this scope is
     eight document types — gating on one type would silently drop the other seven.
 
@@ -133,7 +133,7 @@ spec_version: 1
 # The MACHINE-READABLE deterministic body (LP-324). An "unknown" tag coerces through the gate to
 # couldnt_check BEFORE this body runs.
 deterministic:
-  # ⚠️ AN APPLICABILITY PREDICATE, NOT AN OUTCOME (LP-487). The applicability layer resolves an ABSENT or
+  # AN APPLICABILITY PREDICATE, NOT AN OUTCOME (LP-487). The applicability layer resolves an ABSENT or
   # "unknown" predicate to COULDNT_CHECK and only a definitely-false one to not_applicable — so an
   # unclassified document is surfaced rather than silently skipped as "not a letter".
   applicability:
@@ -152,7 +152,7 @@ deterministic:
       reasoning: >-
         this letter of explanation states what is being explained and when, and carries the borrower's
         signature
-    # ⚠️ needs_review, NEVER fired — an empty extracted field is not proof the page is blank (see header).
+    # needs_review, NEVER fired — an empty extracted field is not proof the page is blank (see header).
     - verdict: needs_review
       when_tags:
         - {tag: loe.completeness, op: eq, value: "incomplete"}
@@ -165,7 +165,7 @@ deterministic:
         signed copy. If it does not identify the event or its date, request a corrected letter that states
         both. If the element is on the page and was simply not captured, no new document is needed.
     - verdict: couldnt_check
-      # ⚠️ THE CATCH-ALL IS AN ABSTAIN, NOT A PASS — and it is the verdict for EVERY LOE type but one.
+      # THE CATCH-ALL IS AN ABSTAIN, NOT A PASS — and it is the verdict for EVERY LOE type but one.
       # A letter whose extraction captures no completeness fields must not read as complete, and must not
       # read as incomplete either. This is the "present but unreadable" state, distinct from "no letter".
       default: true

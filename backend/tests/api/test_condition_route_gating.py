@@ -1,6 +1,6 @@
 """Every route that can create or read a condition declares the RIGHT tenant gate (LP-909 §1).
 
-⚠️ A DEPENDENCY EACH HANDLER MUST DECLARE IS STILL A CHECK THAT CAN BE FORGOTTEN. `ScopedLoanFileById`
+A DEPENDENCY EACH HANDLER MUST DECLARE IS STILL A CHECK THAT CAN BE FORGOTTEN. `ScopedLoanFileById`
 replaced six lines of hand-scoping in every handler, which is better — but the fourth route someone
 adds in Stage 2 is the one that ships open, and *every existing refusal test passes*, because they
 test the routes that exist.
@@ -8,17 +8,17 @@ test the routes that exist.
 So this walks the routers, and the failure arrives when the route is added. The shape is
 `tests/api/test_lender_endpoints_lp813.py`'s admin-gate test, whose docstring makes the argument.
 
-⚠️ ONE DELIBERATE INVERSION OF THAT TEMPLATE. The lenders version checks only `methods - {"GET"}` and
+ONE DELIBERATE INVERSION OF THAT TEMPLATE. The lenders version checks only `methods - {"GET"}` and
 skips routes that mutate nothing — right there, because `GET /lenders` is deliberately open. Here it
 is backwards: §1 added three GET reads, and **an ungated GET is exactly what leaks another tenant's
 data**. There is no GET exemption.
 
-⚠️ THE MAP IS (ROUTER → ACCEPTED GATES), NOT ONE GLOBAL SET, and the distinction is the point rather
+THE MAP IS (ROUTER → ACCEPTED GATES), NOT ONE GLOBAL SET, and the distinction is the point rather
 than bookkeeping. A flat `/condition-rounds/{round_id}` route carrying `ScopedLoanFileById` would be
 WRONG rather than right — it has no file id to scope — so a single accepted-set would call it gated
 while it scoped nothing. Each router names the gate that is correct *for its own path shape*.
 
-⚠️ AND THE WALK COVERS `inbound` BECAUSE ONE CONDITION ROUTE LIVES THERE. Review found it, and an
+AND THE WALK COVERS `inbound` BECAUSE ONE CONDITION ROUTE LIVES THERE. Review found it, and an
 earlier version of this file could not see it: `POST …/inbound/attachments/{id}/condition-round`
 opens a condition round and enqueues the parse. It is a condition route by any reading, it gates on a
 THIRD callable (`get_scoped_loan_file`, via `ScopedLoanFile`), and a Stage 2 route added beside it
@@ -35,7 +35,7 @@ from fastapi.routing import APIRoute
 
 #: `(method, path)` pairs reachable without a tenant gate, each with the reason it is right.
 #:
-#: ⚠️ THIS MECHANISM WAS DEAD IN THE FIRST VERSION AND THE COMMENT CLAIMED OTHERWISE. One test
+#: THIS MECHANISM WAS DEAD IN THE FIRST VERSION AND THE COMMENT CLAIMED OTHERWISE. One test
 #: honoured the list; the two per-router tests asserted unconditionally — so an entry silenced one
 #: test and still failed two, and anyone recording a deliberate exemption would have discovered the
 #: escape hatch did not open. It went unnoticed because the per-router tests are strictly stronger
@@ -82,7 +82,7 @@ def _methods(route: APIRoute) -> set[str]:
 
 
 def _declares(route: APIRoute, gates: set[Callable[..., Any]]) -> bool:
-    """⚠️ BY DEPENDENCY IDENTITY, never by name or by reading source — so a route that merely
+    """BY DEPENDENCY IDENTITY, never by name or by reading source — so a route that merely
     mentions a gate in a docstring does not count as gated."""
     return any(dependency.call in gates for dependency in route.dependant.dependencies)
 
@@ -90,7 +90,7 @@ def _declares(route: APIRoute, gates: set[Callable[..., Any]]) -> bool:
 def _exempt(route: APIRoute) -> bool:
     """Whether EVERY method on this route is exempt — the route-level question.
 
-    ⚠️ TWO EXEMPTION SEMANTICS LIVE IN THIS FILE AND THEY COINCIDE ONLY BY LUCK (review). `_walk`
+    TWO EXEMPTION SEMANTICS LIVE IN THIS FILE AND THEY COINCIDE ONLY BY LUCK (review). `_walk`
     tests membership per `(method, path)` inside its method loop; this tests per ROUTE with `all`.
     For a route carrying two methods where only one is listed they diverge: `_walk` skips the exempt
     method and reports the rest, while this returns False and the reach test demands a gate for the
@@ -111,7 +111,7 @@ def _exempt(route: APIRoute) -> bool:
 def _walk(exemptions: set[tuple[str, str]]) -> list[str]:
     """Every route carrying no gate valid for its router, given this exemption set.
 
-    ⚠️ THE EXEMPTION SET IS A PARAMETER SO THE CHECK CAN BE INVOKED, and that is the whole reason
+    THE EXEMPTION SET IS A PARAMETER SO THE CHECK CAN BE INVOKED, and that is the whole reason
     this is a function. The test below that claims an exemption silences something used to assert
     two helper predicates and never call the walk at all — its docstring described a demonstration
     it did not perform. A mechanism can only be shown to work by running it.
@@ -145,7 +145,7 @@ def test_every_condition_route_declares_the_right_gate() -> None:
 
 
 def test_the_condition_route_in_inbound_is_covered_by_this_walk() -> None:
-    """⚠️ THE ROUTE THE FIRST VERSION COULD NOT SEE, pinned by name so the walk cannot narrow again.
+    """THE ROUTE THE FIRST VERSION COULD NOT SEE, pinned by name so the walk cannot narrow again.
 
     `POST …/condition-round` opens a round and enqueues the parse. It lives in `inbound.py`, not in
     `conditions.py`, and it gates on a third callable — so it was invisible to a walk over the two
@@ -182,13 +182,13 @@ def test_the_exemption_list_describes_routes_that_exist() -> None:
 
 
 def test_an_exemption_actually_silences_the_check() -> None:
-    """⚠️ THE MECHANISM WORKS, WHICH IN THE FIRST VERSION IT DID NOT.
+    """THE MECHANISM WORKS, WHICH IN THE FIRST VERSION IT DID NOT.
 
     `/inbound/queue` carries no file gate and is listed. If the exemption were dead — as it was when
     one test honoured it and two ignored it — this walk would report it, and the only way to get
     green would be to remove the honest entry.
 
-    ⚠️ AND IT RUNS THE WALK RATHER THAN ASSERTING ITS INPUTS. An earlier version checked
+    AND IT RUNS THE WALK RATHER THAN ASSERTING ITS INPUTS. An earlier version checked
     `_declares(...) is False` and `_exempt(...) is True` — the two conditions the skip branch
     consults — and never invoked the check, so the demonstration in this docstring was not
     performed. Pinning a predicate is not pinning the behaviour that reads it.
@@ -205,7 +205,7 @@ def test_an_exemption_actually_silences_the_check() -> None:
 
 
 def test_the_gate_detection_would_notice_an_ungated_route() -> None:
-    """⚠️ THE POSITIVE CONTROL, and the reason the assertions above are worth anything.
+    """THE POSITIVE CONTROL, and the reason the assertions above are worth anything.
 
     They are absence assertions over a set the code supplies, so they would pass just as happily
     against a detector that found nothing at all — this stage's signature failure in its purest
@@ -231,7 +231,7 @@ def test_the_detection_finds_the_real_routes_gated() -> None:
     assertion above. This asserts it recognises the gates actually in place, per router, so both
     answers are demonstrated rather than one.
     """
-    # ⚠️ THE DENOMINATOR IS COMPUTED BEFORE THE WALK, AND TWO EARLIER VERSIONS GOT THIS WRONG IN
+    # THE DENOMINATOR IS COMPUTED BEFORE THE WALK, AND TWO EARLIER VERSIONS GOT THIS WRONG IN
     # OPPOSITE DIRECTIONS. First a guessed literal (`>= 12` against a real 11) — wrong, and failing
     # later for a reason nobody could reconstruct, since adding a route legitimately moves it.
     # Then a "derived" count that incremented `expected` and `checked` in lockstep with the

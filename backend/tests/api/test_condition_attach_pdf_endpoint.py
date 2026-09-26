@@ -1,6 +1,6 @@
 """Attaching the lender's PDF to an existing round (LP-907 section 2, spec §LP-907, screen S1-09).
 
-⚠️ 200, NOT 201 OR 202, AND THE TESTS SAY SO DELIBERATELY. Nothing is created: no second round, and
+200, NOT 201 OR 202, AND THE TESTS SAY SO DELIBERATELY. Nothing is created: no second round, and
 no new conditions when the PDF carries what the paste already had. A 201 would tell a client
 something was created and invite it to look for a new id.
 
@@ -113,7 +113,7 @@ async def test_attaching_the_pdf_enriches_the_same_round(
 async def test_the_response_reports_counts_never_the_lenders_words(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ ADR-405. `unmatched_existing` is a NUMBER, and the test is built so it can actually FAIL.
+    """ADR-405. `unmatched_existing` is a NUMBER, and the test is built so it can actually FAIL.
 
     A round whose paste carries a condition the PDF does not is set up deliberately, so there IS a
     lender's sentence the response could leak. Asserting against a response with nothing to leak
@@ -167,7 +167,7 @@ async def test_something_that_is_not_a_pdf_is_refused(
     )
 
     assert response.status_code == 422
-    # ⚠️ THE MESSAGE THE CODE ACTUALLY EMITS, checked rather than guessed. Plain text is not
+    # THE MESSAGE THE CODE ACTUALLY EMITS, checked rather than guessed. Plain text is not
     # identifiable at all, so `assess` never reaches the "declared X but is Y" mismatch branch and
     # the honest sentence is that the type could not be established. An earlier version of this
     # test asserted "must be a PDF", which is the sentence for a file that sniffs as something

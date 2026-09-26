@@ -12,7 +12,7 @@ cannot read a spec's `reference_values`, so it has no way to know what floor AS-
 Reimplementing the floor in Python would put a threshold outside the spec and leave two copies to drift.
 A split shows up as the same amount more than once, which needs neither a floor nor a counterparty.
 
-⚠️ AS-13 IS INERT. Its bar is `calibratable-now` with `validated: false`, so the eligibility gate
+AS-13 IS INERT. Its bar is `calibratable-now` with `validated: false`, so the eligibility gate
 refuses it and it is not in `ACTIVE_RULE_IDS`. Same-amount grouping is a heuristic that has never run
 against a real snapshot; activating it would assert a sign-off on unobserved behaviour, which is how
 LP-516 shipped a gate that did nothing on a real file. These tests are the constructed evidence; the
@@ -132,7 +132,7 @@ def test_a_lone_deposit_is_not_a_repeat() -> None:
 
 
 def test_payroll_is_excluded_or_every_w2_borrower_fires() -> None:
-    """⚠️ NOT optional. A salary paid twice a month IS a repeated same-amount deposit, so counting
+    """NOT optional. A salary paid twice a month IS a repeated same-amount deposit, so counting
     payroll would fire this on essentially every W-2 file and say nothing. Mirrors AS-12's
     `exempt_when`, and for the guideline reason: payroll is readily identifiable on the statement."""
     value, _ = _aggregate(*_split("3300.00", 4, category="payroll"))
@@ -277,7 +277,7 @@ def test_one_deposit_duplicated_across_two_statement_uploads_is_counted_once() -
 # ABSTENTION — every branch, because a wrong 0 reads as "we looked and there is no pattern"
 # ------------------------------------------------------------------------------------------------ #
 def test_no_deposit_detection_at_all_abstains_rather_than_reporting_zero() -> None:
-    """⚠️ absent != none found. With `txn.is_money_in` on no subject, detection never ran; a 0 here
+    """absent != none found. With `txn.is_money_in` on no subject, detection never ran; a 0 here
     would false-green the rule on every file whose Stage-A tags failed to materialize. The
     `_stmt_nsf_count` discipline, copied deliberately."""
     value, reasoning = _stmt_repeated_money_in_max_total(_snapshot(), "loan", None)
@@ -351,7 +351,7 @@ def test_absent_tags_abstain() -> None:
 # AS-13 IS GONE — the tag is not
 # ------------------------------------------------------------------------------------------------ #
 def test_as13_is_not_in_the_catalog() -> None:
-    """⚠️ AS-13 was WITHDRAWN, not held. As an inert rule whose input resolved on every file it exposed
+    """AS-13 was WITHDRAWN, not held. As an inert rule whose input resolved on every file it exposed
     two latent defects in the pending-checks path and broke staging twice: the database could not store
     `pending_automation` (fixed, LP-521), and `reconcile_evaluation_findings` loads prior findings for
     ACTIVE rules only — so an inert rule's row is invisible on the SECOND run and collides on the

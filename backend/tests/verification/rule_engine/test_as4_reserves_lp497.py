@@ -232,7 +232,7 @@ def test_as4_is_active_and_carries_no_ai_tag() -> None:
 def test_as7_is_built_but_held() -> None:
     """AS-7 must NOT activate — and this docstring named the wrong precondition for two tickets.
 
-    ⚠️ THE BLOCKER IT CITED IS GONE, AND IT POINTED AT THE WRONG ACTION. It said AS-7 "should only go
+    THE BLOCKER IT CITED IS GONE, AND IT POINTED AT THE WRONG ACTION. It said AS-7 "should only go
     live with the declaration fixed": `txn.is_nsf_or_overdraft` declared without an abstain, so an
     honest "unknown" coerced to confidence=None and read as a broken pipeline. LP-495c LANDED at
     6b1dff73 and the tag now declares ["yes","no","unknown"]. A reader following the old wording would

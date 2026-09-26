@@ -6,7 +6,7 @@ new fields are already visible to the reasoner with NO code change — and becau
 fields, a single-holder statement's context is byte-identical to pre-LP-446 (the AS-6 11/11 calibration, which
 ships AUTO, is preserved by construction). Only a JOINT account gains the second-holder line.
 
-⚠️ These are the GUARDS behind "AS-6 needed no change": if a future ticket PII-routes ``account_owner_name_2``
+These are the GUARDS behind "AS-6 needed no change": if a future ticket PII-routes ``account_owner_name_2``
 (masking it) the co-holder name would stop reaching the reasoner and AS-6 would silently go blind on joint
 accounts — this test turns red first. (The end-to-end verdicts — the 4 real joint statements stay ``satisfied``,
 a genuine non-borrower co-holder → ``needs_review`` while the statement still counts — were proven on the real

@@ -1,6 +1,6 @@
 """The extraction-bench engine — walk, preview+cost, the per-document run, and the corpus loop.
 
-⚠️ MEASURES COVERAGE, NOT ACCURACY. Every fill-rate/value it reports is "was this field POPULATED",
+MEASURES COVERAGE, NOT ACCURACY. Every fill-rate/value it reports is "was this field POPULATED",
 never "is the value CORRECT". Nothing is persisted (JSON output only). It changes nothing about the
 system under test — it drives the LIVE classifier and the LIVE registered extractors, read-only.
 
@@ -243,7 +243,7 @@ async def run_one(f: DiscoveredFile) -> dict[str, Any]:
     """Classify one document, then extract it with the LIVE registered extractor. Returns the
     per-document record (no persistence). ``f.media_type`` must be non-None (a readable file).
 
-    ⚠️ **No redaction.** The bench captures REAL values (identity fields included) — the redaction was
+    **No redaction.** The bench captures REAL values (identity fields included) — the redaction was
     blanking data the comparison needs (employer EINs, business addresses, reference numbers). So the
     record contains real borrower PII; the output folder must never be committed/shared/moved.
 

@@ -2,14 +2,14 @@
 
 Adds ``tag_cache_entries``. Additive only: one new table, nothing existing is touched.
 
-⚠️ HAND-TRIMMED, AND THAT MATTERED. `alembic revision --autogenerate` also produced
+HAND-TRIMMED, AND THAT MATTERED. `alembic revision --autogenerate` also produced
 ``op.drop_table('finding_prose')``, a drop of the documents FTS index, and a dozen `alter_column`
 type changes across `validation_verdicts`, `needs_items` and `verifications` — pre-existing drift
 between the models and this database, none of it related to this ticket. Shipping the generated file
 would have DROPPED A TABLE as a side effect of adding a cache. Everything but the `create_table` and
 its indexes was removed by hand.
 
-⚠️ THE DRIFT IS STILL THERE, AND IT RE-ARMS ON EVERY AUTOGENERATE. Verified against a database
+THE DRIFT IS STILL THERE, AND IT RE-ARMS ON EVERY AUTOGENERATE. Verified against a database
 migrated to head from scratch: `--autogenerate` still emits 22 operations, four of them destructive —
 `drop_table('finding_prose')` (the table EXISTS in the database and no model claims it),
 `drop_index('ix_documents_full_text_fts')` and two `stated_housing_expenses` index drops. Whoever
@@ -28,8 +28,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "a1c8734a7978"
-down_revision: str | Sequence[str] | None = "c8b1e47da920"
+revision: str = "a1c8734a7978"  # pragma: allowlist secret  (Alembic revision id, not a secret)
+down_revision: str | Sequence[str] | None = "c8b1e47da920"  # pragma: allowlist secret
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

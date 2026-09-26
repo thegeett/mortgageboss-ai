@@ -104,7 +104,7 @@ A **deterministic** (no AI) tolerant lxml/XPath parser for MISMO XML/HTML → st
 mapping/creation service → upload endpoint → frontend display → full editability. Import-directly (no
 preview/confirm) **with post-import editability as the safety net** for parser gaps.
 
-⚠️ **Hardening honesty:** validated against **one real file** plus synthetic variants. More real files
+**Hardening honesty:** validated against **one real file** plus synthetic variants. More real files
 (especially a real FHA and a real multi-borrower export) are still needed.
 
 **Deferred:** re-import/versioning/diff, smart-needs-from-MISMO, AI-fallback parsing.
@@ -211,7 +211,7 @@ Documents (MISMO XML, PDFs)
 Tabs: **Needs attention** (`open` + `couldn't-check` — both block) · **Satisfied** ·
 **History/no-longer-needed** · **Not applicable** (scope was false for this file).
 
-⚠️ **The three "not firing" cases must stay distinct**, and collapsing any into another is the core
+**The three "not firing" cases must stay distinct**, and collapsing any into another is the core
 failure mode:
 - **Stopped existing** → `no-longer-applies` (was a finding; subject left the file)
 - **Never relevant** → not-applicable (scope false from run one; never a finding)
@@ -238,7 +238,7 @@ and human-verified — they never block submission on their own authority. Every
 
 ### Model tiers (LP-457)
 Bedrock. **Haiku 4.5 for classification + extraction; Sonnet for reasoning.**
-⚠️ **12 reasoning callers previously shared the extraction setting — collapsing the tiers would
+**12 reasoning callers previously shared the extraction setting — collapsing the tiers would
 invalidate every calibrated bar.**
 
 ---
@@ -269,10 +269,10 @@ searching for "replacement cost" finds it on all three and can invert the answer
 - Output ceiling **16,384 tokens** (`RETRY_MAX_TOKENS`). Use **flat rows** for anything with many items.
 - **Absent ≠ empty.** Missing field → `null`. Missing list → `[]`. Missing object → `null`.
   **Never fabricated, never omitted.**
-- ⚠️ **The catch-all is not PII-protected.** Anything the model files into `additional_sections` is
+- **The catch-all is not PII-protected.** Anything the model files into `additional_sections` is
   stored **raw** — a real address and an SSN were found unmasked there. Every PII element must be a
   named typed field registered in `_PII_FIELDS`.
-- ⚠️ **A rule may only depend on a typed-core field** (LP-405). The catch-all is free-form, per-document
+- **A rule may only depend on a typed-core field** (LP-405). The catch-all is free-form, per-document
   and uncoerced — nothing built on it can be trusted.
 
 **Target: ~20–25 typed-core fields per document, every one with a recorded reason.**
@@ -285,7 +285,7 @@ top 8 documents cover 70 of 133 rules (52%).
 - **+232 typed fields and 9 lists** on top of the original 18 types; **109+ document types** wired
   (was 18); **60+ nested lists** captured.
 - **Generic nested lists** (LP-437) — `ListRow` + `DocumentEntry.lists` + `_LIST_SPECS`, replacing ~5
-  hand-written files per list. ⚠️ **The legacy `transactions` / `schedule_c` / `schedule_e` attributes
+  hand-written files per list. **The legacy `transactions` / `schedule_c` / `schedule_e` attributes
   COEXIST and were deliberately NOT migrated** — AS-1, IN-12, IN-13 are live on them.
   **Never migrate the legacy list attributes.**
 - **The tag→field guard** (LP-450) — a tag referencing a field outside the legal universe now **fails
@@ -305,7 +305,7 @@ Apples-to-apples on the 276 documents both runs processed:
 Every field and list gap v1 flagged now populates. Crash clusters gone. T4s no longer emit
 plausible-but-wrong US W-2 numbers; doc 271 recovered ~$164k of wages lost to a `1099` mislabel.
 
-**⚠️ And the cost side, which is the finding that matters:**
+**And the cost side, which is the finding that matters:**
 1. **~14 documents that v1 extracted now drop to `unknown`.** LP-463 made declining legitimate —
    correctly — but the classifier now abstains where a specialised type exists *and its extractor works*.
    **We measured declining's benefit and never measured its cost.**
@@ -317,7 +317,7 @@ plausible-but-wrong US W-2 numbers; doc 271 recovered ~$164k of wages lost to a 
    fabricating a day-of-month from MM/YY.
 
 **The remediation sequence that followed, and completed:** fallback → regressions → accuracy layer → tags.
-- **LP-471 — the Tier-3 fallback.** ⚠️ **The highest-leverage change of the whole run.** A no-extractor
+- **LP-471 — the Tier-3 fallback.** **The highest-leverage change of the whole run.** A no-extractor
   type or an extraction error now falls back to scoped free extraction. **~59 documents went from
   nothing to something.** Fallback runs **AFTER** retries — a throttle is re-runnable and must not be
   silently degraded.
@@ -353,11 +353,11 @@ by declared producers, never raw documents.
 | blocker | rules | needs |
 |---|---|---|
 | **AI calibration** | ~25 | Priya's labels + a bar |
-| ↳ **of those, REAL FILES** | **11** | ⚠️ ADR-332 — a self-authored fixture leaks its own answer |
+| ↳ **of those, REAL FILES** | **11** | ADR-332 — a self-authored fixture leaks its own answer |
 | A tag declaration | ~16 | the bench re-run first (**done**) |
 | A derived recipe | ~10 | code |
 | Re-extraction to make fields measurable | ~15 | the bench re-run (**done**) |
-| **The agency/overlay design** | **6** | ⚠️ **a decision, not a ticket** |
+| **The agency/overlay design** | **6** | **a decision, not a ticket** |
 | A missing extractor | ~6 | MI certificate, rate lock |
 | **Vacuous** | 5 | never write |
 
@@ -365,19 +365,19 @@ Plus **7 compliance rules out of scope** (post-submission / LOS territory).
 
 ### The four-phase plan to finish (`docs/finish-the-rule-engine-plan.md`)
 - **Phase 1 — read the bench re-run. DONE.** Fill rates per type are recorded.
-  ⚠️ **Read fill rate as "available to write a tag against", NOT as "correct."** Doc 244 returned a
+  **Read fill rate as "available to write a tag against", NOT as "correct."** Doc 244 returned a
   confident wrong Box 1. **Coverage is not accuracy.**
 - **Phase 2 — write tags and rules, deterministic first (~25 rules, no Priya).** Only against fields the
   bench shows *actually populate* (the ADR-354 / LP-454 lesson: three prior tag-writing attempts
   under-delivered because the audit measured what schemas **declared**, not what documents **contained**).
-  Build order: parsed tags → derived recipes → **list consumers**. ⚠️ **60+ lists are captured and NO
+  Build order: parsed tags → derived recipes → **list consumers**. **60+ lists are captured and NO
   rule reads any of them.** Every tag must pass the LP-450 load-time guard. **37 → ~62.**
-- **Phase 3 — the agency/overlay design call (6 rules).** ⚠️ **A shape to choose, not a ticket to write.**
+- **Phase 3 — the agency/overlay design call (6 rules).** **A shape to choose, not a ticket to write.**
   See §6.
 - **Phase 4 — Priya's batch (~25 rules).** Labelling sessions: a blind worksheet per tag, she fills a
   `golden_label` column, then we score the AI's answers against a bar she approves. **~20 minutes per 30
-  rows** (the LP-420 measure) — **batch them.** ⚠️ **11 rules need REAL FILES** (the fraud lane FR-1/2/3/6
-  and the cross-source matchers CR-4, OC-1, RE-1, PC-1, TI-1, TI-2, AU-1). ⚠️ **And it costs API credit** —
+  rows** (the LP-420 measure) — **batch them.** **11 rules need REAL FILES** (the fraud lane FR-1/2/3/6
+  and the cross-source matchers CR-4, OC-1, RE-1, PC-1, TI-1, TI-2, AU-1). **And it costs API credit** —
   everything before this phase is nearly free. **→ ~87, and ~100 with a real-file corpus.**
 
 **The honest arc: 37 → ~62 on your own → ~87 with Priya → ~100 with a real-file corpus.**
@@ -388,7 +388,7 @@ Plus **7 compliance rules out of scope** (post-submission / LOS territory).
 public records/inquiries), **appraisal** (8 — UAD 2.6 *and* 3.6 through the Nov 2026 cutover), **title**
 (6), **DU/AUS findings** (4), **MI certificate** (5). Plus condo questionnaire and flood.
 
-⚠️ **Each of these documents is PDF-only with no independent source-of-truth: a misread produces a
+**Each of these documents is PDF-only with no independent source-of-truth: a misread produces a
 confident wrong verdict with nothing to contradict it.** Every one needs an **LP-143 golden-file eval
 built alongside it** — non-negotiable. This is where the eval infrastructure matters most.
 
@@ -408,21 +408,21 @@ the moment they do it.
 
 **Earnings classification — a decision procedure, not a label list:** not cash → NONCASH (qualifying 0) ·
 guaranteed + fixed + not performance-dependent → BASE · performance-dependent → VARIABLE · **else UNKNOWN
-and request the employer's earning-code definition.** ⚠️ **The UNKNOWN branch is load-bearing.**
+and request the employer's earning-code definition.** **The UNKNOWN branch is load-bearing.**
 
-**Declining income** — ⚠️ **supersedes the earlier design.** **Per component, not per borrower.** Base
+**Declining income** — **supersedes the earlier design.** **Per component, not per borrower.** Base
 declining with bonus rising is `NEEDS_REVIEW`. **Do not make "any YoY decrease" automatic.**
 
 **NSF** — an **internal policy**, not an agency rule. **Event type matters.**
 
-**Reserves** — ⚠️ **no blanket 60% haircut for Fannie** (that is FHA's).
+**Reserves** — **no blanket 60% haircut for Fannie** (that is FHA's).
 
-**Agency differences — ⚠️ architectural, and this is the open design decision.**
+**Agency differences — architectural, and this is the open design decision.**
 > *Store all agency rules and select the applicable one; **never the strictest**; a lender's conservative
 > choice is an explicit `LENDER_OVERLAY`, not disguised agency policy. When the agency is not yet
 > selected, return comparative results.*
 
-⚠️ **`activation_bars.yaml` holds ONE threshold per rule and cannot express this.** Concretely: CR-9's
+**`activation_bars.yaml` holds ONE threshold per rule and cannot express this.** Concretely: CR-9's
 deferred-student-loan payment is **1% (Fannie)** vs **0.5% (Freddie/FHA)**; DT-1 is **50% (DU)** vs
 **36–45% (manual)** vs **an FHA compensating-factor matrix**. Gated rules: **CR-9 · DT-1 · AS-3 · PC-4 ·
 PR-1 · CR-7's minimum.** **Decide the shape before building any of the six, or they get built twice.**
@@ -449,7 +449,7 @@ tight enough to catch it would key on content, which is exactly how generic corr
 back in. Tier 3 already reads its 16 occupancy facts.
 
 **Mechanism: positive indicator cues only**, drawn from the documents' own printed language ("ACKNOWLEDGMENT
-OF RECEIPT OF MONIES"; "Schedule A/B"; "BINDER (ALTA)"). ⚠️ **No threshold change, no
+OF RECEIPT OF MONIES"; "Schedule A/B"; "BINDER (ALTA)"). **No threshold change, no
 `type_matches_document` change** — those are the force-fit risk. One file touched:
 `backend/app/ai/classification_prompt.py`.
 
@@ -477,7 +477,7 @@ documents** before declaring a tag on it. (ADR-354)
 wrong verdict. Nothing in the pipeline checked correctness until LP-474.
 
 **Verification rate varies by document structure.** **Tables** — 7/7 claims real. **Fixed-layout forms** —
-high. ⚠️ **Free-text contracts — mostly wrong:** of ~8 purchase-agreement claims, **one** was real; the
+high. **Free-text contracts — mostly wrong:** of ~8 purchase-agreement claims, **one** was real; the
 free reader projected **Texas** TREC fields onto a **North Carolina** form.
 
 **Precision beats recall on a field with a confusable neighbour.** IH-1's fix was **reverted** — it failed
@@ -489,13 +489,13 @@ And it recurs at row granularity (LP-460: 11 rows → 5 by framing the unit prec
 |---|---|
 | the model contradicts itself (reasoning names one type, label says another) | LP-463's `type_matches_document` guard ✅ |
 | **confidently wrong, self-consistent** | a sharpened indicator ✅ |
-| **the input is unreadable** (rotated/low-res scans) | ⚠️ **preprocessing — neither works** (ADR-365) |
+| **the input is unreadable** (rotated/low-res scans) | **preprocessing — neither works** (ADR-365) |
 
 **Confidence does not predict correctness.** Misclassifications ran **0.75–0.99**. **Never add a
 confidence threshold** — it would suppress correct high-confidence calls and still miss the wrong ones.
 
 **A spec edit does not reach a shipped prompt.** The generator runs diff-mode for shipped extractors.
-⚠️ **89 of 109 prompts are untouched STARTER placeholders**; only 19 are hand-tuned — **and those are the
+**89 of 109 prompts are untouched STARTER placeholders**; only 19 are hand-tuned — **and those are the
 types that performed at parity.** Prompt changes go in the `.txt`, **under that prompt's own naming**
 (specs and prompts diverge: `institution_name` vs `bank_name`).
 
@@ -506,7 +506,7 @@ statements → commission_income_statement · LOX emails → general_corresponde
 15pp, Tier 3 at 50pp, **typed extraction uncapped** (ADR-370). The 069 `BadRequestError` was exactly this:
 the classification-side size fix didn't cover extraction.
 
-**We measured LP-463's benefit and not its cost.** ⚠️ **The remedy was NOT to loosen declining — it was
+**We measured LP-463's benefit and not its cost.** **The remedy was NOT to loosen declining — it was
 to make the failure cheap (LP-471) and fix only evidence-backed cases (LP-475).**
 
 **Prompt hygiene:** a tag prompt must report what the document states; the *rule* does the judging.
@@ -529,18 +529,18 @@ error, not bad luck.
 | item | note |
 |---|---|
 | **The splitter** | 066, 069, 167, 196, 204, 271 — **one file, one label.** 271 dropped ~$164k of wages. The one change that would recover the URLA package |
-| **Classified-type threading** | ⚠️ **the best idea to come out of LP-472** — thread the classified type into the extractor so a shared/generic extractor anchors on what classification decided. Helps every long-tail extractor **and the Tier-3 fallback** |
+| **Classified-type threading** | **the best idea to come out of LP-472** — thread the classified type into the extractor so a shared/generic extractor anchors on what classification decided. Helps every long-tail extractor **and the Tier-3 fallback** |
 | **Image preprocessing** | ADR-365 — rotated/low-res scans (266, 294, 174). **Neither the guard nor an indicator can fix these** |
 | **bank_statement Option 3** | `ending_balance` is the FIRST account only — live for AS-3/AS-4/AS-10. Option 1 recovered the balances; the second account's transactions are still uncaptured. Real transaction rows were dropped on 046 and 057 — **data loss, not a missing field** |
 | **The 89 untuned prompts** | long-tail quality |
 | **244's Box 10** | deferred as *"needs a typed Box-10 field"*, not uncatchable — the day it exists, an accuracy check drops in free |
-| **253's $224k gift** | ⚠️ genuinely uncatchable by self-consistency — a lone amount with no internal contradiction. **The boundary of that layer** |
+| **253's $224k gift** | genuinely uncatchable by self-consistency — a lone amount with no internal contradiction. **The boundary of that layer** |
 | **`loan_number_masked` unmasked** | a live PII violation, still open |
 | **Phase 7 security hardening** | MFA, rate limiting, malware scanning, audit logging — **required before any real-PII staging**, i.e. before Priya touches real files |
 | **The UI** | four/five tabs, finding detail with provenance, upload + re-run, resolve/override/waive. This is the gap between an engine and something Priya can use |
 | **Breadth validation** | everything is validated on **LF-6T3N** (one conventional purchase) + synthetic. No jumbo, FHA, condo, self-employed or refinance corpus |
 
-⚠️ **LF-6T3N note:** the identities in that fixture (Akash/Bansari/BofA/Wells) are **invented test data**,
+**LF-6T3N note:** the identities in that fixture (Akash/Bansari/BofA/Wells) are **invented test data**,
 not real PII — despite the fixture calling them "the real ones."
 
 ---
@@ -553,7 +553,7 @@ not real PII — despite the fixture calling them "the real ones."
 3. **Schema-gap Phase 1** in parallel (`docs/schema-gap-remediation-plan.md`) — prompt/extractor fixes,
    no schema change, and it fixes a live rule (IH-1 returns `couldnt_check` on 4 of 16 real policies that
    carry the answer). Plus one genuine extractor bug (credit_report 249: `inquiries` empty, data
-   misrouted to `catch_all`). ⚠️ Don't chase `drivers_license.date_of_birth`/`address` — those nulls are
+   misrouted to `catch_all`). Don't chase `drivers_license.date_of_birth`/`address` — those nulls are
    a **bench artifact**; the harness blanked them.
 4. **Make the agency/overlay call** before building CR-9, DT-1, AS-3, PC-4, PR-1 or CR-7 — it's a shape,
    not a ticket, and they get built twice otherwise.
@@ -583,4 +583,4 @@ not real PII — despite the fixture calling them "the real ones."
 | `decisions.md` | the ADR log, through ADR-373 |
 | `docs/glossary.md` | mortgage domain + technical terms |
 | `docs/project-structure.md` | repo layout and "where does X go?" |
-| ⚠️ `docs/mortgageboss-progress-summary.md` | **SUPERSEDED — stops at LP-433**, before the generator, the 91 extractors, the tier merge, Bedrock and the whole bench exercise |
+| `docs/mortgageboss-progress-summary.md` | **SUPERSEDED — stops at LP-433**, before the generator, the 91 extractors, the tier merge, Bedrock and the whole bench exercise |

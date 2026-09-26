@@ -8,7 +8,7 @@ with 3 failed tasks; the site stays up only because the previous task still serv
 
 ---
 
-## ⚠️ The hypothesis was wrong
+## The hypothesis was wrong
 
 > *"wget is not in the frontend image."*
 
@@ -140,7 +140,7 @@ Verified offline in a scratch module — renders
 3. The check's only real contribution was detecting a bind problem, and that problem
    is now fixed at the source rather than discovered by killing tasks.
 
-⚠️ **The worker keeps its check** — it has no ALB, so `celery inspect ping` is the
+**The worker keeps its check** — it has no ALB, so `celery inspect ping` is the
 only way ECS can distinguish "alive" from "alive but not consuming". That reasoning
 does not transfer to a service behind a load balancer.
 
@@ -150,7 +150,7 @@ BusyBox applet that a base-image change could remove — **verified working insi
 deployed image** (exit 0 above). Only add it back after confirming the task binds
 `0.0.0.0`.
 
-⚠️ **Note on the stated constraint.** The brief said not to modify `infra/` beyond
+**Note on the stated constraint.** The brief said not to modify `infra/` beyond
 the healthcheck definition. The `HOSTNAME` line goes one line past that, because the
 diagnosis showed the healthcheck was *not* the defect. Removing only the check would
 have stopped the crash loop while leaving the app bound to a single interface —
@@ -188,7 +188,7 @@ CMD-SHELL  uv run celery -A app.tasks.celery_app inspect ping -d celery@$HOSTNAM
 worker   healthStatus = HEALTHY   lastStatus = RUNNING   rolloutState = COMPLETED   failedTasks = 0
 ```
 
-⚠️ Worth noting explicitly, because it looks like the same trap: this check
+Worth noting explicitly, because it looks like the same trap: this check
 interpolates **`$HOSTNAME`** — the very variable that broke the frontend. Here it is
 *correct*, because Celery derives its node name from the same hostname, so both
 sides move together. The frontend's problem was never `$HOSTNAME` being wrong; it
@@ -236,7 +236,7 @@ No application code changed, so the image tag is unchanged and the build is skip
 the Alembic head is unchanged so the migration is skipped. What it does is apply the
 task-definition change and wait for all three services to roll.
 
-⚠️ The current deployment is **FAILED** with the circuit breaker tripped. The apply
+The current deployment is **FAILED** with the circuit breaker tripped. The apply
 registers a new revision and starts a fresh deployment, which clears it.
 
 **Confirm afterwards** — the log line is the direct evidence:

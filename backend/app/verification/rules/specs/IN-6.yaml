@@ -6,7 +6,7 @@
 # IN-6 is now a trivial deterministic rule branching on that one enum (the AS-8 pattern + an applicability
 # predicate for not_applicable).
 #
-# ⚠️ THE `uncovered` ROUTING (D2 — the substance of this ticket): income.employer_coverage does the
+# THE `uncovered` ROUTING (D2 — the substance of this ticket): income.employer_coverage does the
 # DETERMINISTIC half of IN-5's employer comparison (the exact-normalized bookend) but NOT IN-5's AI
 # fuzzy-residue judge (LP-410 limitation). A pay stub's short form ("Acme") vs a W-2's legal name ("Acme
 # Freight Co") normalizes to "acme" vs "acme freight" -> reports "uncovered" when it is very likely the SAME
@@ -15,7 +15,7 @@
 # finding would be noisy). needs_review still surfaces a GENUINE gap to a human, so it dominates `fired`
 # until the fuzzy residue is closed (a later refinement). See ADR-325.
 #
-# ⚠️ HELD pending Priya (D3 — the transitive AI dependency): income.employer_coverage is DERIVED, but it reads
+# HELD pending Priya (D3 — the transitive AI dependency): income.employer_coverage is DERIVED, but it reads
 # income.employer_normalized — an AI tag (measured 100%, LP-379-D, via live IN-5). That is the IN-3 case
 # (LP-384 reclassified from no-ai to calibratable-now): IN-6's bar declares load_bearing_ai_tags:
 # [income.employer_normalized] with the 100% measurement and a PROPOSED 0.95 threshold (IN-5's precedent —

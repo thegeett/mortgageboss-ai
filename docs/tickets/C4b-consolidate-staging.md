@@ -75,12 +75,12 @@ KMS key it uses — bootstrap runs before the environment CMK exists, so it is a
 
 Replace `dynamodb_table = "mbai-tf-locks"` with `use_lockfile = true` in every `backend.tf`.
 
-⚠️ **Never set both** — Terraform treats that as a conflict.
+**Never set both** — Terraform treats that as a conflict.
 
 `use_lockfile` uses S3 conditional writes for locking, introduced in Terraform 1.10;
 `dynamodb_table` was deprecated in 1.11. The repo is on **v1.15.8**.
 
-⚠️ This was **not verified** — confirming it requires `terraform init`, which is out of scope
+This was **not verified** — confirming it requires `terraform init`, which is out of scope
 here. Flag it in the result doc as the first thing to check on the initial init. If v1.15.8
 rejects it, `dynamodb_table` is the fallback and the table must be restored to bootstrap.
 
@@ -108,7 +108,7 @@ rather than deleting it — `count = length(var.pull_account_ids) > 0 ? 1 : 0`, 
 defaulting to `[]`. Production may genuinely need it later, and a count-gated resource with an
 empty default is inert. Deleting working code you will want again is worse than gating it.
 
-⚠️ C4's result doc records that `envs/staging` deliberately assembles repository URLs from a
+C4's result doc records that `envs/staging` deliberately assembles repository URLs from a
 variable **because** `data.aws_ecr_repository` resolves through the environment's own provider
 and failed with `RepositoryNotFoundException` against the other account. That constraint
 **disappears** once the registry is in the same account — a module output is now the correct
@@ -147,7 +147,7 @@ Add a prominent note at the top of `envs/dev/main.tf` and in `infra/README.md`: 
 exists to prove the modules take different values and as a starting point for a future
 environment. It is not deployed.
 
-⚠️ **Do not** repoint it at staging. An accidental `apply` in `envs/dev` would then write to
+**Do not** repoint it at staging. An accidental `apply` in `envs/dev` would then write to
 staging's state.
 
 ### 7. Documentation
@@ -175,7 +175,7 @@ with evidence, what was implemented, and every assumption and decision with reas
 **`decisions.md`** — append ADRs. Read for the current maximum (C4 reached ADR-372) and
 continue. At minimum: single-account consolidation, and `use_lockfile` over DynamoDB.
 
-⚠️ **Do not change SSO or profile configuration.** Three separate sessions is a deliberate
+**Do not change SSO or profile configuration.** Three separate sessions is a deliberate
 choice for now; leave `~/.aws/config` alone and do not recommend otherwise in the docs.
 
 ---

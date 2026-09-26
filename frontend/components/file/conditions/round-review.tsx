@@ -16,13 +16,13 @@ import { ReviewSidePanel } from "./review-side-panel";
 /**
  * What this round's header says was recognised, and where.
  *
- * ⚠️ `sheet_format` CANNOT TELL A RECOGNISED PASTE FROM AN UPLOADED LETTER (S1-07, LP-909 §5).
+ * `sheet_format` CANNOT TELL A RECOGNISED PASTE FROM AN UPLOADED LETTER (S1-07, LP-909 §5).
  * `read_pasted_text` returns `UWM_APPROVAL_LETTER` for a paste whose columns survived the clipboard
  * — the identical value an uploaded letter carries — so this header read "UWM · Loan Approval
  * Conditions" on a round where no letter was ever sent to us. The design's line is "UWM layout ·
  * recognised in the pasted text": the same recognition, without claiming the document.
  *
- * ⚠️ THE DISCRIMINATOR IS BYTES, NOT `kind`, AND `hasPdf` ALREADY ASKS THAT. Its docstring carries
+ * THE DISCRIMINATOR IS BYTES, NOT `kind`, AND `hasPdf` ALREADY ASKS THAT. Its docstring carries
  * the reasoning — `kind` would need a list kept in step with the enum, and that list is what the
  * strip got wrong once. Writing `sources.some(s => s.kind === "paste")` here would be a fifth copy
  * of a rule this stage has just finished collapsing into one, and it would also mislabel a pasted
@@ -52,18 +52,18 @@ function usDate(value: string | null): string | null {
 /**
  * How the reader describes itself, for the line under the format (S1-04, S1-10).
  *
- * ⚠️ THE AI CASE IS NOT "reader: split". `parse_report.reader` is "split" after an AI split and the
+ * THE AI CASE IS NOT "reader: split". `parse_report.reader` is "split" after an AI split and the
  * version is `SPLIT_VERSION`, and the design says "Split by AI (split v1) · rules found no rows" —
  * which names both what ran AND what the rules managed, because a processor reading "split v1"
  * alone cannot tell whether the rules contributed anything.
  *
- * ⚠️ AND `SPLIT_VERSION` IS "split_v1", SO THE PLAIN JOIN PRINTED "(split split_v1)" (LP-909 §5).
+ * AND `SPLIT_VERSION` IS "split_v1", SO THE PLAIN JOIN PRINTED "(split split_v1)" (LP-909 §5).
  * The version carries the reader's own name because it names the prompt file
  * (`conditions/split_v1.txt`) — right on the server, doubled on screen. The `<reader>_` prefix comes
  * off here rather than being renamed there, because the prompt file IS the version. `READER_VERSION`
  * is a bare "v1", so the rules line never had this and still reads "uwm v1".
  *
- * ⚠️ A MISSING VERSION WAS WRONG IN A PLACE `.trim()` COULD NOT REACH. The old AI arm produced
+ * A MISSING VERSION WAS WRONG IN A PLACE `.trim()` COULD NOT REACH. The old AI arm produced
  * "Split by AI (split ) · …" — the stray space is INSIDE the parens, where trimming the ends never
  * lands. The rules arm had patched its own copy of that hole with `.replace(" )", ")")` and the fix
  * was never carried across: two arms, two different half-measures. Deciding the parenthesis content
@@ -84,16 +84,16 @@ function readerLine(round: ConditionRound): string {
 /**
  * The review screen — a draft round before anything is saved (S1-04, S1-07, S1-10, S1-11).
  *
- * ⚠️ THE ROWS ARE LOCAL STATE UNTIL SAVED, AND THAT IS THE WHOLE POINT OF THE SCREEN. Nothing a
+ * THE ROWS ARE LOCAL STATE UNTIL SAVED, AND THAT IS THE WHOLE POINT OF THE SCREEN. Nothing a
  * processor edits touches the file until they import; the two sentences in the sticky bar promise
  * exactly that, and they are the design's rule 6 rather than reassurance we invented.
  *
- * ⚠️ IMPORT SENDS THE EDITED TEXT, WHICH IS THE SPEC'S OWN ACCEPTANCE TEST. The draft is PUT before
+ * IMPORT SENDS THE EDITED TEXT, WHICH IS THE SPEC'S OWN ACCEPTANCE TEST. The draft is PUT before
  * the import POST, so the fingerprint is taken of what the processor left behind — meaning an edited
  * row may match a different condition or none. Correct rather than unfortunate: the fingerprint is
  * of what is imported, not of what was read.
  *
- * ⚠️ THE FLAGGED-ROWS CHECKBOX GATES IMPORT (S1-10), and it appears only when there is something to
+ * THE FLAGGED-ROWS CHECKBOX GATES IMPORT (S1-10), and it appears only when there is something to
  * check — a row the AI split below 0.80, or a line the reader could not assign. A checkbox that is
  * always present is one a processor learns to tick without reading, which is worse than none.
  */
@@ -111,7 +111,7 @@ export function RoundReview({
   const completenessName = useId();
   const [rows, setRows] = useState<DraftRow[]>(round.draft_rows ?? []);
   /**
-   * ⚠️ THE TOKEN FOR THE ROWS WE ARE HOLDING, CAPTURED FROM THE SAME SNAPSHOT (LP-909 review).
+   * THE TOKEN FOR THE ROWS WE ARE HOLDING, CAPTURED FROM THE SAME SNAPSHOT (LP-909 review).
    *
    * Sending `round.updated_at` instead read the LIVE prop while `rows` stayed the snapshot `useState`
    * seeded from — and the dashboard renders this component with no `key`, so a refetch swaps the
@@ -125,19 +125,19 @@ export function RoundReview({
    * work disappearing. That is the behaviour the endpoint already implements — it was simply never
    * handed a token old enough to trip it.
    *
-   * ⚠️ AND `importNow` SAVES UNCONDITIONALLY, WHICH MAKES THIS FIRE ON EVERY IMPORT RATHER THAN
+   * AND `importNow` SAVES UNCONDITIONALLY, WHICH MAKES THIS FIRE ON EVERY IMPORT RATHER THAN
    * RARELY. A processor who edits nothing, leaves the screen open across an enrich, and presses
    * Import would otherwise overwrite the enriched rows with the pre-enrich copy. Both behaviours are
    * right; together they need this token to be honest.
    */
   const [baseUpdatedAt] = useState(round.updated_at);
   /**
-   * ⚠️ LOCAL UNTIL IMPORT, LIKE THE ROWS, AND FOR THE SAME PROMISE. The sticky bar says "Nothing is
+   * LOCAL UNTIL IMPORT, LIKE THE ROWS, AND FOR THE SAME PROMISE. The sticky bar says "Nothing is
    * saved to the file until you import" — a toggle that PUT on every click would break that on the
    * one screen whose whole contract is it. It travels in the same request as the rows, under the
    * same `baseUpdatedAt` token, so a stale screen is refused as one unit rather than half-written.
    *
-   * ⚠️ AND THIS IS THE FIRST CONTROL HERE THAT CHANGES WHAT IMPORT MEANS. `completeness` is what
+   * AND THIS IS THE FIRST CONTROL HERE THAT CHANGES WHAT IMPORT MEANS. `completeness` is what
    * `import_round` reads to decide whether conditions absent from a later round are left alone or
    * compared — so getting it wrong does not misdraw a chip, it changes what the file records the
    * lender as having asked for. The default is the server's answer, never a guess by this screen.
@@ -149,7 +149,7 @@ export function RoundReview({
   /**
    * The file's existing conditions, for the "just some" callout's own numbers (S1-07).
    *
-   * ⚠️ FETCHED HERE BECAUSE NOTHING ABOVE HOLDS IT. `useConditions` is called only in
+   * FETCHED HERE BECAUSE NOTHING ABOVE HOLDS IT. `useConditions` is called only in
    * `imported-view.tsx`, which is this screen's SIBLING rather than its ancestor — the dashboard
    * renders one or the other — so the query is not already warm and the count cannot be passed down.
    * The design's sentence names the number, and rewording to dodge it would trade a Must-match line
@@ -166,7 +166,7 @@ export function RoundReview({
   const busy = save.isPending || importRound.isPending;
 
   function importNow() {
-    // ⚠️ SAVE FIRST, ALWAYS — not "if dirty". The import reads `draft_rows` from the ROW, so an
+    // SAVE FIRST, ALWAYS — not "if dirty". The import reads `draft_rows` from the ROW, so an
     // unsaved edit would import the text the reader produced rather than the text on screen, and the
     // processor would have no way to tell. One extra PUT is cheaper than that silence.
     save.mutate(
@@ -220,7 +220,7 @@ export function RoundReview({
                     {SOURCE_LABEL[source.kind]}
                   </span>
                 ))}
-                {/* ⚠️ NO "Date printed" CHIP FOR A PASTE OR A HEADERLESS SHEET (S1-07, S1-11). The
+                {/* NO "Date printed" CHIP FOR A PASTE OR A HEADERLESS SHEET (S1-07, S1-11). The
                     letter carries the date; a paste has no letter, and the page-break fixture has no
                     header at all. An empty chip would claim the field exists and is blank. */}
                 {round.date_printed ? (
@@ -228,7 +228,7 @@ export function RoundReview({
                     Date printed {usDate(round.date_printed)}
                   </span>
                 ) : null}
-                {/* ⚠️ THE CHIP AND THE TOGGLE BOTH APPEAR, AND BOTH READ THE LOCAL VALUE. I removed
+                {/* THE CHIP AND THE TOGGLE BOTH APPEAR, AND BOTH READ THE LOCAL VALUE. I removed
                     this chip when the toggle landed, reasoning it was the same fact twice — the
                     mocks say otherwise: every review screen carries the toggle, and S1-07 and S1-10
                     ALSO carry a "Just some" chip among the source chips (S1-04 and S1-11 are full
@@ -243,7 +243,7 @@ export function RoundReview({
               </div>
             </div>
             <div className="flex shrink-0 flex-col items-end gap-1 text-xs text-muted-foreground">
-              {/* ⚠️ A CONTROL, NOT A SENTENCE (S1-04 Must-match). This read "This sheet is the
+              {/* A CONTROL, NOT A SENTENCE (S1-04 Must-match). This read "This sheet is the
                   lender's full list" as static text — the screen stating a value the processor is
                   the only one who can actually know, with no way to correct it. The reader guesses
                   from the door it came through ("Full list" is the default for a PDF); only the
@@ -251,7 +251,7 @@ export function RoundReview({
                   The partial CHIP beside the source chips went with it: a chip a few inches from a
                   toggle showing the same two words is the same fact twice, which is the exact
                   reason there is no "Full list" chip either. */}
-              {/* ⚠️ NATIVE RADIOS, NOT BUTTONS CARRYING `role="radio"`. The first version claimed
+              {/* NATIVE RADIOS, NOT BUTTONS CARRYING `role="radio"`. The first version claimed
                   the role and delivered none of it: no arrow-key movement between options, no
                   grouping, and an `aria-checked` attribute that can disagree with the control it
                   describes. A real radio group cannot get out of step with itself, which is why
@@ -328,16 +328,16 @@ export function RoundReview({
         </CardContent>
       </Card>
 
-      {/* ⚠️ WHAT "just some" ACTUALLY DOES AT IMPORT (S1-07 Must-match). The toggle above states the
+      {/* WHAT "just some" ACTUALLY DOES AT IMPORT (S1-07 Must-match). The toggle above states the
           answer; this states the consequence, which is the part a processor is deciding about — that
           importing a partial round compares it against what is already on the file and leaves
           everything it did not mention alone. Design rule 3 in one sentence, at the moment it
           applies.
 
-          ⚠️ IT READS THE LOCAL `completeness`, like the chip, so it appears and disappears as the
+          IT READS THE LOCAL `completeness`, like the chip, so it appears and disappears as the
           toggle is used rather than describing the value the round arrived with.
 
-          ⚠️ AND THE FIRST CLAUSE IS DROPPED WHEN THE FILE IS EMPTY. On a round 1 pasted as "just
+          AND THE FIRST CLAUSE IS DROPPED WHEN THE FILE IS EMPTY. On a round 1 pasted as "just
           some" there is nothing to compare against, and "the 0 conditions already on this file are
           compared with these 6" is a sentence about nothing. The design's own second half still
           holds exactly, so that is what shows — a truncation of its wording rather than replacement
@@ -377,7 +377,7 @@ export function RoundReview({
             {unassigned.map((line) => (
               <div key={line} className="flex flex-wrap items-start gap-2 rounded-md bg-muted p-2">
                 <p className="min-w-0 flex-1 font-serif text-sm text-foreground">{line}</p>
-                {/* ⚠️ "Ignore this line" IS NOT OFFERED, AND ITS ABSENCE IS DELIBERATE. S1-10 draws
+                {/* "Ignore this line" IS NOT OFFERED, AND ITS ABSENCE IS DELIBERATE. S1-10 draws
                     it, but nothing in the schema can REMEMBER a dismissal — there is no column for
                     it — so the button would clear on reload and quietly re-raise the line. Recorded
                     against LP-909 rather than faked. The line is already non-blocking: it never

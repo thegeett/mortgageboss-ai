@@ -1,7 +1,7 @@
 """LP-453 (step D.2) — the tradelines list consumer: DETERMINISTIC numeric observations over the credit
 report's `tradelines` list.
 
-⚠️ The row vocabulary is OPEN-ENDED bureau text (account_type = AUTO/INST/REV/…, is_disputed = free-text incl.
+The row vocabulary is OPEN-ENDED bureau text (account_type = AUTO/INST/REV/…, is_disputed = free-text incl.
 non-disputes, payment_history_24mo = a variable-length 0/- string), so classifying mortgage/student/collection
 or interpreting a dispute/late is a Priya/AI question (ADR-353), NOT this recipe. It emits ONLY pure aggregates:
 a COUNT and a MONTHLY-PAYMENT TOTAL. Tags describe, rules judge — no threshold, no is_derogatory.

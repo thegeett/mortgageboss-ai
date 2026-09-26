@@ -206,7 +206,7 @@ version prefix (`pii.py:62`) exists precisely so a construction change is detect
 but it does **not** encode the *key*, so a key rotation is invisible to it. That is a
 gap worth knowing about, not a blocker today.
 
-**⚠️ Constraint for Terraform — the one you flagged, confirmed.** `ENCRYPTION_KEY`
+**Constraint for Terraform — the one you flagged, confirmed.** `ENCRYPTION_KEY`
 must be **IDENTICAL for every task that reads the same database**. That means API and
 worker tasks share one value (they do if both read one secret), and it means a
 `random_password`/`random_id` resource generating a *fresh* key per environment is
@@ -375,7 +375,7 @@ Plus field-level constraints: `jwt_secret_key` `min_length=32` (`:168-171`),
 `encryption_key` `min_length=44` (`:184-187`), `database_url` as `PostgresDsn`
 (`:57`), `redis_url` as `RedisDsn` (`:63`). All are boot-time.
 
-**⚠️ One real gap — DATA, executed.** `encryption_key` is validated for **length only,
+**One real gap — DATA, executed.** `encryption_key` is validated for **length only,
 not format**. A 44-character non-base64 string constructs `Settings()` successfully;
 `Fernet()` rejects it only at first use:
 
@@ -464,7 +464,7 @@ a secret in a frame local produced:
 
 **No locals. The current configuration is safe.**
 
-**⚠️ But it is safe by accident, not by intent.** Removing `format_exc_info` — the
+**But it is safe by accident, not by intent.** Removing `format_exc_info` — the
 natural edit for someone who wants structured tracebacks in JSON — flips it. Same
 exception, same secrets, `format_exc_info` removed:
 
@@ -480,7 +480,7 @@ CloudWatch. The protection is one line-order away from failing, and nothing in t
 repo pins it. Worth an explicit `ExceptionDictTransformer(show_locals=False)` and a
 test, independent of C2.
 
-**⚠️ Secrets leaked by *boot-time validation failure* — DATA, executed.** Pydantic
+**Secrets leaked by *boot-time validation failure* — DATA, executed.** Pydantic
 echoes the rejected input. Because `settings = get_settings()` runs at import
 (`config.py:397`), a bad secret crashes with a traceback on stdout → CloudWatch:
 
@@ -528,7 +528,7 @@ content or key. `decrypt_value` never echoes the token (`encryption.py:91-93`).
 | `REDIS_URL` (if AUTH) | Per-environment. | Yes. |
 | `ANTHROPIC_API_KEY` (if provider=anthropic) | Per-environment preferred. | Yes. |
 
-**⚠️ The constraint you flagged, restated as the one thing Terraform must not do:**
+**The constraint you flagged, restated as the one thing Terraform must not do:**
 generate `ENCRYPTION_KEY` with a resource that can be replaced while the RDS instance
 survives. A `terraform destroy`/`apply` of the secret alone, a provider upgrade that
 forces replacement of a `random_*` resource, or a second environment pointed at the

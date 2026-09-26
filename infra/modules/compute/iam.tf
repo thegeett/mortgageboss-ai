@@ -215,7 +215,7 @@ data "aws_iam_policy_document" "worker_task" {
 
   # Scoped to specific model and profile ARNs, never "*".
   #
-  # ⚠️ BOTH lists are required. Invoking a cross-region inference profile authorises
+  # BOTH lists are required. Invoking a cross-region inference profile authorises
   # against the profile ARN *and* the underlying foundation-model ARN in whichever
   # region Bedrock routes to — so the foundation-model list must cover EVERY region
   # in the profile, not only the home region. A short list fails intermittently.

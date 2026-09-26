@@ -490,7 +490,7 @@ def test_derived_declaration_on_an_unsupported_subject_fails_loud(tmp_path, monk
     producer already supported — it had been excluded only because nothing needed it). The guard itself
     is unchanged, so this now exercises it with a subject that genuinely has no recipe.
 
-    ⚠️ The cache restoration is in `finally`. It used to trail the `pytest.raises` block, so when this
+    The cache restoration is in `finally`. It used to trail the `pytest.raises` block, so when this
     assertion failed the FAKE declarations stayed cached for every later test in the session — one
     failure became 25, none of them in this file.
     """

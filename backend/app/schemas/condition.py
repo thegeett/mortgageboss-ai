@@ -15,7 +15,7 @@ rather than reusing `ConditionPublic` because the two differ in the way that mat
 a confidence and the source line numbers it came from, and no identity of its own until import.
 """
 
-# ⚠️ ALIASED, AND `from __future__ import annotations` DOES NOT SUBSTITUTE FOR IT.
+# ALIASED, AND `from __future__ import annotations` DOES NOT SUBSTITUTE FOR IT.
 #
 # `UnderwriterNotePublic` has a field NAMED `date` — the name is the API contract (spec §LP-904:
 # `underwriter_notes` is `[{date, text, first_seen_round_id}]`), so it cannot be renamed. Annotated
@@ -93,7 +93,7 @@ class ConditionSourcePublic(BaseModel):
     user_id: UUID | None = None
     #: Whether this arrival stored bytes — the question "can this round still take a PDF" reduces to.
     #:
-    #: ⚠️ THE CLIENT COULD NOT ASK THE SERVER'S QUESTION, SO IT ASKED A PROXY (LP-909 review).
+    #: THE CLIENT COULD NOT ASK THE SERVER'S QUESTION, SO IT ASKED A PROXY (LP-909 review).
     #: `_has_pdf_source` keys on `storage_path` and says why: "it is the BYTES that make a second
     #: attach meaningless. `kind` would need a list of three values kept in step with the enum."
     #: `storage_path` was not serialised, so the round strip maintained exactly that list — holding
@@ -101,13 +101,13 @@ class ConditionSourcePublic(BaseModel):
     #: which is a fact about the current writers rather than a rule binding them. A fourth kind that
     #: stores bytes, or a bytes-less forward, would split the two answers silently.
     #:
-    #: ⚠️ A BOOLEAN RATHER THAN THE PATH ITSELF. `_storage_path` is server-controlled precisely so a
+    #: A BOOLEAN RATHER THAN THE PATH ITSELF. `_storage_path` is server-controlled precisely so a
     #: sender's filename never shapes the storage layout — "a real condition sheet's filename
     #: routinely carries the borrower's surname and the loan number" — and putting it on the wire
     #: would export that layout plus a company and file id to answer a yes/no question. This is the
     #: same fact with nothing extra attached.
     #:
-    #: ⚠️ REQUIRED, WITH NO DEFAULT, BECAUSE THE DEFAULT WAS THE BUG (LP-909 review). This shipped as
+    #: REQUIRED, WITH NO DEFAULT, BECAUSE THE DEFAULT WAS THE BUG (LP-909 review). This shipped as
     #: `= False` and the first version of `from_model` built sources with `model_validate` — a raw
     #: JSONB entry has no `has_bytes` key, so every source silently became `False`, a VALID value
     #: that failed nothing. Fixing that one call site left the MECHANISM in place: this model has
@@ -136,7 +136,7 @@ class ConditionSourcePublic(BaseModel):
         )
 
 
-#: ⚠️ A LOGGER IN A SCHEMA MODULE, WHICH IS UNUSUAL HERE AND DELIBERATE. Every other schema in this
+#: A LOGGER IN A SCHEMA MODULE, WHICH IS UNUSUAL HERE AND DELIBERATE. Every other schema in this
 #: repo is pure. The alternative is dropping a writer's drift in silence: a count stored as a string
 #: renders as a blank history line and nobody learns the writer changed shape. Flagged as a judgement
 #: rather than a mechanical fix (LP-909 review).
@@ -145,7 +145,7 @@ log = structlog.get_logger(__name__)
 #: Every reader that can appear in a `ROUND_PARSED` detail. A CLOSED vocabulary, because the field is
 #: exposed and an open string is a hole — see `ConditionEventPublic`.
 #:
-#: ⚠️ `"paste"` WAS IN HERE AND NOTHING WRITES IT (LP-909 review). `reader_for` returns `uwm`,
+#: `"paste"` WAS IN HERE AND NOTHING WRITES IT (LP-909 review). `reader_for` returns `uwm`,
 #: `champions` or `generic`; `read_pasted_text` returns one of those two; the split task writes
 #: `split`. So the set carried a member no writer produces — added in the very commit that removed
 #: three exposed fields no sentence read. ADR-404's shape in miniature, on a frozenset instead of an
@@ -157,7 +157,7 @@ _READERS = frozenset({"uwm", "champions", "generic", "split"})
 def _logged_mismatch(kind: object, key: str, expected: str) -> None:
     """Report that a writer stored the wrong shape — by KEY NAME, never by value.
 
-    ⚠️ THE NAME AND NOTHING ELSE. `detail` is NPI-capable, so logging the value to explain a type
+    THE NAME AND NOTHING ELSE. `detail` is NPI-capable, so logging the value to explain a type
     mismatch would put the lender's text in the log line to complain about its type. The key and the
     event kind are enough to find the writer.
     """
@@ -176,7 +176,7 @@ def _as_int(value: object, *, kind: object = None, key: str = "") -> int | None:
     history panel must not 500 because one of them stored a string where this reads a count, and a
     coerced `"6"` → 6 would be this layer inventing agreement the writers have not made.
 
-    ⚠️ `bool` IS EXCLUDED EXPLICITLY BECAUSE `True` IS AN `int` IN PYTHON. Without that check a flag
+    `bool` IS EXCLUDED EXPLICITLY BECAUSE `True` IS AN `int` IN PYTHON. Without that check a flag
     stored under a count's key renders as the number 1.
 
     A PRESENT key of the wrong type is logged, because silence there is the failure mode: the line
@@ -201,7 +201,7 @@ def _as_bool(value: object, *, kind: object = None, key: str = "") -> bool | Non
 def _as_vocab[T](value: object, allowed: frozenset[str], build: Callable[[str], T]) -> T | None:
     """A value from a CLOSED vocabulary, or None. Anything unrecognised does not travel.
 
-    ⚠️ THIS IS THE FIX FOR A HOLE THE ALLOW-LIST DID NOT CLOSE (LP-909 review). Projecting named keys
+    THIS IS THE FIX FOR A HOLE THE ALLOW-LIST DID NOT CLOSE (LP-909 review). Projecting named keys
     stops an unexpected KEY reaching the client and does nothing about an unexpected VALUE — so
     `detail={"reader": "Alex Rivera"}` would have passed straight through a key that is on the list,
     and the NPI test stayed green because it only ever put text under keys that were NOT.
@@ -221,21 +221,21 @@ def _as_vocab[T](value: object, allowed: frozenset[str], build: Callable[[str], 
 class ConditionEventPublic(BaseModel):
     """One thing that happened to a round — the history on screen S1-09.
 
-    ⚠️ NAMED SCALARS, NEVER `detail` ITSELF, AND THIS IS THE WHOLE DESIGN OF THE SCHEMA.
+    NAMED SCALARS, NEVER `detail` ITSELF, AND THIS IS THE WHOLE DESIGN OF THE SCHEMA.
     `ConditionEvent.detail` is classified NPI: the round model calls it "what changed, which is the
     lender's text", `readonly.condition_events` drops it whole rather than scrubbing it, and
     `condition_import.py` states the rule at its own write site — "WHAT CHANGED, NOT THE WORDING".
     Passing the dict through would export a column the readonly layer deliberately refuses, through a
     door built for a history panel.
 
-    ⚠️ AND THE KEYS ARE NOT ENOUGH — THE VALUES ARE CLOSED TOO. The first version projected named keys
+    AND THE KEYS ARE NOT ENOUGH — THE VALUES ARE CLOSED TOO. The first version projected named keys
     as open `str`, which stops an unexpected KEY arriving and does nothing about an unexpected VALUE:
     `detail={"reader": "Alex Rivera"}` would have travelled through a key that IS on the list. The NPI
     test passed only because it put text under keys that were not. Every string exposed here is now
     drawn from a fixed vocabulary — an enum value, or one of `_READERS` — and anything outside it
     becomes None (LP-909 review).
 
-    ⚠️ AND THE SET IS AS SMALL AS THE SCREEN NEEDS. `reader_version`, `duplicates_dropped` and
+    AND THE SET IS AS SMALL AS THE SCREEN NEEDS. `reader_version`, `duplicates_dropped` and
     `filled_from` were projected and read by nothing: `historyLine` never touches them. Three open
     doors serving no sentence. `filled_from` was also mis-documented as "on an enrich" — it is written
     once, on `CONDITION_EDITED` (`condition_enrich.py:273`), and `ROUND_ENRICHED` stores no such key,
@@ -253,18 +253,18 @@ class ConditionEventPublic(BaseModel):
       `ConditionEnrichResult` but not in the event's detail.
     * discard: `rows`.
 
-    ⚠️ AN EARLIER VERSION OF THIS PARAGRAPH GOT THREE OF THOSE WRONG (LP-909 review): it said fifteen
+    AN EARLIER VERSION OF THIS PARAGRAPH GOT THREE OF THOSE WRONG (LP-909 review): it said fifteen
     constructions from a grep I never filtered, put `bytes` on every receipt when a paste stores
     `chars`, and listed `filled_date_printed` as an enrich key while the field comment below correctly
     said it is not stored. A docstring enumerating writers is worth only as much as the count behind
     it, and the last one was asserted rather than taken.
 
-    ⚠️ `actor_user_id` IS NULL FOR A SYSTEM EVENT, DELIBERATELY. The model says why: "a parse task has
+    `actor_user_id` IS NULL FOR A SYSTEM EVENT, DELIBERATELY. The model says why: "a parse task has
     no actor, and naming the processor who uploaded the sheet as the actor of the parse would make the
     trail say something untrue." The history must therefore distinguish "the reader did this" from "a
     person did this" rather than attributing everything to whoever touched the round last.
 
-    ⚠️ NO `id`. A history line is not addressable — nothing links to one, and `condition_events` is
+    NO `id`. A history line is not addressable — nothing links to one, and `condition_events` is
     append-only, so there is no update or delete for an id to name. Adding one would invite a caller
     to build a URL for a resource that has no endpoint.
     """
@@ -283,7 +283,7 @@ class ConditionEventPublic(BaseModel):
     #: How many rows the event concerned — read on a parse, imported on an import, thrown away on a
     #: discard. The three are different facts under one key because the writers named it that way.
     #:
-    #: ⚠️ A PASTE'S `ROUND_RECEIVED` HAS NO `rows`. It stores `{source_kind, bytes}`, so the count for
+    #: A PASTE'S `ROUND_RECEIVED` HAS NO `rows`. It stores `{source_kind, bytes}`, so the count for
     #: "6 conditions read" comes from the following `ROUND_PARSED`, not from the arrival.
     rows: int | None = None
     #: What an import did (`ROUND_IMPORTED`) — the numbers S1-09's line quotes.
@@ -294,7 +294,7 @@ class ConditionEventPublic(BaseModel):
     from_status: ConditionRoundStatus | None = None
     #: What an enrich actually did (`ROUND_ENRICHED`), so the line can stop claiming it filled the
     #: letter details when it filled nothing (LP-909 review).
-    #: ⚠️ NO `filled_date_printed`. `ConditionEnrichResult` carries one, but the EVENT writer does not
+    #: NO `filled_date_printed`. `ConditionEnrichResult` carries one, but the EVENT writer does not
     #: store it (`condition_enrich.py` writes `reader`, `matched`, `added`, `unmatched_existing`,
     #: `filled_header`, `filled_expiry`) — so projecting it would add a field nothing fills, which is
     #: the shape this stage keeps deleting. `added` and `unmatched_existing` are stored and unused by
@@ -349,7 +349,7 @@ class ParseReportPublic(BaseModel):
     unassigned_lines: list[str] = Field(default_factory=list)
     duplicates_dropped: int = 0
     ai_used: bool = False
-    #: ⚠️ NOT THE SAME FACT AS `ai_used`, AND THE PAIR IS READ TOGETHER. `needs_ai` is the READER's
+    #: NOT THE SAME FACT AS `ai_used`, AND THE PAIR IS READ TOGETHER. `needs_ai` is the READER's
     #: verdict that the rules could not split this text; `ai_used` is whether an AI split actually
     #: ran. Both false means the rules read it. `needs_ai` true with `ai_used` false means the round
     #: is waiting for LP-908 — a state that has to be findable, or the gap is invisible to everyone
@@ -455,7 +455,7 @@ class ConditionRoundPublic(BaseModel):
     date_printed: date_type | None
     round_date: date_type
     expiry_dates: dict[str, Any] | None = None
-    #: ⚠️ PRESENT DOES NOT MEAN REVIEWABLE, and an earlier version of this comment said "Present on a
+    #: PRESENT DOES NOT MEAN REVIEWABLE, and an earlier version of this comment said "Present on a
     #: DRAFT and cleared on import", which is true of one state and populated in two. `from_model`
     #: fills this whenever the round HAS rows, and `create_round_from_paste` writes them
     #: unconditionally — so a `PARSING` round awaiting the AI split carries the rules-read rows too.
@@ -474,20 +474,20 @@ class ConditionRoundPublic(BaseModel):
     condition_count: int = 0
     #: What the import recorded — "11 on sheet · 11 new", "· 0 new · 6 seen again" (S1-05, S1-08).
     #:
-    #: ⚠️ `None` RATHER THAN `0`, AND THE FIELD DIRECTLY ABOVE IS WHY. `condition_count` shipped as
+    #: `None` RATHER THAN `0`, AND THE FIELD DIRECTLY ABOVE IS WHY. `condition_count` shipped as
     #: `int = 0` with no producer at all, so every round card read "0 on sheet" for as long as anyone
     #: looked — and 0 is a VALID count, so nothing failed and no test noticed. These two carry the
     #: same hazard doubled: a DRAFT round has never been imported, so "0 new" is a confident wrong
     #: answer where "the question does not apply" is the true one. `None` cannot be mistaken for a
     #: measurement, and it is the difference between "nothing was new" and "nobody asked yet".
     #:
-    #: ⚠️ THEY LIVE IN AN EVENT, NOT ON THE ROW. `condition_rounds` stores neither, so both are read
+    #: THEY LIVE IN AN EVENT, NOT ON THE ROW. `condition_rounds` stores neither, so both are read
     #: from the round's newest `ROUND_IMPORTED` detail. `condition_events` is append-only, so
     #: "newest" is deliberate rather than incidental: a re-import would leave two.
     created: int | None = None
     seen_again: int | None = None
     created_at: datetime
-    #: ⚠️ EXPOSED SO THE STALE-WRITE GUARD IS REACHABLE AT ALL (LP-909 §4). `ConditionDraftUpdate`
+    #: EXPOSED SO THE STALE-WRITE GUARD IS REACHABLE AT ALL (LP-909 §4). `ConditionDraftUpdate`
     #: says "the caller sends the `updated_at` it read" — and until now no caller could read it,
     #: because this schema carried only `created_at`. Every client therefore sent
     #: `expected_updated_at=None`, which the service treats as "no opinion", so the 409 that exists
@@ -510,7 +510,7 @@ class ConditionRoundPublic(BaseModel):
             status=round_.status,
             completeness=round_.completeness,
             sheet_format=round_.sheet_format,
-            # ⚠️ `from_source`, NOT `model_validate`. A `sources` entry is raw JSONB with no
+            # `from_source`, NOT `model_validate`. A `sources` entry is raw JSONB with no
             # `has_bytes` key, so validating it would silently default the flag to False on every
             # round — and False is a VALID value, so nothing would fail. The client would then offer
             # "Attach the lender's PDF" on rounds that already have one, which is the exact defect
@@ -582,7 +582,7 @@ class ConditionCreateRequest(BaseModel):
 class ConditionEnrichResult(BaseModel):
     """What attaching the lender's PDF to an existing round did (LP-907, screen S1-09).
 
-    ⚠️ EVERY FIELD IS A COUNT OR A FLAG, NEVER A CONDITION'S WORDING. S1-09's success callout says
+    EVERY FIELD IS A COUNT OR A FLAG, NEVER A CONDITION'S WORDING. S1-09's success callout says
     what the PDF filled in and that it added no new conditions and no second round, so counts are
     what it needs — and `unmatched_existing` is deliberately a NUMBER rather than the texts, because
     those are the lender's words and this response is not where they belong (ADR-405). The rows

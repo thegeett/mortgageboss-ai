@@ -1,14 +1,14 @@
 """LP-488 — MI-4 (FHA upfront MIP) and the FHA side of the PROGRAM axis.
 
-⚠️ EVERY VERDICT ASSERTION RUNS THROUGH A REAL RULE EVALUATION (LP-487's standing rule):
+EVERY VERDICT ASSERTION RUNS THROUGH A REAL RULE EVALUATION (LP-487's standing rule):
 materialize_tags() then evaluate_rules(), never by calling a recipe or the gate directly.
 
-⚠️ NOT AN ADR-330 VACUITY. The two operands are two DIFFERENT MISMO elements —
+NOT AN ADR-330 VACUITY. The two operands are two DIFFERENT MISMO elements —
 TERMS_OF_LOAN/BaseLoanAmount and TERMS_OF_LOAN/NoteAmount. On an FHA loan the borrower signs for the base
 amount PLUS the financed upfront premium, so the difference between them IS the premium. On the three
 conventional MISMO fixtures in the repo the two are equal, which is exactly right.
 
-⚠️ ONLY THE UPFRONT PREMIUM IS EVALUATED. No document type in the system carries a monthly MIP figure for
+ONLY THE UPFRONT PREMIUM IS EVALUATED. No document type in the system carries a monthly MIP figure for
 this loan, so the annual leg is deliberately unbuilt rather than built on an invented input — and ML
 2023-05's per-cell annual rate matrix, which was not obtained, is therefore not needed and is written
 nowhere. Logged in docs/domain/priya-open-questions.md.
@@ -63,7 +63,7 @@ async def test_a_premium_below_the_published_rate_fires() -> None:
 
 
 async def test_no_premium_financed_is_needs_review_not_fired() -> None:
-    """⚠️ THE UNDETECTABLE-EXEMPTION CASE. Note == base means nothing was financed — but the premium may
+    """THE UNDETECTABLE-EXEMPTION CASE. Note == base means nothing was financed — but the premium may
     have been paid in cash at closing, and a Section 248 (Indian Lands) mortgage is exempt entirely. No
     field in the system identifies either, so this row ASKS rather than asserts."""
     verdict = await _one(build_mi4_no_ufmip_financed_snapshot)
@@ -80,7 +80,7 @@ async def test_the_outcome_order_is_first_match_wins_with_a_terminal_row() -> No
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ THE PROGRAM AXIS — the FHA side
+# THE PROGRAM AXIS — the FHA side
 # --------------------------------------------------------------------------- #
 async def test_a_conventional_file_is_not_applicable_not_fired() -> None:
     """The SAME note == base that needs_reviews on an FHA file. A conventional loan owes no upfront MIP
@@ -125,7 +125,7 @@ async def test_the_rate_is_computed_from_two_distinct_mismo_amounts() -> None:
 
 
 def test_the_published_rate_and_its_tolerance_live_in_the_spec() -> None:
-    """⚠️ TIER P — HUD Mortgagee Letter 2023-05, published 2023-02-22, read this pass. The tolerance is a
+    """TIER P — HUD Mortgagee Letter 2023-05, published 2023-02-22, read this pass. The tolerance is a
     ROUNDING allowance, not a domain threshold nobody signs off (the AS-3 / CL-1 precedent)."""
     values = load_rule_spec("MI-4").reference_values.values
     assert values["fha_ufmip_percent"] == "1.75"
@@ -134,7 +134,7 @@ def test_the_published_rate_and_its_tolerance_live_in_the_spec() -> None:
 
 
 def test_no_annual_mip_rate_is_written_into_the_spec() -> None:
-    """⚠️ THE MATRIX WAS NOT OBTAINED, so nothing from it is recorded. MI-4 does not evaluate the annual
+    """THE MATRIX WAS NOT OBTAINED, so nothing from it is recorded. MI-4 does not evaluate the annual
     premium — no document carries one — and writing an unused threshold into a spec invites a later
     reader to build against a number nobody read. If someone adds one, this fails."""
     values = load_rule_spec("MI-4").reference_values.values
@@ -147,7 +147,7 @@ def test_mi4_is_live_and_earned_it_through_the_gate() -> None:
     bars = load_activation_bars()
     assert "MI-4" in ACTIVE_RULE_IDS
     assert is_eligible(bars["MI-4"])
-    # ⚠️ no-ai-dependency → is_eligible reads input_resolves alone; `validated` is not read, so it is
+    # no-ai-dependency → is_eligible reads input_resolves alone; `validated` is not read, so it is
     # left false rather than set decoratively. The bar's comment records why.
     assert bars["MI-4"].validated is False
 
@@ -165,7 +165,7 @@ def _mi4_values() -> dict[str, str]:
 
 
 def test_the_ufmip_bounds_are_the_rate_plus_and_minus_the_declared_tolerance() -> None:
-    """⚠️ THE SILENT-EDIT TRAP (reported finding). fha_ufmip_tolerance_percent is DECLARED and documented
+    """THE SILENT-EDIT TRAP (reported finding). fha_ufmip_tolerance_percent is DECLARED and documented
     as the rounding allowance, but the deterministic body binds only max/min — which are independently
     hard-written. So widening the named tolerance to 0.02 changed nothing, and the spec then described a
     rule that did not exist. The DSL cannot compute a reference, so this pins the arithmetic instead:
@@ -178,7 +178,7 @@ def test_the_ufmip_bounds_are_the_rate_plus_and_minus_the_declared_tolerance() -
 
 
 def test_the_spec_ufmip_rate_matches_the_calculator_registry_rate() -> None:
-    """⚠️ TWO SOURCES OF TRUTH (reported finding). The spec's 1.75% duplicates LP-84's registry rule
+    """TWO SOURCES OF TRUTH (reported finding). The spec's 1.75% duplicates LP-84's registry rule
     `fha.mip.ufmip_rate` (175 bps), which app/services/mi.py reads to compute the MI the DTI's PITI line
     consumes. A HUD change updating one and not the other leaves the rule and the calculator disagreeing
     about the same loan — silently. This is the same drift argument the ticket makes for the LTV

@@ -1,6 +1,6 @@
 """The frontend's condition types are a second copy of one fact — this is what forces them to agree.
 
-⚠️ `frontend/lib/types/conditions.ts` RESTATES EVERY CONDITION ENUM BY HAND, and until this file
+`frontend/lib/types/conditions.ts` RESTATES EVERY CONDITION ENUM BY HAND, and until this file
 nothing connected the two. A review pass checked all eight member-for-member and found no drift, which
 is the problem rather than the reassurance: it was correct by vigilance, and vigilance is not a
 mechanism. Add `BucketKind.ESCROW_HOLDBACK` to the backend and the TypeScript union simply does not
@@ -13,7 +13,7 @@ very enum it would be checking. Here the same shape: no Python test can see a Ty
 `tsc` run can see a Python enum, so the only way the two can be compared is for one side to read the
 other as text.
 
-⚠️ WHAT THIS DOES NOT COVER, said plainly so nobody reads it as more than it is:
+WHAT THIS DOES NOT COVER, said plainly so nobody reads it as more than it is:
 
 * **The eleven interfaces are not checked field-for-field.** Parsing TypeScript interfaces with a
   regex is a different order of difficulty from parsing string-union members, and a half-working
@@ -90,7 +90,7 @@ def _unions() -> dict[str, list[str]]:
 
 
 def test_the_types_file_is_where_this_test_thinks_it_is() -> None:
-    """⚠️ WITHOUT THIS, A MOVED OR RENAMED FILE MAKES EVERY TEST BELOW VACUOUS. `_unions()` would
+    """WITHOUT THIS, A MOVED OR RENAMED FILE MAKES EVERY TEST BELOW VACUOUS. `_unions()` would
     raise, or — worse, if the read were ever made forgiving — return nothing and turn every
     comparison into a pass over an empty set. The guard that cannot fail is this ticket's most
     repeated defect; this is its antidote here."""
@@ -109,7 +109,7 @@ def test_every_mirrored_enum_is_present_in_the_frontend(name: str) -> None:
 
 @pytest.mark.parametrize("name", sorted(_MIRRORED))
 def test_the_frontend_union_matches_the_backend_enum(name: str) -> None:
-    """⚠️ SET EQUALITY IN BOTH DIRECTIONS, because the two failures are different bugs.
+    """SET EQUALITY IN BOTH DIRECTIONS, because the two failures are different bugs.
 
     A member in Python and not in TypeScript means the API can send a value the client cannot type —
     the chip renders as an unrecognised string. A member in TypeScript and not in Python means the
@@ -133,7 +133,7 @@ def test_the_stranded_window_agrees() -> None:
     runway left. Now that the server REFUSES a reparse inside its own window, a client that is
     shorter offers a button that reliably 409s.
 
-    ⚠️ READ FROM `app.conditions.limits`, NOT FROM A LITERAL HERE. The server derives the window
+    READ FROM `app.conditions.limits`, NOT FROM A LITERAL HERE. The server derives the window
     from the timeout it must exceed; pinning against a number typed into this test would make the
     test the third copy of the fact rather than the thing that stops copies drifting.
     """

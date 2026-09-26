@@ -139,7 +139,7 @@ lists only. **Do not migrate the legacy three** (they feed live rules).
 - **`pre_masked: false`** — stored raw in `extracted_data`; the **snapshot** masks it and adds a per-file
   salted match-hash.
 
-⚠️ **Two hard limits:**
+**Two hard limits:**
 
 1. **`_PII_FIELDS` is typed-core only.** PII inside a nested list needs a **bespoke row redactor**
    (`_redact_description` is the precedent). **The registry cannot reach it.**
@@ -179,7 +179,7 @@ Current values: **2048** (drivers_license) · **4096** (most flat) · **6144** (
 `tests/ai/test_extraction_budget_sizing.py` **asserts the sizing rule** — a value inconsistent with the output
 shape will fail CI.
 
-⚠️ **The credit report is the risk case.** 20+ tradelines plus inquiries plus public records can plausibly
+**The credit report is the risk case.** 20+ tradelines plus inquiries plus public records can plausibly
 exceed 16384 — and **`RETRY_MAX_TOKENS = 16384` is the hard ceiling.** Mitigations, in order: flat-row nesting
 (already specified), then lifting `_MAX_TOKENS`.
 
@@ -192,7 +192,7 @@ at 16384. **If the retry also truncates**, the call returns `text=None` and the 
 `.failed("response truncated - document too dense to extract in full")` → status **FAILED**.
 **It never records `succeeded` and never keeps a partial JSON.**
 
-⚠️ **NOT handled — model self-truncation.** If the model emits *fewer* rows without hitting the ceiling
+**NOT handled — model self-truncation.** If the model emits *fewer* rows without hitting the ceiling
 (summarises, or stops early with valid JSON), it parses cleanly with a short list and status **SUCCEEDED**.
 The guard cannot see it.
 
@@ -217,7 +217,7 @@ Also add the prompt instruction: _"Read the total count from the summary section
 | nothing read | **FAILED** |
 | unparseable JSON | parser returns `None` → `.failed("could not parse extraction")` |
 
-⚠️ **The snippet is never verified against the page.** Hallucination is not checked at this layer — the
+**The snippet is never verified against the page.** Hallucination is not checked at this layer — the
 prompt's _"NEVER guess"_ is the only defence.
 
 ---

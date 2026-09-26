@@ -15,7 +15,7 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => params.current,
 }));
 
-// ⚠️ THREE ROWS, NOT TWENTY, AND THE PAGE LABEL DOES NOT COME FROM THIS LIST. "Page 1 / 3" is
+// THREE ROWS, NOT TWENTY, AND THE PAGE LABEL DOES NOT COME FROM THIS LIST. "Page 1 / 3" is
 // derived from `total` and `page_size` below, so the row count changes nothing any test here
 // asserts — all three check only `pageLabel()`. Twenty rows bought nothing but render time, and
 // this file is synchronous: no `waitFor`, no `findBy`. It was costing 3.0-3.3s per test on an idle

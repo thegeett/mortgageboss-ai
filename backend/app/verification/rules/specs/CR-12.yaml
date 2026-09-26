@@ -3,20 +3,20 @@
 # Flags a tradeline the credit report shows as DISPUTED BY THE CONSUMER, so a processor can review it
 # against the applicable agency requirement.
 #
-# ⚠️ SCOPE BOUNDARY (Priya's ruling). CR-12 flags an open dispute for review. It does NOT decide whether the
+# SCOPE BOUNDARY (Priya's ruling). CR-12 flags an open dispute for review. It does NOT decide whether the
 # debt is excluded from DTI — that comes from the applicable agency liability rule and the AUS findings.
 # Nothing in this spec touches DTI treatment.
 #
-# ⚠️ RESOLVED DISPUTES: the tag reads the CURRENT report only. A dispute is never carried forward from an
+# RESOLVED DISPUTES: the tag reads the CURRENT report only. A dispute is never carried forward from an
 # older report; if the current report no longer shows a dispute, there is no finding.
 #
-# ⚠️ THE CLOSED-VOCABULARY ABSTAIN (ADR-376) — the whole safety of this rule. `is_disputed` is a clean Y/N
+# THE CLOSED-VOCABULARY ABSTAIN (ADR-376) — the whole safety of this rule. `is_disputed` is a clean Y/N
 # on one bureau's reports and FREE TEXT on another's (LF-96SV holds "ACCOUNT IN FORBEARANCE" and
 # "ACCOUNT PREVIOUSLY IN DISPUTE-NOW RESOLVED-REPORTED BY SUBSCRIBER" in the same field). The producer
 # recognises the closed vocabulary below and ABSTAINS to unknown on anything else, which the gate turns
 # into couldnt_check. It never stems, fuzzy-matches or infers.
 #
-# ⚠️ THIS RULE SHIPS `auto` (forced by kind — structural; LP-424 rejects a mismatched `ships`). There is no
+# THIS RULE SHIPS `auto` (forced by kind — structural; LP-424 rejects a mismatched `ships`). There is no
 # human in the loop, so the abstain guard is the ONLY protection against a bureau-format surprise.
 
 rule_id: CR-12
@@ -46,10 +46,10 @@ reference_values:
   priya_validated: false          # must equal rule_kinds.csv
   threshold_needs_signoff: false  # must equal rule_kinds.csv — no threshold; this is a vocabulary
   values:
-    # ⚠️ THE CLOSED VOCABULARY — DOMAIN DATA, Priya's ruling, pipe-delimited and case-insensitive.
+    # THE CLOSED VOCABULARY — DOMAIN DATA, Priya's ruling, pipe-delimited and case-insensitive.
     # The producer mirrors these two lists; test_cr12_vocabulary_matches_the_spec pins them identical so
     # the spec (where Priya edits) and the recipe (which runs) cannot drift.
-    # ⚠️ "previously in dispute - now resolved" is deliberately in NEITHER list: unrecognised values must
+    # "previously in dispute - now resolved" is deliberately in NEITHER list: unrecognised values must
     # ABSTAIN, and reading a resolution the bureau did not state would be an inference.
     dispute_phrases: "y|yes|account disputed by consumer|consumer disputes this account|dispute in progress|account information disputed by consumer|consumer disputes account information"
     not_dispute_phrases: "n|no|account in forbearance|account closed by credit grantor|paid account|transferred|account closed|deferred"
@@ -113,7 +113,7 @@ spec_version: 1
 # "unknown" tag coerces through the gate to couldnt_check BEFORE this body runs, so an unrecognised or
 # absent dispute value can never reach the default and read as "no dispute".
 deterministic:
-  # ⚠️ SCOPE THE SUBJECT SET (reported finding). per_liability UNIONS credit-report tradelines with the
+  # SCOPE THE SUBJECT SET (reported finding). per_liability UNIONS credit-report tradelines with the
   # application's MISMO stated liabilities, and only the credit-report leg can carry a dispute remark —
   # the alias map has no `is_disputed` for `mismo_stated`. Without this predicate every stated liability
   # became a permanent, unfixable couldnt_check whose how_to_fix says "read the tradeline's dispute
@@ -153,7 +153,7 @@ deterministic:
       reasoning: >-
         this tradeline is reported clean — the credit report shows it undisputed
     - verdict: couldnt_check
-      # ⚠️ THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. The gate already routes an absent/"unknown" tag to
+      # THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. The gate already routes an absent/"unknown" tag to
       # couldnt_check before this body runs, so this branch should be unreachable — but a `satisfied`
       # default would turn any future third value into a silent all-clear on a rule that ships `auto`.
       # Fail closed at both layers.

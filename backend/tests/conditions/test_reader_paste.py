@@ -1,6 +1,6 @@
 """Reading a paste (LP-907 section 1, spec §LP-907).
 
-⚠️ EVERY EXPECTATION HERE WAS MEASURED BEFORE IT WAS WRITTEN, and two of them contradict what
+EVERY EXPECTATION HERE WAS MEASURED BEFORE IT WAS WRITTEN, and two of them contradict what
 `detect_format` says on its own. The cases that matter are the ones where a plausible answer is the
 wrong one, so each is pinned against the thing it would otherwise silently become.
 """
@@ -39,7 +39,7 @@ def clipboard(pdf: bytes) -> str:
 
 
 def test_an_excerpt_with_no_title_and_no_marker_is_still_read_as_uwm() -> None:
-    """⚠️ `detect_format` SAYS GENERIC HERE, AND IT IS RIGHT TO: it keys on the first content line,
+    """`detect_format` SAYS GENERIC HERE, AND IT IS RIGHT TO: it keys on the first content line,
     and a portal copy has no title. The row shapes are the only evidence left, and they are enough."""
     fmt, reader, sheet = read_pasted_text(portal_excerpt())
 
@@ -66,7 +66,7 @@ def test_the_excerpt_reads_identically_to_the_same_sheet_read_whole() -> None:
 
 
 def test_the_fallback_reader_would_have_duplicated_every_condition() -> None:
-    """⚠️ THE DEFECT THIS WHOLE MODULE EXISTS TO PREVENT, EXECUTED RATHER THAN DESCRIBED.
+    """THE DEFECT THIS WHOLE MODULE EXISTS TO PREVENT, EXECUTED RATHER THAN DESCRIBED.
 
     Without recognition the excerpt falls to `read_generic`, which does not fail — it returns SEVEN
     rows and reports success. The bucket heading becomes a row of its own, and every real row keeps
@@ -93,7 +93,7 @@ def test_the_fallback_reader_would_have_duplicated_every_condition() -> None:
 
 
 def test_source_line_numbers_index_the_paste_the_processor_sent() -> None:
-    """⚠️ WHY THE BLOCK START IS PASSED IN RATHER THAN A `CONDITIONS` LINE PREPENDED.
+    """WHY THE BLOCK START IS PASSED IN RATHER THAN A `CONDITIONS` LINE PREPENDED.
 
     Both produce identical rows — measured — so the only thing separating them is this: these numbers
     are what the review screen points at when it shows a row's source, and a synthetic line would
@@ -123,7 +123,7 @@ def test_a_whole_letter_pasted_keeps_its_header_and_printed_date() -> None:
 
 
 def test_a_pasted_champions_certificate_never_reaches_the_champions_reader() -> None:
-    """⚠️ RECOGNISED, AND DELIBERATELY NOT READ BY ITS OWN READER.
+    """RECOGNISED, AND DELIBERATELY NOT READ BY ITS OWN READER.
 
     The title survives a copy so `detect_format` matches — but the reader is built on the row number
     sitting VERTICALLY CENTRED beside its text, and a clipboard copy linearises the table so the
@@ -141,7 +141,7 @@ def test_a_pasted_champions_certificate_never_reaches_the_champions_reader() -> 
     fmt, reader, sheet = read_pasted_text(text)
     assert fmt is ConditionSheetFormat.PASTED_TEXT
     assert reader == "generic"
-    # ⚠️ Overriding generic's own verdict. It returned `needs_ai=False` for a 28-condition
+    # Overriding generic's own verdict. It returned `needs_ai=False` for a 28-condition
     # certificate it had split into four wrong rows; leaving that would present a guess as a
     # rule-read result and never ask LP-908 to do the job properly.
     assert sheet.needs_ai is True
@@ -178,7 +178,7 @@ NOT_UWM_TABLES = {
         " 8821         Checking                      Ending balance as of last statement\n"
         " 8822         Savings                       Ending balance as of last statement"
     ),
-    # ⚠️ THIS ONE IS REAL UWM CONTENT — genuine codes, genuine categories, genuine wording — pasted
+    # THIS ONE IS REAL UWM CONTENT — genuine codes, genuine categories, genuine wording — pasted
     # WITHOUT its bucket heading. It is refused anyway, and that is the deliberate false negative:
     # nothing in the text distinguishes it from the four tables above.
     "real rows, no heading": (
@@ -190,7 +190,7 @@ NOT_UWM_TABLES = {
 
 @pytest.mark.parametrize("name", sorted(NOT_UWM_TABLES))
 def test_a_table_of_four_digit_numbers_is_not_a_uwm_sheet(name: str) -> None:
-    """⚠️ THE BUG THIS TEST EXISTS FOR WAS SHIPPED AND CAUGHT IN REVIEW, and it was worse than the
+    """THE BUG THIS TEST EXISTS FOR WAS SHIPPED AND CAUGHT IN REVIEW, and it was worse than the
     Champions case beside it.
 
     Counting row starts alone claimed all five of these as `uwm_approval_letter` with rows, confident
@@ -208,14 +208,14 @@ def test_a_table_of_four_digit_numbers_is_not_a_uwm_sheet(name: str) -> None:
     assert uwm_block_start(lines_from_text(text)) is None
     assert fmt is ConditionSheetFormat.PASTED_TEXT
     assert reader == "generic"
-    # ⚠️ AND NO ROW CARRIES A UWM `lender_category`, which is the part that made these dangerous:
+    # AND NO ROW CARRIES A UWM `lender_category`, which is the part that made these dangerous:
     # the generic reader has no category column at all, so nothing downstream can mistake a tax year
     # for a lender code sitting beside a lender's own vocabulary.
     assert all(row.lender_category is None for row in sheet.rows)
 
 
 def test_the_discriminator_is_the_heading_and_not_the_codes() -> None:
-    """⚠️ REJECTING YEAR-SHAPED CODES WOULD BE THE OBVIOUS FIX AND IT IS WRONG. The round-2 block's
+    """REJECTING YEAR-SHAPED CODES WOULD BE THE OBVIOUS FIX AND IT IS WRONG. The round-2 block's
     own codes include `1947`. The same rows are refused without their heading and accepted with it,
     so the heading is doing the work — and the codes are untouched by the rule."""
     rows = (

@@ -26,7 +26,7 @@ AWS_PROFILE=mbai-staging-admin aws sts get-caller-identity
 
 Must return the target account. If it returns anything else, stop.
 
-⚠️ **The SSO session is ~4h20m.** RDS creation alone takes 10–15 minutes, and a
+**The SSO session is ~4h20m.** RDS creation alone takes 10–15 minutes, and a
 token that expires mid-apply fails partway, leaving half-created resources. Check
 the clock before starting: `./scripts/sso-status --profile=mbai-staging-admin`.
 
@@ -36,7 +36,7 @@ the clock before starting: `./scripts/sso-status --profile=mbai-staging-admin`.
 ./scripts/deploy staging status
 ```
 
-⚠️ **`export AWS_PROFILE` for the session.** Several failures during this deploy
+**`export AWS_PROFILE` for the session.** Several failures during this deploy
 were nothing but a missing profile on a bare `terraform` command. The script sets
 it; a manual `terraform apply` does not.
 
@@ -58,13 +58,13 @@ it; a manual `terraform apply` does not.
 ./scripts/deploy staging smoke
 ```
 
-⚠️ **Never mix the script and raw `terraform` within one stage.** A `plan` from the
+**Never mix the script and raw `terraform` within one stage.** A `plan` from the
 script followed by a hand-run `apply` produced an `Inconsistent dependency lock
 file` error, because the script's `init` ran between them.
 
 ---
 
-## ⚠️ The rule that cost the most time
+## The rule that cost the most time
 
 **Images must be pushed BEFORE anything references the tag.**
 
@@ -151,7 +151,7 @@ expected state.
 only the ones inside a `resource` block reach an AWS API. Comments and
 `variable`/`output` descriptions are fine.
 
-⚠️ A fifth resource carried the same em dash but was **never attempted** — its
+A fifth resource carried the same em dash but was **never attempted** — its
 dependency failed first. Fixing only the reported errors would have hit it on the
 re-run. **When a class of error appears, sweep for it rather than fixing the
 instances reported.**
@@ -159,7 +159,7 @@ instances reported.**
 **The ALB limit is 5 condition values per RULE**, counted across every condition
 block — splitting them across blocks is the same violation.
 
-⚠️ **The cost allocation tag is a MANUAL step.** From the **management** account:
+**The cost allocation tag is a MANUAL step.** From the **management** account:
 Billing → Cost allocation tags → activate `Environment`. Until then, plus up to 24
 hours, the budget filter matches nothing and **the alarm never fires while looking
 correctly configured.**
@@ -180,7 +180,7 @@ At the registrar, add **four NS records**:
 |---|---|---|
 | NS | `staging` | one nameserver each |
 
-⚠️ **Host is `staging`, not `staging.mortgageboss.ai`.** Registrars append the
+**Host is `staging`, not `staging.mortgageboss.ai`.** Registrars append the
 domain, so the full name creates records for
 `staging.mortgageboss.ai.mortgageboss.ai`.
 
@@ -198,7 +198,7 @@ partial results.
 ./scripts/deploy staging images
 ```
 
-⚠️ **`docker buildx` is required and may be missing.** This machine runs **Colima**,
+**`docker buildx` is required and may be missing.** This machine runs **Colima**,
 which ships BuildKit inside the VM but not the client-side CLI plugin:
 
 ```bash
@@ -212,7 +212,7 @@ image on an ARM64 task definition dies with `exec format error` visible only in 
 CloudWatch log stream, not in ECS service events. The stage verifies each pushed
 manifest.
 
-⚠️ **`NEXT_PUBLIC_API_URL` is baked at build time**, not read at runtime. Build it
+**`NEXT_PUBLIC_API_URL` is baked at build time**, not read at runtime. Build it
 wrong and the browser calls the wrong host with **nothing in the server logs**. The
 stage derives it from `domain_name` in tfvars.
 
@@ -234,7 +234,7 @@ Two confirmations, neither asking for a value:
 The second polls for minutes until the replication group is `available` with
 `AuthTokenEnabled: true`, then builds the Redis URL from the token in the same run.
 
-⚠️ **The Fernet encryption key prints once. Have a password manager open.** It
+**The Fernet encryption key prints once. Have a password manager open.** It
 encrypts `borrowers.ssn` and derives the PII match-hash key. Single-key Fernet, no
 `MultiFernet`, no re-encryption script — **until B2 lands there is no rotation
 path**, and losing it means every stored SSN is permanently unreadable. Store it
@@ -267,7 +267,7 @@ being gone while the database survives.
 paste-safe. SQLAlchemy percent-*decodes* userinfo on parse, so encoding is at best
 a no-op and at worst silently wrong.
 
-⚠️ **Verify any hand-copied password by fingerprint, never by eye.** A 32-character
+**Verify any hand-copied password by fingerprint, never by eye.** A 32-character
 string wraps in the terminal and a partial selection looks complete:
 
 ```bash
@@ -317,7 +317,7 @@ corrected secret version. It read the right value and failed anyway.
 `create_async_engine`, rather than escaping `%%` — which would have left the trap
 armed for the next caller.
 
-⚠️ **A residual hazard remains below this fix:** Pydantic passes `%` through and
+**A residual hazard remains below this fix:** Pydantic passes `%` through and
 SQLAlchemy percent-decodes userinfo, so a password containing `%` followed by two
 hex digits reaches the driver **altered**, with an auth failure as the only symptom.
 This is why the generated charset excludes `%`. Never hand-set a password
@@ -347,7 +347,7 @@ ACM validation takes a few minutes; Terraform waits.
 - Port 80 becomes a **301 redirect**
 - `session_timeout = 604800` (7 days)
 
-⚠️ **The auth action must be on EVERY rule.** ALB rules are evaluated in priority
+**The auth action must be on EVERY rule.** ALB rules are evaluated in priority
 order and the default action only fires when nothing matches — so a specific
 `/api/*` rule without an auth action **bypasses Cognito entirely** while the
 default rule looks correctly configured. This was a real error in the C4 ticket,
@@ -380,14 +380,14 @@ aws cognito-idp admin-create-user --user-pool-id <printed> \
   --user-attributes Name=email,Value=person@example.com Name=email_verified,Value=true
 ```
 
-⚠️ **There is no signup route and no password-change endpoint in the application.**
+**There is no signup route and no password-change endpoint in the application.**
 Whatever password you set is permanent until someone builds a change flow. Tell
 whoever you hand credentials to.
 
 **Roles:** `ADMIN` vs `PROCESSOR` matters for exactly two surfaces —
 `overlay_admin` and `validation_aid`. Uploading works either way.
 
-⚠️ **`mfa_configuration` starts `OPTIONAL`** because enforcing MFA before any user
+**`mfa_configuration` starts `OPTIONAL`** because enforcing MFA before any user
 exists locks out the first account. **Flip it to `ON` once everyone is enrolled.**
 
 ---
@@ -406,7 +406,7 @@ exists locks out the first account. **Flip it to `ON` once everyone is enrolled.
 | 4–6 | login, upload, extraction row | manual |
 | 7 | document in S3 | automated |
 
-⚠️ **Check 2 is a security check, not a health check.** A **200** means the
+**Check 2 is a security check, not a health check.** A **200** means the
 `/api/*` rule is missing its auth action and **the API is open to the internet**.
 Do not hand over the environment or upload a real file until it is fixed.
 
@@ -459,7 +459,7 @@ path. After Cognito lands, every response is a 302 and this becomes impossible.
 For a bad image, bump `image_tag` back and re-apply — immutable tags mean the
 previous image is exactly where it was.
 
-⚠️ **`terraform destroy` is not a rollback here.** `rds_deletion_protection = true`,
+**`terraform destroy` is not a rollback here.** `rds_deletion_protection = true`,
 `rds_skip_final_snapshot = false`, `secret_recovery_window_days = 30`, and the
 documents bucket carries `prevent_destroy`. A destroy will refuse on the database,
 and that is intended.

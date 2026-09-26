@@ -1,8 +1,8 @@
 """LP-493 — PC-8 (activated), PC-5 (built, held) and PC-1 (dropped).
 
-⚠️ EVERY VERDICT ASSERTION RUNS THROUGH A REAL RULE EVALUATION (LP-487's standing rule).
+EVERY VERDICT ASSERTION RUNS THROUGH A REAL RULE EVALUATION (LP-487's standing rule).
 
-⚠️ n=5, AND FREE-TEXT CONTRACTS ARE THE LEAST RELIABLE DOCUMENT CLASS IN THE CORPUS: of ~8
+n=5, AND FREE-TEXT CONTRACTS ARE THE LEAST RELIABLE DOCUMENT CLASS IN THE CORPUS: of ~8
 purchase-agreement claims in the bench, ONE was real — the free reader projected Texas TREC fields onto a
 North Carolina form. These tests prove wiring and direction, not accuracy.
 """
@@ -55,10 +55,10 @@ def _contract_snapshot(**fields: str) -> Snapshot:
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ PC-8 SURFACES — it has NO firing path
+# PC-8 SURFACES — it has NO firing path
 # --------------------------------------------------------------------------- #
 def test_pc8_has_no_firing_path() -> None:
-    """⚠️ The catalog rationale is "SURFACE included personal property — judgment", and a judgmental rule
+    """The catalog rationale is "SURFACE included personal property — judgment", and a judgmental rule
     has exactly two exits: needs_review and couldnt_check. PC-8 tells a processor what the contract
     includes; a human decides whether it is material. If someone gives it a `fired` path, this fails."""
     spec = load_rule_spec("PC-8")
@@ -69,7 +69,7 @@ def test_pc8_has_no_firing_path() -> None:
 
 
 def test_pc8_computes_no_deduction() -> None:
-    """⚠️ Non-realty items are deducted from the sales price for LTV under the sales-concessions topic
+    """Non-realty items are deducted from the sales price for LTV under the sales-concessions topic
     (tier S — the IPC page, whose per-cell table was NOT fetched). PC-8 carries no number and applies
     none: it surfaces, and the deduction belongs to the LTV lane if it is ever built."""
     values = load_rule_spec("PC-8").reference_values.values
@@ -77,7 +77,7 @@ def test_pc8_computes_no_deduction() -> None:
 
 
 async def test_pc8_findings_carry_ratification(monkeypatch: pytest.MonkeyPatch) -> None:
-    """⚠️ RATIFICATION IS THE SAFETY SUBSTITUTE for the missing measurement (ADR-378), proven through the
+    """RATIFICATION IS THE SAFETY SUBSTITUTE for the missing measurement (ADR-378), proven through the
     REAL evaluator — never by calling the mechanism (LP-487; LP-508's guard passed that way and reached
     1 of 5 rules)."""
     from app.ai.rule_judgment import RuleJudgment, RuleJudgmentResult
@@ -91,7 +91,7 @@ async def test_pc8_findings_carry_ratification(monkeypatch: pytest.MonkeyPatch) 
             truncated=False,
         )
 
-    # ⚠️ A PARTIAL SEAM IS NOT A SEAM (LP-490): stub EVERY group, then override the one under test.
+    # A PARTIAL SEAM IS NOT A SEAM (LP-490): stub EVERY group, then override the one under test.
     # `only_groups=frozenset()` skips AI groups entirely, which would leave the tag ABSENT and the rule
     # gated to couldnt_check — the finding would never be produced and the assertion would be vacuous.
     from app.verification.eval.stubs import stub_materialization_reasoners
@@ -133,7 +133,7 @@ async def test_pc8_findings_carry_ratification(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_pc8_is_live_on_a_two_valued_spread() -> None:
-    """⚠️ THE STRONGEST RATE IN ANY COHORT SO FAR — and still only 5 cases. Unlike LP-492's
+    """THE STRONGEST RATE IN ANY COHORT SO FAR — and still only 5 cases. Unlike LP-492's
     single-verdict spreads, both derivations produced a genuinely two-valued answer, so the rate reflects
     the model agreeing on DIFFERENT answers rather than agreeing on one."""
     bar = load_activation_bars()["PC-8"]
@@ -144,18 +144,18 @@ def test_pc8_is_live_on_a_two_valued_spread() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ PC-5 — built, HELD. Originally on a uniform-abstain derivation; RE-DERIVED at LP-493a to a
+# PC-5 — built, HELD. Originally on a uniform-abstain derivation; RE-DERIVED at LP-493a to a
 # measured 0.5000 (2 cases, 1 disagreement). Still held — but for a different, stronger reason.
 # --------------------------------------------------------------------------- #
 def test_pc5_is_held_not_activated() -> None:
-    """⚠️ THE TICKET'S OWN PRE-RATE CHECK 2: refuse to record a rate when every derivation returned the
+    """THE TICKET'S OWN PRE-RATE CHECK 2: refuse to record a rate when every derivation returned the
     same abstain value. PC-5's ran cleanly on LF-6T3N — calls succeeded, context non-redacted — but the
     spread was {unknown: 2} BEFORE the LP-493a context fixes; the re-derivation after them scored
     0.5000 (1 disagreement). A rate over a uniform abstain is the CR-8 shape: perfectly consistent and
     carrying no information. Not recorded, so PC-5 stays held."""
     bar = load_activation_bars()["PC-5"]
     assert bar.status == "not-calibratable-yet"
-    # ⚠️ PC-5 was RE-DERIVED after LP-493a fixed both context defects and scored 0.5000 over 2 cases with 1 disagreement — a MEASURED FAILURE, not the uniform abstain the original hold recorded. The distinction matters: 'never measured' and 'measured and failed the bar' are different audit-trail entries, and only one of them says the rule was actually tried.
+    # PC-5 was RE-DERIVED after LP-493a fixed both context defects and scored 0.5000 over 2 cases with 1 disagreement — a MEASURED FAILURE, not the uniform abstain the original hold recorded. The distinction matters: 'never measured' and 'measured and failed the bar' are different audit-trail entries, and only one of them says the rule was actually tried.
     assert bar.self_consistency_rate is None, (
         "PC-5 is held; if a rate is ever recorded here it must be the measured 0.5000 from the "
         "LP-493a re-derivation, never the pre-fix uniform-abstain 1.0"
@@ -165,7 +165,7 @@ def test_pc5_is_held_not_activated() -> None:
 
 
 def test_pc5_encodes_no_customary_threshold() -> None:
-    """⚠️ B3-4.3-09 says large deposits and those exceeding what is "customary for the area" should be
+    """B3-4.3-09 says large deposits and those exceeding what is "customary for the area" should be
     closely evaluated — and gives NO number. None is invented; a fabricated percentage would fire on
     ordinary files."""
     values = load_rule_spec("PC-5").reference_values.values
@@ -173,17 +173,17 @@ def test_pc5_encodes_no_customary_threshold() -> None:
 
 
 def test_pc5_records_the_single_emd_input_gap() -> None:
-    """⚠️ Doc 183 understated a $204k ADDITIONAL earnest money distinct from the primary figure.
+    """Doc 183 understated a $204k ADDITIONAL earnest money distinct from the primary figure.
     `earnest_money_amount` is singular and NO `additional_earnest_money_amount` field exists, so a second
     deposit is LOST. The prompt asks the model to name one in its reasoning; the tag cannot carry it."""
     assert "additional" in load_rule_spec("PC-5").evidence_required.lower()
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ PC-1 — dropped, and the reasons pinned so it is not rebuilt hollow
+# PC-1 — dropped, and the reasons pinned so it is not rebuilt hollow
 # --------------------------------------------------------------------------- #
 def test_pc1_is_not_live_and_its_tags_stay_undeclared() -> None:
-    """⚠️ PC-1 IS DROPPED, for two independent reasons:
+    """PC-1 IS DROPPED, for two independent reasons:
 
     1. `title.parties_match` ("Title parties match borrowers/seller") asks the SAME question TI-1 already
        answers with `title.vested_owner_matches` — live, deterministic and proven at LP-491. Building it

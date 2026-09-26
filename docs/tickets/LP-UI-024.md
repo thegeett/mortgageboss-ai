@@ -18,8 +18,8 @@ Verified end to end on a real import. A MISMO file with `PropertyEstimatedValueA
 and `BaseLoanAmount` stripped produced `LF-68D5`, whose Overview reads:
 
 > **THE IMPORT COULD NOT READ** — 2 fields to review
-> ⚠ Loan is missing a base loan amount. *Go to the loan*
-> ⚠ Subject property is missing an estimated value. *Go to the property*
+> Loan is missing a base loan amount. *Go to the loan*
+> Subject property is missing an estimated value. *Go to the property*
 
 and both links land on the blanks visible below them — Loan → Amount "—",
 Subject property → Estimated value "—".

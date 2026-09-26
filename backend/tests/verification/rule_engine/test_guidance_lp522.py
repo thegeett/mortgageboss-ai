@@ -108,7 +108,7 @@ async def _evaluate(
 
 
 async def test_the_finding_now_says_what_to_do() -> None:
-    """⚠️ THE HEADLINE DEFECT. `how_to_fix` was hard-coded None in judgment.py, so NO judgment rule had
+    """THE HEADLINE DEFECT. `how_to_fix` was hard-coded None in judgment.py, so NO judgment rule had
     ever told anyone what to do — 18 active rules, every finding, since LP-324."""
     evaluation = await _evaluate()
 
@@ -128,7 +128,7 @@ async def test_the_message_leads_with_the_action_not_the_verdict() -> None:
 
 
 async def test_the_verdict_shapes_the_headline_instead_of_being_a_bare_chip() -> None:
-    """⚠️ WHY THE yes/no CHIP CAN GO. The verdict is not hidden — it changes the instruction. A
+    """WHY THE yes/no CHIP CAN GO. The verdict is not hidden — it changes the instruction. A
     processor skimming a bare `yes` reads it as "yes, fine"; it actually means "yes, this may be
     borrowed funds", the worst finding on the file read as its opposite."""
     cleared = await _evaluate(answer="no")
@@ -161,7 +161,7 @@ async def test_the_statement_line_is_quoted_exactly() -> None:
     ],
 )
 async def test_the_why_keys_on_the_evidence_not_the_verdict(strength: str, expected: str) -> None:
-    """⚠️ THE REASON `why` IS TAG-KEYED. Every case here has the SAME verdict ("no"); only the evidence
+    """THE REASON `why` IS TAG-KEYED. Every case here has the SAME verdict ("no"); only the evidence
     differs. One template per verdict would have to assume a situation and would be FALSE in the others
     — "the statement line reads X, but no matching withdrawal appears" is simply wrong for a deposit
     whose source was verified."""
@@ -171,7 +171,7 @@ async def test_the_why_keys_on_the_evidence_not_the_verdict(strength: str, expec
 
 
 async def test_the_none_wording_never_contradicts_the_line_it_quotes() -> None:
-    """⚠️ REGRESSION. `source_strength: none` is about CORROBORATION, not about whether the description
+    """REGRESSION. `source_strength: none` is about CORROBORATION, not about whether the description
     has words in it. The first wording said "nothing in it identifies where the money came from" and
     rendered on a real file directly above `Online Transfer From Digital Federal Credit Union Sav
     xxxx0433 A. Talluri` — a sentence contradicting the quote beside it, which reads as a system that
@@ -266,7 +266,7 @@ def test_explain_without_a_default_is_rejected_at_load() -> None:
 
 
 def test_an_explain_by_tag_the_rule_never_reads_is_rejected_at_load() -> None:
-    """⚠️ The silent one. A tag outside `reasoned_over` is absent on every subject, so every finding
+    """The silent one. A tag outside `reasoned_over` is absent on every subject, so every finding
     would quietly take the `default` case and the per-situation wording would never appear."""
     with pytest.raises(ValidationError, match="is not in `reasoned_over`"):
         _judgment(

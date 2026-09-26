@@ -1,6 +1,6 @@
 """The paste endpoint (LP-907 section 1, spec §LP-907, screens S1-06 and S1-07).
 
-⚠️ 201 AND A FINISHED ROUND, where the upload door answers 202 and a `PARSING` one. The two differ
+201 AND A FINISHED ROUND, where the upload door answers 202 and a `PARSING` one. The two differ
 because the work does, and the contract has to say so: a client that polled this round waiting for
 `DRAFT` would poll a round that was already there.
 """
@@ -86,7 +86,7 @@ async def test_a_paste_comes_back_as_a_finished_draft(
     assert body["parse_report"]["reader"] == "uwm"
     assert body["parse_report"]["needs_ai"] is False
     assert body["sources"][0]["kind"] == "paste"
-    # ⚠️ A paste has no letter, so the side panel is told so rather than shown empty fields (S1-07).
+    # A paste has no letter, so the side panel is told so rather than shown empty fields (S1-07).
     assert body["header"] is None
     assert body["date_printed"] is None
 
@@ -94,7 +94,7 @@ async def test_a_paste_comes_back_as_a_finished_draft(
 async def test_text_the_rules_cannot_split_comes_back_parsing(
     client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """⚠️ `PARSING`, AND THE ENQUEUE IS ASSERTED RATHER THAN ASSUMED.
+    """`PARSING`, AND THE ENQUEUE IS ASSERTED RATHER THAN ASSUMED.
 
     LP-907 answered `DRAFT` here because LP-908 did not exist; §2 is the worker, so the spec's shape
     applies. The delay() call is what makes `PARSING` honest — a round in that state with nothing
@@ -155,7 +155,7 @@ async def test_a_paste_the_rules_read_queues_nothing(
 async def test_a_broker_that_refuses_the_job_fails_the_round_rather_than_stranding_it(
     client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """⚠️ ASSERTING THE ENQUEUE PROVES THE CALL, NOT THE DELIVERY — and the failure mode is the
+    """ASSERTING THE ENQUEUE PROVES THE CALL, NOT THE DELIVERY — and the failure mode is the
     second one.
 
     The round is committed in `PARSING` BEFORE `.delay()` is reached, so a broker that is down
@@ -191,7 +191,7 @@ async def test_a_broker_that_refuses_the_job_fails_the_round_rather_than_strandi
     assert body["status"] == ConditionRoundStatus.PARSE_FAILED.value
     assert body["parse_report"]["failure_kind"] == "enqueue_failed"
     assert "try again" in body["parse_report"]["failure_detail"]
-    # ⚠️ THE REASON IS COMPOSED, NEVER QUOTED FROM THE PASTE — and the assertion is on that FIELD,
+    # THE REASON IS COMPOSED, NEVER QUOTED FROM THE PASTE — and the assertion is on that FIELD,
     # not on the response. An earlier version checked the whole body and failed correctly: the paste
     # is legitimately there in `draft_rows[].verbatim_text`, because that is what the review screen
     # renders.
@@ -203,7 +203,7 @@ async def test_a_broker_that_refuses_the_job_fails_the_round_rather_than_strandi
 
 
 async def test_completeness_is_required(client: AsyncClient, db_session: AsyncSession) -> None:
-    """⚠️ NO DEFAULT AT THE BOUNDARY (ADR-404). The UI defaults the control to "just some"; the API
+    """NO DEFAULT AT THE BOUNDARY (ADR-404). The UI defaults the control to "just some"; the API
     refusing to guess is what makes that a decision rather than a fallback."""
     company, token = await _user(db_session, slug="paste-nocomp")
     loan_file = await create_loan_file(db_session, company_id=company.id)

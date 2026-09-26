@@ -1,6 +1,6 @@
 """The fallback reader for layouts nobody has taught us (LP-906 section 3, spec §6).
 
-⚠️ `needs_ai` IS THE ASSERTION THAT MATTERS HERE, and it is not a failure flag. It means the RULES
+`needs_ai` IS THE ASSERTION THAT MATTERS HERE, and it is not a failure flag. It means the RULES
 could not split this text, so LP-908 must — and LP-908 only ever SPLITS, never interprets. Setting it
 when structure WAS found would pay for an AI call to redo work the rules already did; failing to set
 it when there is none would hand LP-909 a single undifferentiated blob and call it a condition.
@@ -37,13 +37,13 @@ def test_lender_style_leading_codes_are_structure() -> None:
     assert [r.lender_code for r in sheet.rows] == ["0006", "0007"]
     assert sheet.rows[0].verbatim_text == "Provide copy of invoice for credit report."
     assert sheet.needs_ai is False
-    # ⚠️ The leading zeros survive. `0006` is an identifier printed on a document (ADR-407); reading
+    # The leading zeros survive. `0006` is an identifier printed on a document (ADR-407); reading
     # it as the integer 6 is a silent loss that surfaces later as a failed match.
     assert sheet.rows[0].lender_code == "0006"
 
 
 def test_paragraphs_without_numbers_still_need_ai() -> None:
-    """⚠️ PARAGRAPH SPLITTING IS NOT THE SAME AS FINDING STRUCTURE.
+    """PARAGRAPH SPLITTING IS NOT THE SAME AS FINDING STRUCTURE.
 
     Blank lines do separate these into three rows, and the spec lists blank-line paragraphs as a
     signal — but none carries a number or a code, so the rules have not actually identified where a

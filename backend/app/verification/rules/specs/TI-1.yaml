@@ -3,16 +3,16 @@
 # Does the owner of record on the title commitment match the party the file says should own it — the
 # seller on a purchase, the borrower on a refinance?
 #
-# ⚠️ THE CATALOG KIND WAS CHANGED FOR THIS RULE (rule_kinds.csv, LP-491): ai_fuzzy_match →
+# THE CATALOG KIND WAS CHANGED FOR THIS RULE (rule_kinds.csv, LP-491): ai_fuzzy_match →
 # deterministic_only, the SECOND time this has been needed (IH-2 was the first, LP-487). The reasoning is
 # identical: typed extraction already reads `vested_owner_name` (4/4 real commitments) and `seller_name`
 # (5/5 real purchase agreements), so the PERCEPTION step is spent and what remains is comparing two
 # strings. Recorded as a deliberate edit with its evidence, not slipped in — row count stays 135.
 #
-# ⚠️ THE CONSEQUENCE OF THAT EDIT IS THE POINT: TI-1 needs NO self-consistency run and no ratification.
+# THE CONSEQUENCE OF THAT EDIT IS THE POINT: TI-1 needs NO self-consistency run and no ratification.
 # It activates on `no-ai-dependency` like any deterministic rule, because there is no model in its chain.
 #
-# ⚠️ A MISMATCH IS `needs_review`, NEVER `fired` — argued, not assumed (the ticket asked for the
+# A MISMATCH IS `needs_review`, NEVER `fired` — argued, not assumed (the ticket asked for the
 # argument). A vesting difference is frequently legitimate: the property is held in a revocable trust
 # whose trustee is the borrower under another name; an estate is selling; a name changed on marriage or
 # divorce; the deed into the seller has not yet recorded. Each of those is a correct file that a firing
@@ -21,10 +21,10 @@
 # reports "the owner of record is X, the file's counterparty is Y, confirm", which is IH-2's precedent
 # and, on the same reasoning, the right direction here.
 #
-# ⚠️ MATCHES EITHER OWNER. Three of the four real commitments carry a `vested_owner_name_2`; a co-owned
+# MATCHES EITHER OWNER. Three of the four real commitments carry a `vested_owner_name_2`; a co-owned
 # property matching only the second name is still a match.
 #
-# ⚠️ THE PURPOSE BRANCH IS IN THE PRODUCER, NOT AN APPLICABILITY PREDICATE — and the abstain a predicate
+# THE PURPOSE BRANCH IS IN THE PRODUCER, NOT AN APPLICABILITY PREDICATE — and the abstain a predicate
 # would have given is preserved. TI-1 applies to BOTH purposes, so there is no single predicate value to
 # scope on. The recipe returns "unknown" when the purpose is unstated, and the gate routes that to
 # couldnt_check: a file that does not state its purpose is SURFACED, never silently skipped.
@@ -43,10 +43,10 @@ criteria: >-
   whole tokens in order. A mismatch is surfaced for confirmation rather than failed — a trust, an estate
   or a name change all produce a legitimate difference. A commitment stating no owner, a file stating no
   purpose, or a file with no counterparty resolves to couldnt_check, never a guessed match.
-  ⚠️ The vesting-recital markers are UNEXERCISED by the corpus: all four real commitments carry a PLAIN
+  The vesting-recital markers are UNEXERCISED by the corpus: all four real commitments carry a PLAIN
   NAME in vested_owner_name (the recital lives in vesting_marital_recital, which fills 0/4). Stripping a
   marker that is not present changes nothing, so they are safe to ship — but nothing here is measured
-  behaviour. ⚠️ They match on WORD BOUNDARIES: an unbounded substring match truncated ordinary names
+  behaviour. They match on WORD BOUNDARIES: an unbounded substring match truncated ordinary names
   ("margarET ALonso" contains "et al") and manufactured agreement between different people.
 
 applicability:
@@ -59,11 +59,11 @@ reference_values:
   priya_validated: false          # must equal rule_kinds.csv
   threshold_needs_signoff: false  # must equal rule_kinds.csv — a vocabulary, not a threshold
   values:
-    # ⚠️ THE DECLARED NORMALISATION VOCABULARY, pipe-delimited and case-insensitive. The producer mirrors
+    # THE DECLARED NORMALISATION VOCABULARY, pipe-delimited and case-insensitive. The producer mirrors
     # IH-2's markers and suffixes exactly (ONE normaliser, shared — LP-487) and adds the vesting recitals
     # below; test_ti1_vocabulary_matches_the_spec pins them identical.
     #
-    # ⚠️ THE VESTING MARKERS ARE SPECULATIVE, and this is the reported finding. ALL FOUR real commitments
+    # THE VESTING MARKERS ARE SPECULATIVE, and this is the reported finding. ALL FOUR real commitments
     # carry a PLAIN NAME in vested_owner_name — 2 to 3 words, no TRUSTEE, no HUSBAND AND WIFE, no ET UX —
     # because the extractor puts the recital in `vesting_marital_recital`, which fills 0/4. Real titles do
     # carry these forms, so they are stripped; but NOTHING IN OUR CORPUS EXERCISES THEM.
@@ -119,7 +119,7 @@ deterministic:
         - {tag: title.vested_owner_matches, op: eq, value: "yes"}
       reasoning: >-
         the owner of record on the title commitment matches the party the file expects to own the property
-    # ⚠️ needs_review, NOT fired — see the header for the argument.
+    # needs_review, NOT fired — see the header for the argument.
     - verdict: needs_review
       when_tags:
         - {tag: title.vested_owner_matches, op: eq, value: "no"}
@@ -133,7 +133,7 @@ deterministic:
         it and the vesting is fine. If the commitment names an unrelated party, it may be for the wrong
         property or the wrong file — request a corrected commitment before closing.
     - verdict: couldnt_check
-      # ⚠️ ABSTAIN, NOT A PASS. "The vested owner matches" on a file with no commitment, no purpose, or no
+      # ABSTAIN, NOT A PASS. "The vested owner matches" on a file with no commitment, no purpose, or no
       # counterparty is a false all-clear on the one document that establishes who owns the property.
       default: true
       reasoning: >-

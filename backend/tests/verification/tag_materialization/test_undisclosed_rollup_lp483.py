@@ -4,7 +4,7 @@
 aggregating ``liab.in_application``, the atomic per-liability judgment — so CR-1 (which debt?) and CR-4
 (any debt?) read one comparison and cannot disagree about the same file.
 
-⚠️ THE SEAM THESE PIN. The aggregation is exactly where a false ALL-CLEAR could slip in: an empty list of
+THE SEAM THESE PIN. The aggregation is exactly where a false ALL-CLEAR could slip in: an empty list of
 judgments must never read as "no undisclosed debt". Every no-evidence path must abstain to ``unknown``.
 """
 
@@ -122,7 +122,7 @@ def test_the_rollup_is_derived_and_the_atomic_judgment_is_the_ai_tag() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ Fail-closed: NEVER a false all-clear
+# Fail-closed: NEVER a false all-clear
 # --------------------------------------------------------------------------- #
 def test_no_credit_report_abstains_never_no() -> None:
     """'No undisclosed debt' on a file with no credit report is a FALSE ALL-CLEAR."""

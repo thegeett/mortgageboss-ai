@@ -83,7 +83,7 @@ async def test_a_companys_conditions_are_invisible_to_another(db_session: AsyncS
 
 
 async def test_scoping_is_not_satisfied_by_the_loan_file_alone(db_session: AsyncSession) -> None:
-    """⚠️ THE MISTAKE THIS COLUMN PREVENTS, made deliberately so the test has something to catch.
+    """THE MISTAKE THIS COLUMN PREVENTS, made deliberately so the test has something to catch.
 
     A query that filters only on `loan_file_id` looks correct and is correct *for that file* — but it
     is the shape that cannot be written at all for the flat routes, where no loan file is in the

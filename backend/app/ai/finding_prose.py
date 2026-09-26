@@ -7,7 +7,7 @@ And ~65 active rules still have no hand-written text, each of which reads as bad
 someone sat down with it. Generation solves both — a specific sentence per situation, with no authoring
 queue.
 
-⚠️ FOUR CONSTRAINTS MAKE IT SAFE, and none of them is optional.
+FOUR CONSTRAINTS MAKE IT SAFE, and none of them is optional.
 
 1. **It only ever rewrites.** The composer runs AFTER the verdict, over a finding that already exists.
    No verdict, no outcome, no tag depends on it. A failure changes prose and nothing else.
@@ -279,11 +279,11 @@ def _numbers_in(text: str) -> set[str]:
 def unsupported_numbers(summary: FactSummary, composition: Composition) -> set[str]:
     """Numbers in the output that appear NOWHERE in the input — the hallucination check.
 
-    ⚠️ DETERMINISTIC ON PURPOSE. Asking a model whether a model hallucinated has the same failure mode
+    DETERMINISTIC ON PURPOSE. Asking a model whether a model hallucinated has the same failure mode
     as the thing it is checking. A number is either in the source text or it is not, and that is
     decidable without judgement.
     """
-    # ⚠️ THE DOCUMENT COUNT IS NOT A PERMITTED NUMBER. LP-597 injects `documents_on_file` into the
+    # THE DOCUMENT COUNT IS NOT A PERMITTED NUMBER. LP-597 injects `documents_on_file` into the
     # summary so the model can stop inventing a corpus — but this check derives its allow-list from
     # that same JSON, so a file with 24 documents silently licensed the token "24" anywhere in the
     # output ("24 months of reserves"). The count is excluded here rather than kept out of the
@@ -370,7 +370,7 @@ _EDITORIALISING = (
 def editorialises_correctness(composition: Composition) -> set[str]:
     """Words asserting that something was done RIGHT, rather than saying what the file shows.
 
-    ⚠️ WORD BOUNDARIES, NOT SUBSTRINGS. A plain `in` check inverts this rule's meaning: "the
+    WORD BOUNDARIES, NOT SUBSTRINGS. A plain `in` check inverts this rule's meaning: "the
     application INcorrectly lists the property as a second home" contains "correctly", so a finding
     reporting a genuine error was rejected as editorialising, retried, rejected again, and shipped the
     raw engine template. Same for "improperly" against "properly". The negated forms are precisely

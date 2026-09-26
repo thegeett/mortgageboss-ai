@@ -55,7 +55,7 @@ Two modes, picked by `sys.stdout.isatty()`:
 
 ```
 ✓ bob/bank_statement.pdf → bank_statement · success
-⚠ bob/credit_report.pdf → THROTTLED
+bob/credit_report.pdf → THROTTLED
 ████████████████░░░░░░░░░░  60% · 3/5 · $0.04 · 1 failed (1 throttled) · ~2s left · alice/2024_w2.pdf
 ```
 

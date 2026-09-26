@@ -151,7 +151,7 @@ export function bucketRuleFindings(findings: RuleFinding[]): GovernedBuckets {
  */
 /** Order two rule ids the way a processor reads them: by family, then NUMERICALLY (LP-613).
  *
- * ⚠️ NOT a string sort. Rule ids are `AS-1`, `AS-4`, `AS-8`, `AS-10` — lexicographically that is
+ * NOT a string sort. Rule ids are `AS-1`, `AS-4`, `AS-8`, `AS-10` — lexicographically that is
  * AS-1, AS-10, AS-4, which puts the tenth rule second and reads as an accident. The number is a
  * number and is compared as one.
  *

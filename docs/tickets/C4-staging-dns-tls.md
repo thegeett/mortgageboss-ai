@@ -36,7 +36,7 @@ It adds what dev never needed:
 
 ---
 
-## ⚠️ This apply is in TWO phases with a manual step between
+## This apply is in TWO phases with a manual step between
 
 Terraform cannot complete in one run. The sequence:
 
@@ -88,7 +88,7 @@ Staging needs its own, and unlike dev's it should be **CMK-encrypted**, since it
 borrower files. C3's compute module already renders the KMS statements when
 `documents_bucket_kms_key_arn` is set.
 
-⚠️ **Staging starts EMPTY.** No document sync from dev, no database seed. Dev documents are
+**Staging starts EMPTY.** No document sync from dev, no database seed. Dev documents are
 development artifacts and have no place in an environment holding borrower NPI. The database
 gets its schema from the migration task against an empty RDS instance.
 
@@ -141,7 +141,7 @@ without a local endpoint work but incur cross-AZ transfer and lose the AZ indepe
 Endpoints needed: `bedrock-runtime`, `ecr.api`, `ecr.dkr`, `logs`, `secretsmanager`, plus the
 **free** S3 gateway endpoint (a route table entry, not an ENI — AZ-independent).
 
-⚠️ **With no NAT, anything not covered by an endpoint is unreachable.** Audit the application
+**With no NAT, anything not covered by an endpoint is unreachable.** Audit the application
 for outbound calls beyond those services — SMTP, any external HTTP client, any package fetch at
 startup — and report what you find. A missed dependency **hangs** rather than failing cleanly,
 which is a miserable thing to debug on a task with no shell.
@@ -166,7 +166,7 @@ Namecheap and is never delegated to AWS.
 
 All of the above gated on `enable_tls` per the two-phase note.
 
-⚠️ **The ALB target group health check is unaffected by listener rules** — it probes the target
+**The ALB target group health check is unaffected by listener rules** — it probes the target
 directly. Confirm this and say so; if it were affected, every task would fail its check behind
 Cognito and the service would never stabilise.
 
@@ -181,11 +181,11 @@ and an independent layer at the ALB means **unauthenticated requests never reach
 - `aws_cognito_user_pool_client` with the ALB callback URL
 - `authenticate-cognito` as the **default listener action**
 
-⚠️ **The auth action goes on the DEFAULT rule, so it covers `/api/*` too.** Excluding API paths
+**The auth action goes on the DEFAULT rule, so it covers `/api/*` too.** Excluding API paths
 to avoid the XHR issue below would leave the upload endpoint open to the internet, defeating the
 entire exercise. Do not do it.
 
-⚠️ **Session timeout must be long — 7 days.** When an ALB session expires mid-use, an in-flight
+**Session timeout must be long — 7 days.** When an ALB session expires mid-use, an in-flight
 `fetch` receives a 302 to the login page, which browser JavaScript cannot follow. The app then
 fails in confusing ways rather than redirecting cleanly. A long session means expiry happens
 between visits, not during one. State this in the result doc.
@@ -219,7 +219,7 @@ Create it in Terraform for staging — unlike dev's, which was hand-made.
 - `documents_bucket_kms_key_arn` wired into the compute module so the task-role KMS statements
   render
 
-⚠️ **Lifecycle expiry: leave it unset and say so.** The FTU Safeguards Rule disposal provision
+**Lifecycle expiry: leave it unset and say so.** The FTU Safeguards Rule disposal provision
 suggests an outer bound, but the retention decision was explicitly deferred. Do not invent a
 number; flag it as an open decision in the result doc.
 

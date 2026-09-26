@@ -65,7 +65,7 @@ line but the enclosing block. So the scan tracked the enclosing HCL block type.
 |---|---|---|---|
 | `modules/data/main.tf:49` | `aws_db_parameter_group.description` | `CreateDBParameterGroup` | ❌ **failed** |
 | `modules/data/main.tf:190` | `aws_elasticache_parameter_group.description` | `CreateCacheParameterGroup` | ❌ **failed** |
-| `modules/data/main.tf:202` | `aws_elasticache_replication_group.description` | `CreateReplicationGroup` | ⚠️ **never attempted** |
+| `modules/data/main.tf:202` | `aws_elasticache_replication_group.description` | `CreateReplicationGroup` | **never attempted** |
 | `modules/secrets/main.tf:45` | `aws_kms_key.description` | `CreateKey` | ✅ accepted |
 | `modules/secrets/main.tf:112` | `aws_secretsmanager_secret.description` | `CreateSecret` | ✅ accepted |
 | `modules/dns/main.tf:31` | `aws_route53_zone.comment` | `CreateHostedZone` | ✅ accepted |
@@ -86,7 +86,7 @@ key, four secrets, and a hosted zone whose descriptions contain an em dash right
 now. Per-API charset tolerance is undocumented and is discovered only by an apply
 failing, so the four surviving coin flips were removed too. This is ADR-377.
 
-⚠️ **Consequence for your re-run:** those three already exist, so normalising their
+**Consequence for your re-run:** those three already exist, so normalising their
 descriptions produces **three in-place updates** in the plan that are not related to
 the four failures. All three are non-destructive metadata updates —
 `UpdateKeyDescription`, `UpdateSecret`, `UpdateHostedZoneComment`. No replacement,
@@ -107,7 +107,7 @@ ValidationError: A rule can only have '5' condition values and regex values
 `modules/compute/alb.tf:263` listed six: `/health`, `/health/*`, `/docs`, `/docs/*`,
 `/redoc`, `/openapi.json`.
 
-⚠️ **The limit is per RULE, not per condition block** — counted across every block in
+**The limit is per RULE, not per condition block** — counted across every block in
 it. Splitting six values across three `path_pattern` blocks is the same violation.
 
 **Fixed** in three parts.
@@ -158,7 +158,7 @@ the ADR to understand what to do.
 A second validation rejects an empty list, which would otherwise fail at apply time
 on a `path_pattern` condition that requires at least one value.
 
-⚠️ **`terraform validate` does NOT evaluate variable validations.** Verified: a
+**`terraform validate` does NOT evaluate variable validations.** Verified: a
 scratch module carrying the original six paths as its default passes
 `terraform validate` cleanly, both with and without a reference to the variable. The
 guarantee is **plan** time, which is what the brief asked for — but it is worth
@@ -212,7 +212,7 @@ management-account root module adopts by flipping a variable **there**.
 
 The brief asked for anything else that would fail for the same three reasons.
 
-### ⚠️ Would have failed the NEXT apply — `aws_elasticache_replication_group`
+### Would have failed the NEXT apply — `aws_elasticache_replication_group`
 
 `modules/data/main.tf:202`:
 
@@ -323,6 +323,6 @@ convention that lives only in a ticket doc is one nobody finds.
   KMS key, four secrets, hosted zone. Expected, non-destructive.
 - The listener rule now carries **2** path patterns, not 6.
 
-⚠️ **Then, by hand, from the MANAGEMENT account:** activate the `Environment` cost
+**Then, by hand, from the MANAGEMENT account:** activate the `Environment` cost
 allocation tag. Nothing in any future apply will remind you, and until it is done —
 plus up to 24 hours — the budget is inert.

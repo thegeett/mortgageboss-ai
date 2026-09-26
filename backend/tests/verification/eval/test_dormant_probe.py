@@ -60,7 +60,7 @@ _DORMANT_EXPECTED = frozenset(
         # LP-493 — contract_emd stays dormant: PC-5 is BUILT BUT HELD (its derivation returned a uniform
         # abstain, so no rate was recorded). contract_personal_property went LIVE with PC-8.
         "contract_emd",
-        # ⚠️ LP-490a — credit_profile / credit_derogatory / credit_mortgage_history / credit_collections
+        # LP-490a — credit_profile / credit_derogatory / credit_mortgage_history / credit_collections
         # LEFT the dormant set: CR-1, CR-4, CR-6, CR-8 and CR-10 went live on `ratify-pending` (ADR-378),
         # so their groups are now REQUIRED and run on a live file. Only credit_inquiries stays dormant —
         # CR-5 is the one credit rule still held (its trigger has one instance in the whole corpus, so
@@ -85,7 +85,7 @@ _LIVE_EXPECTED = frozenset(
         # group is dormant to the LIVE set — it does still run on every file through the pending-check
         # pass, which is a different path and is recorded on DT-7's bar.
         "occupancy_rental",
-        # ⚠️ LP-490a — the four credit groups JOINED the live set: CR-1, CR-4, CR-6, CR-8 and CR-10 went
+        # LP-490a — the four credit groups JOINED the live set: CR-1, CR-4, CR-6, CR-8 and CR-10 went
         # live on `ratify-pending` (ADR-378), so these now run on a live file. credit_inquiries stays
         # dormant (CR-5 is still held — one inquiry row in the whole corpus).
         "credit_profile",

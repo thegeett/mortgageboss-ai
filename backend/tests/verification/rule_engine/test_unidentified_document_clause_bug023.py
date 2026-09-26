@@ -141,7 +141,7 @@ async def test_id3_says_nothing_extra_when_the_file_is_fully_identified() -> Non
 
 
 async def test_the_borrower_facing_ask_never_carries_the_clause() -> None:
-    """⚠️ THE LINE THIS TICKET MUST NOT CROSS. `requested_documents` is shown to the BORROWER verbatim
+    """THE LINE THIS TICKET MUST NOT CROSS. `requested_documents` is shown to the BORROWER verbatim
     and names no document type on purpose. "Identify the untyped files" is our filing, not theirs —
     it belongs in the processor's message only."""
     result = await _id3(

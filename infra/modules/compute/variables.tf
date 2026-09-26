@@ -67,7 +67,7 @@ variable "cpu_architecture" {
   description = <<-EOT
     Fargate runtime platform CPU architecture: "ARM64" or "X86_64".
 
-    ⚠️ MUST match the architecture of the images actually built. A mismatch fails
+    MUST match the architecture of the images actually built. A mismatch fails
     with `exec format error` — the task starts, dies immediately, and the message
     appears only in the CloudWatch log stream, never in the ECS console's service
     events. Verify with:
@@ -244,7 +244,7 @@ variable "bedrock_foundation_model_arns" {
   description = <<-EOT
     Foundation-model ARNs the worker may invoke.
 
-    ⚠️ A cross-region inference profile requires the foundation-model ARN in EVERY
+    A cross-region inference profile requires the foundation-model ARN in EVERY
     region the profile can route to, not just the home region. Omitting one produces
     an INTERMITTENT AccessDeniedException — it fails only when Bedrock happens to
     route to the missing region.
@@ -271,7 +271,7 @@ variable "enable_execute_command" {
     Fargate has no SSH, so without this the only diagnostic surface is CloudWatch
     logs — and several failure modes here produce no log line at all.
 
-    ⚠️ This is a PRODUCTION ACCESS PATH: it grants a shell inside a task holding
+    This is a PRODUCTION ACCESS PATH: it grants a shell inside a task holding
     borrower data. Appropriate for a throwaway environment, and it should be gated
     or disabled where real NPI lives. When false, the ssmmessages statements are
     omitted from every task role, so the frontend role ends up genuinely empty.
@@ -345,12 +345,12 @@ variable "api_root_path_patterns" {
     /health/ready), not under the /api/v1 prefix the feature routers use, so they
     need an explicit rule or they fall through to the frontend.
 
-    ⚠️ FIVE VALUES MAXIMUM. An ALB counts condition values ACROSS THE WHOLE RULE,
+    FIVE VALUES MAXIMUM. An ALB counts condition values ACROSS THE WHOLE RULE,
     not per condition block, and the limit is 5. The validation below is what makes
     a sixth entry a plan-time error rather than an apply-time ValidationError
     partway through creating an environment.
 
-    ⚠️ FastAPI's /docs, /docs/*, /redoc and /openapi.json are deliberately NOT here.
+    FastAPI's /docs, /docs/*, /redoc and /openapi.json are deliberately NOT here.
     They are the interactive documentation and the OpenAPI schema: a complete,
     machine-readable map of every endpoint, its parameters and its response shapes.
     In an environment holding real borrower files there is no reason to route them
@@ -383,7 +383,7 @@ variable "enable_tls" {
   description = <<-EOT
     Create the HTTPS listener and turn port 80 into a redirect.
 
-    ⚠️ PHASE GATE. false on the first apply (no certificate exists yet); true on the
+    PHASE GATE. false on the first apply (no certificate exists yet); true on the
     second, once DNS delegation is live and ACM has issued.
   EOT
   type        = bool
@@ -422,7 +422,7 @@ variable "enable_cognito" {
   description = <<-EOT
     Put an authenticate-cognito action in front of every listener rule.
 
-    ⚠️ Requires enable_tls — an ALB cannot attach this action to an HTTP listener.
+    Requires enable_tls — an ALB cannot attach this action to an HTTP listener.
     A precondition fails the plan rather than letting the environment come up
     unauthenticated while appearing configured.
   EOT
@@ -457,7 +457,7 @@ variable "cognito_session_timeout_seconds" {
   description = <<-EOT
     ALB authentication session lifetime.
 
-    ⚠️ DELIBERATELY LONG. When a session expires mid-use, an in-flight fetch()
+    DELIBERATELY LONG. When a session expires mid-use, an in-flight fetch()
     receives a 302 toward the hosted login page — which browser JavaScript cannot
     follow, so the application fails in ways that look like application bugs rather
     than an expired login. A long session moves expiry to BETWEEN visits.

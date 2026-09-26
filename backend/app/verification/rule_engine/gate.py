@@ -90,13 +90,13 @@ def evaluate_gate(
     5. the minimum load-bearing confidence is below ``confidence_floor`` → ``needs_review``.
     6. else → ``PASS`` (the rule may run and return satisfied/fired).
 
-    ⚠️ WHY CHECK 3 EXISTS. The other four cannot see a confidently-WRONG parsed value: it is present, not
+    WHY CHECK 3 EXISTS. The other four cannot see a confidently-WRONG parsed value: it is present, not
     ``"unknown"``, uncontradicted, and a parsed passthrough carries ``confidence=None`` — which the
     minimum below FILTERS OUT, and skips entirely when every load-bearing tag is parsed. So a rule whose
     inputs are all parsed (IH-1) had NO confidence defence at all. Check 3 is that defence: a field with a
     CONFIRMED wrong value in the corpus degrades the verdict instead of auto-asserting it.
 
-    ⚠️ DISTRUSTED IS A FIFTH STATE, not a fourth. It is not absent (the value is there), not empty, not
+    DISTRUSTED IS A FIFTH STATE, not a fourth. It is not absent (the value is there), not empty, not
     ``"unknown"`` (the extractor was confident), and not low-confidence (there is no confidence to read).
     It must not collapse into any of them — hence its own check and its own reason.
 
@@ -119,7 +119,7 @@ def evaluate_gate(
             # processor nothing and, worse, sounds like a reading failure when the fact simply is not in
             # the document.
             #
-            # ⚠️ ONLY a NON-AI tag's reasoning. A derived or parsed tag's sentence is authored code,
+            # ONLY a NON-AI tag's reasoning. A derived or parsed tag's sentence is authored code,
             # reviewable and stable. An AI tag's is model prose of unpredictable length written for a
             # different audience — the 400-word paragraph that made AS-12's card unreadable. Those keep
             # the generic wording until the composer layer can summarise them.
@@ -136,7 +136,7 @@ def evaluate_gate(
     # LP-508 / ADR-377 — the fifth defence. Ordered AFTER absent/"unknown" (a missing value is a more
     # specific and more useful message than a distrusted one) and BEFORE contradiction, so a distrusted
     # field is reported as such rather than as a disagreement.
-    # ⚠️ ``distrust_tag_ids`` OVERRIDES the map's keys, and the consistency path REQUIRES it (reported
+    # ``distrust_tag_ids`` OVERRIDES the map's keys, and the consistency path REQUIRES it (reported
     # finding). A consistency rule gathers ONE tag across many documents, so it keys the gate map by
     # document ``content_id`` to keep the instances distinct — meaning ``tag_id in distrusted`` compared a
     # document id against tag ids and could never match. ID-3 was on the distrust list and unprotected in

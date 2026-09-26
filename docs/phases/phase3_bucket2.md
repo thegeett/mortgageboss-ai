@@ -25,7 +25,7 @@ Confirm whether it needs a Priya tolerance (how close must stub-annualized be to
 Per-borrower enumeration (reuse LP-389-A's primitive — no second mechanism)
 Tests + doc
 LP-406-4 — OC-1 (Occupancy) · 3 pts
-⚠️ Spec-wording trap (LP-405 finding): its produced AI tag measures declaration consistency, not address signals (the LP-371 D3 caveat) — word the spec to what the tag actually measures, or it becomes structurally dead
+Spec-wording trap (LP-405 finding): its produced AI tag measures declaration consistency, not address signals (the LP-371 D3 caveat) — word the spec to what the tag actually measures, or it becomes structurally dead
 Rides OC-2's live producer
 Phase 0 must confirm the tag's real semantics before writing the verdict logic
 Tests + doc
@@ -139,8 +139,8 @@ Unblocks: PC-5 (does the contract's earnest money match the bank-statement depos
 First: the boundary. Live AS-2 currently approximates this cross-document EMD match, and its own spec says the real check is "not cleanly expressible today"
 Decide: does PC-5 replace AS-2's approximation, complement it, or does AS-2 narrow its scope? Two rules firing on one finding is processor noise
 Then build the EMD-match derived producer and write PC-5
-⚠️ Touches a live rule — any AS-2 change needs its own equivalence proof
-LP-407-6 — Extend the purchase_agreement extractor · 5 pts · ⚠️ Bucket 4 discipline
+Touches a live rule — any AS-2 change needs its own equivalence proof
+LP-407-6 — Extend the purchase_agreement extractor · 5 pts · Bucket 4 discipline
 
 Unblocks: PC-4, PC-6, PC-8, PC-9
 

@@ -163,13 +163,13 @@ class Condition(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         str_enum(BucketKind), default=BucketKind.UNKNOWN, nullable=False
     )
 
-    #: ⚠️ NPI — the lender's words. Soft hyphen → "-", non-breaking space → space, whitespace
+    #: NPI — the lender's words. Soft hyphen → "-", non-breaking space → space, whitespace
     #: collapsed, and NOTHING else. Never paraphrased.
     verbatim_text: Mapped[str] = mapped_column(Text, nullable=False)
     #: sha256 of the normalised text WITH UNDERWRITER NOTES REMOVED. Not NPI, and it is what the
     #: matching runs on — which is why the text itself never has to be compared in SQL.
     text_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
-    #: ⚠️ NPI — `[{date, text, first_seen_round_id}]`. A dated note the underwriter appended inside
+    #: NPI — `[{date, text, first_seen_round_id}]`. A dated note the underwriter appended inside
     #: the condition's text, meaning it came back. Kept as structure AND left inside `verbatim_text`:
     #: the lender wrote one string, and a UI that showed the note as ours would misattribute it.
     underwriter_notes: Mapped[list[dict[str, Any]]] = mapped_column(
@@ -187,7 +187,7 @@ class Condition(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     #: The canonical condition type, from the code map. Stage 3 fills the rest of the taxonomy.
     canonical_type_id: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
 
-    #: ⚠️ Both created here and NOT MOVED IN STAGE 1 (ADR-404).
+    #: Both created here and NOT MOVED IN STAGE 1 (ADR-404).
     prep_status: Mapped[ConditionPrepStatus] = mapped_column(
         str_enum(ConditionPrepStatus), default=ConditionPrepStatus.TO_DO, nullable=False
     )

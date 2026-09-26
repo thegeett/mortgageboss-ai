@@ -143,7 +143,7 @@ tags:
   # LP-366-A — the loan's total STATED income (sum of the borrowers' MISMO income lines). STAGED ahead of
   # its consumer: AS-1 will read this via a `loan_tag` operand instead of the gated DTI calc (LP-366-B); no
   # rule reads it yet. Fail-closed to unknown, never 0.
-  #   ⚠️ VOCABULARY MISMATCH (needs xlsx reconciliation): fact_tags.csv describes this as
+  #   VOCABULARY MISMATCH (needs xlsx reconciliation): fact_tags.csv describes this as
   #   "sum of income.qualifying_monthly", but the recipe reads MISMO STATED income (the AI qualifying tag
   #   is underspecified — LP-343 F2 — and degraded on the real run). STATED income >= QUALIFYING (qualifying
   #   haircuts declining/variable pay), so a threshold sized on this is 50%-of-STATED, LOOSER than
@@ -194,16 +194,16 @@ tags:
   #     field the DTI reads directly from the extraction (services/dti.py), so the tag agrees with the DTI
   #     line. It does NOT unblock the DTI (which never read this tag — it reads the extraction); it closes
   #     the orphan and serves the tag's own consumers (DT-1/DT-5/IH-1, inert). Fail-closed to unknown,
-  #     never 0 (absent≠0 — a 0 premium makes the DTI confidently too-low). ⚠️ VOCABULARY DRIFT: the CSV
+  #     never 0 (absent≠0 — a 0 premium makes the DTI confidently too-low). VOCABULARY DRIFT: the CSV
   #     says produced_by=AI; it is DERIVED here (needs xlsx reconciliation).
   housing.insurance_monthly: {mode: derived, subject: loan, data: housing_insurance_monthly}
   # LP-407-2 — the DT-2/DT-4 monthly-conversion producers, the housing.insurance_monthly shape. Both read the
   # SAME extracted fields the DTI reads directly (services/dti.py), so each agrees with (or, on ambiguity,
   # abstains stricter than) the DTI line. Fail-closed to unknown, never 0 (absent≠0). housing.taxes_monthly
   # ALSO closes the DTI's last required-input orphan (it was _KNOWN_LIVE_ORPHANS — now produced).
-  #   ⚠️ VOCABULARY DRIFT (needs xlsx reconciliation): fact_tags.csv says produced_by=parsed/AI (taxes) and
+  #   VOCABULARY DRIFT (needs xlsx reconciliation): fact_tags.csv says produced_by=parsed/AI (taxes) and
   #   =AI (hoa); both are DERIVED here (a monthly conversion, no AI call) — the housing.insurance_monthly case.
-  #   ⚠️ HOA PERIODICITY (LP-407-2 D3 / ADR-328): an unstated/unrecognized dues_frequency FAILS CLOSED to
+  #   HOA PERIODICITY (LP-407-2 D3 / ADR-328): an unstated/unrecognized dues_frequency FAILS CLOSED to
   #   unknown here — a tag must not assume a periodicity (a 12x silent error). The DTI originally defaulted that
   #   case to monthly (the LP-407-2 finding); LP-413/ADR-329 fixed it so the DTI now gates too — the two agree.
   housing.taxes_monthly: {mode: derived, subject: loan, data: housing_taxes_monthly}
@@ -224,7 +224,7 @@ tags:
   property.estimated_value: {mode: parsed, subject: loan, data: property.estimated_value}
   # LP-454 (step D.3) — the purchase agreement's earnest-money amount (PC-5 / AS-2). A PARSED document fact
   # from the purchase_agreement extractor's earnest_money_amount field — POPULATED + clean (a number: 5000.0 on
-  # LF-6T3N). ⚠️ NOT an unblock on its own: PC-5 also needs contract.emd_sourced (the sourced-debit AI match
+  # LF-6T3N). NOT an unblock on its own: PC-5 also needs contract.emd_sourced (the sourced-debit AI match
   # tying AS-2), so the rule stays blocked. Was a vocabulary orphan (fact_tags, no producer); this gives it one.
   # document_type-SCOPED to purchase_agreement (LP-454 review): earnest_money_amount is ALSO emitted by the
   # earnest_money_receipt extractor, so an unscoped tag would mis-materialise the receipt's amount here — this
@@ -257,7 +257,7 @@ tags:
   #     (ins.loan_effective_date) so the loan-enumerated IH-3 can compare it to contract.loan_closing_date —
   #     the contract.closing_date → contract.loan_closing_date shape (LP-389-A), with housing.insurance_monthly's
   #     multi-binder abstain (two binders disagree → unknown). Dates compare natively (type: date, ID-5).
-  #     ⚠️ ins.effective_date is scoped by FIELD NAME (a document parsed tag), and `effective_date` is ALSO
+  #     ins.effective_date is scoped by FIELD NAME (a document parsed tag), and `effective_date` is ALSO
   #     emitted by the divorce_decree extractor — so this tag also materializes on a decree. The
   #     _loan_effective_date recipe therefore reads it ONLY from homeowners_insurance documents (see the recipe;
   #     the same id.id_expiration leak-guard), never every subject carrying the tag. --------------------------- #
@@ -265,12 +265,12 @@ tags:
   ins.loan_effective_date: {mode: derived, subject: loan, data: loan_effective_date}
   # --- LP-509-D1 — IH-9's input, the same two-step shape as the effective date directly above. The binder's
   #     typed-core expiration_date is read as a DOCUMENT parsed tag, then a loan-level DERIVED verdict compares
-  #     it to the snapshot's own build date. ⚠️ Against the FILE DATE, not the closing date: an expired policy
+  #     it to the snapshot's own build date. Against the FILE DATE, not the closing date: an expired policy
   #     is expired whether or not a closing date is known, and gating that on one is what hid a 13-month-lapsed
   #     policy on LF-WCHG behind IH-3's couldnt_check. `expiration_date` is emitted by the flood-policy and
   #     insurance-quote extractors too, so — exactly like _loan_effective_date — the recipe reads it ONLY from
   #     homeowners_insurance documents. -------------------------------------------------------------------- #
-  #     ⚠️ SCOPED with document_type, unlike ins.effective_date beside it. An unscoped parsed declaration
+  #     SCOPED with document_type, unlike ins.effective_date beside it. An unscoped parsed declaration
   #     matches a distrusted (document_type, field) pair on FIELD NAME ALONE (distrust.py, deliberately
   #     conservative) — and `expiration_date` is distrusted on drivers_license, where the extractor
   #     hallucinated dates on docs 146/294. Unscoped, this tag would inherit a distrust measured on a
@@ -291,7 +291,7 @@ tags:
   #     consistency normalizers), NOT the AI-at-rule-time the CSV plans — so PC-3 routes "no" to needs_review
   #     (ADR-325: the normalizers cannot expand St->Street). Reads the MISMO SUBJECT address (property.address_*),
   #     NEVER the borrower's mailing address or a retained-property tax bill (the D1 trap). Fail-closed to unknown.
-  #   ⚠️ VOCABULARY DRIFT (needs xlsx reconciliation): fact_tags.csv says produced_by=AI (AI-at-rule-time,
+  #   VOCABULARY DRIFT (needs xlsx reconciliation): fact_tags.csv says produced_by=AI (AI-at-rule-time,
   #   "tolerant"); it is DERIVED here (deterministic, less tolerant). The AI-tolerant version is the future
   #   refinement that would reduce PC-3's needs_review noise (a calibration ticket) — the housing.insurance_monthly
   #   drift precedent. -------------------------------------------------------------------------------------------- #
@@ -302,7 +302,7 @@ tags:
   #     LP-366-A/367). occupancy.stated is DERIVED (a MISMO→enum mapping, not parsed — see the recipe).
   #     occupancy.consistent_with_signals is the FIRST loan-subject AI group; its context is the loan's
   #     MISMO facts (the 1003 declaration signals — NOT address signals, which are not in that context). #
-  # ⚠️ VOCABULARY DRIFT (needs xlsx reconciliation): fact_tags.csv classifies occupancy.stated
+  # VOCABULARY DRIFT (needs xlsx reconciliation): fact_tags.csv classifies occupancy.stated
   #    produced_by=parsed and used_by=OC-1 — STALE. It is DERIVED here (D1: a parsed passthrough would emit
   #    MISMO's "primary_residence", not the tag's "primary" enum), and OC-2 (LIVE) is now its consumer.
   occupancy.stated: {mode: derived, subject: loan, data: occupancy_stated}
@@ -315,7 +315,7 @@ tags:
   # "n/a" specially, `evaluate_gate` short-circuits on None and "unknown" only, so "n/a" passes the gate like
   # any other present value. OC-3 and IN-14 now each declare a `judgment.applicability` predicate
   # (occupancy.rental_support ne "n/a") — that is what turns this value into not_applicable.
-  # ⚠️ VOCABULARY DRIFT (needs xlsx reconciliation) — rule_tags.csv has NO OC-3 rows at all, and no
+  # VOCABULARY DRIFT (needs xlsx reconciliation) — rule_tags.csv has NO OC-3 rows at all, and no
   # `IN-14,occupancy.rental_support` row, though fact_tags.csv already names OC-3 as this tag's consumer
   # and DT-7 has its edge. rule_tags.csv is GENERATED from the "Rule → Tags" sheet of
   # docs/snapshot-fact-tags.xlsx, and unlike the vocabulary it has NO vocabulary_extra.yaml overlay, so
@@ -361,7 +361,7 @@ tags:
   # LP-483 — the FIRST produced liab.* tag. Parsed from whichever source the subject came from (the
   # liability family's alias map resolves the column: the tradeline's `monthly_payment`, the MISMO
   # liability's `monthly_payment`). A raw number, so no classification is involved.
-  # ⚠️ `liab.account_type` is deliberately NOT declared here: its vocabulary enum
+  # `liab.account_type` is deliberately NOT declared here: its vocabulary enum
   # (revolving/installment/mortgage/...) does not match either source's raw codes (REV/AUTO/MTG;
   # MortgageLoan/Installment), and mapping between them is the open-vocabulary classification ADR-353
   # defers to Priya. A parsed tag is NOT validated against allowed_values, so declaring it would ship
@@ -397,7 +397,7 @@ tags:
   credit.tradeline_count: {mode: derived, subject: loan, data: credit_tradeline_count}
   credit.tradeline_monthly_payment_total: {mode: derived, subject: loan, data: credit_tradeline_monthly_payment_total}
   # LP-454 (step D.3) — the credit report's PULL DATE (CR-13). A PARSED document fact from the credit_report
-  # extractor's report_date field — POPULATED + clean (a date: 2026-07-17 on LF-96SV). ⚠️ NOT an unblock on its
+  # extractor's report_date field — POPULATED + clean (a date: 2026-07-17 on LF-96SV). NOT an unblock on its
   # own: CR-13 also needs a Priya validity WINDOW + a derived date-vs-today (closing − report_date), so the rule
   # stays blocked. Was a vocabulary orphan (fact_tags, no producer); this gives it one.
   # document_type-SCOPED to credit_report (LP-454 review): report_date is ALSO emitted by appraisal /
@@ -408,7 +408,7 @@ tags:
 
   # --- LP-487 — IH-2 (mortgagee clause) and IH-7 (condo master policy). ------------------------------ #
   #
-  # ⚠️ EVERY PARSED TAG HERE IS document_type-SCOPED. `lender_name` is a field on TEN document types and
+  # EVERY PARSED TAG HERE IS document_type-SCOPED. `lender_name` is a field on TEN document types and
   # `policy_number` on many more; an unscoped declaration matches on FIELD NAME ALONE and would read a
   # 1098's servicer, or a VOE's requester, as this loan's creditor. Scope is the whole safety of the
   # compare — see the note in vocabulary_extra.yaml.
@@ -426,7 +426,7 @@ tags:
   # resolver reads a real fact rather than silently defaulting.
   loan.refinance_type: {mode: parsed, subject: loan, data: loan.refinance_type}
   loan.note_amount: {mode: parsed, subject: loan, data: loan.note_amount}
-  # ⚠️ document_type-SCOPED. `appraised_value` is the appraisal's own field; reading it unscoped would let
+  # document_type-SCOPED. `appraised_value` is the appraisal's own field; reading it unscoped would let
   # a future document reusing the name drive the LTV denominator.
   property.appraised_value: {mode: parsed, subject: document, data: appraised_value, document_type: appraisal}
   property.value_basis: {mode: derived, subject: loan, data: property_value_basis}
@@ -445,13 +445,13 @@ tags:
   #     not there (IH-7's reasoning). ------------------------------------------------------------------ #
   condo.questionnaire_present: {mode: derived, subject: loan, data: condo_questionnaire_present}
 
-  # --- LP-491 — TI-1 (title commitment parties). ⚠️ EVERY PARSED TAG document_type-SCOPED: `seller_name`
+  # --- LP-491 — TI-1 (title commitment parties). EVERY PARSED TAG document_type-SCOPED: `seller_name`
   #     and `vested_owner_name` both mean something specific to their own document. ------------------- #
   title.vested_owner_name: {mode: parsed, subject: document, data: vested_owner_name, document_type: title_commitment}
   title.vested_owner_name_2: {mode: parsed, subject: document, data: vested_owner_name_2, document_type: title_commitment}
   contract.seller_name: {mode: parsed, subject: document, data: seller_name, document_type: purchase_agreement}
   title.vested_owner_matches: {mode: derived, subject: document, data: title_vested_owner_matches}
-  # LP-491 — TI-2's two inputs, and TI-6's three deterministic chain facts. ⚠️ All document_type-scoped.
+  # LP-491 — TI-2's two inputs, and TI-6's three deterministic chain facts. All document_type-scoped.
   title.legal_description: {mode: parsed, subject: document, data: legal_description, document_type: title_commitment}
   title.property_address: {mode: parsed, subject: document, data: property_address, document_type: title_commitment}
   title.chain_transfer_count: {mode: derived, subject: document, data: title_chain_transfer_count}
@@ -460,21 +460,21 @@ tags:
   # --- LP-492 — PR-2. Reads the ALREADY-DECLARED property.appraised_value (LP-488) and
   #     property.purchase_price (MISMO), so the two sides come from TWO DOCUMENTS — not a vacuity.
   property.value_vs_price_gap: {mode: derived, subject: loan, data: property_value_vs_price_gap}
-  # --- LP-492 — PR-3 / PR-4 / PR-5 / PR-7. ⚠️ Every parsed tag document_type-scoped to `appraisal`. ---
+  # --- LP-492 — PR-3 / PR-4 / PR-5 / PR-7. Every parsed tag document_type-scoped to `appraisal`. ---
   property.condition_rating_raw: {mode: parsed, subject: document, data: condition_rating, document_type: appraisal}
   property.condition_rating: {mode: derived, subject: document, data: property_condition_rating}
   property.appraisal_completion_condition: {mode: parsed, subject: document, data: appraisal_completion_condition, document_type: appraisal}
   property.appraisal_property_type: {mode: parsed, subject: document, data: property_type, document_type: appraisal}
   property.appraisal_address_match: {mode: derived, subject: document, data: property_appraisal_address_match}
 
-  # --- LP-493 — PC-5 and PC-8. ⚠️ contract.emd_amount is ALREADY declared (parsed, purchase_agreement).
+  # --- LP-493 — PC-5 and PC-8. contract.emd_amount is ALREADY declared (parsed, purchase_agreement).
   #     contract.arms_length and title.parties_match are deliberately NOT declared — see LP-493.md.
-  #     ⚠️ emd_sourced is BORROWER-scoped, not document-scoped: tracing a deposit needs the contract AND
+  #     emd_sourced is BORROWER-scoped, not document-scoped: tracing a deposit needs the contract AND
   #     the bank statements together, and a document-subject group sees only its own document.
   contract.emd_sourced: {mode: ai, subject: borrower, data: contract_emd}
   contract.personal_property: {mode: ai, subject: document, data: contract_personal_property}
 
-  # --- LP-488 — AU-3 (AUS recommendation). ⚠️ DERIVED, NOT PARSED, and that is the whole point. The raw
+  # --- LP-488 — AU-3 (AUS recommendation). DERIVED, NOT PARSED, and that is the whole point. The raw
   #     `recommendation` field is VENDOR-SPECIFIC: DU prints "Approve/Eligible", LPA prints "Accept" —
   #     and the ONE aus_findings document in the corpus is an LPA whose recommendation reads "ACCEPT",
   #     which is not in the tag's DU-shaped vocabulary at all. A parsed passthrough compared for equality
@@ -482,7 +482,7 @@ tags:
   #     declared closed vocabulary, abstain on anything else. ------------------------------------------ #
   aus.recommendation: {mode: derived, subject: document, data: aus_recommendation}
 
-  # --- LP-490 — the credit AI cohort. ⚠️ EVERY TAG HERE IS UNCALIBRATED; every rule reading one is INERT
+  # --- LP-490 — the credit AI cohort. EVERY TAG HERE IS UNCALIBRATED; every rule reading one is INERT
   #     (`not-calibratable-yet` → is_eligible False, LP-484). Declared so they MATERIALIZE and can be
   #     scored later; nothing here goes live in this ticket. ---------------------------------------- #
   credit.inquiry_explained: {mode: ai, subject: borrower, data: credit_inquiries}
@@ -490,7 +490,7 @@ tags:
   liab.is_derogatory: {mode: ai, subject: liability, data: credit_derogatory}
   liab.derogatory_type: {mode: ai, subject: liability, data: credit_derogatory}
   liab.derogatory_date: {mode: ai, subject: liability, data: credit_derogatory}
-  # CR-8's mortgage-history facts. ⚠️ structured_history_confident is Priya's OWN gate: when the payment
+  # CR-8's mortgage-history facts. structured_history_confident is Priya's OWN gate: when the payment
   #     history cannot be read reliably, CR-8 must say so rather than parse an ambiguous string.
   liab.payment_status: {mode: ai, subject: liability, data: credit_mortgage_history}
   liab.is_mortgage: {mode: ai, subject: liability, data: credit_mortgage_history}
@@ -505,7 +505,7 @@ tags:
   credit.largest_single_collection_balance: {mode: derived, subject: borrower, data: credit_largest_single_collection_balance}
   credit.has_collections: {mode: derived, subject: borrower, data: credit_has_collections}
   # CR-10's DU branch reads the subject property's OCCUPANCY. It is a MISMO fact that has always been in
-  # the snapshot and was never declared, so it reached no rule. ⚠️ Absent occupancy must abstain, never
+  # the snapshot and was never declared, so it reached no rule. Absent occupancy must abstain, never
   # default to the most permissive cell (one-unit primary requires no payoff at all).
   property.occupancy: {mode: parsed, subject: loan, data: property.occupancy}
   # IH-2's CONCLUSION tag, already in the generated fact_tags.csv (enum yes|no|unknown), declared DERIVED
@@ -520,19 +520,19 @@ tags:
 
   # --- LP-494 — the CONDO PROJECT lane (CO-4 reserves, CO-5 eligibility). ---------------------------- #
   #
-  # ⚠️ EVERY PARSED TAG HERE IS document_type-SCOPED to condo_questionnaire (LP-487's discipline).
+  # EVERY PARSED TAG HERE IS document_type-SCOPED to condo_questionnaire (LP-487's discipline).
   # `total_units` in particular is a plausible field name on other forms; an unscoped read would let an
   # unrelated document decide a project's single-entity concentration tier.
   #
-  # ⚠️ THE CATALOG SAID "AI parses the budget". THERE IS NO BUDGET DOCUMENT TYPE — an HOA budget cannot be
+  # THE CATALOG SAID "AI parses the budget". THERE IS NO BUDGET DOCUMENT TYPE — an HOA budget cannot be
   # classified, extracted, or attached, so it reaches no loan file. The reserve percentage is a TYPED
   # questionnaire field, which is why these are `parsed` and not an ai_group (LP-494 Phase A §4).
   #
-  # ⚠️ ALL SIX FILL 0/4 ON THE BENCH CORPUS, and the bars say so. The two questionnaires there are a
+  # ALL SIX FILL 0/4 ON THE BENCH CORPUS, and the bars say so. The two questionnaires there are a
   # CANCELLATION NOTICE and a genuinely UNANSWERED standard form (all 90 of its catch-all labels carry an
   # empty value — verified at the document, not inferred from a fill rate). Declared because the fields
   # exist and the document type is real, NOT because data has been seen. Both rules are INERT.
-  # ⚠️ TWO SOURCES, AND THE SECOND IS THE ONE THAT RESOLVES (LP-494 follow-up). The reserve percentage
+  # TWO SOURCES, AND THE SECOND IS THE ONE THAT RESOLVES (LP-494 follow-up). The reserve percentage
   # was first declared on the condo questionnaire, where it fills 0/4. The HOA STATEMENT carries its own
   # `reserve_percentage`, and that fills on 6 of 59 real statements — four of them stating exactly "10",
   # the current Fannie floor. So `condo.reserve_pct` reads the HOA statement (the resolving source) and
@@ -540,7 +540,7 @@ tags:
   # abstains if they disagree — the IH-7 no-cross-document-pooling discipline.
   condo.reserve_pct: {mode: parsed, subject: document, data: reserve_percentage, document_type: hoa_statement}
   condo.reserve_pct_questionnaire: {mode: parsed, subject: document, data: reserve_contribution_percentage, document_type: condo_questionnaire}
-  # ⚠️ THE 60-DAY MEASURE, NOT THE GENERIC ONE (reported finding). This was parsed straight from the
+  # THE 60-DAY MEASURE, NOT THE GENERIC ONE (reported finding). This was parsed straight from the
   # questionnaire's `delinquency_percentage`, a field the extractor prompt attaches NO definition to —
   # while the vocabulary, every reason string and CO-5 all describe it as "units 60+ days past due" and
   # compare it to B4-2.2-02's 60-day 15% cap. A form reporting "% delinquent (30+ days): 22%" made CO-5
@@ -557,7 +557,7 @@ tags:
   loan.application_received_date: {mode: parsed, subject: loan, data: loan.application_received_date}
   # The two LOAN-scoped verdicts, derived. Loan-scoped for IH-7's reason: "absent" is a statement about the
   # FILE, and no per-document tag can be produced for a document that is not there.
-  # LP-494 (revised) — CO-3's fidelity leg. ⚠️ NOT A DUPLICATE OF IH-7: IH-7's spec header explicitly
+  # LP-494 (revised) — CO-3's fidelity leg. NOT A DUPLICATE OF IH-7: IH-7's spec header explicitly
   # excludes fidelity/crime, so this is the one condo-insurance question no live rule asks. Both fields
   # fill 8/8 on the bench's master policies — the strongest-resolving input in the whole condo lane.
   condo.fidelity_present_raw: {mode: parsed, subject: document, data: fidelity_crime_coverage_present, document_type: master_insurance_policy_for_condominium}
@@ -572,14 +572,14 @@ tags:
   ins.condo_master_policy: {mode: derived, subject: loan, data: condo_master_policy}
 
   # --- LP-495a — the mortgage-statement ↔ stated-liability reconciliation, and LOE completeness. ------ #
-  # ⚠️ ONE MATCHER, TWO RULES (ADR-375). Both `reo.*` recipes call the SAME `_reo_match_statement`, so
+  # ONE MATCHER, TWO RULES (ADR-375). Both `reo.*` recipes call the SAME `_reo_match_statement`, so
   # RE-1 (is it disclosed?) and DT-6 (does the stated payment cover it?) can never disagree about which
   # stated liability a given statement matched. Two matchers would allow exactly that — the CR-1/CR-4
   # precedent this discipline comes from.
-  # ⚠️ DERIVED, NOT PARSED, and per DOCUMENT. The recipes read the mortgage statement's own extracted
+  # DERIVED, NOT PARSED, and per DOCUMENT. The recipes read the mortgage statement's own extracted
   # fields off the document subject (the IH-2 `mortgagee_clause_correct` shape) and compare them against
   # the MISMO `liability.{k}.*` facts. A parsed tag could carry neither the comparison nor the abstains.
-  # ⚠️ NEITHER TAG READS `property.is_retained_reo` OR `property.retained_pitia` — those have no entry in
+  # NEITHER TAG READS `property.is_retained_reo` OR `property.retained_pitia` — those have no entry in
   # this file and no producer, deliberately (see vocabulary_extra.yaml).
   reo.statement_disclosure: {mode: derived, subject: document, data: reo_statement_disclosure}
   reo.statement_payment_coverage: {mode: derived, subject: document, data: reo_statement_payment_coverage}
@@ -587,7 +587,7 @@ tags:
   # resolves to not_applicable rather than couldnt_check. Needed because the applicability DSL has only
   # eq/ne while LO-2's scope is eight document types (LP-487's predicate-not-outcome discipline).
   loe.is_explanation_letter: {mode: derived, subject: document, data: loe_is_explanation_letter}
-  # ⚠️ Materialises on the LOE types ONLY (the recipe DECLINES elsewhere), so the completeness tag lands
+  # Materialises on the LOE types ONLY (the recipe DECLINES elsewhere), so the completeness tag lands
   # on the documents LO-2 reads and nowhere else.
   loe.completeness: {mode: derived, subject: document, data: loe_completeness}
 
@@ -603,17 +603,17 @@ ai_groups:
   # LP-490 — CR-5's inquiry check. PER BORROWER, because "was each inquiry explained?" is a question
   # about the borrower's file as a whole: the answer needs the inquiries, the tradelines that may have
   # resulted from them, and any letters of explanation, together.
-  # ⚠️ n≈0 — ONE inquiry row exists across all three real credit reports. This group is built and
+  # n≈0 — ONE inquiry row exists across all three real credit reports. This group is built and
   # UNCALIBRATED; CR-5 is inert.
   # LP-493 — PC-5's earnest-money trace. PER BORROWER, because the question needs BOTH sides: the
   # contract states the deposit, the bank statements show whether it left a verified account.
-  # ⚠️ THIS IS THE RARE TESTABLE CROSS-SOURCE RULE. LP-480 found most two-source combinations exist on no
+  # THIS IS THE RARE TESTABLE CROSS-SOURCE RULE. LP-480 found most two-source combinations exist on no
   # file at all; LF-6T3N carries a purchase agreement AND bank statements, so PC-5 can actually be proven.
   contract_emd:
     subject: borrower
     context_builder: borrower
     applies_to: [purchase_agreement, bank_statement]
-    # ⚠️ LP-493a — BOTH opt-ins are load-bearing, and PC-5 abstained on LF-6T3N without them.
+    # LP-493a — BOTH opt-ins are load-bearing, and PC-5 abstained on LF-6T3N without them.
     #   include_unattributed_documents: a purchase agreement is a PROPERTY document with no belongs_to,
     #     so borrower-scoped gathering dropped it and the model never saw the deposit it was asked about.
     #   include_transactions: a statement's transactions live in the legacy `entry.transactions`
@@ -653,7 +653,7 @@ ai_groups:
       [{"index": <i>, "emd_sourced": {"value","confidence","reasoning"}}]
 
   # LP-493 — PC-8's personal property. PER DOCUMENT (the contract).
-  # ⚠️ THE FIELD IS FREE TEXT, not the yes/no the vocabulary row implies: the four real contracts read
+  # THE FIELD IS FREE TEXT, not the yes/no the vocabulary row implies: the four real contracts read
   # "None", "Gas Logs in fireplace...", "Refrigerator, Washer/Dryer". So this is a reading, not a lookup.
   contract_personal_property:
     subject: document
@@ -691,7 +691,7 @@ ai_groups:
     subject: borrower
     context_builder: borrower
     applies_to: [credit_report, letter_of_explanation]
-    # ⚠️ include_lists IS LOAD-BEARING (reported finding). `inquiries[]` and `tradelines[]` are GENERIC
+    # include_lists IS LOAD-BEARING (reported finding). `inquiries[]` and `tradelines[]` are GENERIC
     # LISTS, and the borrower context serialises them ONLY on this opt-in. Without it the prompt asked the
     # model to match each inquiry to the tradeline it produced and to an explanation letter while the
     # context contained neither list — so credit.inquiry_explained was structurally always "unknown" and
@@ -724,7 +724,7 @@ ai_groups:
 
   # LP-490 — CR-6's derogatory facts. PER LIABILITY: seasoning is a property of ONE event, and the
   # finding must name which. Three tags co-produced by one read of one tradeline.
-  # ⚠️ ZERO public-record rows and no collection/charge-off codes exist on any of the three real
+  # ZERO public-record rows and no collection/charge-off codes exist on any of the three real
   # reports. This group is built against the schema, not against observed data.
   credit_derogatory:
     subject: liability
@@ -758,7 +758,7 @@ ai_groups:
         "derogatory_type": {"value","confidence","reasoning"},
         "derogatory_date": {"value","confidence","reasoning"}}]
 
-  # LP-490 — CR-8's mortgage history. PER LIABILITY. ⚠️ THE CONFIDENCE GATE IS PRIYA'S OWN DESIGN:
+  # LP-490 — CR-8's mortgage history. PER LIABILITY. THE CONFIDENCE GATE IS PRIYA'S OWN DESIGN:
   # structured_history_confident=false → CR-8 returns needs_review rather than interpreting.
   credit_mortgage_history:
     subject: liability
@@ -798,7 +798,7 @@ ai_groups:
         "mortgage_late_60_plus_last_12mo": {"value","confidence","reasoning"}}]
 
   # LP-490 — CR-10's collection facts. PER LIABILITY.
-  # ⚠️ ZERO collection or charge-off codes exist on any of the three real reports — the trigger is
+  # ZERO collection or charge-off codes exist on any of the three real reports — the trigger is
   # entirely unexercised. Built against the schema.
   credit_collections:
     subject: liability
@@ -1100,7 +1100,7 @@ ai_groups:
   # income_stability — PER-BORROWER over the borrower's documents (LP-385). The context is ONE borrower's
   #     MISMO facts + all documents ATTRIBUTED to them (subjects._borrower_context); the group reasons about
   #     the income TREND ACROSS the borrower's documents (which a per-document pass could not — LP-378 0/120).
-  #     ⚠️ TERM DEFINITIONS (D2) are DEFENSIBLE DEFAULTS flagged for Priya (LP-379) — not yet validated;
+  #     TERM DEFINITIONS (D2) are DEFENSIBLE DEFAULTS flagged for Priya (LP-379) — not yet validated;
   #     "materializes" is NOT "correct" (LP-385 proves production; LP-379 measures accuracy).
   income_stability:
     subject: borrower
@@ -1317,7 +1317,7 @@ ai_groups:
   # LP-418 — NSF / overdraft detection per transaction (unblocks stmt.nsf_count → AS-7). Its OWN group (not
   # txn_stage_a), scoped to depository statements. DESCRIBE what the line is; a downstream rule (AS-7) counts +
   # judges the tolerance. AS-7 is HELD on calibration (this tag is unscored) until a labeling round + Priya's bar.
-  #   ⚠️ VALUE-SPACE DRIFT (LP-418 review): the prompt offers "unknown" for a genuinely illegible line (so an
+  #   VALUE-SPACE DRIFT (LP-418 review): the prompt offers "unknown" for a genuinely illegible line (so an
   #   unreadable description does not silently count as "no" → an undercount that false-greens AS-7; stmt.nsf_count
   #   fail-closes on it). fact_tags.csv still lists ["yes","no"] — a model "unknown" is preserved anyway (ai.py
   #   coerces an off-vocab value to an "unknown"-valued tag), but the DECLARED value space should gain "unknown"

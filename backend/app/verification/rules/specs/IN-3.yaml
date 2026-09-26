@@ -30,7 +30,7 @@ reference_values:
 # summed across documents; a whole-month divisor — three errors that together reported a 62.6% income shortfall
 # on a file with none). It ALSO moved the rule to per_borrower to match IN-1, and LP-511 REVERTED that half.
 #
-# ⚠️ WHY IT IS LOAN-SCOPED AND NOT per_borrower. On the first real file the change made IN-3 produce NOTHING:
+# WHY IT IS LOAN-SCOPED AND NOT per_borrower. On the first real file the change made IN-3 produce NOTHING:
 # the per_borrower enumerator resolves borrowers through documents' `belongs_to` attribution, and on LF-WCHG
 # that attribution yields no borrower subjects at all — so did IN-1, IN-12..IN-16, ID-5, CR-4 and CR-10, none
 # of which produced a single finding there (LP-513). Moving IN-3 into that class silently retired a live rule,

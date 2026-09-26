@@ -3,18 +3,18 @@
 # A conventional loan above 80% LTV requires mortgage insurance. This computes the LTV from the base loan
 # amount and the value basis, and surfaces the requirement.
 #
-# ⚠️ THE FIRST USE OF THE PROGRAM AXIS. LP-501 established that conventional-vs-FHA IS expressible today
+# THE FIRST USE OF THE PROGRAM AXIS. LP-501 established that conventional-vs-FHA IS expressible today
 # (`LoanProgram` is a two-value enum reaching the snapshot as `program.type`), while Fannie-vs-Freddie and
 # DU-vs-manual are NOT — no field carries either. MI-1 is conventional-only and MI-4 is FHA-only; both
 # scope with an APPLICABILITY PREDICATE, never an outcome.
 #
-# ⚠️ WHY A PREDICATE AND NOT AN OUTCOME (LP-487's finding, and it is load-bearing here). The applicability
+# WHY A PREDICATE AND NOT AN OUTCOME (LP-487's finding, and it is load-bearing here). The applicability
 # layer resolves an ABSENT or "unknown" predicate tag to COULDNT_CHECK and only a DEFINITELY-FALSE one to
 # not_applicable. As an outcome, a file that does not state its program would be SILENTLY SKIPPED. On this
 # rule that is the difference between "we could not tell whether this loan needs MI" and saying nothing at
 # all. LF-6T3N states no program and correctly returns couldnt_check.
 #
-# ⚠️ MI-1 CANNOT CONFIRM THAT MI IS PRESENT — the honest limit of this rule, and the reason it never fires.
+# MI-1 CANNOT CONFIRM THAT MI IS PRESENT — the honest limit of this rule, and the reason it never fires.
 # The catalog rationale reads "LTV>80 test + PMI present". The LTV test is fully buildable. The PRESENCE
 # half has NO deterministic source in the system today:
 #   • NO document type carries an MI certificate or an MI factor. The only mortgage-insurance field
@@ -27,7 +27,7 @@
 # it" — not to `fired`. Firing would assert that MI is MISSING, which this rule cannot know. That is the
 # IH-2 shape: report what is true, ask for what cannot be verified.
 #
-# ⚠️ MI-1 reads the BASE loan amount, never the note amount. On an FHA file the note amount includes
+# MI-1 reads the BASE loan amount, never the note amount. On an FHA file the note amount includes
 # financed upfront MIP; dividing by it would overstate LTV. (MI-4 reads the difference deliberately.)
 
 rule_id: MI-1
@@ -55,7 +55,7 @@ reference_values:
   priya_validated: false          # must equal rule_kinds.csv
   threshold_needs_signoff: true   # must equal rule_kinds.csv
   values:
-    # ⚠️ PROVENANCE TIER P — the publisher's own page, READ 2026-08-13 (LP-491 follow-up). It shipped at
+    # PROVENANCE TIER P — the publisher's own page, READ 2026-08-13 (LP-491 follow-up). It shipped at
     # LP-488 as tier S with the page date marked NOT OBTAINED; the page has since been fetched and the
     # value confirmed verbatim, so the tier is raised. ADR-361: a value is cited or it is marked
     # unobtained — never recalled and dressed as read.
@@ -64,7 +64,7 @@ reference_values:
     #   page date: 04/02/2025
     #   verbatim:  "the lender must obtain a primary mortgage insurance policy for a conventional first
     #              mortgage loan that has an LTV ratio greater than 80% at the time it is purchased"
-    #   ⚠️ NOTE THE MEASUREMENT POINT: the guide states the test "at the time it is purchased" (by
+    #   NOTE THE MEASUREMENT POINT: the guide states the test "at the time it is purchased" (by
     #   Fannie). MI-1 evaluates the LTV on the file before closing, which is the processor-facing
     #   question and the earlier of the two. Recorded so the difference is not mistaken for the same
     #   moment; logged for Priya.
@@ -108,7 +108,7 @@ spec_version: 1
 # The MACHINE-READABLE deterministic body (LP-324). An "unknown" tag coerces through the gate to
 # couldnt_check BEFORE this body runs, so a missing loan amount can never reach the default.
 deterministic:
-  # ⚠️ THE PROGRAM PREDICATE — see the header. Absent/"unknown" → couldnt_check; FHA → not_applicable.
+  # THE PROGRAM PREDICATE — see the header. Absent/"unknown" → couldnt_check; FHA → not_applicable.
   applicability:
     tag: program.type
     op: eq
@@ -123,7 +123,7 @@ deterministic:
     ltv: {tag: loan.ltv_percent}
     mi_threshold: {reference: mi_required_above_ltv_percent}
   outcomes:
-    # ⚠️ needs_review, NOT fired — the rule knows MI is REQUIRED; it cannot know whether MI is PRESENT.
+    # needs_review, NOT fired — the rule knows MI is REQUIRED; it cannot know whether MI is PRESENT.
     - verdict: needs_review
       when_compare: {op: ">", left: ltv, right: mi_threshold}
       reasoning: >-
@@ -161,7 +161,7 @@ deterministic:
         Upload the appraisal report. If its value puts the loan-to-value above {mi_threshold}%, this
         conventional loan requires mortgage insurance and the premium belongs in the qualifying housing
         payment.
-    # ⚠️ THE DEFAULT IS REACHED ONLY WITH A RESOLVED, PARSEABLE LTV. A numeric compare has no third
+    # THE DEFAULT IS REACHED ONLY WITH A RESOLVED, PARSEABLE LTV. A numeric compare has no third
     # state — the tag is either above the threshold or not — and the gate routes an absent, "unknown" or
     # unparseable value to couldnt_check BEFORE this body runs. This is PR-6's structure, deliberately.
     - verdict: satisfied

@@ -34,7 +34,7 @@ resource "aws_db_subnet_group" "this" {
 # connection. The default parameter group does not enforce TLS, and the security
 # architecture assumes it.
 #
-# ⚠️ This makes the client's SSL behaviour load-bearing. See the module README:
+# This makes the client's SSL behaviour load-bearing. See the module README:
 # the URL must use `?ssl=require`, NOT the libpq spelling `?sslmode=require`,
 # which crashes the application outright.
 #
@@ -74,7 +74,7 @@ resource "random_password" "db" {
   # narrowed further so the value is genuinely safe to paste into a URL without
   # percent-encoding, which is how the READMEs say it will be used.
   #
-  # ⚠️ DO NOT re-add '#', '?' or '%'. This set previously included all three and
+  # DO NOT re-add '#', '?' or '%'. This set previously included all three and
   # the app failed to boot roughly HALF the time:
   #
   #   * '#' and '?' are gen-delims — they terminate the URL authority component.
@@ -90,7 +90,7 @@ resource "random_password" "db" {
   # URL userinfo component (RFC 3986 §3.2.1). ':' is also excluded: it separates
   # user from password, so a password containing one splits the credential.
   #
-  # ⚠️ CHANGING THIS SET ROTATES THE PASSWORD. override_special is ForceNew on
+  # CHANGING THIS SET ROTATES THE PASSWORD. override_special is ForceNew on
   # random_password — verified:
   #
   #   ~ override_special = "..." -> "..." # forces replacement
@@ -195,7 +195,7 @@ resource "aws_elasticache_subnet_group" "this" {
 # ElastiCache family strings can carry them ("redis6.x") and parameter-group names
 # cannot.
 #
-# ⚠️ MIGRATION. This is a RENAME on an existing environment (<name_prefix> ->
+# MIGRATION. This is a RENAME on an existing environment (<name_prefix> ->
 # <name_prefix>-<family>), so the next apply replaces the group and re-associates the
 # replication group. No data loss, but do it in a maintenance window: with
 # apply_immediately = false the association update is deferred, and a deferred
@@ -232,7 +232,7 @@ resource "aws_elasticache_replication_group" "this" {
   at_rest_encryption_enabled = true
   kms_key_id                 = var.kms_key_arn
 
-  # ⚠️ Transit encryption changes the CLIENT contract: REDIS_URL must use the
+  # Transit encryption changes the CLIENT contract: REDIS_URL must use the
   # rediss:// scheme. See the module README — the two Redis libraries this
   # application uses disagree on the default certificate policy for rediss://,
   # so the URL must also carry ?ssl_cert_reqs=required.
@@ -243,7 +243,7 @@ resource "aws_elasticache_replication_group" "this" {
   # with `aws elasticache modify-replication-group --auth-token ...` and written
   # into the redis-url secret. ignore_changes keeps Terraform from reverting it.
   #
-  # ⚠️ That combination is silent by construction — ignore_changes means Terraform
+  # That combination is silent by construction — ignore_changes means Terraform
   # can never report a MISSING token either. check "redis_auth_token_applied" below
   # is what makes the gap visible; do not delete it as redundant.
   lifecycle {
@@ -301,7 +301,7 @@ resource "aws_cloudwatch_log_group" "this" {
 # state, so log_retention_days did not reach it and `terraform destroy` left it
 # behind — the retention policy this module advertises as uniform had a hole in it.
 #
-# ⚠️ MIGRATION. On an environment already applied with enabled_cloudwatch_logs_exports,
+# MIGRATION. On an environment already applied with enabled_cloudwatch_logs_exports,
 # RDS has ALREADY created this group, and Terraform does not adopt existing
 # resources — the apply fails with ResourceAlreadyExistsException. Import it first:
 #

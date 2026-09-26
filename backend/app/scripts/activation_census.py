@@ -1,6 +1,6 @@
 """The activation census — every count a rule-activation ticket has to re-pin, in ONE pass.
 
-⚠️ WHY THIS EXISTS. Activating (or merely BUILDING) a rule moves roughly a dozen pinned numbers spread
+WHY THIS EXISTS. Activating (or merely BUILDING) a rule moves roughly a dozen pinned numbers spread
 across the suite, and they are pinned in TWO DIFFERENT ORDERS — some sites hold a ``set``, others a
 ``sorted`` tuple. Discovering them one failure at a time costs a full suite run (~2 minutes) per
 discovery; four tickets in a row paid that toll before this script was written.
@@ -41,11 +41,11 @@ def main() -> None:
     print("=" * 78)
 
     print(f"\n[1] ACTIVE_RULE_IDS — count = {len(ACTIVE_RULE_IDS)}")
-    print("    ⚠️ Pinned in BOTH orders. Registry order is the module's own tuple; SORTED is:")
+    print("    Pinned in BOTH orders. Registry order is the module's own tuple; SORTED is:")
     print(_fmt(active_sorted))
 
     print(f"\n[2] ELIGIBLE per is_eligible() — count = {len(eligible)}")
-    # ⚠️ A DIFFERENCE HERE IS EXPECTED, NOT A BUG: `_BASE_ACTIVE` grandfathers the pre-LP-389 rules,
+    # A DIFFERENCE HERE IS EXPECTED, NOT A BUG: `_BASE_ACTIVE` grandfathers the pre-LP-389 rules,
     # which are active without passing the gate. Watch it for CHANGE, not for emptiness.
     grandfathered = sorted(set(active_sorted) - set(eligible))
     print(f"    active but not gate-eligible (_BASE_ACTIVE): {len(grandfathered)} {grandfathered}")
@@ -58,7 +58,7 @@ def main() -> None:
 
     print("\n[4] rule_kinds.csv (test_rule_kinds, and docs/stage2-rule-classification.md)")
     kinds = load_rule_kinds()
-    print(f"    rows = {len(kinds)}   ⚠️ must stay 135")
+    print(f"    rows = {len(kinds)}   must stay 135")
     for kind in RuleKindName:
         print(f"    {kind.value:28} {len(rules_by_kind(kind))}")
     numeric = sum(1 for rk in kinds.values() if rk.numeric_check)
@@ -67,7 +67,7 @@ def main() -> None:
     print(f"    {'numeric_check':28} {numeric}")
     print(f"    {'threshold_needs_signoff':28} {signoff}")
     print(f"    {'priya_validated':28} {validated}/{len(kinds)}")
-    print("    ⚠️ After ANY csv edit: uv run python -m app.scripts.generate_rule_kinds_md")
+    print("    After ANY csv edit: uv run python -m app.scripts.generate_rule_kinds_md")
 
     print("\n[5] Vocabulary (test_fact_tags_files::test_desired_state_shape)")
     tags = load_desired_tags()

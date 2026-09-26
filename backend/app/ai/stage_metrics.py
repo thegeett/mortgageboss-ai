@@ -10,7 +10,7 @@ waiting and everything else — the number deciding whether the rest of the tick
 is the one with the least evidence behind it. This module is what turns those rows into
 measurements.
 
-⚠️ TWO DIFFERENT SECONDS, AND CONFLATING THEM IS THE WHOLE TRAP. Under concurrency they diverge by
+TWO DIFFERENT SECONDS, AND CONFLATING THEM IS THE WHOLE TRAP. Under concurrency they diverge by
 the concurrency factor, and each answers a different question:
 
 * ``latency_seconds`` — CUMULATIVE model latency, summed per call. Comparable to LP-635's

@@ -25,8 +25,8 @@ verified.
 |---|---|---|---|
 | 1 | `AI_PROVIDER=anthropic` (default) behaves **exactly** as today | ✅ **Met** | Default asserted in code *and* test; `resolve_model` is the identity function under `anthropic`; limiter defaults to unlimited (`None`). Live check with `AI_PROVIDER` unset: provider `anthropic`, all three tiers resolve to their own values, `rpm None`, client `AsyncAnthropic`. Full suite green. |
 | 2 | `AI_PROVIDER=bedrock` routes every call through Bedrock, no caller changes | ✅ **Met** | `get_anthropic_client()` returns `AsyncAnthropicBedrock`; `test_complete_sends_the_resolved_bedrock_id` asserts the wire `model` is the profile id. **Zero of the 13 `complete()` callers changed** — `git diff --stat` touches none of them. |
-| 3 | A real Bedrock call records non-zero `cost_estimate` and correct `model_used` | ⚠️ **Met in code, unproven live** | Both Bedrock profiles priced; pipeline now records `resolve_model(...)` — the model that *actually ran* — for both `model_used` and the cost key. `test_configured_models_produce_a_non_zero_estimate` passes. Needs a real call (task 10) to be *proven*. |
-| 4 | Bedrock throttling classified transient and retried | ⚠️ **Implemented, shape PENDING** | `_is_transient` matches `ThrottlingException` / `ModelNotReadyException` / `ServiceUnavailableException` in type, message **and body**, on top of 429/5xx. Tests pin both directions. The **actual** exception is unverified — see Empirical findings. |
+| 3 | A real Bedrock call records non-zero `cost_estimate` and correct `model_used` | **Met in code, unproven live** | Both Bedrock profiles priced; pipeline now records `resolve_model(...)` — the model that *actually ran* — for both `model_used` and the cost key. `test_configured_models_produce_a_non_zero_estimate` passes. Needs a real call (task 10) to be *proven*. |
+| 4 | Bedrock throttling classified transient and retried | **Implemented, shape PENDING** | `_is_transient` matches `ThrottlingException` / `ModelNotReadyException` / `ServiceUnavailableException` in type, message **and body**, on top of 429/5xx. Tests pin both directions. The **actual** exception is unverified — see Empirical findings. |
 | 5 | Truncation detection works on Bedrock (`stop_reason` verified, not assumed) | ❌ **NOT met — PENDING** | Cannot be met without a live call. Normalisation boundary + shared constant are in place so the fix is one map entry; verify script step 2 prints the exact string. |
 | 6 | Classification and extraction calls have a request timeout | ✅ **Met** | `asyncio.wait_for(..., timeout=settings.ai_request_timeout_seconds)` wraps every attempt inside `complete()`, so both paths (and the other 11 callers) are covered. `TimeoutError` classified transient → retried. |
 | 7 | Client-side rate limiting configurable per provider, applied to every call | ✅ **Met** | `app/ai/rate_limit.py`; `resolve_requests_per_minute()` picks by provider; `limiter.acquire()` runs per **attempt** in `complete()`. 8 limiter tests, none sleeping in real time. |
@@ -123,7 +123,7 @@ call `get_anthropic_client.cache_clear()`; the fixture does.
 **Response shape unchanged** — `complete()`'s handling at `:334-339` needed no edit. Both clients
 return `.content[].text`, `.usage.input_tokens/.output_tokens`, `.stop_reason`.
 
-### ⚠️ PENDING — task 4: the actual throttle exception
+### PENDING — task 4: the actual throttle exception
 
 **Not determined. Requires live calls.** `_is_transient` is implemented to be correct either way —
 it matches the three Bedrock codes in the exception type name, message, **and response body**, on
@@ -134,7 +134,7 @@ matching missed a throttle surfaced as a 400 with the code in the body.
 body, and whether `_is_transient` accepts it — failing loudly if it does not. **Record the result
 here.**
 
-### ⚠️ PENDING — task 5: the actual `stop_reason` on truncation
+### PENDING — task 5: the actual `stop_reason` on truncation
 
 **Not determined. Requires a live call.** Acceptance criterion 5 is therefore **not met**.
 
@@ -196,7 +196,7 @@ transfer because its cause is absent.
 against quota exactly as the first did, and a hung attempt would otherwise hold a Celery worker slot
 indefinitely. `TimeoutError` is classified transient so the existing loop covers it.
 
-### ⚠️ The rate limiter is PROCESS-LOCAL
+### The rate limiter is PROCESS-LOCAL
 
 **N worker tasks pace at N × the setting.** The deployed value must be *the account quota divided by
 task count*, **never the quota itself** — two tasks each pacing at 8 against a 10 RPM account still
@@ -368,7 +368,7 @@ Compare against the direct-API baseline:
 | confidence | 0.92 | 0.97 |
 | tokens | in 32,902 / out 7,887 | in 6,104 / out 3,264 |
 
-⚠️ **18 tradelines is the number that matters.** Fewer means the dense nested case is dropping rows
+**18 tradelines is the number that matters.** Fewer means the dense nested case is dropping rows
 on Bedrock where the direct API handled it. **That is a finding to report, not something to fix by
 adjusting the extractor.**
 

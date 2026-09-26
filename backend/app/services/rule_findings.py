@@ -174,7 +174,7 @@ def consolidate_unidentified_documents(results: list[RuleEvaluation]) -> list[Ru
     Returns the results with those abstentions replaced by a single loan-level evaluation naming the
     documents and the number of blocked checks. Everything else passes through untouched, in order.
 
-    ⚠️ THE VERDICT IS UNCHANGED — this collapses the QUEUE, never the conclusion. The consolidated
+    THE VERDICT IS UNCHANGED — this collapses the QUEUE, never the conclusion. The consolidated
     evaluation is still ``COULDNT_CHECK``, so the file still reads as "these checks did not run". The
     trap on the other side is the one ``pending_checks`` (LP-391) already names: *a BLOCKED rule runs
     NOTHING, so a file that qualifies for it produces SILENCE, which reads as "checked, nothing found"

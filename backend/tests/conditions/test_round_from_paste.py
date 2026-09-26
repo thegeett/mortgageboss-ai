@@ -46,7 +46,7 @@ async def _paste(
 
 
 async def test_a_paste_arrives_already_read(db_session: AsyncSession) -> None:
-    """⚠️ `DRAFT`, NOT `PARSING` — the opposite of every other door, and deliberately so. An upload
+    """`DRAFT`, NOT `PARSING` — the opposite of every other door, and deliberately so. An upload
     has bytes to fetch and pages to rasterise; a paste is text already in memory, so queuing it
     would cost the processor a "Reading…" screen for work that finished inside the request."""
     round_ = await _paste(db_session)
@@ -82,7 +82,7 @@ async def test_a_recognised_paste_keeps_the_lenders_own_columns(db_session: Asyn
 
 
 async def test_the_raw_paste_is_stored_because_it_IS_the_source(db_session: AsyncSession) -> None:
-    """⚠️ NPI (ADR-405), and kept anyway. A pasted round has no file: `raw_text` is the only copy of
+    """NPI (ADR-405), and kept anyway. A pasted round has no file: `raw_text` is the only copy of
     what the processor sent. LP-908 splits THAT text, never a reconstruction from rows the rules may
     have misread, and §9.3 checks every AI row is a substring of it."""
     text = portal_excerpt()
@@ -101,7 +101,7 @@ async def test_the_source_records_a_paste_and_nothing_it_does_not_have(
 
     assert len(round_.sources) == 1
     assert round_.sources[0]["kind"] == ConditionSourceKind.PASTE.value
-    # ⚠️ NO `storage_path`. Nothing was stored, so claiming a path would make the parse task fetch a
+    # NO `storage_path`. Nothing was stored, so claiming a path would make the parse task fetch a
     # file that does not exist instead of refusing cleanly.
     assert "storage_path" not in round_.sources[0]
 
@@ -157,7 +157,7 @@ async def test_both_events_are_written_because_both_things_happened(
     parsed = next(e for e in events if e.kind is ConditionEventKind.ROUND_PARSED)
     assert parsed.detail["reader"] == "uwm"
     assert parsed.detail["rows"] == 6
-    # ⚠️ NO NPI IN AN EVENT DETAIL (spec §9.5): counts, codes and reader names only.
+    # NO NPI IN AN EVENT DETAIL (spec §9.5): counts, codes and reader names only.
     received = next(e for e in events if e.kind is ConditionEventKind.ROUND_RECEIVED)
     assert set(received.detail) == {"source_kind", "chars"}
 
@@ -165,7 +165,7 @@ async def test_both_events_are_written_because_both_things_happened(
 async def test_a_paste_awaiting_the_ai_has_not_been_parsed_yet(
     db_session: AsyncSession,
 ) -> None:
-    """⚠️ THE ROUND'S HISTORY MUST NOT CLAIM A PARSE THAT HAS NOT HAPPENED.
+    """THE ROUND'S HISTORY MUST NOT CLAIM A PARSE THAT HAS NOT HAPPENED.
 
     A paste the rules read emits ROUND_RECEIVED and ROUND_PARSED together, because both genuinely
     happened inside the request. One that needs the AI has only ARRIVED — the split task emits
@@ -207,7 +207,7 @@ async def test_a_paste_writes_a_timeline_entry(db_session: AsyncSession) -> None
 async def test_text_the_rules_cannot_split_opens_parsing_for_the_ai(
     db_session: AsyncSession,
 ) -> None:
-    """⚠️ LP-907's DEVIATION, REVERTED NOW THAT ITS REASON HAS EXPIRED.
+    """LP-907's DEVIATION, REVERTED NOW THAT ITS REASON HAS EXPIRED.
 
     LP-907 shipped this as `DRAFT` for one stated reason: LP-908 did not exist, so `PARSING` would
     have enqueued nothing and stranded the round with no worker and no exit — the gap LP-905
@@ -239,7 +239,7 @@ async def test_a_rule_read_paste_does_not_ask_for_ai(db_session: AsyncSession) -
 async def test_draft_rows_are_stored_through_the_response_schema(
     db_session: AsyncSession,
 ) -> None:
-    """⚠️ NOT `dataclasses.asdict`. Dates, enums and nested dataclasses are not JSONB, and a
+    """NOT `dataclasses.asdict`. Dates, enums and nested dataclasses are not JSONB, and a
     hand-rolled dict would be a third representation of a row free to drift from `DraftRowPublic`.
     Going through the schema means what is stored is exactly what is served."""
     round_ = await _paste(db_session)

@@ -13,7 +13,7 @@ from app.models.base import Base, utcnow
 class FindingProse(Base):
     """One cached composition.
 
-    ⚠️ A PURE CACHE — no foreign key, no loan file, no run. A row is a function of its key alone, so it
+    A PURE CACHE — no foreign key, no loan file, no run. A row is a function of its key alone, so it
     can be truncated at any time and two loan files whose facts coincide share the sentence. It exists
     for DETERMINISM first: without it the same unchanged finding is worded differently every run, which
     reads to a processor as though something changed.

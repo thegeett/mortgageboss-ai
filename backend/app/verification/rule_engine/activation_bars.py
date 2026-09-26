@@ -41,7 +41,7 @@ _STATUSES = frozenset(
         "no-ai-dependency",
         "no-ai-threshold-pending",
         # LP-490a / ADR-378 — activation on a SELF-CONSISTENCY rate instead of a measured accuracy, with
-        # RATIFICATION as the safety substitute. ⚠️ This INVERTS the gate's stated principle ("activation
+        # RATIFICATION as the safety substitute. This INVERTS the gate's stated principle ("activation
         # never trusts what it hasn't measured"): a deliberate product decision, taken with the trade-offs
         # recorded in ADR-378. A rule on this status must ratify EVERY finding it produces.
         "ratify-pending",
@@ -74,13 +74,13 @@ class ActivationBar:
     # gate a no-ai-dependency rule. Both default to the fail-closed value (None / False).
     measured_accuracy: float | None = None
     input_resolves: bool = False
-    # LP-490a / ADR-378 — the SELF-CONSISTENCY evidence. ⚠️ THIS IS NOT AN ACCURACY, and the field is
+    # LP-490a / ADR-378 — the SELF-CONSISTENCY evidence. THIS IS NOT AN ACCURACY, and the field is
     # named for what it measures. It is the rate at which TWO INDEPENDENT derivations of the same tag,
     # from the same source data in FRESH contexts, agreed with each other. Two agreeing derivations are
     # STABLE, not RIGHT: a systematically wrong tag scores 1.0. Disagreement is a real signal;
     # agreement is weak evidence.
     #
-    # ⚠️ IT MUST NEVER BE COLLAPSED INTO measured_accuracy. That field means "a human said what the
+    # IT MUST NEVER BE COLLAPSED INTO measured_accuracy. That field means "a human said what the
     # right answer was". This one means "the model said the same thing twice". A loader check rejects a
     # bar carrying both, because the distinction is the only thing telling a future reader which is
     # which — and `is_eligible` reads this field ONLY on the ratify-pending branch.
@@ -228,7 +228,7 @@ def parse_bar(rule_id: str, body: object) -> ActivationBar:
             f"{rule_id}: self_consistency_rate must be a number in [0,1] or null, got "
             f"{self_consistency_rate!r}"
         )
-    # ⚠️ THE NON-NEGOTIABLE SEPARATION. `measured_accuracy` means A HUMAN SAID WHAT THE RIGHT ANSWER WAS.
+    # THE NON-NEGOTIABLE SEPARATION. `measured_accuracy` means A HUMAN SAID WHAT THE RIGHT ANSWER WAS.
     # `self_consistency_rate` means THE MODEL SAID THE SAME THING TWICE. Collapsing them destroys the only
     # signal telling a future reader which kind of number a bar carries — so a bar carrying both is
     # rejected at LOAD, not quietly preferred one way at read time.
@@ -270,9 +270,9 @@ def parse_bar(rule_id: str, body: object) -> ActivationBar:
         )
     cases = body.get("self_consistency_cases")
     disagreements = body.get("self_consistency_disagreements")
-    # ⚠️ A RATE WITHOUT A CASE COUNT IS UNREADABLE. A 1.0 over 2 cases and a 1.0 over 200 are different
+    # A RATE WITHOUT A CASE COUNT IS UNREADABLE. A 1.0 over 2 cases and a 1.0 over 200 are different
     # claims, and the bar must say which.
-    # ⚠️ `isinstance(True, int)` is True in Python, so `self_consistency_cases: true` loaded as ONE case
+    # `isinstance(True, int)` is True in Python, so `self_consistency_cases: true` loaded as ONE case
     # and passed the `> 0` guard this same block calls non-negotiable. The rate check next to it
     # already excludes bool; this one did not (reported finding).
     if self_consistency_rate is not None and (
@@ -351,13 +351,13 @@ def is_eligible(bar: ActivationBar) -> bool:
         # AND Priya validates the window. (input_resolves stays honest; `validated` is the real hold.)
         return bar.input_resolves and bar.validated
     if bar.status == "ratify-pending":
-        # LP-490a / ADR-378 — ⚠️ THE ONE BRANCH THAT ACTIVATES ON SOMETHING OTHER THAN A MEASUREMENT.
+        # LP-490a / ADR-378 — THE ONE BRANCH THAT ACTIVATES ON SOMETHING OTHER THAN A MEASUREMENT.
         # A self-consistency rate is NOT evidence of correctness (see the field's note), so ratification
         # is the substitute safety: every finding such a rule produces carries ratification_pending=True
         # (enforced in deterministic.py and judgment.py, proven per rule by test), so a wrong tag costs a
         # processor's attention and can never auto-assert.
         #
-        # ⚠️ `measured_accuracy is None` IS LOAD-BEARING, not belt-and-braces. A rule whose tag was
+        # `measured_accuracy is None` IS LOAD-BEARING, not belt-and-braces. A rule whose tag was
         # MEASURED and FAILED is measured-and-failing, not unmeasured, and must stay held — AS-4's
         # stmt.is_reserve_eligible measured 0/5 against Priya's labels (LP-390-5), a systematic domain
         # disagreement that two agreeing derivations would score 1.0 on precisely because the model is
@@ -383,7 +383,7 @@ def is_eligible(bar: ActivationBar) -> bool:
 def ratifies_every_finding(rule_id: str) -> bool:
     """Is this rule activated on a self-consistency rate, and therefore required to ratify everything?
 
-    ⚠️ The deterministic evaluator calls this. Ratification is the ENTIRE safety substitute for
+    The deterministic evaluator calls this. Ratification is the ENTIRE safety substitute for
     measurement on a ratify-pending rule (ADR-378), so it has to be enforced where the verdict is built,
     not asserted in a comment — `deterministic.py` never set the flag before LP-490a, which would have
     shipped every ai_fuzzy_match rule with no human in the loop.

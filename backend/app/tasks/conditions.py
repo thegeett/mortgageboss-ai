@@ -5,7 +5,7 @@ rasterises pages and may call a model, so holding the request open across it wou
 a lender's page count — and a processor watching screen S1-02 ("Reading…") is the design that
 replaces the wait.
 
-⚠️ IDEMPOTENCY IS A COMPARE-AND-SET, NOT AN EXISTENCE CHECK. Three different events arrive at this
+IDEMPOTENCY IS A COMPARE-AND-SET, NOT AN EXISTENCE CHECK. Three different events arrive at this
 function with the same round id — a Celery redelivery, a manual re-enqueue, and a retry after a
 crash — and only the database can say which one won. Keying on "has a ROUND_PARSED event already?"
 loses to two workers racing, because both read before either writes; and the events table is
@@ -16,7 +16,7 @@ written only by whoever the database let through. That removes the half-written 
 handling it: there is no window in which `draft_rows` exist under a `PARSING` status, because both
 land together or neither does.
 
-⚠️ THE CONSEQUENCE, STATED RATHER THAN IMPLIED: a re-parse after a code fix requires moving the round
+THE CONSEQUENCE, STATED RATHER THAN IMPLIED: a re-parse after a code fix requires moving the round
 back to `PARSING` first. That is a deliberate, auditable act — and the alternative is worse, because
 a re-enqueue would otherwise silently overwrite a DRAFT a processor is already reviewing.
 
@@ -113,11 +113,11 @@ async def _settle(
 ) -> bool:
     """Write the outcome and its event, or do nothing at all.
 
-    ⚠️ ONE CONDITIONAL UPDATE, GUARDED ON `PARSING`. Whoever the database lets through owns the
+    ONE CONDITIONAL UPDATE, GUARDED ON `PARSING`. Whoever the database lets through owns the
     outcome; a second delivery matches no row, writes nothing, and appends no event. A round the
     processor DISCARDED while it was being read is also protected, because it is no longer PARSING.
 
-    ⚠️ `kind=None` WRITES NO EVENT, AND EXACTLY ONE CALLER WANTS THAT. A sheet the rules could not
+    `kind=None` WRITES NO EVENT, AND EXACTLY ONE CALLER WANTS THAT. A sheet the rules could not
     split is handed to the AI: its rows and text are stored, the status STAYS `PARSING`, and the
     split task emits `ROUND_PARSED` when it settles. Emitting one here too would put two parses in a
     round's history for one read — which LP-907 already shipped once and had to correct, because
@@ -159,17 +159,17 @@ async def _queue_split_or_fail(
 ) -> None:
     """Queue the AI split, and settle the round FAILED if the broker will not take it.
 
-    ⚠️ THE FIX THIS TICKET EXISTS FOR, REINTRODUCED BY ANOTHER ROUTE AND CAUGHT IN REVIEW. The
+    THE FIX THIS TICKET EXISTS FOR, REINTRODUCED BY ANOTHER ROUTE AND CAUGHT IN REVIEW. The
     commit that made the split reachable from every door called `.delay()` bare. The round is
     committed `PARSING` BEFORE the enqueue — correctly, since a worker that picked it up first
     would find no row — so a broker that is down left exactly the permanent-`PARSING` round this
     work set out to eliminate, arriving by a third path instead of the original two.
 
-    ⚠️ AND NOTHING WOULD HAVE SHOWN IT. `OperationalError` appeared in one test file in the whole
+    AND NOTHING WOULD HAVE SHOWN IT. `OperationalError` appeared in one test file in the whole
     backend suite, covering the one enqueue that was already guarded: "the only door with coverage
     was the only door that worked", now true of the enqueues inside the fix for it.
 
-    ⚠️ IT SETTLES RATHER THAN RE-RAISING, WHICH FORGOES CELERY'S RETRY ON PURPOSE. Letting the
+    IT SETTLES RATHER THAN RE-RAISING, WHICH FORGOES CELERY'S RETRY ON PURPOSE. Letting the
     error escape would reach `retry_or_terminal`, which retries — and a retry genuinely would
     re-parse and re-enqueue, because the round is still `PARSING` so the compare-and-set wins
     again. But `on_exhausted` only LOGS, so once the retries run out the round sits `PARSING`
@@ -183,7 +183,7 @@ async def _queue_split_or_fail(
     try:
         split_condition_round.delay(str(round_id))
     except OperationalError:
-        # ⚠️ SPECIFIC, NEVER A BARE `except Exception` (spec §9.8), AND FROM `kombu` RATHER THAN
+        # SPECIFIC, NEVER A BARE `except Exception` (spec §9.8), AND FROM `kombu` RATHER THAN
         # `sqlalchemy.exc`. Two unrelated classes share this name; `.delay()` raises kombu's when
         # the broker refuses the message, so catching SQLAlchemy's would be a guard that never
         # fires — verified against the paste door, which imports the same one.
@@ -211,7 +211,7 @@ async def _queue_split_or_fail(
 async def parse_round(db: AsyncSession, round_id: UUID) -> None:
     """Read one round into draft rows, on a session the CALLER owns.
 
-    ⚠️ SPLIT FROM THE SESSION-OPENING WRAPPER SO IT CAN BE TESTED AT ALL. `task_session()` builds its
+    SPLIT FROM THE SESSION-OPENING WRAPPER SO IT CAN BE TESTED AT ALL. `task_session()` builds its
     own engine, and the suite isolates each test inside a transaction that is never committed — so a
     task opening its own session cannot see the round the test just created. Every task test in this
     repo calls the inner function for that reason, and a test that drove the Celery wrapper would be
@@ -261,18 +261,18 @@ async def parse_round(db: AsyncSession, round_id: UUID) -> None:
         )
         return
 
-    # ⚠️ `raw_text` IS WRITTEN ON BOTH PATHS, and that is what makes a PDF splittable at all.
+    # `raw_text` IS WRITTEN ON BOTH PATHS, and that is what makes a PDF splittable at all.
     # `split_round` reads it, and before LP-908's review only the paste door ever wrote it — so
     # handing an uploaded or forwarded sheet to the AI settled it `PARSE_FAILED` telling a processor
     # to paste a letter they had just uploaded. It is stored on the DRAFT path too, so a reparse
     # after a reader fix has the page without re-fetching the PDF.
     #
-    # ⚠️ THAT FIX CLOSED THE COMMON CASE AND LEFT THE BLANK ONE, which S1-03 then showed (LP-909 §5).
+    # THAT FIX CLOSED THE COMMON CASE AND LEFT THE BLANK ONE, which S1-03 then showed (LP-909 §5).
     # A PDF with no text layer still extracts to nothing, so it reaches the same `if not text:`
     # branch legitimately — and the branch's one sentence was still the paste one. The sentence is
     # now chosen by `has_stored_sheet`; see `NO_TEXT_IN_SHEET_DETAIL`.
     #
-    # ⚠️ THIS IS A RETENTION CHANGE, NOT AN EXPOSURE ONE, and the distinction is worth stating
+    # THIS IS A RETENTION CHANGE, NOT AN EXPOSURE ONE, and the distinction is worth stating
     # because the two are easy to conflate (LP-908 review). No NPI reaches anywhere it could not
     # reach before: `raw_text` is in the readonly layer's EXCLUDED set, migration `d1f4b8c25e93`
     # drops it by name, and the view projects only `(raw_text IS NOT NULL) AS has_raw_text`. What
@@ -280,7 +280,7 @@ async def parse_round(db: AsyncSession, round_id: UUID) -> None:
     # forwarded round, where before only pasted ones carried it. Reparse is what justifies holding
     # it; if that ever goes away, so should this.
     #
-    # ⚠️ AND `has_raw_text` NOW MEANS SOMETHING ELSE. It used to separate pasted rounds from
+    # AND `has_raw_text` NOW MEANS SOMETHING ELSE. It used to separate pasted rounds from
     # uploaded ones, because only a paste wrote the column. From this commit it is true for nearly
     # every parsed round, so any readonly query that leaned on it to count pastes is silently
     # answering a different question. `sources[].kind` is the field that still means what that one
@@ -288,14 +288,14 @@ async def parse_round(db: AsyncSession, round_id: UUID) -> None:
     values: dict[str, Any] = {
         "sheet_format": sheet.sheet_format,
         "date_printed": sheet.date_printed,
-        # ⚠️ THE UPLOAD DOOR WAS IGNORING THE CONTRACT ITS OWN COLUMN DOCUMENTS (LP-909 §5 visual
+        # THE UPLOAD DOOR WAS IGNORING THE CONTRACT ITS OWN COLUMN DOCUMENTS (LP-909 §5 visual
         # check). `round_date` is described on the model as "`date_printed` when known, else the date
         # received" — and the PASTE door honours that exactly (`round_date or sheet.date_printed or
         # now.date()`), while this one set `now.date()` at creation and never looked again. So a sheet
         # printed 08/28 opened a round dated today, on S1-04, S1-05 and S1-12 at once, and the two
         # doors disagreed about a column with one stated meaning.
         #
-        # ⚠️ IT CANNOT CLOBBER A PROCESSOR'S EDIT, which is the only reason adopting it here is safe
+        # IT CANNOT CLOBBER A PROCESSOR'S EDIT, which is the only reason adopting it here is safe
         # rather than presumptuous. `update_draft` refuses a round that is not DRAFT, and this write
         # happens while it is still PARSING — so there is no window in which a person could have set
         # the date before the reader answers. The processor's own edit still wins afterwards.
@@ -312,7 +312,7 @@ async def parse_round(db: AsyncSession, round_id: UUID) -> None:
     }
 
     if sheet.needs_ai:
-        # ⚠️ STAYS `PARSING`, AND EMITS NOTHING. The rules could not tell where one condition ends
+        # STAYS `PARSING`, AND EMITS NOTHING. The rules could not tell where one condition ends
         # and the next begins, so the AI split owns the terminal state — and its own compare-and-set
         # is guarded on `PARSING`, which only holds if this write leaves it there. Settling to `DRAFT`
         # first would both hand a processor rows the rules admit are unsplit AND make the split's
@@ -362,14 +362,14 @@ async def parse_round(db: AsyncSession, round_id: UUID) -> None:
 async def split_round(db: AsyncSession, round_id: UUID) -> None:
     """Split a pasted round the rules could not read, on a session the CALLER owns (LP-908 §2).
 
-    ⚠️ THIS ONE *DOES* REUSE `_settle`, AND THE ENRICH MERGE DELIBERATELY DOES NOT. The difference is
+    THIS ONE *DOES* REUSE `_settle`, AND THE ENRICH MERGE DELIBERATELY DOES NOT. The difference is
     not taste: this genuinely IS a parse settling a round that is `PARSING`, so the compare-and-set
     guarded on that status means exactly what it says — a redelivery, a manual re-enqueue and a
     crash-retry all converge, and a round the processor DISCARDED while the model was working is
     protected because it is no longer `PARSING`. Enrich borrows none of that, because there the
     round is `DRAFT` or `IMPORTED` with content a processor may already be reviewing.
 
-    ⚠️ THE INPUT IS `raw_text`, WHICH IS WHY A PASTED ROUND STORES IT. Splitting a reconstruction of
+    THE INPUT IS `raw_text`, WHICH IS WHY A PASTED ROUND STORES IT. Splitting a reconstruction of
     the rows the rules half-read would feed the model our guess instead of the lender's page — and
     §9.3's substring check is against this exact text.
     """
@@ -385,7 +385,7 @@ async def split_round(db: AsyncSession, round_id: UUID) -> None:
         return
 
     text = round_.raw_text
-    # ⚠️ `.strip()`, BECAUSE A TRUTHY COLUMN IS NOT THE SAME AS SOMETHING TO SPLIT. `ConditionPasteRequest`
+    # `.strip()`, BECAUSE A TRUTHY COLUMN IS NOT THE SAME AS SOMETHING TO SPLIT. `ConditionPasteRequest`
     # is `min_length=1`, so a paste of three spaces passes the door, reads as `needs_ai` (the generic
     # reader answers that for empty input), opens `PARSING`, and arrives here with `raw_text == "   "`
     # — truthy. The old guard let it through and we paid for a model call on whitespace.
@@ -398,7 +398,7 @@ async def split_round(db: AsyncSession, round_id: UUID) -> None:
                 "parse_report": {
                     **(round_.parse_report or {}),
                     "failure_kind": "no_text",
-                    # ⚠️ THE SENTENCE DEPENDS ON THE DOOR, AND THE ONE IT USED TO HAVE WAS WRONG FOR
+                    # THE SENTENCE DEPENDS ON THE DOOR, AND THE ONE IT USED TO HAVE WAS WRONG FOR
                     # THE ONLY CASE THAT ACTUALLY OCCURS (LP-909 §5, seen on S1-03). Asked of the
                     # round rather than of `parse_report`, because bytes at rest are what make the
                     # difference: see `has_stored_sheet`.
@@ -442,7 +442,7 @@ async def split_round(db: AsyncSession, round_id: UUID) -> None:
         return
 
     report = parse_report_for("split", outcome.sheet)
-    # ⚠️ `ai_used` TRUE ONLY HERE. `parse_report_for` hardcodes False because it is written for the
+    # `ai_used` TRUE ONLY HERE. `parse_report_for` hardcodes False because it is written for the
     # rule readers, and the pair (needs_ai, ai_used) is what makes "waiting for the AI" and "the AI
     # has run" distinguishable states rather than one ambiguous flag.
     report["ai_used"] = True
@@ -508,7 +508,7 @@ def parse_condition_round(self: Task, round_id: str) -> None:
     briefly unreachable), and on exhaustion leaves the round in `PARSING` rather than inventing a
     terminal state the code did not reach.
 
-    ⚠️ EXHAUSTION IS THE ONE GAP THIS TICKET LEAVES OPEN, and it is recorded rather than hidden: a
+    EXHAUSTION IS THE ONE GAP THIS TICKET LEAVES OPEN, and it is recorded rather than hidden: a
     round stranded in `PARSING` has no exit, and a processor sits on S1-02 indefinitely. The row
     carries `created_at` and `status`, so "PARSING for more than N minutes" is a query rather than a
     schema change — a reaper is buildable and deliberately not built here.
@@ -538,7 +538,7 @@ def split_condition_round(self: Task, round_id: str) -> None:
     transient error AROUND it, and on exhaustion leaves the round in `PARSING` rather than inventing
     a terminal state the code never reached.
 
-    ⚠️ THE SAME STRANDED-`PARSING` GAP LP-905 RECORDED APPLIES HERE, and it is the reason LP-907 did
+    THE SAME STRANDED-`PARSING` GAP LP-905 RECORDED APPLIES HERE, and it is the reason LP-907 did
     not open this state before the worker existed. It is buildable as a query — `status` plus
     `created_at` — and is still deliberately not built.
     """

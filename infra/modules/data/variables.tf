@@ -67,17 +67,17 @@ variable "rds_max_allocated_storage" {
 }
 
 variable "rds_multi_az" {
-  description = "Run a standby in a second AZ. ⚠️ MUST BE true FOR STAGING AND PRODUCTION."
+  description = "Run a standby in a second AZ. MUST BE true FOR STAGING AND PRODUCTION."
   type        = bool
 }
 
 variable "rds_deletion_protection" {
-  description = "Refuse to delete the database. ⚠️ MUST BE true FOR STAGING AND PRODUCTION."
+  description = "Refuse to delete the database. MUST BE true FOR STAGING AND PRODUCTION."
   type        = bool
 }
 
 variable "rds_skip_final_snapshot" {
-  description = "Skip the final snapshot on delete. ⚠️ MUST BE false FOR STAGING AND PRODUCTION."
+  description = "Skip the final snapshot on delete. MUST BE false FOR STAGING AND PRODUCTION."
   type        = bool
 }
 

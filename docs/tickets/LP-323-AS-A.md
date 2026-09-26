@@ -84,7 +84,7 @@ authoring (-B).
 | **AS-5** | Gift-fund documentation chain | structural (fuzzy) | judgment / presence | per_deposit / per_document | `txn.apparent_category==gift`, `txn.source_reference`; gift_letter present |
 | **AS-6** | Account ownership | structural (fuzzy) | deterministic-over-enum OR consistency | per_document (per statement) | `stmt.owner_matches_borrower` (AI already resolves the match) |
 | **AS-7** | NSF / overdraft flag | structural (fuzzy) | deterministic | per_account (or loan) | `txn.is_nsf_or_overdraft` count vs tolerance |
-| **AS-8** | Statement chaining (continuity) | structural (exact) | **⚠ NEW SHAPE — pairwise sequential** | per_account | `stmt.ending_balance[n] == stmt.beginning_balance[n+1]` |
+| **AS-8** | Statement chaining (continuity) | structural (exact) | **NEW SHAPE — pairwise sequential** | per_account | `stmt.ending_balance[n] == stmt.beginning_balance[n+1]` |
 | **AS-9** | Missing pages | structural (exact) | deterministic | per_document | `stmt.page_count_declared` vs `stmt.page_count_present` (derived) |
 | **AS-10** | Statement recency completeness | structural (exact) | deterministic + per-account count | per_account | `stmt.period_start/end` — N consecutive months vs required |
 | **AS-11** | Retirement/stock liquidation terms | calculative | deterministic + judgment | per_document (per asset) | `asset.liquidation_terms`, `asset.usable_value` (discount) |
@@ -141,7 +141,7 @@ FREE-TEXT → not string-scorable. **Any AS prompt exemplar is unaudited** (FIND
 
 ## PHASE 3 — Thresholds (agency-default | overlay-pending | UNSURE)
 
-**⚠ TICKET-TEXT CORRECTION (the code is the gate of record):** the ticket says *"AS-1's 50% is
+**TICKET-TEXT CORRECTION (the code is the gate of record):** the ticket says *"AS-1's 50% is
 Priya-VALIDATED."* `rule_kinds.csv` shows **AS-1 `priya_validated=false, threshold_needs_signoff=true`** —
 it is NOT validated; it is overlay-pending, same as every other threshold. There is **no Priya-validated
 precedent row in Assets** (IN-A's IN-1/IN-3 mislabel and IN-C's IN-12 armor error, again).

@@ -14,7 +14,7 @@ TWO DIFFERENCES FROM `FindingEvent`, both deliberate:
    bucket a condition moved between. That is the lender's text, so the column is dropped from
    `readonly.condition_events` rather than scrubbed.
 
-⚠️ THERE WAS NO TEST TO COPY. `finding_event.py`'s immutability is asserted nowhere in the suite —
+THERE WAS NO TEST TO COPY. `finding_event.py`'s immutability is asserted nowhere in the suite —
 every test that touches it only READS event rows to check a lifecycle sequence. LP-904 writes that
 guard for this table from scratch (`tests/models/test_condition_events_append_only.py`).
 """
@@ -42,7 +42,7 @@ class ConditionEventKind(StrEnum):
     `CONDITION_REMOVED` and no `ROUND_COMPARED`. Stage 1 cannot produce them, and an enum member
     nothing writes is an invitation (ADR-404).
 
-    ⚠️ ADDING A MEMBER HERE IS A MIGRATION, AND NO TEST WILL TELL YOU SO. `kind` is VARCHAR + CHECK
+    ADDING A MEMBER HERE IS A MIGRATION, AND NO TEST WILL TELL YOU SO. `kind` is VARCHAR + CHECK
     (ADR-037, via `str_enum`), so a new member changes what the code writes and nothing about what
     the database accepts — and conftest builds the schema with `create_all`, which regenerates the
     CHECK from this very enum. The suite therefore stays green against a database that would reject
@@ -56,7 +56,7 @@ class ConditionEventKind(StrEnum):
     ROUND_PARSE_FAILED = "round_parse_failed"
     #: A processor asked for a stored sheet to be read again (LP-909 §3).
     #:
-    #: ⚠️ NOT `ROUND_RECEIVED` REUSED, THOUGH THAT WOULD HAVE SAVED A MIGRATION. Screen S1-09
+    #: NOT `ROUND_RECEIVED` REUSED, THOUGH THAT WOULD HAVE SAVED A MIGRATION. Screen S1-09
     #: renders this history, and "Condition sheet received" for an event where nothing was received
     #: is the class of statement this stage keeps deleting from comments and screens. Adding it is
     #: permitted by ADR-404 precisely because something writes it — the rule forbids members nothing
@@ -106,7 +106,7 @@ class ConditionEvent(Base, UUIDMixin):
     actor_user_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    #: ⚠️ NPI — what changed, which is the lender's text. Dropped from the readonly view.
+    #: NPI — what changed, which is the lender's text. Dropped from the readonly view.
     detail: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False

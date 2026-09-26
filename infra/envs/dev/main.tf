@@ -1,5 +1,5 @@
 # ┌─────────────────────────────────────────────────────────────────────────────┐
-# │  ⚠️  THIS ENVIRONMENT IS NEVER APPLIED.                                      │
+# │  THIS ENVIRONMENT IS NEVER APPLIED.                                      │
 # │                                                                             │
 # │  It is a REFERENCE TEMPLATE. Local development runs on Docker Compose and    │
 # │  calls Bedrock from the laptop, so it needs no AWS infrastructure at all.    │
@@ -10,7 +10,7 @@
 # │  There is deliberately NO backend.tf — it described a state file that would  │
 # │  never exist. `terraform validate` here runs with -backend=false.            │
 # │                                                                             │
-# │  ⚠️  Do NOT repoint this at staging's backend. An accidental `apply` would   │
+# │  Do NOT repoint this at staging's backend. An accidental `apply` would   │
 # │      then write to staging's state.                                          │
 # │                                                                             │
 # │  The deployed environment is ../staging.                                     │
@@ -202,7 +202,7 @@ resource "aws_budgets_budget" "monthly" {
   # budget would have tracked $0 and never fired, which is worse than no filter at
   # all because it looks configured. Verified: format() yields "user:Environment$dev".
   #
-  # ⚠️ DEPENDS ON AN ACCOUNT-LEVEL ACTIVATION. AWS Budgets can only filter on a
+  # DEPENDS ON AN ACCOUNT-LEVEL ACTIVATION. AWS Budgets can only filter on a
   # user-defined tag once `Environment` is ACTIVATED as a cost allocation tag, which
   # is an account (payer) setting, not a per-environment one — it is applied by
   # `aws_ce_cost_allocation_tag.environment` in ../../shared. Without that this
@@ -350,7 +350,7 @@ module "compute" {
     AI_REQUESTS_PER_MINUTE_BEDROCK = tostring(local.bedrock_rpm_per_process)
 
     # REDIS_URL is CONFIG rather than a secret while the cache has no AUTH token:
-    # the URL is topology only. ⚠️ Both parts of this value matter — transit
+    # the URL is topology only. Both parts of this value matter — transit
     # encryption makes rediss:// mandatory, and without ?ssl_cert_reqs=required
     # redis-py verifies the certificate while kombu resolves to CERT_NONE.
     REDIS_URL = "rediss://${module.data.redis_primary_endpoint}:6379/0?ssl_cert_reqs=required"

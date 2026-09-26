@@ -1,6 +1,6 @@
 """`source_line_numbers` means indices into the input — for every reader (LP-909 review).
 
-⚠️ THE PROPERTY WAS DEMONSTRATED IN THE READER THAT GOT IT RIGHT AND ASSUMED IN THE ONE THAT DID NOT.
+THE PROPERTY WAS DEMONSTRATED IN THE READER THAT GOT IT RIGHT AND ASSUMED IN THE ONE THAT DID NOT.
 Before this file, three assertions of the field existed suite-wide and all three were on the paste
 path. `test_reader_champions.py` pins `crossed_page` and never the numbers — so Champions stored
 `int(line.y)` (a coordinate in POINTS) for a row's lines and `range(len(leftover))` (ordinals from
@@ -55,7 +55,7 @@ def test_generic_source_lines_are_indices() -> None:
 
 
 def test_champions_source_lines_are_indices() -> None:
-    """⚠️ THE ONE THAT WAS WRONG. `int(line.y)` is a y-coordinate: on the §7.4 certificate those run
+    """THE ONE THAT WAS WRONG. `int(line.y)` is a y-coordinate: on the §7.4 certificate those run
     into the hundreds while the sheet has far fewer lines, so most rows pointed outside the input
     entirely — and the value is not even unique, because y repeats on every page."""
     lines = lines_from_pdf(build_champions_pdf())
@@ -78,7 +78,7 @@ def test_champions_source_lines_point_at_the_rows_own_words() -> None:
 
 
 def test_a_page_crossing_row_cites_both_pages() -> None:
-    """⚠️ THE MIXED-SCALE BUG, PINNED. The tail used `range(len(leftover))` — ordinals from zero —
+    """THE MIXED-SCALE BUG, PINNED. The tail used `range(len(leftover))` — ordinals from zero —
     appended onto a list of y-values, so one row held two scales and the tail pointed at the first
     lines of the document. Correct indices put the tail AFTER the head and on a later page."""
     lines = lines_from_pdf(build_champions_pdf())

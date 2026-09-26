@@ -27,7 +27,7 @@ function errMsg(e: unknown, fallback: string): string {
  * ACCURACY, and persists NOTHING to the database.
  *
  * Gating is defence-in-depth: the backend router is absent (404) outside development, and this page
- * also refuses to render its controls in a production build. ⚠️ Redaction was REMOVED — the output
+ * also refuses to render its controls in a production build. Redaction was REMOVED — the output
  * captures REAL PII and must not be committed/shared/moved. See docs/tickets/extraction-bench.md.
  *
  * The flow is deliberate: PREVIEW first (count, breakdown, unreadable, estimated cost) — nothing runs
@@ -196,8 +196,8 @@ export default function ExtractionBenchPage() {
             </div>
           ) : preview.provider === "bedrock" ? (
             <div className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
-              ⚠️ No rate limit set under Bedrock — the bench will <strong>refuse to start</strong>.
-              Set <span className="font-mono">AI_REQUESTS_PER_MINUTE_BEDROCK</span> (e.g. 8) and
+              No rate limit set under Bedrock — the bench will <strong>refuse to start</strong>. Set{" "}
+              <span className="font-mono">AI_REQUESTS_PER_MINUTE_BEDROCK</span> (e.g. 8) and
               re-preview.
             </div>
           ) : (

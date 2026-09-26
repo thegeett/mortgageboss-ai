@@ -4,7 +4,7 @@ One function, keyed on the first non-blank line, because that is the only part o
 whose wording the lender never varies — the title is boilerplate, while everything below it changes
 per loan.
 
-⚠️ THE TWO TESTS ARE DELIBERATELY DIFFERENT, and the spec is precise about it: UWM's title CONTAINS
+THE TWO TESTS ARE DELIBERATELY DIFFERENT, and the spec is precise about it: UWM's title CONTAINS
 `LOAN APPROVAL CONDITIONS` (the real line is `LOAN APPROVAL CONDITIONS - RIVERA - 1226500417`, with
 the borrower and the loan number appended), while Champions' first line IS exactly
 `Conditional Approval Certificate`. Making both `in` would match a pasted sentence that merely

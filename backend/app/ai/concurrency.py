@@ -21,7 +21,7 @@ THE THREE DETAILS LP-635 PAID FOR, carried over rather than rediscovered:
    never made. Calls already in flight are allowed to finish, so the bound on what an outage costs
    is the threshold plus one semaphore's worth — not the stage.
 
-   ⚠️ THAT BOUND IS PER DISPATCH, AND DISPATCHES NEST. Each ``dispatch_bounded`` keeps its OWN
+   THAT BOUND IS PER DISPATCH, AND DISPATCHES NEST. Each ``dispatch_bounded`` keeps its OWN
    ``consecutive_failures``, so a caller that nests one inside another (materialization: N groups
    outside, N batches inside) pays the bound once PER INNER DISPATCH, not once per stage. With the
    materialization bounds (4 groups x 8 batches, threshold 5) a total outage costs up to ~48 failed
@@ -41,7 +41,7 @@ An ``AIClientError`` is RETURNED, never raised, so one unreachable call cannot c
 that were about to succeed. Any OTHER exception is a bug rather than an outage: it closes the gate
 and propagates — but only after the siblings have been collected.
 
-⚠️ NOT USED BY STAGE B, DELIBERATELY. ``tag_correlation._judge_concurrently`` is the original of this
+NOT USED BY STAGE B, DELIBERATELY. ``tag_correlation._judge_concurrently`` is the original of this
 pattern and is left alone: it is live, it was reviewed into its current shape by LP-635, and its
 ``_NotAttempted`` sentinel carries a processor-facing reason string this module has no business
 knowing. Unifying them is a worthwhile follow-up and a bad thing to attempt in the same change that

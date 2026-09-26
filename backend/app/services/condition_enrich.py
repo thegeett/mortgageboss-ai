@@ -4,7 +4,7 @@ The processor pasted what they could see in the portal; the letter itself arrive
 enrich THE SAME ROUND — a second round would make round 2 appear twice on the strip and split one
 sheet's conditions across two of them.
 
-⚠️ THIS DOES NOT REUSE THE PARSE TASK'S COMPARE-AND-SET, AND THAT IS THE CENTRAL DECISION HERE.
+THIS DOES NOT REUSE THE PARSE TASK'S COMPARE-AND-SET, AND THAT IS THE CENTRAL DECISION HERE.
 `app/tasks/conditions.py` settles a parse with one conditional UPDATE guarded on `status = PARSING`.
 Moving a round back to `PARSING` so that machinery could re-read it would break the very property it
 was built for: the guard could no longer tell "a retry of the parse that created this round" from "a
@@ -15,12 +15,12 @@ upload does silently through a different door.
 
 So enrich has its own transition, guarded on the round's CURRENT status.
 
-⚠️ THE GUARD IS "AN ACTIVE ROUND WITH NO PDF SOURCE YET", NOT "status = DRAFT". Spec §LP-907 says the
+THE GUARD IS "AN ACTIVE ROUND WITH NO PDF SOURCE YET", NOT "status = DRAFT". Spec §LP-907 says the
 merge "works for DRAFT and IMPORTED rounds", and screen S1-08 puts the "Attach the lender's PDF"
 button on an imported round card. One predicate covers both statuses AND makes attaching twice
 refuse, the same way the forward door now refuses a second forward of one attachment.
 
-⚠️ ADDITIVE ONLY, AND THAT RULE IS OURS RATHER THAN THE SPEC'S. The spec says to fill MISSING code,
+ADDITIVE ONLY, AND THAT RULE IS OURS RATHER THAN THE SPEC'S. The spec says to fill MISSING code,
 category and bucket on matched rows, add unmatched PDF rows, and keep unmatched pasted ones with a
 warning. It is silent on what happens when a PDF row's code CONTRADICTS a pasted row's rather than
 filling a hole. The rule taken here: the PDF may fill a hole, never overwrite a value a processor can
@@ -86,7 +86,7 @@ class EnrichResult:
     matched: int = 0
     #: PDF rows the paste did not carry — new conditions in THIS round.
     added: int = 0
-    #: ⚠️ Pasted rows the PDF does not contain. KEPT, never removed (ADR-404: a partial source may
+    #: Pasted rows the PDF does not contain. KEPT, never removed (ADR-404: a partial source may
     #: add and update, never remove or clear), and surfaced as a warning so the processor can look.
     unmatched_existing: list[str] = field(default_factory=list)
 
@@ -107,7 +107,7 @@ def _match_key(code: str | None, text: str) -> tuple[str | None, str]:
 def _merge_row(existing: dict[str, Any], pdf_row: ParsedRow) -> bool:
     """Fill what the paste could not carry. Returns whether anything changed.
 
-    ⚠️ `verbatim_text` IS NEVER TOUCHED, and neither is any value already present. The paste is what
+    `verbatim_text` IS NEVER TOUCHED, and neither is any value already present. The paste is what
     the processor typed and may have edited on the review screen; the PDF fills holes.
     """
     changed = False
@@ -128,7 +128,7 @@ def _merge_row(existing: dict[str, Any], pdf_row: ParsedRow) -> bool:
 def _merge_draft_rows(round_: ConditionRound, sheet: ParsedSheet, result: EnrichResult) -> None:
     """Merge into a DRAFT round's `draft_rows`, which are JSON and have no identity yet."""
     rows: list[dict[str, Any]] = list(round_.draft_rows or [])
-    # ⚠️ CAPTURED BEFORE ANYTHING IS APPENDED. "Pasted rows the PDF did not carry" must not include
+    # CAPTURED BEFORE ANYTHING IS APPENDED. "Pasted rows the PDF did not carry" must not include
     # rows the PDF itself just added — they are unmatched by construction, and counting them would
     # report every new condition as a missing one in the same breath.
     was_already_here = {id(row) for row in rows}
@@ -211,7 +211,7 @@ async def _merge_conditions(
                 owner_hint_source=pdf_row.owner_hint_source,
             )
             db.add(created)
-            # ⚠️ THE EVENT IS NOT DECORATION HERE — IT IS THE ONLY RECORD THAT THIS CONDITION WAS ON
+            # THE EVENT IS NOT DECORATION HERE — IT IS THE ONLY RECORD THAT THIS CONDITION WAS ON
             # THIS SHEET, and an earlier version of this branch omitted it.
             #
             # Import is not the only writer of conditions; this is the second. "Which rounds did a
@@ -281,7 +281,7 @@ async def enrich_round_with_pdf(
 
     The caller owns the transaction, as every service here does.
 
-    ⚠️ `source_kind` IS A PARAMETER BECAUSE THIS HAS TWO DOORS, AND ONE OF THEM IS NOT AN UPLOAD.
+    `source_kind` IS A PARAMETER BECAUSE THIS HAS TWO DOORS, AND ONE OF THEM IS NOT AN UPLOAD.
     It was hard-coded to `PDF_UPLOAD`, which is right for `api/conditions.py`'s attach door and wrong
     for `merge_attachment_into_round`, where the letter arrived as EMAIL. `sources` exists to record
     how each arrival reached us — `ConditionSourceKind`'s own docstring says so — so a forwarded
@@ -303,7 +303,7 @@ async def enrich_round_with_pdf(
         )
 
     reject_unless_pdf(content, declared_content_type=declared_content_type)
-    # ⚠️ THE SOURCE TEXT IS DELIBERATELY DISCARDED HERE, and that is not the same decision the parse
+    # THE SOURCE TEXT IS DELIBERATELY DISCARDED HERE, and that is not the same decision the parse
     # task makes. `sheet_from_bytes` now returns the lender's page so a PDF round can be AI-split
     # (LP-908 review), and the parse task persists it to `raw_text`. This is an ENRICH: it merges a
     # SECOND PDF into a round that already exists, and for a pasted round `raw_text` is the page the
@@ -319,9 +319,9 @@ async def enrich_round_with_pdf(
 
     result = EnrichResult(round_=round_)
 
-    # ⚠️ FILL, NEVER REPLACE. A pasted round has no letterhead, so these are holes; a round that
+    # FILL, NEVER REPLACE. A pasted round has no letterhead, so these are holes; a round that
     # somehow has them keeps what it has.
-    # ⚠️ THE CLAUSE COMES WITH IT, AND THIS IS THE PATH THAT MATTERS MOST FOR IT. S1-09 shows the
+    # THE CLAUSE COMES WITH IT, AND THIS IS THE PATH THAT MATTERS MOST FOR IT. S1-09 shows the
     # mortgagee clause on the round-details sheet AFTER a PDF is attached to a pasted round — which
     # is exactly this branch — so dropping it here would leave the screen it was drawn for empty.
     header = header_with_clause(sheet)

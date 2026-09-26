@@ -5,7 +5,7 @@ writes back only `message` and `how_to_fix`. Nothing else is touched: not the ve
 not the tags, not the reconcile identity. A total failure of this pass leaves a fully correct run whose
 findings read exactly as the templates wrote them.
 
-⚠️ PER FINDING, NOT PER RULE, AND NOT ONE BATCHED CALL. Batching is cheaper on a cold cache and worse
+PER FINDING, NOT PER RULE, AND NOT ONE BATCHED CALL. Batching is cheaper on a cold cache and worse
 everywhere else: a single changed finding would invalidate a whole batch (defeating the cache, which is
 the point), one malformed response would cost every finding its prose instead of one, and item 17 of 25
 gets less of the model's attention than item 1 — the position degradation this codebase already avoids
@@ -104,7 +104,7 @@ def summarize(
     the rule never considered, and a processor reading a finding is entitled to assume the sentence
     describes what the check actually looked at.
 
-    ⚠️ THE SUBJECT IS THE RESOLVED LABEL, NEVER `subject_key`. A first version passed the key, and the
+    THE SUBJECT IS THE RESOLVED LABEL, NEVER `subject_key`. A first version passed the key, and the
     model faithfully wrote it into user-facing text: "the retained property on doc7031677534131285",
     "for liability lia7a033a46ec70cc10". LP-377-B exists to keep that hash away from a processor, and
     the read path already had `resolve_subject_label` for it — the composer just has to use the same

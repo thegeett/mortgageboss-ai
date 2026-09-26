@@ -41,7 +41,7 @@ _STATEMENT_DOC_TYPE = "bank_statement"
 # tradeline IS a debt present in one source and absent from the other. See ADR-374 for the rejected
 # alternatives (match-and-merge; single-source-of-truth).
 #
-# ⚠️ These are RESERVED STRUCTURAL MARKERS, not vocabulary tags (the DOC_TYPE_TAG / ACCOUNT_UNRESOLVED_TAG
+# These are RESERVED STRUCTURAL MARKERS, not vocabulary tags (the DOC_TYPE_TAG / ACCOUNT_UNRESOLVED_TAG
 # pattern) — they describe the SUBJECT, never the debt. No threshold, no classification: rules judge.
 LIABILITY_SOURCE_TAG = "liability.source"
 LIABILITY_UNRESOLVED_TAG = "liability.unresolved"
@@ -143,7 +143,7 @@ def _per_document(snapshot: Snapshot) -> list[Subject]:
     if snapshot.documents.absent:
         return []
     tags = {} if snapshot.tags.absent else snapshot.tags.by_subject
-    # ⚠️ LOAN-LEVEL TAGS ARE MERGED IN, exactly as ``_per_borrower`` already does (reported finding).
+    # LOAN-LEVEL TAGS ARE MERGED IN, exactly as ``_per_borrower`` already does (reported finding).
     # Without them a per-document rule could name a loan fact in `reasoned_over` and silently receive
     # ONE SIDE of its own comparison: PR-3 asks whether the appraisal's property type agrees with the
     # type the FILE states, declares `[property.appraisal_property_type, property.type]`, and
@@ -459,12 +459,12 @@ def _per_liability(snapshot: Snapshot) -> list[Subject]:
     * a MISMO ``liability.{n}.*`` row → a CONTENT-derived id over its four available fields (never the
       positional ``{n}``, so the id survives a reordering) + ``liability.source = mismo_stated``.
 
-    ⚠️ NO MATCHING between the sources. The same real debt appears twice, once per source, deliberately:
+    NO MATCHING between the sources. The same real debt appears twice, once per source, deliberately:
     CR-4's undisclosed-tradeline signal IS the difference between the two lists, and a merge would erase
     it. A summing rule must therefore filter on ``liability.source`` rather than sum every subject —
     stated in ADR-374 because a naive sum double-counts.
 
-    ⚠️ The ``(creditor, account_number_masked)`` composite that ``_per_account`` uses is NOT usable here:
+    The ``(creditor, account_number_masked)`` composite that ``_per_account`` uses is NOT usable here:
     the LP-443 redact backstop scrubs unmasked account numbers, leaving 9/35 rows a bare ``[redacted]``
     and collapsing two distinct SETOYOTA tradelines onto one key — a guess-merge on real data.
 
@@ -473,7 +473,7 @@ def _per_liability(snapshot: Snapshot) -> list[Subject]:
     never merged (the ``_per_account`` rule). Absent tags yield subjects with EMPTY maps, so the gate
     reports ``couldnt_check`` per liability rather than the rule silently vanishing.
 
-    ⚠️ **DECIDED, not overlooked — the MISMO subject id is a function of MUTABLE amounts** (reported
+    **DECIDED, not overlooked — the MISMO subject id is a function of MUTABLE amounts** (reported
     finding). ``_MISMO_LIABILITY_FIELDS`` includes ``monthly_payment`` and ``unpaid_balance``, so when a
     borrower re-submits an updated 1003 with a moved balance, the same real debt hashes to a DIFFERENT id
     — and LP-322 reconciles findings by ``(rule_id, subject_key)``, so the prior finding RETIRES and a
@@ -484,7 +484,7 @@ def _per_liability(snapshot: Snapshot) -> list[Subject]:
     chain (parser → model → snapshot), so there is no stable natural key to use instead. Revisit if a rule
     ever needs a liability finding to survive a re-import; see ADR-374.
 
-    ⚠️ **No dedup WITHIN a source** (reported finding). The union is across sources only. Two
+    **No dedup WITHIN a source** (reported finding). The union is across sources only. Two
     ``credit_report`` documents on one file — the same report uploaded twice, or a per-borrower report on
     a joint file — carry distinct document content-ids, hence distinct ``row_id``s, hence TWO subjects for
     one debt. ADR-374's "a summing rule must filter on ``liability.source``" does NOT protect against

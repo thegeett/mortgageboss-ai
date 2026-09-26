@@ -41,7 +41,7 @@ _B2 = UUID("22222222-2222-4222-8222-222222222222")
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ LP-508 review: these are RULE-LOGIC tests, so they run with the distrusted-field guard OFF.
+# LP-508 review: these are RULE-LOGIC tests, so they run with the distrusted-field guard OFF.
 #
 # ID-3 and ID-5 gate on tags whose source fields are on the distrust list (a hallucinated driver's-licence
 # date on docs 146/294), so with the guard live EVERY case here degrades to needs_review and the date

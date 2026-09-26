@@ -9,7 +9,7 @@ one degrades instead of auto-asserting.
 The list is DATA (``distrusted_fields.yaml``) so it is reviewable and PRUNABLE — an extractor that improves
 should have its entry deleted, and every entry carries the document and the error behind it.
 
-⚠️ Resolution is by DECLARATION, not by name. A field is distrusted for a DOCUMENT TYPE; this maps that to
+Resolution is by DECLARATION, not by name. A field is distrusted for a DOCUMENT TYPE; this maps that to
 the tag ids that actually read it, using the same ``tag_production.yaml`` declarations the producers use. A
 tag reading the same field name on a DIFFERENT document type is unaffected.
 """
@@ -83,7 +83,7 @@ def load_distrusted_fields() -> dict[tuple[str, str], str]:
     An entry with a blank reason is rejected: a bare field name is unreviewable later and cannot be pruned
     with confidence, which is the whole point of keeping the list small.
 
-    ⚠️ An entry naming a field NO schema spec declares is rejected too. The two sections used to disagree
+    An entry naming a field NO schema spec declares is rejected too. The two sections used to disagree
     about failing loud — ``tags:`` raised on an unknown tag id ("a distrust entry naming a tag that does
     not exist would silently protect nothing") while ``fields:`` silently dropped an unmatched entry. The
     asymmetry meant a typo, or an extractor renaming a field, would disable protection with nothing
@@ -127,12 +127,12 @@ def distrusted_tag_ids() -> dict[str, str]:
     reads it. A declaration WITHOUT a document_type scope matches on field name alone — deliberately
     conservative: an unscoped parsed tag could read that field from any document.
 
-    ⚠️ Field resolution covers ``parsed`` declarations only. A DERIVED tag computes from other tags, so
+    Field resolution covers ``parsed`` declarations only. A DERIVED tag computes from other tags, so
     inferring which fields its recipe reads would be guesswork — the very inference this layer exists to
     avoid. Such a tag is named EXPLICITLY in the file's ``tags:`` section instead, and those are merged
     in here.
 
-    ⚠️ THE TRAP THIS WALKED INTO, recorded so the next entry does not repeat it: a rule almost never gates
+    THE TRAP THIS WALKED INTO, recorded so the next entry does not repeat it: a rule almost never gates
     on the PARSED tag. It gates on a DERIVED tag computed from it — ID-5 on ``id.borrower_id_expiration``,
     CR-13 on ``credit.report_age_months_at_closing``, PR-6 on ``property.appraisal_age_months_at_closing``.
     Listing only the field therefore protected NOTHING for those three: the distrusted set held the parsed

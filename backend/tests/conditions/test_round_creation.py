@@ -50,7 +50,7 @@ async def _round(db: AsyncSession, *, content: bytes | None = None, **kwargs: ob
 
 
 async def test_a_new_round_starts_parsing_and_unread(db_session: AsyncSession) -> None:
-    """⚠️ THE ROUND EXISTS BEFORE IT IS READ. `status` is PARSING and `sheet_format` is the GENERIC
+    """THE ROUND EXISTS BEFORE IT IS READ. `status` is PARSING and `sheet_format` is the GENERIC
     default until the task fills them in — which is what lets the endpoint answer 202 immediately
     with a row the UI can poll (screen S1-02) instead of holding the request open across a parse."""
     round_ = await _round(db_session)
@@ -66,7 +66,7 @@ async def test_a_new_round_starts_parsing_and_unread(db_session: AsyncSession) -
 async def test_the_round_is_dated_by_arrival_because_nothing_has_read_it(
     db_session: AsyncSession,
 ) -> None:
-    """⚠️ `round_date` IS NOT NULL WITH NO DEFAULT. Until the sheet is read there is no printed
+    """`round_date` IS NOT NULL WITH NO DEFAULT. Until the sheet is read there is no printed
     date, so the round is dated by arrival and `date_printed` stays null. Omitting it fails the
     insert outright — the same shape as the `display_id` defect that hid LP-904's guards."""
     round_ = await _round(db_session)
@@ -88,7 +88,7 @@ async def test_the_source_records_how_it_arrived(db_session: AsyncSession) -> No
 
 
 async def test_the_storage_path_is_server_controlled(db_session: AsyncSession) -> None:
-    """⚠️ NEVER DERIVED FROM THE UPLOAD'S FILENAME. A real sheet's filename routinely carries the
+    """NEVER DERIVED FROM THE UPLOAD'S FILENAME. A real sheet's filename routinely carries the
     borrower's surname and the loan number, so building a path from it would write NPI into the
     storage layout itself."""
     round_ = await _round(db_session)
@@ -131,7 +131,7 @@ async def test_arrival_writes_a_round_received_event(db_session: AsyncSession) -
 async def test_arrival_writes_a_timeline_entry(db_session: AsyncSession) -> None:
     """Spec §LP-905: "Condition sheet received" on the file timeline.
 
-    ⚠️ ITS OWN ACTIVITY TYPE, not DOCUMENT_UPLOADED. A condition sheet is not a borrower document —
+    ITS OWN ACTIVITY TYPE, not DOCUMENT_UPLOADED. A condition sheet is not a borrower document —
     it never enters classify → extract → needs — and filing it under "document uploaded" would
     invite exactly the confusion ADR-403's boundary exists to prevent.
     """
@@ -154,7 +154,7 @@ async def test_arrival_writes_a_timeline_entry(db_session: AsyncSession) -> None
 
 
 async def test_no_document_row_is_created(db_session: AsyncSession) -> None:
-    """⚠️ THE BOUNDARY ADR-403 EXISTS FOR. The sheet is stored, not documented: no `Document` row
+    """THE BOUNDARY ADR-403 EXISTS FOR. The sheet is stored, not documented: no `Document` row
     means it cannot enter classify → extract → needs, cannot be matched against a need, and cannot
     be classified against a 166-type borrower taxonomy that has no bucket for it."""
     from app.models.document import Document
@@ -175,7 +175,7 @@ async def test_no_document_row_is_created(db_session: AsyncSession) -> None:
 
 
 async def test_a_non_pdf_is_refused_with_a_reason(db_session: AsyncSession) -> None:
-    """⚠️ `assess` RETURNS SAFE FOR AN IMAGE TOO — "an image has no executable structure to strip
+    """`assess` RETURNS SAFE FOR AN IMAGE TOO — "an image has no executable structure to strip
     and no pages to render — it IS the raster". So the state alone does not mean PDF, and a reader
     keyed only on it would accept a screenshot of a sheet and fail deep inside the parser, where the
     message means nothing to a processor."""
@@ -188,7 +188,7 @@ async def test_a_non_pdf_is_refused_with_a_reason(db_session: AsyncSession) -> N
     with pytest.raises(ConditionSheetRejected) as caught:
         await _round(db_session, content=png)
 
-    # ⚠️ ASSERT THE PROPERTY, NOT A WORD, AND NOT A HARDCODED CLAIM EITHER. This assertion has been
+    # ASSERT THE PROPERTY, NOT A WORD, AND NOT A HARDCODED CLAIM EITHER. This assertion has been
     # wrong twice. First it looked for the literal "PDF", which the message never contained. Then it
     # required "application/pdf" — true only while the service HARDCODED that as the declared type;
     # once the declared type came from the caller (review Q1) this path stopped mentioning it at all.
@@ -201,7 +201,7 @@ async def test_a_non_pdf_is_refused_with_a_reason(db_session: AsyncSession) -> N
 
 
 async def test_the_refusal_quotes_what_the_sender_CLAIMED(db_session: AsyncSession) -> None:
-    """⚠️ THE DECLARED TYPE BELONGS TO THE CALLER (review Q1), and this is why it matters.
+    """THE DECLARED TYPE BELONGS TO THE CALLER (review Q1), and this is why it matters.
 
     `assess`'s mismatch message is a claim about the SENDER — "this is not what it said it was". The
     service used to hardcode `application/pdf` as the declared type, which made that sentence true

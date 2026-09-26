@@ -1,8 +1,8 @@
 """LP-492 — PR-2 (appraised value vs purchase price).
 
-⚠️ EVERY VERDICT ASSERTION RUNS THROUGH A REAL RULE EVALUATION (LP-487's standing rule).
+EVERY VERDICT ASSERTION RUNS THROUGH A REAL RULE EVALUATION (LP-487's standing rule).
 
-⚠️ n=2. Two appraisals is the whole corpus (`appraised_value` 2/2). These fixtures use invented amounts
+n=2. Two appraisals is the whole corpus (`appraised_value` 2/2). These fixtures use invented amounts
 because no borrower PII enters the repo; they prove wiring and direction, not accuracy.
 """
 
@@ -42,7 +42,7 @@ async def test_value_at_or_above_price_is_satisfied() -> None:
 
 
 async def test_a_shortfall_fires() -> None:
-    """⚠️ `fired`, argued rather than inherited. IH-2 and TI-1 chose needs_review because a NAME
+    """`fired`, argued rather than inherited. IH-2 and TI-1 chose needs_review because a NAME
     difference is frequently legitimate (a trust, a name change). A value shortfall is not ambiguous in
     that way: the number is the number, and it has a definite consequence — cash, a renegotiation, or a
     rebuttal. That is an actionable requirement, which is what `fired` means here (PR-6 uses it the same
@@ -51,7 +51,7 @@ async def test_a_shortfall_fires() -> None:
 
 
 async def test_two_appraisals_take_the_lowest_value_pinned_by_value() -> None:
-    """⚠️ THE LP-488 DEFECT SHAPE, guarded here BY VALUE rather than by verdict.
+    """THE LP-488 DEFECT SHAPE, guarded here BY VALUE rather than by verdict.
 
     `property.appraised_value` is per-appraisal-document. The first version of that reader took whichever
     subject iterated FIRST, giving an arbitrary answer on an ordinary file (an original plus a
@@ -77,7 +77,7 @@ async def test_a_refinance_is_not_applicable() -> None:
 
 
 async def test_a_file_with_no_stated_purpose_couldnt_checks() -> None:
-    """⚠️ The same shortfall that FIRES under `purchase` must be SURFACED, not skipped, when the purpose
+    """The same shortfall that FIRES under `purchase` must be SURFACED, not skipped, when the purpose
     is unstated. As an outcome rather than an applicability predicate it would have produced nothing."""
     assert await _one(build_pr2_no_purpose_snapshot) is Verdict.COULDNT_CHECK
 
@@ -89,7 +89,7 @@ async def test_no_price_couldnt_checks_never_satisfied() -> None:
 
 
 async def test_lf6t3n_never_clears_on_a_missing_appraisal() -> None:
-    """⚠️ "The appraisal supports the value" on a file with no appraisal is a false all-clear."""
+    """ "The appraisal supports the value" on a file with no appraisal is a false all-clear."""
     snapshot = await materialize_tags(build_lf6t3n_snapshot(), only_groups=frozenset())
     evaluations, _tags = await evaluate_rules(snapshot, rule_ids=("PR-2",))
     assert Verdict.SATISFIED not in [e.verdict for e in evaluations]
@@ -99,7 +99,7 @@ async def test_lf6t3n_never_clears_on_a_missing_appraisal() -> None:
 # Provenance and the gate
 # --------------------------------------------------------------------------- #
 def test_the_lesser_of_citation_is_recorded() -> None:
-    """⚠️ TIER P, VERIFIED against the live page in this session (2026-08-13) rather than taken from the
+    """TIER P, VERIFIED against the live page in this session (2026-08-13) rather than taken from the
     ticket: Fannie Mae B2-1.2-01, page dated 06/01/2022 — the property value is the LOWER of sales price
     and appraised value, which is why a shortfall lands on the borrower as cash."""
     spec = load_rule_spec("PR-2")

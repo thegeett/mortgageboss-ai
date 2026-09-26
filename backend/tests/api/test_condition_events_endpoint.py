@@ -1,12 +1,12 @@
 """One round's history — `GET /condition-rounds/{round_id}/events` (LP-909 §4, screen S1-09).
 
-⚠️ THIS ROUTE IS THE FIRST READER OF AN INDEX BUILT FOR IT IN LP-904.
+THIS ROUTE IS THE FIRST READER OF AN INDEX BUILT FOR IT IN LP-904.
 `ix_condition_events_round_occurred` has carried the comment "One round's history in time order — the
 shape the round-details sheet reads (S1-09)" since `condition_events` was created, and nothing ever
 read it. Every event insert — per created condition, per seen-again, per note, per round transition —
 paid for an index serving a query that did not exist.
 
-⚠️ AND THE HARDEST THING TO GET RIGHT HERE IS WHAT DOES *NOT* COME BACK. `ConditionEvent.detail` is
+AND THE HARDEST THING TO GET RIGHT HERE IS WHAT DOES *NOT* COME BACK. `ConditionEvent.detail` is
 classified NPI: the model calls it "what changed, which is the lender's text",
 `readonly.condition_events` drops it whole rather than scrubbing it, and `condition_import.py` states
 the rule at its own write site. A history panel is not a reason to open that door, so the schema
@@ -82,7 +82,7 @@ async def _user(db: AsyncSession, *, slug: str) -> tuple[Company, str]:
 async def _round(db: AsyncSession, *, slug: str) -> tuple[ConditionRound, Company, str]:
     """A pasted round, which already carries TWO events of its own.
 
-    ⚠️ TWO, NOT ONE, AND THIS DOCSTRING SAID ONE. `create_round_from_paste` parses INLINE — the rules
+    TWO, NOT ONE, AND THIS DOCSTRING SAID ONE. `create_round_from_paste` parses INLINE — the rules
     read the text in the request — so it writes `ROUND_RECEIVED` and then `ROUND_PARSED` before a test
     adds anything. The first version of the ordering test below asserted an exact three-element list
     against this fixture and failed on the event it had not accounted for.
@@ -132,7 +132,7 @@ async def _event(
 async def test_the_lenders_words_do_not_travel(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ THE ASSERTION THE WHOLE SCHEMA DESIGN EXISTS FOR, AND THE ONE THAT MAKES IT A GUARANTEE.
+    """THE ASSERTION THE WHOLE SCHEMA DESIGN EXISTS FOR, AND THE ONE THAT MAKES IT A GUARANTEE.
 
     `detail` is free-form JSONB and NPI-classified. Every current writer keeps it to counts and
     identifiers — `condition_import.py` says so at its own write site ("WHAT CHANGED, NOT THE
@@ -174,7 +174,7 @@ async def test_the_lenders_words_do_not_travel(
 async def test_npi_under_an_allow_listed_key_does_not_travel_either(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ THE HALF THE FIRST NPI TEST NEVER CHECKED (LP-909 review).
+    """THE HALF THE FIRST NPI TEST NEVER CHECKED (LP-909 review).
 
     That test put lender text under keys that are NOT on the allow-list — `text`, `verbatim_text`,
     `borrower` — so it proved the KEY filter works and said nothing about VALUES. The projection typed
@@ -244,7 +244,7 @@ async def test_only_the_named_scalars_are_exposed(
         "filled_expiry",
         "matched",
     }
-    # ⚠️ THREE FIELDS CAME OFF THIS LIST AND THAT IS THE POINT. `reader_version`,
+    # THREE FIELDS CAME OFF THIS LIST AND THAT IS THE POINT. `reader_version`,
     # `duplicates_dropped` and `filled_from` were projected and read by no sentence — three open
     # doors serving nothing. `filled_from` was also mis-documented as an enrich key: it is written
     # once, on `CONDITION_EDITED`, so the arm that would have used it could never have seen it.
@@ -259,7 +259,7 @@ async def test_only_the_named_scalars_are_exposed(
 async def test_the_history_reads_oldest_first(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ OLDEST FIRST, WHICH IS THE OPPOSITE OF THE ROUND STRIP. A history is read downwards as a
+    """OLDEST FIRST, WHICH IS THE OPPOSITE OF THE ROUND STRIP. A history is read downwards as a
     sequence — pasted, then imported, then the PDF attached — so newest-first would run the story
     backwards. `list_rounds` is newest-first because a strip answers "what is current"; this answers
     "what happened", and the two orders are not interchangeable."""
@@ -285,12 +285,12 @@ async def test_the_history_reads_oldest_first(
 
     kinds = [event["kind"] for event in response.json()]
 
-    # ⚠️ A RELATION OVER THE SEQUENCE, NOT AN EXACT LIST. An earlier version asserted exactly three
+    # A RELATION OVER THE SEQUENCE, NOT AN EXACT LIST. An earlier version asserted exactly three
     # kinds and failed on a correct implementation: a pasted round parses inline, so `ROUND_PARSED`
     # sits between received and imported. Pinning the census makes this break whenever a writer
     # legitimately adds an event, which trains the next person to loosen it rather than read it.
     #
-    # ⚠️ AND NEWEST FIRST, WHICH THIS TEST ALSO HAD BACKWARDS. It asserted oldest-first, following a
+    # AND NEWEST FIRST, WHICH THIS TEST ALSO HAD BACKWARDS. It asserted oldest-first, following a
     # commit that argued it from first principles — but S1-09's mock runs 4:31 → 4:22 → 4:20 and its
     # *May differ* covers only the sheet width and whether times show. The order is a Must-match, so
     # reasoning to the other answer was re-deciding something the design pack had settled.
@@ -314,7 +314,7 @@ async def test_the_history_reads_oldest_first(
 async def test_a_conditions_own_events_stay_out_of_the_rounds_history(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ WITHOUT THIS FILTER A 30-ROW IMPORT RENDERS THIRTY "A condition was added" LINES, and the
+    """WITHOUT THIS FILTER A 30-ROW IMPORT RENDERS THIRTY "A condition was added" LINES, and the
     README asks for "a SHORT history". Measured on a real paste → import → paste → import flow, round
     2 came back with NINE lines, six of them detail-less `CONDITION_SEEN_AGAIN`.
 
@@ -324,7 +324,7 @@ async def test_a_conditions_own_events_stay_out_of_the_rounds_history(
     """
     round_, company, token = await _round(db_session, slug="events-condition-level")
 
-    # ⚠️ A REAL `Condition`, NOT A SENTINEL UUID. `condition_events.condition_id` carries
+    # A REAL `Condition`, NOT A SENTINEL UUID. `condition_events.condition_id` carries
     # `fk_condition_events_condition_id_conditions`, so `uuid4()` fails the insert rather than the
     # assertion — the first version of this test died in its own setup with a ForeignKeyViolation.
     condition = Condition(
@@ -390,7 +390,7 @@ async def test_an_imports_numbers_come_through(
 
 
 async def test_a_system_event_has_no_actor(client: AsyncClient, db_session: AsyncSession) -> None:
-    """⚠️ NULL IS A FACT HERE, NOT MISSING DATA. The model says why: "a parse task has no actor, and
+    """NULL IS A FACT HERE, NOT MISSING DATA. The model says why: "a parse task has no actor, and
     naming the processor who uploaded the sheet as the actor of the parse would make the trail say
     something untrue." The history must be able to distinguish the reader from a person."""
     round_, company, token = await _round(db_session, slug="events-actor")
@@ -413,7 +413,7 @@ async def test_a_system_event_has_no_actor(client: AsyncClient, db_session: Asyn
 async def test_a_malformed_detail_does_not_break_the_history(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ A COUNT STORED AS A STRING BECOMES None, NEVER A COERCION AND NEVER A 500. `detail` is
+    """A COUNT STORED AS A STRING BECOMES None, NEVER A COERCION AND NEVER A 500. `detail` is
     written by six call sites and nothing constrains its shapes, so the projection reads defensively:
     `"6"` is not 6, and inventing that agreement would be this layer asserting something the writers
     do not guarantee. A history panel must not fail because one writer differed."""
@@ -434,7 +434,7 @@ async def test_a_malformed_detail_does_not_break_the_history(
         e for e in response.json() if e["kind"] == ConditionEventKind.ROUND_IMPORTED.value
     )
     assert imported["created"] is None, "a string is not an int"
-    # ⚠️ `True` IS AN `int` IN PYTHON, which is why `_as_int` excludes bool explicitly. Without that
+    # `True` IS AN `int` IN PYTHON, which is why `_as_int` excludes bool explicitly. Without that
     # check a flag would render as the count 1.
     assert imported["seen_again"] is None, "a bool is not a count"
     assert imported["rows"] == 6, "the well-formed keys still come through"

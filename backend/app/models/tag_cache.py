@@ -81,7 +81,7 @@ class TagCacheEntry(Base, UUIDMixin, TimestampMixin):
     #: Bumped every time a run STORES this entry — which is every run, for every entry, because the
     #: loader pulls the whole file's rows into the cache and the saver writes the whole cache back.
     #:
-    #: ⚠️ SO IT IS NOT A LIVENESS SIGNAL, and the first version of this comment claimed it was ("a
+    #: SO IT IS NOT A LIVENESS SIGNAL, and the first version of this comment claimed it was ("a
     #: busy file's live entries stay young while its dead ones age"). Measured: a fingerprint whose
     #: content has changed — never looked up by any producer again — still reaches `hit_count=3`
     #: after three runs, exactly like an entry hit every time. What this counts is runs SURVIVED.

@@ -30,12 +30,12 @@ function usDate(iso: string): string {
 /**
  * Which round this condition joins, in the words S1-12 specifies.
  *
- * ⚠️ TWO SENTENCES, AND THE SECOND ONE IS NOT A FALLBACK FOR MISSING DATA. "Starts round 1 (typed)"
+ * TWO SENTENCES, AND THE SECOND ONE IS NOT A FALLBACK FOR MISSING DATA. "Starts round 1 (typed)"
  * is what happens on a file with no imported round: the server opens one. Rendering the first
  * sentence with a blank number would describe a round that does not exist yet; saying nothing would
  * leave a processor unable to tell whether they are adding to the lender's list or beginning one.
  *
- * ⚠️ `round_number` IS NULL ON A DRAFT — it is assigned on IMPORT — so a file whose only round is
+ * `round_number` IS NULL ON A DRAFT — it is assigned on IMPORT — so a file whose only round is
  * still being reviewed is "starts round 1" too, which is correct: the backend attaches a manual
  * condition to the latest IMPORTED round, not to a draft somebody is mid-review on.
  */
@@ -52,13 +52,13 @@ const HEADINGS = Object.keys(BUCKET_KIND_LABEL) as BucketKind[];
 /**
  * Add one condition by hand (screen S1-12, `POST /loan-files/{id}/conditions`).
  *
- * ⚠️ THE WORDING FIELD IS SERIF AND REQUIRED, AND BOTH ARE RULES RATHER THAN STYLE. The design pack's
+ * THE WORDING FIELD IS SERIF AND REQUIRED, AND BOTH ARE RULES RATHER THAN STYLE. The design pack's
  * rule 2: text quoted from a document is IBM Plex Serif, because it is the lender's words and not
  * ours. Required, because a condition with no wording is not a condition — and the hint says "Type
  * it exactly as the lender wrote it", which is the same verbatim-storage promise the readers make
  * (spec §9.1: the lender's exact words, only whitespace normalised).
  *
- * ⚠️ NO STATUS CONTROL, AND THERE NEVER IS ONE IN STAGE 1 (design rule 3). Nothing here says
+ * NO STATUS CONTROL, AND THERE NEVER IS ONE IN STAGE 1 (design rule 3). Nothing here says
  * cleared, done, satisfied or open. A manually added condition arrives exactly as a parsed one does.
  */
 export function AddConditionDialog({
@@ -98,13 +98,13 @@ export function AddConditionDialog({
         lender_code: lenderCode.trim() || null,
         lender_category: category.trim() || null,
         bucket_kind: bucketKind,
-        // ⚠️ EXPLICITLY `null`, NOT OMITTED, MATCHING THE TWO FIELDS ABOVE. They send `|| null` with
+        // EXPLICITLY `null`, NOT OMITTED, MATCHING THE TWO FIELDS ABOVE. They send `|| null` with
         // a comment saying why — the column is nullable and `""` would be a value the lender never
         // wrote — and a third field escaping that convention in the same expression is the
         // inconsistency worth avoiding. `null` says we considered it and have nothing; leaving the
         // key out says nothing at all. The server turns it into `""` either way.
         bucket_heading: null,
-        // ⚠️ AND SENDING A REAL ONE WAS A DEFECT (LP-909 review). It used to send
+        // AND SENDING A REAL ONE WAS A DEFECT (LP-909 review). It used to send
         // `BUCKET_KIND_LABEL[bucketKind]` — OUR prose — into a column that holds the LENDER's
         // printed vocabulary ("Prior To Docs (PTD)", "Underwriter To Obtain And Clear").
         // `create_manual_condition` refuses to manufacture one for exactly that reason and writes

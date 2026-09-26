@@ -1231,7 +1231,7 @@ async def list_verification_runs(
     runs = (await db.execute(stmt)).scalars().all()
     # LP-600 — the governed outcome counts, per run, FROM THE EVENT LOG.
     #
-    # ⚠️ NOT FROM `Finding.verification_id`, which is what LP-592 did and what made every historical
+    # NOT FROM `Finding.verification_id`, which is what LP-592 did and what made every historical
     # run render as "produced no findings". That column is REASSIGNED on every run: `_update_finding`
     # sets it for each re-detected finding and the retire loop does the same, so after run 2 almost
     # all of run 1's findings point at run 2. Grouping by it returns rows for the latest run only.

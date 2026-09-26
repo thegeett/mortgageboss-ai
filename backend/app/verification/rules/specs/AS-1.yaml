@@ -5,7 +5,7 @@
 # guideline_reference — see docs/stage2-evaluator-prompts.md). Nothing consumes this
 # yet; the evaluator is LP-304.
 #
-# ⚠️ FORMAT IS PROVISIONAL. These fields were DISCOVERED from this one real rule (AS-1).
+# FORMAT IS PROVISIONAL. These fields were DISCOVERED from this one real rule (AS-1).
 # The general spec schema is generalized in LP-308 — do not treat this shape as final.
 #
 # Consistency: `kind` / `numeric_check` and the validation gate
@@ -132,7 +132,7 @@ deterministic:
         # unresolved candidate regardless of size. This wiring makes AS-1 EVALUATE (previously it
         # couldnt_checked every deposit — a strict improvement). Fail-closed: absent/unknown income → None
         # → couldnt_check (never 0 — a 0 threshold would fire on every deposit).
-        #   ⚠️ STATED, NOT QUALIFYING (priya_validated:false — needs sign-off): dti.qualifying_income_monthly
+        #   STATED, NOT QUALIFYING (priya_validated:false — needs sign-off): dti.qualifying_income_monthly
         #   sums the MISMO STATED 1003 income, but the guideline below is 50% of QUALIFYING income. STATED >=
         #   QUALIFYING (qualifying haircuts declining/variable pay), so this threshold is LOOSER than the
         #   guideline: a deposit between 50%×qualifying and 50%×stated now reads SATISFIED (before: the gated

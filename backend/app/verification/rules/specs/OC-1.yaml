@@ -3,7 +3,7 @@
 # The FIRST Bucket 2 rule written from scratch. It reads two ALREADY-PRODUCED loan-level tags (the same
 # occupancy.consistent_with_signals that LIVE OC-2 rides) and reaches a verdict with ZERO new producer.
 #
-# ⚠️ SPEC-WORDING (the LP-405 / LP-371 D3 trap, verified in Phase 0): the produced tag
+# SPEC-WORDING (the LP-405 / LP-371 D3 trap, verified in Phase 0): the produced tag
 # occupancy.consistent_with_signals measures whether the borrower's OTHER 1003/MISMO DECLARATIONS
 # (intent-to-occupy, the FHA second-residence indicator, the financed-unit count) agree with the stated
 # occupancy — NOT the "address signals" the rule's NAME/rationale implies. The loan/MISMO context that
@@ -21,7 +21,7 @@
 # CALIBRATED; OC-1 would AUTO-ship, which does. So OC-1 ships "written + producing", HELD on calibration
 # (activation_bars.yaml: now ratify-pending (was not-calibratable-yet)). See LP-406-4.
 #
-# ⚠️ ACTIVATION PRECONDITION (LP-406-4 review): OC-1 and LIVE OC-2 BOTH consume
+# ACTIVATION PRECONDITION (LP-406-4 review): OC-1 and LIVE OC-2 BOTH consume
 # occupancy.consistent_with_signals (OC-2 reasons over it; OC-1 fires deterministically on "no"), so once
 # OC-1 is activated a "no" file surfaces TWICE — OC-1 auto ("declarations conflict") AND OC-2 ratify
 # ("occupancy implausible"). Before activating OC-1, reconcile the overlap: decide whether OC-1's

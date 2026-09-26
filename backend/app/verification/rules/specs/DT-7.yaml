@@ -109,7 +109,7 @@ judgment:
   reasoned_over: [dti.atr_factors_documented]
   output_tag: dti.atr_documentation_adequate
   value_domain: ["yes", "no", "unknown"]
-  # LP-522 — action first. ⚠️ THE WORDING MUST NOT DRIFT INTO AN ATR DETERMINATION. Ability-to-repay is
+  # LP-522 — action first. THE WORDING MUST NOT DRIFT INTO AN ATR DETERMINATION. Ability-to-repay is
   # a CREDITOR obligation under Regulation Z, assessed at underwriting; a processor assembling the file
   # is not the party making it. This rule asks only whether the file CARRIES documents supporting each
   # factor, and every sentence below says "documents" or "documentation" for that reason.

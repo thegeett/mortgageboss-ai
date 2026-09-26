@@ -1,6 +1,6 @@
 """The UWM fixtures, rendered as real PDFs (LP-906 follow-up).
 
-⚠️ WHY THIS EXISTS. §7.1-7.3 are TEXT, and `read_uwm` refused PDF input entirely because the
+WHY THIS EXISTS. §7.1-7.3 are TEXT, and `read_uwm` refused PDF input entirely because the
 heading-versus-continuation test measures `Line.indent`, which is None for PDF-built lines. That was
 the honest state while no UWM PDF existed to calibrate against. LP-905's own done-when is
 "uploading a PDF built from `uwm_round1` produces a DRAFT round with 11 draft rows", so the refusal
@@ -16,7 +16,7 @@ measured on round 1: `x0 = 54.0 + indent * 4.8` exactly — which is how the rea
 layout behaves. That linearity is what makes the reader's derived threshold checkable: headings and
 row starts land at {54.0, 58.8} and continuations at [260.4, 303.6], two clusters ~200 points apart.
 
-⚠️ THE READER MUST NOT LEARN THOSE NUMBERS. They are this fixture's font metrics, not UWM's. The
+THE READER MUST NOT LEARN THOSE NUMBERS. They are this fixture's font metrics, not UWM's. The
 reader derives its threshold from the document it is given; this module exists to give it a document
 whose geometry is known, so a wrong derivation is visible.
 """
@@ -45,14 +45,14 @@ def render_text_pdf(text: str) -> bytes:
     empty word boxes are produced — `lines_from_pdf` would otherwise have nothing to group and the
     blank would simply vanish, which is fine here because the UWM reader skips blanks anyway.
 
-    ⚠️ IT TAKES TEXT RATHER THAN A FIXTURE NAME, AND THAT IS WHY IT EXISTS (LP-908 review).
+    IT TAKES TEXT RATHER THAN A FIXTURE NAME, AND THAT IS WHY IT EXISTS (LP-908 review).
     `render_uwm_pdf` resolves a filename under `fixtures/` and there are only three, all UWM letters
     the rules read cleanly — so `needs_ai` is False for every PDF the suite could previously build,
     and the parse task's "hand it to the AI" branch had no way to be reached at all. A door test for
     that branch needs a page the rules CANNOT split, and prose is the shortest such page
     (`test_prose_with_no_structure_at_all_needs_ai`).
 
-    ⚠️ THE PROSE STAYS AT THE CALL SITE, NOT IN `fixtures/`. That directory holds the spec's §7
+    THE PROSE STAYS AT THE CALL SITE, NOT IN `fixtures/`. That directory holds the spec's §7
     condition sheets, every expected value in `test_reader_uwm.py` transcribed from one of them.
     A paragraph of prose is not a condition sheet, and filing it beside them would misrepresent what
     they are — a later reader would reasonably take it for a lender's real output.

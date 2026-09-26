@@ -1,6 +1,6 @@
 """Reading an arrived condition sheet (LP-905 section 2, spec §6).
 
-⚠️ THESE DRIVE `parse_round`, NOT THE CELERY TASK, and that is deliberate rather than convenient.
+THESE DRIVE `parse_round`, NOT THE CELERY TASK, and that is deliberate rather than convenient.
 `task_session()` builds its own engine, and the suite isolates each test inside a transaction that
 is never committed — so a task opening its own session would not see the round the test just
 created, and every assertion here would be about an empty database. `test_document_claim_lp637.py`
@@ -83,7 +83,7 @@ async def test_a_uwm_pdf_becomes_a_draft_with_eleven_rows(db_session: AsyncSessi
 
 
 async def test_the_draft_rows_are_stored_as_the_api_serves_them(db_session: AsyncSession) -> None:
-    """⚠️ STORED THROUGH `DraftRowPublic`, NOT `dataclasses.asdict`. A hand-rolled dict would be a
+    """STORED THROUGH `DraftRowPublic`, NOT `dataclasses.asdict`. A hand-rolled dict would be a
     third representation of a row, free to drift from what the endpoint returns; going through the
     response schema makes stored and served identical by construction — and JSONB accepts none of
     the dates, enums and nested dataclasses a `ParsedRow` actually holds."""
@@ -103,7 +103,7 @@ async def test_the_draft_rows_are_stored_as_the_api_serves_them(db_session: Asyn
 
 
 async def test_the_mortgagee_clause_reaches_the_round(db_session: AsyncSession) -> None:
-    """⚠️ THE MODEL'S OWN COMMENT PROMISED THIS KEY AND NOTHING WROTE IT (LP-909 §4).
+    """THE MODEL'S OWN COMMENT PROMISED THIS KEY AND NOTHING WROTE IT (LP-909 §4).
 
     `condition_round.py` documents `header` as `{loan_facts, lender_team, dates,
     mortgagee_clause?}`. But `_split_header` returns only `{lender_team, broker_contact}`, the
@@ -128,11 +128,11 @@ async def test_the_mortgagee_clause_reaches_the_round(db_session: AsyncSession) 
 
 
 def test_a_sheet_with_no_clause_gains_no_phantom_key() -> None:
-    """⚠️ ABSENT, NOT EMPTY. The side panel renders the clause block conditionally, so "no clause"
+    """ABSENT, NOT EMPTY. The side panel renders the clause block conditionally, so "no clause"
     and "blank clause" must not look alike — `header_with_clause` adds the key only when there is
     something to put in it.
 
-    ⚠️ DRIVEN DIRECTLY, AND THE FIRST VERSION OF THIS TEST PROVED NOTHING. It monkeypatched
+    DRIVEN DIRECTLY, AND THE FIRST VERSION OF THIS TEST PROVED NOTHING. It monkeypatched
     `sheet_read.sheet_from_bytes` to strip the clause — but `tasks/conditions.py` does
     `from app.conditions.sheet_read import sheet_from_bytes`, binding the function into its OWN
     namespace at import time, so patching the source module rebound a name nothing reads. The real
@@ -162,7 +162,7 @@ def test_a_sheet_with_no_clause_gains_no_phantom_key() -> None:
     assert kept is not None
     assert "mortgagee_clause" not in kept
 
-    # ⚠️ None, NOT `{}` — both call sites had `sheet.header or None`, and an empty dict would turn a
+    # None, NOT `{}` — both call sites had `sheet.header or None`, and an empty dict would turn a
     # headerless sheet into one with a header nobody can read anything from. S1-07 branches on
     # `header === null` to say "a paste has no letter" rather than rendering eleven em-dashes.
     assert header_with_clause(neither) is None
@@ -210,7 +210,7 @@ async def test_a_successful_parse_writes_exactly_one_round_parsed_event(
 async def test_a_second_delivery_writes_nothing_and_appends_no_event(
     db_session: AsyncSession,
 ) -> None:
-    """⚠️ THE COMPARE-AND-SET, EXERCISED. A Celery redelivery arrives at the same function with the
+    """THE COMPARE-AND-SET, EXERCISED. A Celery redelivery arrives at the same function with the
     same round id. The guard is `status = PARSING`, so the second attempt matches no row, writes
     nothing, and appends no event — which matters more than usual because `condition_events` is
     append-only and a duplicate could never be taken back."""
@@ -226,7 +226,7 @@ async def test_a_second_delivery_writes_nothing_and_appends_no_event(
 
 
 async def test_a_discarded_round_is_not_clobbered(db_session: AsyncSession) -> None:
-    """⚠️ A PROCESSOR CAN DISCARD A ROUND WHILE IT IS BEING READ. The guard protects that too: the
+    """A PROCESSOR CAN DISCARD A ROUND WHILE IT IS BEING READ. The guard protects that too: the
     round is no longer PARSING, so the parse settles nothing and the discard stands. Without it, a
     slow parse would resurrect a round the processor had thrown away."""
     round_ = await _round(db_session)
@@ -245,7 +245,7 @@ async def test_a_discarded_round_is_not_clobbered(db_session: AsyncSession) -> N
 async def test_a_crash_mid_parse_leaves_the_round_untouched(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """⚠️ THE TEST THE REVIEW ASKED FOR FIRST, and the design turns it into a stronger assertion.
+    """THE TEST THE REVIEW ASKED FOR FIRST, and the design turns it into a stronger assertion.
 
     A task that raised after writing `draft_rows` but before the status moved would leave a
     half-written round, and the retry would have to decide whether to trust it. Writing every field
@@ -257,7 +257,7 @@ async def test_a_crash_mid_parse_leaves_the_round_untouched(
     def _explode(_content: bytes) -> object:
         raise RuntimeError("reader blew up mid-parse")
 
-    # ⚠️ PATCHED WHERE THE NAME NOW LIVES, AND THE MOVE BROKE THIS ONCE. LP-907 lifted the read out
+    # PATCHED WHERE THE NAME NOW LIVES, AND THE MOVE BROKE THIS ONCE. LP-907 lifted the read out
     # of this task into `app.conditions.sheet_read`, and the old `setattr(task_module, ...)` went on
     # naming an attribute the module no longer had — `AttributeError`, caught here rather than by
     # quietly patching nothing. A monkeypatch is only as good as the binding it targets.
@@ -294,7 +294,7 @@ PROSE_SHEET = "Please send over whatever you have for this file when you get a c
 async def test_a_pdf_the_rules_cannot_split_queues_the_ai_and_stays_parsing(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch, source_kind: ConditionSourceKind
 ) -> None:
-    """⚠️ THE ORPHAN THIS TICKET EXISTS TO CLOSE, AT BOTH DOORS THAT HAD IT.
+    """THE ORPHAN THIS TICKET EXISTS TO CLOSE, AT BOTH DOORS THAT HAD IT.
 
     `split_condition_round.delay()` was called from exactly one site — inside `paste_conditions` —
     so a sheet that ARRIVED as a PDF and whose reader asked for the AI was settled and then waited
@@ -335,7 +335,7 @@ async def test_a_pdf_the_rules_cannot_split_queues_the_ai_and_stays_parsing(
 async def test_the_lenders_page_is_persisted_so_the_split_has_something_to_read(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch, source_kind: ConditionSourceKind
 ) -> None:
-    """⚠️ QUEUEING THE SPLIT WAS NOT ENOUGH ON ITS OWN, and this is the half that is easy to miss.
+    """QUEUEING THE SPLIT WAS NOT ENOUGH ON ITS OWN, and this is the half that is easy to miss.
 
     `split_round` reads `round_.raw_text`, which only the paste door ever wrote. So a fix that just
     called `delay()` for an uploaded sheet would hand the task an empty column, hit its `if not
@@ -365,7 +365,7 @@ async def test_the_lenders_page_is_persisted_so_the_split_has_something_to_read(
 async def test_handing_a_sheet_to_the_ai_writes_no_parsed_event(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """⚠️ ONE READ MUST LEAVE ONE PARSE IN THE HISTORY, and LP-907 shipped the other version once.
+    """ONE READ MUST LEAVE ONE PARSE IN THE HISTORY, and LP-907 shipped the other version once.
 
     The split emits `ROUND_PARSED` when it settles. Emitting one here too would put two parses in a
     round's history for a single read — and screen S1-09 renders that history, so a processor would
@@ -391,7 +391,7 @@ async def test_handing_a_sheet_to_the_ai_writes_no_parsed_event(
 async def test_a_broker_that_refuses_the_split_fails_the_round_rather_than_stranding_it(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch, source_kind: ConditionSourceKind
 ) -> None:
-    """⚠️ THE STRANDED ROUND THIS TICKET ELIMINATED, ARRIVING BY A THIRD ROUTE (LP-908 review).
+    """THE STRANDED ROUND THIS TICKET ELIMINATED, ARRIVING BY A THIRD ROUTE (LP-908 review).
 
     Queueing the split from every door closed two paths to a permanent `PARSING` round and opened
     one: the row is committed BEFORE `.delay()` is reached, so a broker that is down leaves a round
@@ -401,7 +401,7 @@ async def test_a_broker_that_refuses_the_split_fails_the_round_rather_than_stran
     scenario, because the call was made. Only this one distinguishes "queued" from "queued and
     accepted", which is the distinction the processor experiences.
 
-    ⚠️ `kombu`'s `OperationalError`, NOT `sqlalchemy.exc`'s. Two unrelated exception classes share
+    `kombu`'s `OperationalError`, NOT `sqlalchemy.exc`'s. Two unrelated exception classes share
     the name, and catching the wrong one would be a guard that never fires while every test here
     still passed — the mutation run is what proves this one does.
     """
@@ -456,7 +456,7 @@ async def test_a_broker_failure_quotes_nothing_from_the_sheet(
 async def test_a_sheet_the_rules_read_cleanly_still_stores_the_lenders_page(
     db_session: AsyncSession,
 ) -> None:
-    """⚠️ THE DRAFT PATH'S `raw_text` WRITE, WHICH NOTHING PINNED UNTIL NOW (LP-908 review).
+    """THE DRAFT PATH'S `raw_text` WRITE, WHICH NOTHING PINNED UNTIL NOW (LP-908 review).
 
     The review session moved the write out of the shared `values` dict into the `needs_ai` branch
     only — the narrowing any reasonable person would make, since the AI path is the one that
@@ -486,7 +486,7 @@ async def test_a_sheet_the_rules_read_cleanly_still_stores_the_lenders_page(
 async def test_a_pdf_the_rules_read_queues_no_ai_at_all(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """⚠️ THE OTHER SIDE, AND WITHOUT IT THE FIX ABOVE PASSES FOR A VERSION THAT SPLITS EVERYTHING.
+    """THE OTHER SIDE, AND WITHOUT IT THE FIX ABOVE PASSES FOR A VERSION THAT SPLITS EVERYTHING.
 
     A UWM letter the rules read is DRAFT with its rows, and there is no model call to pay for. The
     absent assertion of this shape is what let the original defect ship: the enqueue was asserted
@@ -515,7 +515,7 @@ async def test_a_pdf_the_rules_read_queues_no_ai_at_all(
 
 
 async def test_an_unreadable_pdf_fails_with_a_typed_reason(db_session: AsyncSession) -> None:
-    """⚠️ NEVER A BARE `except Exception`. Measured: empty bytes raise `pymupdf.EmptyFileError` and
+    """NEVER A BARE `except Exception`. Measured: empty bytes raise `pymupdf.EmptyFileError` and
     garbage raises `FileDataError`, so both are caught by name and become one typed failure a
     processor can act on."""
     round_ = await _round(db_session)
@@ -554,7 +554,7 @@ async def test_missing_bytes_fail_with_their_own_reason(db_session: AsyncSession
 async def test_the_failure_detail_quotes_nothing_from_the_sheet(
     db_session: AsyncSession,
 ) -> None:
-    """⚠️ COMPOSED, NEVER QUOTED (spec §9.5), AND NOT FOR THE REASON THIS DOCSTRING USED TO GIVE.
+    """COMPOSED, NEVER QUOTED (spec §9.5), AND NOT FOR THE REASON THIS DOCSTRING USED TO GIVE.
 
     It said `failure_detail` "reaches the readonly layer, which scrubs identifier SHAPES only". It
     does not reach it: `parse_report` is in the EXCLUDED set and migration `d1f4b8c25e93` drops it
@@ -566,7 +566,7 @@ async def test_the_failure_detail_quotes_nothing_from_the_sheet(
     The same rule that moved a warning from quoting a loan-information line to naming its position:
     there too nothing escaped the view, and storing it was the part that needed fixing.
     """
-    # ⚠️ THE BAD BYTES GO IN *AFTER* CREATION. An earlier version passed them to
+    # THE BAD BYTES GO IN *AFTER* CREATION. An earlier version passed them to
     # `create_round_from_sheet`, which refuses a non-PDF at the door — so the round never existed
     # and the test failed inside its own setup with `ConditionSheetRejected`. The upload guard and
     # the parse guard are different defences; this one is about the second.

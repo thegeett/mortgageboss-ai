@@ -1,14 +1,14 @@
 """LP-491 — TI-1 (title commitment parties).
 
-⚠️ EVERY VERDICT ASSERTION RUNS THROUGH A REAL RULE EVALUATION (LP-487's standing rule).
+EVERY VERDICT ASSERTION RUNS THROUGH A REAL RULE EVALUATION (LP-487's standing rule).
 
-⚠️ TI-1 CARRIES A CATALOG EDIT: ai_fuzzy_match → deterministic_only, the SECOND time typed extraction
+TI-1 CARRIES A CATALOG EDIT: ai_fuzzy_match → deterministic_only, the SECOND time typed extraction
 turned out to have already spent the perception step (IH-2 was the first, LP-487). vested_owner_name
 fills 4/4 on the real commitments and seller_name 5/5 on the purchase agreements, so what remains is a
-string compare. ⚠️ THE CONSEQUENCE IS THE POINT: TI-1 needs no self-consistency run and no ratification —
+string compare. THE CONSEQUENCE IS THE POINT: TI-1 needs no self-consistency run and no ratification —
 it activates on `no-ai-dependency` because there is no model in its chain.
 
-⚠️ n=4. Four title commitments is what the corpus holds. These fixtures reproduce their SHAPE — a plain
+n=4. Four title commitments is what the corpus holds. These fixtures reproduce their SHAPE — a plain
 2-3 word name in vested_owner_name, a second owner on most, the seller on the contract — with invented
 names, because no borrower PII enters the repo. They prove wiring and direction, NOT accuracy at scale.
 """
@@ -61,7 +61,7 @@ async def test_a_purchase_whose_vested_owner_is_the_seller_is_satisfied() -> Non
 
 
 async def test_a_mismatch_is_needs_review_never_fired() -> None:
-    """⚠️ THE DIRECTION THIS RULE TURNS ON, argued rather than assumed. A vesting difference is
+    """THE DIRECTION THIS RULE TURNS ON, argued rather than assumed. A vesting difference is
     frequently LEGITIMATE — a revocable trust whose trustee is the borrower, an estate selling, a name
     changed on marriage or divorce, a deed not yet recorded. Each is a CORRECT file that a firing rule
     would call defective. The real failure (wrong property, wrong party) is caught just as well by
@@ -79,7 +79,7 @@ def test_ti1_cannot_fire_from_any_outcome() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ THE PURPOSE BRANCH — all three directions
+# THE PURPOSE BRANCH — all three directions
 # --------------------------------------------------------------------------- #
 async def test_a_refinance_compares_against_the_borrower_not_a_seller() -> None:
     """The counterparty differs by purpose: a refinancing borrower should already own the property."""
@@ -87,7 +87,7 @@ async def test_a_refinance_compares_against_the_borrower_not_a_seller() -> None:
 
 
 async def test_a_file_with_no_stated_purpose_couldnt_checks() -> None:
-    """⚠️ THE ABSENT DIRECTION. TI-1 applies to BOTH purposes, so there is no single applicability
+    """THE ABSENT DIRECTION. TI-1 applies to BOTH purposes, so there is no single applicability
     predicate to scope on — the branch lives in the producer. The abstain a predicate would have given is
     preserved exactly: an unstated purpose resolves to "unknown" and the gate surfaces it. The same
     matching names that satisfy under `purchase` must NOT satisfy with no purpose stated."""
@@ -131,18 +131,18 @@ def test_ti1_vocabulary_matches_the_spec() -> None:
 
 
 def test_the_vesting_markers_are_recorded_as_speculative() -> None:
-    """⚠️ THE REPORTED FINDING, kept where it cannot be lost. All four real commitments carry a PLAIN
+    """THE REPORTED FINDING, kept where it cannot be lost. All four real commitments carry a PLAIN
     NAME in vested_owner_name — the recital lives in vesting_marital_recital, which fills 0/4 — so
     nothing in the corpus exercises these markers. They are safe to ship unexercised (stripping a marker
     that is not present changes nothing), but a reader must not mistake them for measured behaviour."""
     header = load_rule_spec("TI-1").reference_values.values["vesting_truncate_markers"]
     assert "et ux" in header  # the vocabulary exists
-    # ⚠️ `or True` made this unfailable (reported finding) — it asserted nothing about the spec.
+    # `or True` made this unfailable (reported finding) — it asserted nothing about the spec.
     assert "PLAIN NAME" in load_rule_spec("TI-1").criteria.upper()
 
 
 def test_ti1_is_live_without_a_self_consistency_rate() -> None:
-    """⚠️ THE CONSEQUENCE OF THE CATALOG EDIT. TI-1 has no model in its chain, so it activates on
+    """THE CONSEQUENCE OF THE CATALOG EDIT. TI-1 has no model in its chain, so it activates on
     `no-ai-dependency` — no self-consistency run, no ratification, no calibration debt."""
     bar = load_activation_bars()["TI-1"]
     assert bar.status == "no-ai-dependency"
@@ -158,12 +158,12 @@ def test_ti1_reads_no_distrusted_tag() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# LP-491 follow-up — ⚠️ THE PER-RULE RATIFICATION PROOF for TI-2 and TI-6
+# LP-491 follow-up — THE PER-RULE RATIFICATION PROOF for TI-2 and TI-6
 # --------------------------------------------------------------------------- #
 def _judgeable_commitment() -> Snapshot:
     """A commitment carrying everything TI-2 and TI-6 gate on, so both REACH their judgment.
 
-    ⚠️ TI-1's builders deliberately omit `property_address` and the chain rows — they are not TI-1's
+    TI-1's builders deliberately omit `property_address` and the chain rows — they are not TI-1's
     inputs — so reusing them left both rules gated to couldnt_check before the judge ran, and the proof
     would have asserted nothing.
     """
@@ -246,7 +246,7 @@ async def _judged(rule_id: str, value: str):
 async def test_ratify_pending_judgment_findings_carry_ratification(
     rule_id: str, value: str
 ) -> None:
-    """⚠️ THE GAP LP-491 SHIPPED WITH, now closed. Both rules activated on `ratify-pending` (ADR-378),
+    """THE GAP LP-491 SHIPPED WITH, now closed. Both rules activated on `ratify-pending` (ADR-378),
     where RATIFICATION IS THE ENTIRE SAFETY SUBSTITUTE for the missing measurement — but the proof was
     only ever SET-LEVEL: that the status set was as expected and `ratifies_every_finding()` returned
     True. The per-rule evidence existed for CR-1 and CR-4 and was never extended here.
@@ -256,7 +256,7 @@ async def test_ratify_pending_judgment_findings_carry_ratification(
     reached 1 of the 5 rules it claimed to protect. So this drives a real judgment through the real
     evaluator, on BOTH the clean and the adverse value, and checks the finding itself.
 
-    ⚠️ Asserted on the ASSERTING verdicts. A judgment rule emits needs_review (an assertion a human must
+    Asserted on the ASSERTING verdicts. A judgment rule emits needs_review (an assertion a human must
     confirm) or couldnt_check (an abstention, which asserts nothing and needs no ratification)."""
     findings = await _judged(rule_id, value)
     asserted = [e for e in findings if e.verdict is Verdict.NEEDS_REVIEW]

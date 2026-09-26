@@ -1,6 +1,6 @@
 """One round number per file — the index that IS the rule (LP-904, LP-909 §2).
 
-⚠️ THIS INDEX EXISTED IN PRODUCTION AND IN NO TEST DATABASE, AND NOTHING NOTICED. LP-904's migration
+THIS INDEX EXISTED IN PRODUCTION AND IN NO TEST DATABASE, AND NOTHING NOTICED. LP-904's migration
 creates `uq_condition_rounds_file_number` with raw SQL; `ConditionRound.__table_args__` did not
 declare it. The suite builds its schema with `Base.metadata.create_all`, not with migrations, so for
 the whole of Stage 1 two rounds numbered 2 on one file inserted cleanly in every test — measured, not
@@ -60,7 +60,7 @@ def _round(
 def _violated_constraint(error: IntegrityError) -> str | None:
     """The constraint that actually failed.
 
-    ⚠️ MEASURED, BECAUSE THE OBVIOUS PLACE IS EMPTY. `error.orig` is SQLAlchemy's
+    MEASURED, BECAUSE THE OBVIOUS PLACE IS EMPTY. `error.orig` is SQLAlchemy's
     `asyncpg.IntegrityError` wrapper and carries NO `constraint_name` at all; the name lives on its
     `__cause__`, the underlying `asyncpg.UniqueViolationError`. Reading `error.orig.constraint_name`
     returns nothing and a comparison against it is quietly always False — a check that reads as
@@ -73,7 +73,7 @@ def _violated_constraint(error: IntegrityError) -> str | None:
 async def test_two_imported_rounds_cannot_share_a_number_on_one_file(
     db_session: AsyncSession,
 ) -> None:
-    """⚠️ THE PROPERTY THE WHOLE IMPORT RETRY IS BUILT ON. Two sheets both recorded as "round 2"
+    """THE PROPERTY THE WHOLE IMPORT RETRY IS BUILT ON. Two sheets both recorded as "round 2"
     would put one file's history in two places with nothing able to tell them apart."""
     company = await make_company(db_session)
     loan_file = await make_loan_file(db_session, company=company)
@@ -107,7 +107,7 @@ async def test_the_same_number_on_a_different_file_is_fine(db_session: AsyncSess
 
 
 async def test_numberless_drafts_do_not_collide(db_session: AsyncSession) -> None:
-    """⚠️ WHY THE INDEX IS PARTIAL. Numbers are assigned on import, so a file can hold several
+    """WHY THE INDEX IS PARTIAL. Numbers are assigned on import, so a file can hold several
     drafts at once — an upload and a paste — all with `round_number` NULL. A non-partial unique
     index would refuse the second one and break the paste door."""
     company = await make_company(db_session)
@@ -126,7 +126,7 @@ async def test_numberless_drafts_do_not_collide(db_session: AsyncSession) -> Non
 
 
 async def test_a_discarded_round_keeps_its_number(db_session: AsyncSession) -> None:
-    """⚠️ `status = 'imported'` IS DELIBERATELY NOT IN THE PREDICATE, and LP-904's migration records
+    """`status = 'imported'` IS DELIBERATELY NOT IN THE PREDICATE, and LP-904's migration records
     why it was removed in review: `condition_events` is append-only, so a discarded round's
     ROUND_IMPORTED event survives forever. Freeing its number for reuse would leave two different
     sheets both recorded as "round 2" in an immutable history."""
@@ -168,7 +168,7 @@ async def test_a_soft_deleted_round_releases_its_number(db_session: AsyncSession
 async def test_the_session_survives_the_violation_and_can_recompute(
     db_session: AsyncSession,
 ) -> None:
-    """⚠️ THE EXACT SHAPE LP-909's IMPORT RETRY DEPENDS ON, pinned here rather than discovered there.
+    """THE EXACT SHAPE LP-909's IMPORT RETRY DEPENDS ON, pinned here rather than discovered there.
 
     After the violation, asyncpg refuses every further statement on the transaction until the
     savepoint is unwound — so a recompute issued without rolling back never runs at all, and the

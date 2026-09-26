@@ -165,7 +165,7 @@ def test_exactly_the_signed_off_bars_are_validated() -> None:
     # publisher's live guide (in each spec's reference_values), not Priya-signed. See the file header.
     # LP-487 adds IH-7 on the same footing: its $1M liability floor and replacement-cost basis are cited to
     # Fannie B7-4-01 / B7-3-03 (both pages dated 08/05/2026) in the spec, not signed off by Priya.
-    # ⚠️ IH-2 is NOT here: it is no-ai-dependency with validated:false — a matching VOCABULARY, not a
+    # IH-2 is NOT here: it is no-ai-dependency with validated:false — a matching VOCABULARY, not a
     # threshold, so there is nothing to validate (the CL-1 precedent).
     # LP-494 adds CO-4 on exactly the CR-13 / PR-6 / IH-7 footing: SELF-CALIBRATED, not Priya-signed. Both
     # reserve floors are researched and cited in the spec's reference_values — 10% from B4-2.2-02

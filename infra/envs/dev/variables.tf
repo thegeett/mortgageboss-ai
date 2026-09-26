@@ -24,7 +24,7 @@ variable "name_prefix" {
 # --- Network --------------------------------------------------------------- #
 
 variable "vpc_cidr" {
-  description = "VPC CIDR. ⚠️ Staging MUST differ from this if the two ever peer."
+  description = "VPC CIDR. Staging MUST differ from this if the two ever peer."
   type        = string
 }
 
@@ -51,7 +51,7 @@ variable "interface_endpoint_services" {
 # --- Secrets --------------------------------------------------------------- #
 
 variable "secret_recovery_window_days" {
-  description = "Secrets Manager recovery window. ⚠️ MUST BE 30 FOR STAGING — 0 only suits a throwaway environment."
+  description = "Secrets Manager recovery window. MUST BE 30 FOR STAGING — 0 only suits a throwaway environment."
   type        = number
 }
 
@@ -63,7 +63,7 @@ variable "kms_deletion_window_days" {
 variable "kms_create_alias" {
   description = <<-EOT
     Create a friendly KMS alias. Console readability only — every consumer uses the
-    ARN. ⚠️ An orphaned alias after destroy is what breaks rebuild; false here,
+    ARN. An orphaned alias after destroy is what breaks rebuild; false here,
     true for long-lived environments.
   EOT
   type        = bool
@@ -103,17 +103,17 @@ variable "rds_max_allocated_storage" {
 }
 
 variable "rds_multi_az" {
-  description = "Standby in a second AZ. ⚠️ MUST BE true FOR STAGING."
+  description = "Standby in a second AZ. MUST BE true FOR STAGING."
   type        = bool
 }
 
 variable "rds_deletion_protection" {
-  description = "Refuse to delete the database. ⚠️ MUST BE true FOR STAGING."
+  description = "Refuse to delete the database. MUST BE true FOR STAGING."
   type        = bool
 }
 
 variable "rds_skip_final_snapshot" {
-  description = "Skip the final snapshot on delete. ⚠️ MUST BE false FOR STAGING."
+  description = "Skip the final snapshot on delete. MUST BE false FOR STAGING."
   type        = bool
 }
 
@@ -209,7 +209,7 @@ variable "image_tag" {
     Image tag the task definitions reference. Repositories are IMMUTABLE, so a tag
     always means the same bytes.
 
-    ⚠️ Must already be pushed. A task definition referencing a missing tag fails at
+    Must already be pushed. A task definition referencing a missing tag fails at
     launch with CannotPullContainerError, visible only in the service events.
   EOT
   type        = string
@@ -217,7 +217,7 @@ variable "image_tag" {
 
 variable "cpu_architecture" {
   description = <<-EOT
-    Must match the architecture of the pushed images. ⚠️ A mismatch fails with
+    Must match the architecture of the pushed images. A mismatch fails with
     `exec format error`, visible only in the CloudWatch log stream.
   EOT
   type        = string
@@ -279,7 +279,7 @@ variable "enable_container_insights" {
 }
 
 variable "enable_execute_command" {
-  description = "ECS Exec. ⚠️ A production access path — grants a shell in a task holding borrower data."
+  description = "ECS Exec. A production access path — grants a shell in a task holding borrower data."
   type        = bool
 }
 
@@ -324,7 +324,7 @@ variable "bedrock_profile_regions" {
   description = <<-EOT
     Regions a `us.` cross-region inference profile may route to.
 
-    ⚠️ VERIFIED, and wider than it looks: `aws bedrock get-inference-profile` shows
+    VERIFIED, and wider than it looks: `aws bedrock get-inference-profile` shows
     the us. profiles routing to us-east-1, us-east-2 AND us-west-2. The IAM policy
     needs the foundation-model ARN in every one — omitting a region produces an
     INTERMITTENT AccessDeniedException that only fires when Bedrock routes there.
@@ -336,7 +336,7 @@ variable "documents_bucket_kms_key_arn" {
   description = <<-EOT
     CMK protecting the documents bucket, or null when it uses SSE-S3.
 
-    ⚠️ PENDING VERIFICATION — the C3 author could not read the bucket's encryption
+    PENDING VERIFICATION — the C3 author could not read the bucket's encryption
     configuration (the available role lacks s3:GetEncryptionConfiguration). Confirm
     with:
       aws s3api get-bucket-encryption --bucket <documents bucket>
@@ -349,12 +349,12 @@ variable "cors_allowed_origins" {
   description = <<-EOT
     Origins the API accepts, as a LIST — Terraform jsonencodes it.
 
-    ⚠️ The application parses this env var as JSON (pydantic-settings complex type).
+    The application parses this env var as JSON (pydantic-settings complex type).
     A bare "http://host" string raises SettingsError and the app REFUSES TO START,
     verified against the installed pydantic-settings. So this fails loudly rather
     than silently, unlike most of the config traps here.
 
-    ⚠️ CHICKEN AND EGG: the real value is the ALB's DNS name, which does not exist
+    CHICKEN AND EGG: the real value is the ALB's DNS name, which does not exist
     until after the first apply. It cannot be wired from module.compute.alb_dns_name
     because that would make the compute module depend on its own output. In practice
     the frontend and API share one ALB origin, so browser calls are SAME-ORIGIN and

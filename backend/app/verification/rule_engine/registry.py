@@ -87,7 +87,7 @@ _LP384_ACTIVATED: tuple[str, ...] = ("AS-9", "IN-4", "AS-10")
 # LP-390-7 — the FIRST income-wave activation: two AI rules whose load-bearing tags Priya's labels finally
 # measured (LP-390-5/5a). Both go live through the gate (validated:true + measured_accuracy >= the 0.90 bar).
 #   AS-2  — Earnest-money sourcing (ships AUTO). apparent_category re-scored 100% concrete (n=17, LP-390-5a) +
-#           has_identified_source 93.8% (n=16, LP-390-5); measured_accuracy 0.938. ⚠️ its trigger value
+#           has_identified_source 93.8% (n=16, LP-390-5); measured_accuracy 0.938. its trigger value
 #           loan_proceeds is n=0 on LF-6T3N — the tag is measured broadly but that value is UNTESTED (a file
 #           with a loan-proceeds deposit would strengthen it); it must not falsely fire (Phase-2 verified).
 #   AS-12 — Borrowed-funds detection (judgmental -> ships RATIFY; surfaces to needs_review, never an auto
@@ -108,7 +108,7 @@ _LP390_9_ACTIVATED: tuple[str, ...] = ("IN-3",)
 # has_2yr_history 100% (RE-SCORED after her B14 ruling — a terminated job's two years DOES count as history),
 # AS-11 liquidation_terms 100%. She set the heights (0.90/0.95/0.90/0.90) and chose AUTO, KNOWINGLY overriding
 # the ratify-only recommendation on a synthetic-only basis. Their AI groups (income_stability / asset_facts)
-# fold into _required_ai_groups automatically because it derives from ACTIVE_RULE_IDS. ⚠️ IN-7 is JUDGMENTAL,
+# fold into _required_ai_groups automatically because it derives from ACTIVE_RULE_IDS. IN-7 is JUDGMENTAL,
 # so despite the AUTO sign-off it ships RATIFY (LP-376-B armor in judgment.py) — active, but surfaces to
 # needs_review, never an auto verdict; truly-auto needs a kind reclassification (a separate ticket, ADR-316).
 _LP393_ACTIVATED: tuple[str, ...] = ("IN-7", "IN-10", "IN-11", "AS-11")
@@ -155,7 +155,7 @@ _LP4074_ACTIVATED: tuple[str, ...] = ("PC-3",)
 # LP-423 — IN-12 goes live (31). Its self-employment SCOPE gate (income.is_self_employed) became a DETERMINISTIC
 # read of Schedule C presence (LP-422), resolving the LP-419 income.type-unscored blocker; income.type is dropped
 # as load-bearing. The VERDICT tag has_2yr_history is measured 100% + Priya-validated at 0.9 via IN-11 (the IN-6
-# inherit pattern), so the bar is calibratable-now / validated / 1.0 >= 0.9 -> eligible. ⚠️ ACCEPTED RISK (D3,
+# inherit pattern), so the bar is calibratable-now / validated / 1.0 >= 0.9 -> eligible. ACCEPTED RISK (D3,
 # ADR-335): the gate rests on the STARTER tax-return extractor (no golden files) — accepted because a missed
 # Schedule C is a wrong SCOPE (not_applicable, visible) IN-11 still backstops, not a false verdict. IN-13 is NOT
 # activated (D1: "other income continuance" is broader than rental — gating on rental would narrow it; and its
@@ -238,46 +238,46 @@ _LP487_ACTIVATED: tuple[str, ...] = ("IH-2", "IH-7")
 
 # LP-488 — MI-1, the FIRST use of the PROGRAM axis. `program.type` scopes it to conventional as an
 # APPLICABILITY PREDICATE (not an outcome), so an FHA file is not_applicable and a file that states no
-# program is couldnt_check rather than silently skipped. ⚠️ MI-1 never FIRES: it can prove MI is
+# program is couldnt_check rather than silently skipped. MI-1 never FIRES: it can prove MI is
 # REQUIRED (LTV > 80) but cannot prove MI is PRESENT — no document type in the system carries an MI
 # certificate — so the requirement routes to needs_review for confirmation.
 # MI-4 is the FHA side of the same axis. Only the UPFRONT premium is evaluated — no document carries a
 # monthly MIP figure, so the annual leg is deliberately unbuilt rather than built on an invented input.
 # CO-1 is a document-type presence read, PRESENCE ONLY — warrantability (CO-3/CO-5) has no source field.
-# AU-3 normalises the AUS decision across DU and LPA wording (ADR-376). ⚠️ n=1 corpus, and that one is an
+# AU-3 normalises the AUS decision across DU and LPA wording (ADR-376). n=1 corpus, and that one is an
 # LPA reading "ACCEPT" — a term the DU-shaped catalog vocabulary does not contain, which is the concrete
 # evidence that a field-equality rule would have been wrong.
-# ⚠️ RE-2 IS NOT HERE AND WILL NOT BE: no REO/retained-property concept exists in MISMO or the data model,
+# RE-2 IS NOT HERE AND WILL NOT BE: no REO/retained-property concept exists in MISMO or the data model,
 # and nothing states that a borrower RETAINS a property. Dropped with a reason (LP-488), not deferred.
 _LP488_ACTIVATED: tuple[str, ...] = ("MI-1", "MI-4", "CO-1", "AU-3")
 
 # LP-490a / ADR-378 — activated on a SELF-CONSISTENCY rate, not a measured accuracy, with RATIFICATION as
 # the safety substitute: every finding these produce carries ratification_pending=True (enforced in
 # deterministic.py), so a wrong tag costs a processor's attention and can never auto-assert.
-# ⚠️ Rates are model-produced and measure STABILITY, not correctness — a systematically wrong tag scores
+# Rates are model-produced and measure STABILITY, not correctness — a systematically wrong tag scores
 # 1.0. CR-1/CR-4 share one matcher (1.0000, 13 cases); CR-8 is 0.9714 over 35 real tradelines.
-# ⚠️ CR-6 and CR-10's rates cover NEGATIVE CASES ONLY — the corpus holds zero derogatory events and zero
+# CR-6 and CR-10's rates cover NEGATIVE CASES ONLY — the corpus holds zero derogatory events and zero
 # collection codes, so both derivations were answering "no" on all 35 tradelines. Their bars say so.
 _LP490A_ACTIVATED: tuple[str, ...] = ("CR-1", "CR-4", "CR-8", "CR-6", "CR-10")
 
-# LP-491 — TI-1 (title commitment parties). ⚠️ NOT ratify-pending: the LP-491 catalog edit moved it to
+# LP-491 — TI-1 (title commitment parties). NOT ratify-pending: the LP-491 catalog edit moved it to
 # `deterministic_only` (IH-2's precedent, the second time typed extraction turned out to have already
 # spent the perception step), so it has no model in its chain and activates on input_resolves alone.
 # A mismatch is needs_review, never fired — a vesting difference is frequently legitimate.
 # TI-2 and TI-6 are ai_judgment and activate on `ratify-pending` (ADR-378) — a judgment rule ratifies
-# every verdict, so an uncalibrated tag can never auto-assert. ⚠️ Their rates compare VERDICTS, which a
+# every verdict, so an uncalibrated tag can never auto-assert. Their rates compare VERDICTS, which a
 # judgment rule collapses to needs_review, so they show pipeline stability rather than judgment stability.
 _LP491_ACTIVATED: tuple[str, ...] = ("TI-1", "TI-2", "TI-6")
 
 # LP-492 — the appraisal lane. PR-2 is deterministic (no model in its chain), so it activates on
-# input_resolves alone. ⚠️ PR-8 is DROPPED, not deferred: a disaster-area reinspection needs a FEMA
+# input_resolves alone. PR-8 is DROPPED, not deferred: a disaster-area reinspection needs a FEMA
 # declaration, and no field in any of the 121 schema specs — nor MISMO — states one. CR-3's shape.
 # PR-7 joins PR-2 on the deterministic route (PC-3's precedent — a catalog ai_fuzzy_match row with a
-# deterministic body; no edit needed). PR-3/PR-4/PR-5 activate on ratify-pending. ⚠️ Their rates are the
+# deterministic body; no edit needed). PR-3/PR-4/PR-5 activate on ratify-pending. Their rates are the
 # WEAKEST in any cohort: n=2 with a SINGLE-VERDICT spread, so they show pipeline stability, not judgment.
 _LP492_ACTIVATED: tuple[str, ...] = ("PR-2", "PR-7", "PR-3", "PR-4", "PR-5")
 
-# LP-493 — the purchase-contract lane. ⚠️ ONLY PC-8 ACTIVATES.
+# LP-493 — the purchase-contract lane. ONLY PC-8 ACTIVATES.
 # PC-5 is BUILT AND HELD: its derivation returned a uniform abstain ({unknown: 2}), and a rate over a
 # single abstain value carries no information (the CR-8 shape) — recording it would activate a rule on
 # nothing. PC-1 is DROPPED: its `title.parties_match` duplicates TI-1's live comparison (one matcher, one
@@ -285,42 +285,42 @@ _LP492_ACTIVATED: tuple[str, ...] = ("PR-2", "PR-7", "PR-3", "PR-4", "PR-5")
 # disclosed`, which is 0/5 on the real contracts (TI-3/4/5's shape).
 _LP493_ACTIVATED: tuple[str, ...] = ("PC-8",)
 
-# LP-494 — the condo lane. ⚠️ CO-3 AND CO-4 ACTIVATE; CO-5 IS BUILT AND HELD.
+# LP-494 — the condo lane. CO-3 AND CO-4 ACTIVATE; CO-5 IS BUILT AND HELD.
 # CO-3 was DROPPED mid-ticket and un-dropped on evidence: it is the FIDELITY leg, which IH-7's own spec
 # header excludes, so it duplicates nothing — and its two inputs fill 8/8, the lane's strongest.
 # CO-4's reserve percentage reads from the HOA STATEMENT type, which is where HOA BUDGETS classify; the
 # first search looked only at documents labelled condo_questionnaire and wrongly concluded no budget
 # document type existed.
-# ⚠️ CO-5 STAYS HELD, and it is the only one of the three whose blocker research could not remove: NOT ONE
+# CO-5 STAYS HELD, and it is the only one of the three whose blocker research could not remove: NOT ONE
 # of its five inputs (delinquency, commercial share, unit count, single-entity units, litigation) resolves
 # on any document of any type. hoa_certification declares every one of them and ZERO such documents exist
 # (ADR-354 exactly: schema present, data absent). Activating it would produce couldnt_check on 100% of
 # files forever with every test green — ADR-286/289, the pattern that has killed four live rules.
 _LP494_ACTIVATED: tuple[str, ...] = ("CO-3", "CO-4")
 
-# LP-495a — the REO reconciliation lane + LOE completeness. ⚠️ RE-1 AND DT-6 WERE DROPPED IN PHASE A AND
+# LP-495a — the REO reconciliation lane + LOE completeness. RE-1 AND DT-6 WERE DROPPED IN PHASE A AND
 # THE DROP WAS WRONG, for the SAME reason CO-3's was in LP-494: a search that found no source for ONE side
 # of a comparison was read as proof the comparison is impossible. Four "independent" searches all probed
 # extractor schemas and document filenames for the word "retained"; not one queried the STATED side, where
 # 135 StatedLiability rows (61 of them MortgageLoan) sat populated across 14 loan files.
-# ⚠️ BOTH RULES SURVIVE WITHOUT THE RETENTION INFERENCE because neither ASSERTS retention — they SURFACE a
+# BOTH RULES SURVIVE WITHOUT THE RETENTION INFERENCE because neither ASSERTS retention — they SURFACE a
 # discrepancy as needs_review and hand the question to the processor (CO-3's absent-fidelity pattern).
 # NEITHER CAN PRODUCE `fired`, pinned as a spec property, and neither reads the still-orphaned
 # `property.is_retained_reo` / `property.retained_pitia`.
-# ⚠️ ONE MATCHER SERVES BOTH (ADR-375) — `_reo_match_statement`, so they cannot disagree about the same
+# ONE MATCHER SERVES BOTH (ADR-375) — `_reo_match_statement`, so they cannot disagree about the same
 # pair of documents.
-# ⚠️ LO-2 IS BUILT NARROWER THAN THE DIRECTIVE ASKED, ON EVIDENCE: its three legs exist on ONE of the eight
+# LO-2 IS BUILT NARROWER THAN THE DIRECTIVE ASKED, ON EVIDENCE: its three legs exist on ONE of the eight
 # LOE document types, so a rule spanning "all six" would have reported 25 of 34 letters incomplete. Every
 # LOE type is still in scope; the seven without the fields resolve to couldnt_check ("present, unreadable")
 # — a different verdict from "no letter exists" and from "incomplete".
-# ⚠️ LO-1 IS NOT HERE AND IS NOT BUILT: it needs the list of conditions that REQUIRE an LOE, which is
+# LO-1 IS NOT HERE AND IS NOT BUILT: it needs the list of conditions that REQUIRE an LOE, which is
 # lender- and AUS-driven and enumerated in no document. Deriving it from this run's own findings would make
 # LO-1 a META-RULE over other rules' output, which nothing in the architecture does — ADR-sized, held.
-# ⚠️ OC-1 activates on a SELF-CONSISTENCY rate (ADR-378), the only branch that ships on something
+# OC-1 activates on a SELF-CONSISTENCY rate (ADR-378), the only branch that ships on something
 # other than a measurement — so ratification is the safety substitute and `ratifies_every_finding`
-# returns true for it. ⚠️ Its tag `occupancy.consistent_with_signals` is NOT re-kinded: it is SHARED
+# returns true for it. Its tag `occupancy.consistent_with_signals` is NOT re-kinded: it is SHARED
 # with live OC-2, and re-kinding it is a behaviour change on shipped code needing its own evidence.
-# ⚠️ The LP-406-4 activation precondition (OC-1 auto + OC-2 ratify double-surfacing a "no" file) is
+# The LP-406-4 activation precondition (OC-1 auto + OC-2 ratify double-surfacing a "no" file) is
 # resolved by the status itself — on ratify-pending BOTH rules route to a human. Live OC-2 unchanged.
 _LP495A_ACTIVATED: tuple[str, ...] = ("DT-6", "LO-2", "OC-1", "RE-1")
 

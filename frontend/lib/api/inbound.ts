@@ -154,17 +154,17 @@ export interface UseAsConditionSheetResult {
 /**
  * Use an emailed PDF as this file's condition sheet — screen S1-13 (202).
  *
- * ⚠️ THE BODY IS `{}` AND THAT IS NOT AN OVERSIGHT. `UseAsConditionSheetRequest` has one optional
+ * THE BODY IS `{}` AND THAT IS NOT AN OVERSIGHT. `UseAsConditionSheetRequest` has one optional
  * field, but FastAPI makes a Pydantic body parameter REQUIRED regardless of every field on it
  * having a default — so posting nothing at all is a 422. The same trap `documents.py` documents for
  * its reprocess endpoint.
  *
- * ⚠️ IT INVALIDATES THE CONDITION ROUNDS TOO, which the accept and reject mutations have no reason
+ * IT INVALIDATES THE CONDITION ROUNDS TOO, which the accept and reject mutations have no reason
  * to. The attachment becomes a `parsing` round on the Conditions tab, and a processor who forwards a
  * letter and then finds that tab unchanged will forward it again — which the server refuses with a
  * 409 naming the round that already exists, but only after they have been confused by it.
  *
- * ⚠️ `attach_to_round_id` IS NOW EXPOSED, AND THE REASON IT WAS NOT WAS A GUESS. This said it
+ * `attach_to_round_id` IS NOW EXPOSED, AND THE REASON IT WAS NOT WAS A GUESS. This said it
  * "merges into an existing pasted round and answers 200 instead of 202, which is a different
  * screen's action (S1-09) rather than this one's" — a judgement made without the design pack, which
  * puts the question on THIS screen: "When the file's newest round was pasted and has no PDF yet,

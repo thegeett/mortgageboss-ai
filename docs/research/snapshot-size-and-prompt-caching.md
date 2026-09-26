@@ -453,7 +453,7 @@ are not part of *what it knows*.
 after LP-516 added `txn.amount` and `txn.date` because the prompt was asking about signals
 the model could not observe:
 
-> ⚠️ Two of the prompt's three signals, not all three: "proximity to closing" also needs
+> Two of the prompt's three signals, not all three: "proximity to closing" also needs
 > the loan's closing date (`contract.loan_closing_date`), which is loan-level and absent on
 > the file this ticket came from — the same gap that makes IH-3 abstain there.
 

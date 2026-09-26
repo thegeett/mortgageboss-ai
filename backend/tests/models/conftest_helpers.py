@@ -56,7 +56,7 @@ async def make_lender(db: AsyncSession, *, company: Company, name: str = "UWM") 
 async def make_loan_file(db: AsyncSession, *, company: Company) -> LoanFile:
     """Create a loan file the way the application does (LP-904 review fix).
 
-    ⚠️ THROUGH `create_loan_file`, NEVER `LoanFile(...)` DIRECTLY. `display_id` and `inbox_token` are
+    THROUGH `create_loan_file`, NEVER `LoanFile(...)` DIRECTLY. `display_id` and `inbox_token` are
     both NOT NULL with no server default — confirmed in the live schema, not just the model — and
     ADR-036/ADR-050 put their generation in `app/services/loan_files.py`. A bare construction raises
     `NotNullViolationError` at flush, so the test dies in SETUP before a single assertion runs.
@@ -86,7 +86,7 @@ async def make_round(
     """A round in whatever state the test needs. `round_number` stays None unless asked for —
     drafts have none, and the partial unique index only constrains rows that HAVE a number.
 
-    ⚠️ THIS SAID "ONLY CONSTRAINS IMPORTED ROWS", WHICH IS THE BELIEF LP-904's REVIEW CORRECTED.
+    THIS SAID "ONLY CONSTRAINS IMPORTED ROWS", WHICH IS THE BELIEF LP-904's REVIEW CORRECTED.
     The predicate is `round_number IS NOT NULL AND deleted_at IS NULL` — no status term at all — so
     a round that was imported and is later DISCARDED keeps its number and is still constrained. The
     omission is deliberate: `condition_events` is append-only, so a discarded round's ROUND_IMPORTED

@@ -16,7 +16,7 @@ code so staging is a second workspace rather than a second afternoon of clicking
 **Dev first, deliberately.** Same modules will target staging later. Getting the rough edges
 wrong in an account with no client data is much cheaper.
 
-## ⚠️ This ticket creates real, billable AWS resources
+## This ticket creates real, billable AWS resources
 
 Roughly **$75–95/month** if left running (itemised at the end). Every `apply` step below must be
 run **by the user**, not by you. Write the code, run `validate` and `plan`, show the plan, and
@@ -95,7 +95,7 @@ which you did. The README must explain that this directory is applied once and t
   public internet entirely, which matters for the staging security story — so this is not purely
   a cost question.
 
-  ⚠️ **B1 has landed since this ticket was drafted.** Bedrock is confirmed working in this
+  **B1 has landed since this ticket was drafted.** Bedrock is confirmed working in this
   account via `bedrock-runtime` with `us.` inference profiles (verified 2026-08-04). The
   endpoint that matters is therefore `com.amazonaws.us-east-1.bedrock-runtime` — confirm it
   exists and include it.
@@ -130,7 +130,7 @@ secrets audit (`docs/secrets-audit.md`) established that under `AI_PROVIDER=bedr
 does not require it and `AsyncAnthropicBedrock` never sends it — injecting it would add a
 live credential to the task with no consumer.
 
-### ⚠️ `ENCRYPTION_KEY` — the most dangerous value in this stack
+### `ENCRYPTION_KEY` — the most dangerous value in this stack
 
 The audit established (`app/core/encryption.py:58`, `app/models/borrower.py:88`) that this key
 has **two** consumers: single-key Fernet encryption of `borrowers.ssn`, and a derived HMAC key
@@ -196,7 +196,7 @@ where it was not.
   staging), `skip_final_snapshot = true` for dev (also a variable)
 - Master password via `random_password`, written to the `database-url` secret. Never in state
   output, never in a variable default.
-- ⚠️ **The URL must use `?ssl=require`, NOT `?sslmode=require`.** The audit executed this
+- **The URL must use `?ssl=require`, NOT `?sslmode=require`.** The audit executed this
   against the installed asyncpg 0.31.0 / SQLAlchemy 2.0.50: SQLAlchemy's asyncpg dialect does
   not translate libpq parameter names, so unknown query params are forwarded as raw kwargs to
   `asyncpg.connect()`, which has no `sslmode` parameter and no `**kwargs`. The result is
@@ -259,7 +259,7 @@ two and say why.
 
 ### 6b. Nothing environment-specific may be hardcoded
 
-⚠️ **This is the requirement that decides whether staging is a copy-paste or a rewrite.**
+**This is the requirement that decides whether staging is a copy-paste or a rewrite.**
 
 Every value that differs between dev, staging, and production must be a **variable with no
 default in the module**, supplied by `envs/<env>/terraform.tfvars`. A module containing the
@@ -273,7 +273,7 @@ At minimum, these must be variables:
 | `aws_region` | `us-east-1` | |
 | `environment` | `dev` | Drives naming and the tag |
 | `name_prefix` | `mbai-dev` | Every resource name derives from this |
-| `vpc_cidr` | e.g. `10.20.0.0/16` | ⚠️ staging **must** differ from dev if the two ever peer |
+| `vpc_cidr` | e.g. `10.20.0.0/16` | staging **must** differ from dev if the two ever peer |
 | `availability_zones` | `["us-east-1a","us-east-1b"]` | Do not hardcode AZ suffixes |
 | `rds_instance_class` | `db.t4g.micro` | staging/prod will be larger |
 | `rds_allocated_storage` | `20` | |

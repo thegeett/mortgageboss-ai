@@ -10,7 +10,7 @@ recommendation on a synthetic-only basis.
 These pin (keyless; the live re-score number lives in docs/tickets/LP-393-6.md, not asserted): the two goldens
 changed exactly and her originals are preserved; the four bars are validated at her heights; IN-11 now clears
 its own gate (measured >= threshold); validating activated the four (ACTIVE 24, the gate invariant intact); and
-⚠️ IN-7 ships RATIFY despite the AUTO sign-off — a judgment rule never auto-ships (LP-376-B), reported not
+IN-7 ships RATIFY despite the AUTO sign-off — a judgment rule never auto-ships (LP-376-B), reported not
 forced.
 """
 
@@ -82,7 +82,7 @@ def test_validating_activated_the_four() -> None:
 
 
 def test_in7_ships_ratify_despite_the_auto_signoff() -> None:
-    # ⚠️ the reported conflict: Priya asked AUTO, but IN-7 is JUDGMENTAL — LP-376-B forbids a judgment rule from
+    # the reported conflict: Priya asked AUTO, but IN-7 is JUDGMENTAL — LP-376-B forbids a judgment rule from
     # auto-shipping. ships STAYS ratify; activation_mode routes it to ratify even at measured 1.0 >= bar. Truly
     # auto would need a kind reclassification (ADR-316) — NOT silently forced here.
     bars = load_activation_bars()

@@ -70,7 +70,7 @@ class StatedEmployer(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # Whether this is the borrower's current employer (MISMO EmploymentStatusType
     # == "Current"); nullable — not always present.
     #
-    # ⚠️ LP-624 — THIS COLUMN AND ITS COMMENT PREDATE ANYTHING POPULATING IT. The parser read only
+    # LP-624 — THIS COLUMN AND ITS COMMENT PREDATE ANYTHING POPULATING IT. The parser read only
     # `FullName`, so every stated employer imported with `is_current` NULL and the comment described an
     # intention rather than a behaviour. A nullable column nothing writes looks exactly like one that is
     # legitimately null, which is why it survived that way.

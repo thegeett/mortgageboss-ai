@@ -1,14 +1,14 @@
 """LP-488 — AU-3 (AUS recommendation status) and the DU/LPA vocabulary.
 
-⚠️ EVERY VERDICT ASSERTION RUNS THROUGH A REAL RULE EVALUATION (LP-487's standing rule).
+EVERY VERDICT ASSERTION RUNS THROUGH A REAL RULE EVALUATION (LP-487's standing rule).
 
-⚠️ THE `is_disputed` MISTAKE, AVOIDED ON REAL EVIDENCE. The catalog vocabulary for `aus.recommendation`
+THE `is_disputed` MISTAKE, AVOIDED ON REAL EVIDENCE. The catalog vocabulary for `aus.recommendation`
 is DU's (approve_eligible / approve_ineligible / refer / out_of_scope). The ONE aus_findings document in
 the 303-document corpus is an **LPA** whose recommendation reads **"ACCEPT"** — absent from that
 vocabulary entirely. A rule written as `recommendation == "Approve/Eligible"` would have abstained on, or
 misread, every Freddie file. ONE FIELD, TWO VENDOR ENCODINGS — CR-12's case exactly.
 
-⚠️ THIN CORPUS: n=1, and it is the LPA. The DU cases below are RESEARCHED, not observed — no DU file
+THIN CORPUS: n=1, and it is the LPA. The DU cases below are RESEARCHED, not observed — no DU file
 exists in our data. They abstain rather than misfire if wrong, which is the safe direction, but they are
 unproven. Whether AU-3 is worth shipping on n=1 is logged for Priya.
 """
@@ -50,7 +50,7 @@ async def _one(builder) -> Verdict:
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ THE REAL CORPUS CASE FIRST — it is the whole argument for this rule's shape
+# THE REAL CORPUS CASE FIRST — it is the whole argument for this rule's shape
 # --------------------------------------------------------------------------- #
 async def test_the_real_lpa_accept_is_satisfied() -> None:
     """The single aus_findings document in the corpus, verbatim: LPA, "ACCEPT" / "ELIGIBLE". Neither
@@ -60,7 +60,7 @@ async def test_the_real_lpa_accept_is_satisfied() -> None:
 
 
 async def test_du_approve_eligible_is_satisfied() -> None:
-    """DU states the eligibility INSIDE the recommendation. ⚠️ Researched, not observed."""
+    """DU states the eligibility INSIDE the recommendation. Researched, not observed."""
     assert await _one(build_au3_du_approve_eligible_snapshot) is Verdict.SATISFIED
 
 
@@ -78,7 +78,7 @@ async def test_a_referral_is_needs_review_not_fired() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ THE ABSTAINS — ADR-376's actual protection
+# THE ABSTAINS — ADR-376's actual protection
 # --------------------------------------------------------------------------- #
 async def test_an_unrecognised_engine_wording_couldnt_checks() -> None:
     """A third engine's wording nobody taught the rule must NEVER read as an approval."""
@@ -88,7 +88,7 @@ async def test_an_unrecognised_engine_wording_couldnt_checks() -> None:
 
 
 async def test_an_approval_without_a_readable_eligibility_couldnt_checks() -> None:
-    """⚠️ "Approve" ALONE IS NOT A CLEARANCE. Reading it as approve_eligible would turn an unread field
+    """ "Approve" ALONE IS NOT A CLEARANCE. Reading it as approve_eligible would turn an unread field
     into a delivery clearance — the exact silent-pass this layer exists to stop."""
     verdict = await _one(build_au3_approve_without_eligibility_snapshot)
     assert verdict is Verdict.COULDNT_CHECK
@@ -124,7 +124,7 @@ def test_au3_vocabulary_matches_the_spec() -> None:
 
 
 def test_both_engines_wording_is_present_in_the_vocabulary() -> None:
-    """⚠️ THE POINT OF THE WHOLE DESIGN. If someone later prunes the vocabulary back to one vendor's
+    """THE POINT OF THE WHOLE DESIGN. If someone later prunes the vocabulary back to one vendor's
     spelling, every file from the other silently abstains — and the corpus's only real AUS document is
     the one that would break."""
     assert "accept" in _AUS_APPROVE_PHRASES, "LPA's wording — the corpus's only real AUS document"

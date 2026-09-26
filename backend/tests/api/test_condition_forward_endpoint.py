@@ -1,6 +1,6 @@
 """Using an emailed PDF as a condition sheet (LP-905 section 3, spec §6, screen S1-13).
 
-⚠️ THE ATTACHMENT IS NEVER TURNED INTO A DOCUMENT, and that is the property most worth pinning. A
+THE ATTACHMENT IS NEVER TURNED INTO A DOCUMENT, and that is the property most worth pinning. A
 lender's letter satisfies no need and would be classified against a 166-type BORROWER taxonomy —
 the reasoning that created `CORRESPONDENCE` in the first place (ADR-403). So the bytes are
 re-derived and stored with `save_at`, and the classify → extract → needs pipeline is never entered.
@@ -140,7 +140,7 @@ async def test_an_emailed_pdf_becomes_a_parsing_round(
     round_ = await db_session.get(ConditionRound, UUID(body["round_id"]))
     assert round_ is not None
     assert round_.sources[0]["kind"] == ConditionSourceKind.EMAIL.value
-    # ⚠️ The link screen S1-13 renders ("Used as condition sheet → Round N") is derivable from this,
+    # The link screen S1-13 renders ("Used as condition sheet → Round N") is derivable from this,
     # so no column was needed to join a round back to the attachment it came from.
     assert round_.sources[0]["inbound_attachment_id"] == str(attachment.id)
 
@@ -148,7 +148,7 @@ async def test_an_emailed_pdf_becomes_a_parsing_round(
 async def test_the_attachment_is_kept_as_correspondence_not_made_a_document(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ ADR-403's boundary, at the forward door this time. A condition sheet is not a borrower
+    """ADR-403's boundary, at the forward door this time. A condition sheet is not a borrower
     document: no `Document` row means it cannot enter classify → extract → needs, cannot satisfy a
     need, and cannot be classified against a taxonomy with no bucket for it."""
     loan_file, attachment, token = await _setup(db_session, slug="fwd-corr")
@@ -172,7 +172,7 @@ async def test_the_attachment_is_kept_as_correspondence_not_made_a_document(
 async def test_attaching_to_a_round_that_is_not_on_this_file_is_refused(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ `attach_to_round_id` ARRIVES IN THE REQUEST BODY, which makes it the one id here that
+    """`attach_to_round_id` ARRIVES IN THE REQUEST BODY, which makes it the one id here that
     cannot be trusted. The route proves the caller owns the FILE; only the scoped lookup proves the
     ROUND is on it. An unknown id is refused and leaves nothing behind.
 
@@ -206,7 +206,7 @@ async def test_attaching_to_a_round_that_is_not_on_this_file_is_refused(
 async def test_forwarding_into_an_existing_round_merges_instead_of_creating_one(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ THE `501` LP-905 LEFT BEHIND, NOW CLOSED — and the property it was protecting is the one
+    """THE `501` LP-905 LEFT BEHIND, NOW CLOSED — and the property it was protecting is the one
     asserted here: forwarding into a round enriches THAT round and creates no second one.
 
     200 rather than 202, because nothing was created and nothing was queued, so there is nothing to
@@ -234,7 +234,7 @@ async def test_forwarding_into_an_existing_round_merges_instead_of_creating_one(
     assert response.json()["round_id"] == str(pasted.id)
     assert response.json()["disposition"] == AttachmentDisposition.CORRESPONDENCE.value
 
-    # ⚠️ AND THE MERGED ARRIVAL SAYS HOW IT ARRIVED — the assertion this test stopped short of.
+    # AND THE MERGED ARRIVAL SAYS HOW IT ARRIVED — the assertion this test stopped short of.
     # `enrich_round_with_pdf` hard-coded `PDF_UPLOAD`, so every round merged from a FORWARD has been
     # recording that someone uploaded the letter. `ConditionSourceKind` exists to say "how one
     # arrival of a round reached us", so this was wrong in the row and not only on S1-09's chip,
@@ -267,7 +267,7 @@ async def test_forwarding_into_an_existing_round_merges_instead_of_creating_one(
 async def test_forwarding_the_same_attachment_twice_is_refused(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ A SELF-PERMITTING LOOP, AND IT BROKE A STATED INVARIANT.
+    """A SELF-PERMITTING LOOP, AND IT BROKE A STATED INVARIANT.
 
     The disposition guard admits PENDING *or* CORRESPONDENCE, and the action ends by setting
     CORRESPONDENCE — so the first call creates exactly the condition the second one requires, and it
@@ -308,7 +308,7 @@ async def test_forwarding_the_same_attachment_twice_is_refused(
 async def test_one_attachment_cannot_end_up_in_two_rounds(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ THE SAME ONE-TO-MANY THE FIRST FIX CLOSED, REOPENED THROUGH THE MERGE DOOR.
+    """THE SAME ONE-TO-MANY THE FIRST FIX CLOSED, REOPENED THROUGH THE MERGE DOOR.
 
     Forwarding an attachment creates round 1 carrying its id in `sources`. Forwarding it AGAIN with
     `attach_to_round_id` pointing at a different round merges it there — and now two rounds carry the
@@ -370,7 +370,7 @@ async def test_one_attachment_cannot_end_up_in_two_rounds(
 async def test_re_attaching_to_the_round_that_already_has_it_refuses_on_the_rounds_own_terms(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ THE ONE EXCEPTION TO THE CROSS-ROUND GUARD, AND NOTHING COVERED IT UNTIL NOW.
+    """THE ONE EXCEPTION TO THE CROSS-ROUND GUARD, AND NOTHING COVERED IT UNTIL NOW.
 
     The guard refuses an attachment already carried by a DIFFERENT round. Pointing it at the round
     that already has it is a re-attach, and that is `enrich_round_with_pdf`'s question, not the
@@ -393,7 +393,7 @@ async def test_re_attaching_to_the_round_that_already_has_it_refuses_on_the_roun
     )
 
     assert second.status_code == 409
-    # ⚠️ THE ROUND'S OWN MESSAGE, NOT THE ATTACHMENT'S — which is exactly what the exception allows,
+    # THE ROUND'S OWN MESSAGE, NOT THE ATTACHMENT'S — which is exactly what the exception allows,
     # and the message is about STATUS rather than the PDF because `enrich_round_with_pdf` checks the
     # status first and a forwarded round is still PARSING while the task reads it. (I expected the
     # PDF-source message here and was wrong about the order, not about the behaviour.)
@@ -406,7 +406,7 @@ async def test_re_attaching_to_the_round_that_already_has_it_refuses_on_the_roun
 async def test_an_unsafe_attachment_is_refused(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ PENDING IS NOT A PASS. The malware scan is asynchronous, so "nobody has looked yet" is a
+    """PENDING IS NOT A PASS. The malware scan is asynchronous, so "nobody has looked yet" is a
     state that genuinely persists and must never read as "nothing was found"."""
     loan_file, attachment, token = await _setup(db_session, slug="fwd-unsafe")
     attachment.safety_state = AttachmentSafetyState.QUARANTINED
@@ -449,7 +449,7 @@ async def test_an_unauthenticated_forward_is_refused(
 async def test_a_forwarded_sheet_the_rules_cannot_split_reaches_the_ai(
     client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """⚠️ THE DOOR'S OWN SEAM, WHICH IS WHERE THE DEFECT ACTUALLY LIVED (LP-908 review).
+    """THE DOOR'S OWN SEAM, WHICH IS WHERE THE DEFECT ACTUALLY LIVED (LP-908 review).
 
     `tests/tasks/test_condition_parse.py` pins the parse for both source kinds, but it builds its
     round by calling `create_round_from_sheet` directly. That would still pass if this ENDPOINT
@@ -461,7 +461,7 @@ async def test_a_forwarded_sheet_the_rules_cannot_split_reaches_the_ai(
     endpoint made a round, the parse read it, the split task was correct and tested. Nothing joined
     the forward door to the split, and no test looked at more than one piece at a time.
 
-    ⚠️ `parse_round` IS CALLED HERE RATHER THAN AWAITED FROM THE ENDPOINT, because the endpoint only
+    `parse_round` IS CALLED HERE RATHER THAN AWAITED FROM THE ENDPOINT, because the endpoint only
     enqueues — `task_session()` would open its own engine and see none of this test's uncommitted
     rows. Same reason every task test in the repo drives the inner function.
     """

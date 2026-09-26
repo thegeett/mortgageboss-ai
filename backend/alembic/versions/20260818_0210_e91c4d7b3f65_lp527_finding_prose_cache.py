@@ -3,7 +3,7 @@
 A pure CACHE, keyed by a hash of the fact summary a composition was made from. Identical facts give the
 identical key and therefore the identical sentence, without a second model call.
 
-⚠️ THE POINT IS DETERMINISM MORE THAN COST. Without this the same unchanged problem is worded
+THE POINT IS DETERMINISM MORE THAN COST. Without this the same unchanged problem is worded
 differently on every run: a processor re-reads a finding thinking something changed, and any cross-run
 diff of the queue becomes noise. Cost is a secondary benefit — a re-run of an unchanged file makes no
 composition calls at all.

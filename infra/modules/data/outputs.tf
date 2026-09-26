@@ -38,7 +38,7 @@ output "redis_url_scheme" {
     The scheme REDIS_URL must use, WITHOUT the "://" separator — the value is the
     bare string `rediss`, and a consumer must add the separator itself.
 
-    ⚠️ This description previously read "Always rediss://" while the value was
+    This description previously read "Always rediss://" while the value was
     bare, and a consumer built its URL by concatenation on the strength of it:
     `rediss:<TOKEN>@host` on one path and `redissmaster.example.com` on the
     other. Both were rejected downstream, so it failed safe — but the wording is
@@ -54,7 +54,7 @@ output "redis_requires_auth_token" {
     Whether an AUTH token must be applied out of band. When true, REDIS_URL
     carries the token and is therefore a SECRET rather than CONFIG.
 
-    ⚠️ This is the REQUESTED state, not the observed one — it is just
+    This is the REQUESTED state, not the observed one — it is just
     var.redis_auth_enabled echoed back. Whether the token is actually on the cache
     is reported by check "redis_auth_token_applied" (see main.tf), which fires on
     every plan until it is.

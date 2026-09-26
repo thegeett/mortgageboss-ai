@@ -27,7 +27,7 @@ def test_both_shipped_maps_parse() -> None:
 
 
 def test_uwm_codes_keep_their_leading_zeros() -> None:
-    """⚠️ THE ONE THAT WOULD COST MONTHS. `0006` is an identifier, not the number 6.
+    """THE ONE THAT WOULD COST MONTHS. `0006` is an identifier, not the number 6.
 
     Asserted as a string comparison rather than a truthiness check, because the failure mode is a
     value that is still a valid-looking code — `"6"` — rather than a missing one.
@@ -101,7 +101,7 @@ def test_an_unknown_owner_hint_is_refused() -> None:
 
 
 def test_a_null_default_is_legitimate_and_not_confused_with_a_typo() -> None:
-    """⚠️ THE DISTINCTION THE ENUM RESOLVER EXISTS FOR.
+    """THE DISTINCTION THE ENUM RESOLVER EXISTS FOR.
 
     A code whose bucket nobody has decided is `None`; a code whose bucket is misspelled is an error.
     Collapsing them would make `prior_to_doc` behave exactly like "not decided", which is the failure

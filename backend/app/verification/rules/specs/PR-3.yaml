@@ -1,19 +1,19 @@
 # PR-3 — Property type eligibility — AI JUDGMENT rule SPEC (LP-492).
 #
-# ⚠️ THE TICKET'S RULE TABLE HAD PR-3 AND PR-5 SWAPPED — it called PR-3 "UAD condition rating".
+# THE TICKET'S RULE TABLE HAD PR-3 AND PR-5 SWAPPED — it called PR-3 "UAD condition rating".
 # `rule_kinds.csv`, the gate of record, says PR-3 is "Property type eligibility (Classify property type
 # vs allowed)". Built to the catalog; the condition-rating research went to PR-5, where it belongs.
 #
-# ⚠️ NO NUMERIC THRESHOLD, and none was invented. Eligible property types are programme- and
+# NO NUMERIC THRESHOLD, and none was invented. Eligible property types are programme- and
 # investor-specific, and no page was read for a governing list this pass — so the rule surfaces a type it
 # cannot place rather than comparing against a fabricated allow-list. Tier U, stated.
 #
-# ⚠️ THE APPRAISER'S TYPE IS FREE TEXT: the two real appraisals read "Condominium" and "Condominium
+# THE APPRAISER'S TYPE IS FREE TEXT: the two real appraisals read "Condominium" and "Condominium
 # Unit". A controlled vocabulary does not exist here, which is exactly why this is a judgment and not a
 # lookup — and why the rule ALSO reads the file's own `property.type` (a clean MISMO enum) so the model
 # has both sides.
 #
-# ⚠️ n=2, both condominiums. The ineligible path has never been observed.
+# n=2, both condominiums. The ineligible path has never been observed.
 
 rule_id: PR-3
 name: Property type eligibility
@@ -36,7 +36,7 @@ reference_values:
   priya_validated: false
   threshold_needs_signoff: false
   values:
-    # ⚠️ PROVENANCE TIER U — NOT OBTAINED. A governing list of eligible property types is
+    # PROVENANCE TIER U — NOT OBTAINED. A governing list of eligible property types is
     # programme- and investor-specific, and no page was read for one this pass. Deliberately NOT
     # encoded: an invented allow-list would fire on ordinary properties. The rule surfaces instead.
     eligible_property_types: "not obtained — the rule surfaces an unplaceable type rather than comparing"

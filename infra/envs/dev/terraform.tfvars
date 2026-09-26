@@ -1,7 +1,7 @@
 # Development environment values. NON-SECRET ONLY — this file is committed.
 # No password, key, token, or connection string with credentials belongs here.
 
-# ⚠️ PLACEHOLDER. This template is never applied, and the account it once named
+# PLACEHOLDER. This template is never applied, and the account it once named
 # is no longer used by this project. Replace before using it as a starting point.
 aws_account_id = "000000000000"
 aws_region     = "us-east-1"
@@ -10,7 +10,7 @@ name_prefix    = "mbai-dev"
 
 # --- Network --------------------------------------------------------------- #
 
-# ⚠️ Staging MUST use a different CIDR (e.g. 10.30.0.0/16) — identical ranges
+# Staging MUST use a different CIDR (e.g. 10.30.0.0/16) — identical ranges
 # cannot be peered, and this environment and staging may well need to be.
 vpc_cidr           = "10.20.0.0/16"
 availability_zones = ["us-east-1a", "us-east-1b"]
@@ -34,7 +34,7 @@ enable_vpc_endpoints = false
 
 # Consumed only when enable_vpc_endpoints = true. Region is interpolated by the
 # module, so these are short names.
-# ⚠️ bedrock-runtime has NOT been verified to exist as an interface endpoint in
+# bedrock-runtime has NOT been verified to exist as an interface endpoint in
 # this region — see the result doc. Verify before flipping endpoints on.
 interface_endpoint_services = [
   "ecr.api",
@@ -48,12 +48,12 @@ interface_endpoint_services = [
 
 # 0 = delete immediately. A non-zero window leaves the NAME RESERVED, so
 # destroy-then-apply fails on a conflict — fatal for a destroy-and-rebuild
-# environment. ⚠️ STAGING MUST USE 30.
+# environment. STAGING MUST USE 30.
 secret_recovery_window_days = 0
 
 # 7 = the AWS minimum. A destroy leaves the key pending deletion for this long
 # (~$1/month each while it lingers); the minimum clears orphans as fast as AWS
-# allows. ⚠️ Staging uses 30.
+# allows. Staging uses 30.
 kms_deletion_window_days = 7
 
 # NO alias for this environment. `terraform destroy` schedules the key but leaves
@@ -61,7 +61,7 @@ kms_deletion_window_days = 7
 # alias — not the key — is what makes the next apply fail with
 # AlreadyExistsException. Skipping it removes the only manual step from
 # destroy-and-rebuild. Nothing functional depends on it; every consumer uses the
-# key ARN. ⚠️ Staging sets this true.
+# key ARN. Staging sets this true.
 kms_create_alias = false
 
 # --- Registry -------------------------------------------------------------- #
@@ -83,7 +83,7 @@ rds_allocated_storage     = 20
 rds_max_allocated_storage = 100
 rds_backup_retention_days = 7
 
-# ⚠️ ALL THREE MUST FLIP FOR STAGING: multi_az true, deletion_protection true,
+# ALL THREE MUST FLIP FOR STAGING: multi_az true, deletion_protection true,
 # skip_final_snapshot false.
 rds_multi_az            = false
 rds_deletion_protection = false
@@ -115,7 +115,7 @@ log_retention_days = 30
 # --- Budget ---------------------------------------------------------------- #
 
 budget_limit_usd = 150
-# ⚠️ This mailbox must actually EXIST. AWS Budgets does not confirm an email
+# This mailbox must actually EXIST. AWS Budgets does not confirm an email
 # subscriber the way SNS does — if it bounces, the alert is silently dead and
 # nothing in Terraform or the console will say so. Send yourself a test mail before
 # relying on it.
@@ -138,11 +138,11 @@ ecr_repository_names = {
   frontend = "mbai/frontend"
 }
 
-# ⚠️ Must already be pushed. Repositories are IMMUTABLE, so a tag is a fixed set
+# Must already be pushed. Repositories are IMMUTABLE, so a tag is a fixed set
 # of bytes; a missing tag fails at launch with CannotPullContainerError.
 image_tag = "latest"
 
-# ⚠️ VERIFIED EMPIRICALLY, not assumed. The C1 images were built on Apple Silicon:
+# VERIFIED EMPIRICALLY, not assumed. The C1 images were built on Apple Silicon:
 #   docker image inspect mbai-api:test      --format '{{.Architecture}}'  -> arm64
 #   docker image inspect mbai-frontend:test --format '{{.Architecture}}'  -> arm64
 # and the live worker container reports `uname -m` = aarch64. Fargate defaults to
@@ -174,7 +174,7 @@ worker_concurrency   = 2
 enable_container_insights = false
 
 # Fargate has no SSH, and several failure modes here produce no log line at all.
-# ⚠️ This grants a shell inside a task. Fine here; reconsider for staging, which
+# This grants a shell inside a task. Fine here; reconsider for staging, which
 # holds real borrower data.
 enable_execute_command = true
 
@@ -201,19 +201,19 @@ bedrock_model_ids = {
   reasoning      = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 }
 
-# ⚠️ VERIFIED with `aws bedrock get-inference-profile`: the us. profiles route to
+# VERIFIED with `aws bedrock get-inference-profile`: the us. profiles route to
 # THREE regions, not one. The IAM policy needs the foundation-model ARN in each —
 # a us-east-1-only list fails intermittently, whenever Bedrock routes elsewhere.
 bedrock_profile_regions = ["us-east-1", "us-east-2", "us-west-2"]
 
-# ⚠️ PENDING VERIFICATION. Could not read the bucket's encryption configuration —
+# PENDING VERIFICATION. Could not read the bucket's encryption configuration —
 # the available role lacks s3:GetEncryptionConfiguration. null assumes SSE-S3, in
 # which case no KMS statement is attached to the task roles. Confirm with:
 #   aws s3api get-bucket-encryption --bucket <documents bucket>
 # If it reports aws:kms, set this to that key's ARN or uploads fail with AccessDenied.
 documents_bucket_kms_key_arn = null
 
-# ⚠️ Placeholder until the ALB exists — its DNS name is not known before the first
+# Placeholder until the ALB exists — its DNS name is not known before the first
 # apply and cannot be self-referenced. The frontend and API share one ALB origin,
 # so browser calls are same-origin and CORS is not on the critical path until C4.
 cors_allowed_origins = ["http://localhost:3000"]

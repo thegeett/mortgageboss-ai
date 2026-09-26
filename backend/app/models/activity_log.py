@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 class ActivityType(StrEnum):
     """Types of activities recorded on a loan file.
 
-    ⚠️ ADDING A MEMBER HERE CHANGES WHAT THE CODE WRITES AND NOTHING ABOUT WHAT THE DATABASE
+    ADDING A MEMBER HERE CHANGES WHAT THE CODE WRITES AND NOTHING ABOUT WHAT THE DATABASE
     ACCEPTS. These are VARCHAR + CHECK (ADR-037), not a native enum, so a new value REQUIRES a
     constraint-swap migration that lists **every** value — see the newest
     `*_activity.py` revision for the shape, and `tests/test_activity_type_migrations.py` for the

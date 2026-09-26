@@ -6,7 +6,7 @@ rather than in the request, which is the opposite of the MISMO import — MISMO 
 lxml work, while reading a condition sheet rasterises pages and may call a model, so holding the
 request open across it would block a worker on a lender's page count.
 
-⚠️ 202, NOT 201, AND THE ROUND COMES BACK IMMEDIATELY. The processor sees the round in `PARSING`
+202, NOT 201, AND THE ROUND COMES BACK IMMEDIATELY. The processor sees the round in `PARSING`
 (screen S1-02, "Reading…") and the UI polls it to `DRAFT` or `PARSE_FAILED`. Answering only when the
 parse finished would make a slow lender's PDF look like a broken upload.
 
@@ -76,7 +76,7 @@ from app.services.loan_files import get_loan_file
 from app.services.needs_engine import loan_file_needs_lock
 
 router = APIRouter(prefix="/loan-files", tags=["conditions"])
-#: ⚠️ A SECOND ROUTER, BECAUSE THE PATH CARRIES NO LOAN FILE. Spec §LP-907 writes
+#: A SECOND ROUTER, BECAUSE THE PATH CARRIES NO LOAN FILE. Spec §LP-907 writes
 #: `POST /api/condition-rounds/{round_id}/attach-pdf`, and a round id is globally unique — so
 #: `ScopedLoanFile`, the tenant gate every nested route uses, has nothing to gate on here. The
 #: scoping moves into the lookup instead (`get_scoped_round`), which is the same shape
@@ -98,7 +98,7 @@ async def _enqueue_or_fail(
 ) -> None:
     """Hand a round to a worker, and settle it FAILED if the broker will not take it.
 
-    ⚠️ ONE BODY FOR BOTH DOORS, AND THE ARGUMENT FOR KEEPING THEM SEPARATE WAS ABOUT A DIFFERENT
+    ONE BODY FOR BOTH DOORS, AND THE ARGUMENT FOR KEEPING THEM SEPARATE WAS ABOUT A DIFFERENT
     FUNCTION (LP-909 review). I defended the duplication by saying the two "genuinely differ — one
     mutates the ORM object and commits, the other settles through a compare-and-set". That describes
     `_queue_split_or_fail` in `app/tasks/conditions.py`, which is a THIRD handler and does differ.
@@ -109,7 +109,7 @@ async def _enqueue_or_fail(
     third is the one whose difference is real and load-bearing (a task has no ORM object in hand and
     must not clobber a round a processor discarded meanwhile).
 
-    ⚠️ `enqueue` IS THE BOUND `.delay`, RESOLVED BY THE CALLER. Passing the method rather than the
+    `enqueue` IS THE BOUND `.delay`, RESOLVED BY THE CALLER. Passing the method rather than the
     task keeps the test seam where every condition test already puts it: `monkeypatch.setattr(
     task_module.<task>, "delay", ...)` still works, because the attribute is looked up when the
     caller runs, not when this module is imported.
@@ -117,7 +117,7 @@ async def _enqueue_or_fail(
     try:
         enqueue(str(round_.id))
     except OperationalError:
-        # ⚠️ kombu's, NOT `sqlalchemy.exc`'s — two unrelated classes share the name and `.delay()`
+        # kombu's, NOT `sqlalchemy.exc`'s — two unrelated classes share the name and `.delay()`
         # raises kombu's, so catching the other is a guard that never fires (LP-908 review).
         # Specific, never a bare `except Exception` (spec §9.8): this is the broker refusing the
         # message, the one failure the round must survive. Anything else is a bug and belongs in the
@@ -139,7 +139,7 @@ async def _enqueue_or_fail(
 async def _enqueue_split_or_fail(db: DbSession, round_: ConditionRound) -> None:
     """Queue the AI split, and mark the round failed if the broker will not take it.
 
-    ⚠️ REPORTING THE OUTCOME RATHER THAN SWALLOWING IT, and this repo already learned which of those
+    REPORTING THE OUTCOME RATHER THAN SWALLOWING IT, and this repo already learned which of those
     is right here. `documents.py` carries both shapes: `_enqueue_reprocess` logs and moves on,
     because the document is fine either way; `_enqueue_full_reprocess` REPORTS, because its callers
     set a blocking state first and, in the LP-637 review's words, "a swallowed failure made that
@@ -164,7 +164,7 @@ async def _enqueue_split_or_fail(db: DbSession, round_: ConditionRound) -> None:
 async def _enqueue_parse_or_fail(db: DbSession, round_: ConditionRound) -> None:
     """Queue the read, and mark the round failed if the broker will not take it.
 
-    ⚠️ THE SPLIT'S TWIN, AND THE UPLOAD DOOR DELIBERATELY HAS NO SUCH GUARD. That door's bare
+    THE SPLIT'S TWIN, AND THE UPLOAD DOOR DELIBERATELY HAS NO SUCH GUARD. That door's bare
     `.delay()` carries a comment calling the exposure a decision rather than an oversight, on the
     grounds that changing a shipped door inside another ticket is how a ticket becomes a refactor.
 
@@ -173,7 +173,7 @@ async def _enqueue_parse_or_fail(db: DbSession, round_: ConditionRound) -> None:
     twice — and a processor who pressed "Try again" watching it strand a second time is the worst
     version of it, because they asked for the recovery and the recovery is what failed.
 
-    ⚠️ AND A FAILED REPARSE MUST NOT LOOK LIKE A FAILED SHEET. `failure_kind` is `enqueue_failed`,
+    AND A FAILED REPARSE MUST NOT LOOK LIKE A FAILED SHEET. `failure_kind` is `enqueue_failed`,
     whose sentence says the conditions could not be QUEUED and nothing was lost — never a reason
     that blames the lender's PDF, which was read fine or was never read at all.
     """
@@ -189,7 +189,7 @@ async def get_scoped_round(
 ) -> ConditionRound:
     """The round in the path, scoped to the caller's company.
 
-    ⚠️ THE SCOPE IS IN THE QUERY, NOT IN A CHECK AFTER IT. Fetching by id and then comparing
+    THE SCOPE IS IN THE QUERY, NOT IN A CHECK AFTER IT. Fetching by id and then comparing
     `company_id` gives the same answer but a different failure: for the window between the two the
     row is in hand, and any code added later that touches it before the check leaks another tenant's
     data. Filtering in the statement makes a mismatched (company, round) pair unfetchable rather than
@@ -218,13 +218,13 @@ async def get_scoped_loan_file_by_id(
 ) -> LoanFile:
     """The loan file in the path, scoped to the caller's company.
 
-    ⚠️ A DEPENDENCY RATHER THAN THE SAME SIX LINES IN EVERY HANDLER, which is what this router had.
+    A DEPENDENCY RATHER THAN THE SAME SIX LINES IN EVERY HANDLER, which is what this router had.
     Both POSTs opened by calling `get_loan_file` and raising 404 themselves; §1 adds three reads, and
     five copies of a tenant gate is how one of them eventually ships without it. Every other nested
     router in this repo declares `ScopedLoanFile` for exactly this reason — the file is fetched and
     company-checked *before* the handler body runs, so a handler cannot forget.
 
-    ⚠️ IT IS NOT `ScopedLoanFile` ITSELF BECAUSE THIS ROUTER'S PATH IS DIFFERENT. That dependency
+    IT IS NOT `ScopedLoanFile` ITSELF BECAUSE THIS ROUTER'S PATH IS DIFFERENT. That dependency
     reads `file_identifier` from a `/loan-files/{file_identifier}/...` prefix; spec §LP-905/907 fix
     these paths as `/loan-files/{loan_file_id}/condition-rounds/...`, LP-905 and LP-907 shipped them,
     and three test files plus the tenancy test hardcode that shape. Renaming the segment to reuse the
@@ -250,7 +250,7 @@ ScopedLoanFileById = Annotated[LoanFile, Depends(get_scoped_loan_file_by_id)]
 async def _read_capped(upload: UploadFile, *, max_bytes: int) -> bytes:
     """Read an upload into memory, aborting (413) once it exceeds ``max_bytes``.
 
-    ⚠️ CHUNKED, NOT `await upload.read()` THEN `len()`. Reading the whole body and measuring it
+    CHUNKED, NOT `await upload.read()` THEN `len()`. Reading the whole body and measuring it
     afterwards means a 2 GB upload is already in memory by the time it is refused, which makes the
     cap a formality rather than a defence.
     """
@@ -307,7 +307,7 @@ async def upload_condition_sheet(
             actor_user_id=current_user.id,
         )
     except ConditionSheetRejected as exc:
-        # ⚠️ THE SERVICE'S OWN REASON, NOT A GENERIC ONE. "That is not a PDF" and "the PDF is
+        # THE SERVICE'S OWN REASON, NOT A GENERIC ONE. "That is not a PDF" and "the PDF is
         # password-protected" lead to different next actions for the processor (spec §9.8).
         raise HTTPException(status_code=422, detail=exc.reason) from exc
 
@@ -316,7 +316,7 @@ async def upload_condition_sheet(
 
     # Enqueued AFTER the commit, deliberately: a worker that picked the round up before the
     # transaction landed would find no row. The same ordering every enqueue in this repo uses.
-    # ⚠️ UNGUARDED, AND THAT IS A DECISION RATHER THAN AN OVERSIGHT — see `_enqueue_split_or_fail`
+    # UNGUARDED, AND THAT IS A DECISION RATHER THAN AN OVERSIGHT — see `_enqueue_split_or_fail`
     # above, which DOES guard the same call. This door has the identical exposure: the round is
     # committed in `PARSING` before `.delay()` is reached, so a broker that is down strands it.
     # It is left alone because this is LP-905's surface with its own test coverage, and changing a
@@ -337,7 +337,7 @@ def _round_public(
 ) -> ConditionRoundPublic:
     """One round as the wire sees it, with every derived count filled in.
 
-    ⚠️ ONE PLACE, BECAUSE THESE DEFAULTS DO NOT FAIL LOUDLY. `_round_card` below already records
+    ONE PLACE, BECAUSE THESE DEFAULTS DO NOT FAIL LOUDLY. `_round_card` below already records
     what happens otherwise: `condition_count` "defaults to 0 and must be supplied, which is easy to
     forget precisely because forgetting it looks like data rather than like a bug" — and
     `paste_conditions` forgets it to this day, answering "0 on sheet" for a round it just filled.
@@ -363,7 +363,7 @@ async def list_condition_rounds(
 ) -> list[ConditionRoundPublic]:
     """Every round on this file, newest first — the round strip above the conditions list (S1-05).
 
-    ⚠️ `condition_count` GETS ITS FIRST PRODUCER HERE. It has defaulted to 0 since LP-904 with
+    `condition_count` GETS ITS FIRST PRODUCER HERE. It has defaulted to 0 since LP-904 with
     nothing filling it, so a round card would have read "0 on sheet" for as long as anyone looked.
     The count comes from a different place depending on status — a draft counts the rows it holds, an
     imported round counts the conditions that appeared on it — which is what `rows_on_sheet` decides.
@@ -383,7 +383,7 @@ async def list_condition_rounds(
 async def get_condition_round(round_: ScopedRound, db: DbSession) -> ConditionRoundPublic:
     """One round: its draft rows or its imported count, header, expiry dates and parse report.
 
-    ⚠️ THE FIRST GET ON THIS ROUTER, and the schema it returns carries a trap worth naming at the
+    THE FIRST GET ON THIS ROUTER, and the schema it returns carries a trap worth naming at the
     call site: `draft_rows` being PRESENT does not mean a processor may act on them. A `PARSING`
     round awaiting the AI split carries the rules-read rows too, and screen S1-02 renders skeletons
     and polls rather than showing them. Read `status`, never the presence of rows.
@@ -402,7 +402,7 @@ async def list_file_conditions(
 ) -> list[ConditionPublic]:
     """The file's imported conditions, in sheet order, each with the rounds it appeared on.
 
-    ⚠️ `round_numbers` GETS ITS FIRST PRODUCER HERE — the `R1 R2` chips, which have defaulted to `[]`
+    `round_numbers` GETS ITS FIRST PRODUCER HERE — the `R1 R2` chips, which have defaulted to `[]`
     since LP-904. It is derived from each condition's `CONDITION_CREATED` / `CONDITION_SEEN_AGAIN`
     events rather than from `first_round_id` / `last_seen_round_id`, because two columns cannot
     express "appeared on R1 and R3 but not R2" — which is the whole point of the chips.
@@ -432,12 +432,12 @@ async def paste_conditions(
 ) -> ConditionRoundPublic:
     """Paste conditions copied from the lender's portal → a round holding what the rules read.
 
-    ⚠️ 201 AND A FINISHED ROUND, WHERE THE UPLOAD ANSWERS 202 AND A `PARSING` ONE. The two doors
+    201 AND A FINISHED ROUND, WHERE THE UPLOAD ANSWERS 202 AND A `PARSING` ONE. The two doors
     differ because the work does: an upload has bytes to fetch and pages to rasterise, while a paste
     is text already in memory. The processor goes straight to the review screen instead of watching
     a progress state for work that finished inside the request.
 
-    ⚠️ `completeness` IS REQUIRED AND THE API REFUSES TO GUESS IT. The UI defaults the control to
+    `completeness` IS REQUIRED AND THE API REFUSES TO GUESS IT. The UI defaults the control to
     "just some" — the answer that can never remove anything — but a default HERE would decide the
     file's history on the processor's behalf, and ADR-404 lets only a FULL round's absences mean
     anything later.
@@ -457,7 +457,7 @@ async def paste_conditions(
     await db.commit()
     await db.refresh(round_)
 
-    # ⚠️ ENQUEUED ONLY WHEN THE RULES GAVE UP, and after the commit for the reason every enqueue in
+    # ENQUEUED ONLY WHEN THE RULES GAVE UP, and after the commit for the reason every enqueue in
     # this repo uses: a worker that picked the round up before the transaction landed would find no
     # row. A round the rules read is already DRAFT and has nothing to queue.
     if round_.status is ConditionRoundStatus.PARSING:
@@ -479,7 +479,7 @@ async def attach_pdf(
 ) -> ConditionEnrichResult:
     """Attach the lender's PDF to a round that was pasted → merge into THE SAME round (S1-09).
 
-    ⚠️ 200, NOT 201 OR 202, AND THAT IS THE CONTRACT THIS TICKET EXISTS TO STATE. Nothing is created:
+    200, NOT 201 OR 202, AND THAT IS THE CONTRACT THIS TICKET EXISTS TO STATE. Nothing is created:
     no second round, and — when the PDF carries the conditions the paste already had — no new
     conditions either. A 201 would say something was created and invite a client to expect a new id.
 
@@ -521,7 +521,7 @@ async def attach_pdf(
         filled_date_printed=result.filled_date_printed,
         matched=result.matched,
         added=result.added,
-        # ⚠️ A COUNT, NOT THE TEXTS. Those are the lender's words (ADR-405) and the rows themselves
+        # A COUNT, NOT THE TEXTS. Those are the lender's words (ADR-405) and the rows themselves
         # come back on the round; a response does not need to restate them to report a number.
         unmatched_existing=len(result.unmatched_existing),
         warnings=result.warnings,
@@ -531,14 +531,14 @@ async def attach_pdf(
 async def _round_card(db: DbSession, round_: ConditionRound) -> ConditionRoundPublic:
     """One round with its count filled in.
 
-    ⚠️ `condition_count` DEFAULTS TO 0 AND MUST BE SUPPLIED, which is easy to forget precisely
+    `condition_count` DEFAULTS TO 0 AND MUST BE SUPPLIED, which is easy to forget precisely
     because forgetting it looks like data rather than like a bug. `paste_conditions` does forget it
     today: it answers `from_model(round_)` for a round it just filled with rows, so the response
     says "0 on sheet". That is LP-907's shipped door and widening this ticket into it would be a
     refactor, but it is the reason this helper exists rather than three more call sites that each
     have to remember.
 
-    ⚠️ `upload_condition_sheet` HAS THE IDENTICAL SHAPE AND IS CORRECT — do not "fix" it by copying
+    `upload_condition_sheet` HAS THE IDENTICAL SHAPE AND IS CORRECT — do not "fix" it by copying
     this. `create_round_from_sheet` opens a `PARSING` round and assigns no `draft_rows` at all, so an
     upload genuinely holds no rows when it answers and its zero is the truth. Paste stores its rows
     synchronously, which is why only paste reports a number it can see is wrong. Routing upload
@@ -546,7 +546,7 @@ async def _round_card(db: DbSession, round_: ConditionRound) -> ConditionRoundPu
     call sites looked like one defect).
     """
     _, per_round = await appearances_for_file(db, loan_file_id=round_.loan_file_id)
-    # ⚠️ THE IMPORT ENDPOINT ANSWERS THROUGH HERE, WHICH IS WHERE THESE COUNTS FIRST EXIST. The
+    # THE IMPORT ENDPOINT ANSWERS THROUGH HERE, WHICH IS WHERE THESE COUNTS FIRST EXIST. The
     # import writes `ROUND_IMPORTED` and returns; without this the one response that could report
     # what the import just did would be the only one that could not.
     imports = await import_counts_for_file(db, loan_file_id=round_.loan_file_id)
@@ -563,17 +563,17 @@ async def import_condition_round(
 ) -> ConditionImportResult:
     """Turn a reviewed draft into the file's conditions (spec §LP-909 steps 1-5).
 
-    ⚠️ 200, NOT 201, THOUGH CONDITIONS ARE CREATED. The resource this call addresses is the ROUND,
+    200, NOT 201, THOUGH CONDITIONS ARE CREATED. The resource this call addresses is the ROUND,
     and the round already existed — it is settled in place, from DRAFT to IMPORTED. A 201 would
     invite a client to look for a new id in a `Location` header that names nothing new.
 
-    ⚠️ THE LOCK IS TAKEN HERE AND NOT IN THE SERVICE, AND THAT PLACEMENT IS THE WHOLE POINT. An
+    THE LOCK IS TAKEN HERE AND NOT IN THE SERVICE, AND THAT PLACEMENT IS THE WHOLE POINT. An
     `async with loan_file_needs_lock(...)` inside `import_round` would release when the service
     returned — before this handler commits — leaving the commit outside the window the lock exists
     to cover. It is the repo's first handler-level use of it; every other call site is a task or a
     service that owns its own transaction.
 
-    ⚠️ AND IT IS ADVISORY, NOT MUTUAL EXCLUSION. It yields `bool(acquired)` and every caller in this
+    AND IT IS ADVISORY, NOT MUTUAL EXCLUSION. It yields `bool(acquired)` and every caller in this
     repo proceeds either way, and its 30-second timeout auto-expires a HELD lock, so a slow import
     can lose it mid-transaction. What actually prevents two rounds sharing a number is
     `uq_condition_rounds_file_number`; the service catches that violation and recomputes. The lock
@@ -608,7 +608,7 @@ async def discard_condition_round(
 ) -> ConditionRoundPublic:
     """Throw a draft away. It stays on the round strip, marked discarded.
 
-    ⚠️ AN IMPORTED ROUND IS REFUSED, and the service's docstring carries the argument: its conditions
+    AN IMPORTED ROUND IS REFUSED, and the service's docstring carries the argument: its conditions
     survive by ADR-404 and it keeps its number by LP-904's index, so "discarded" would mean one thing
     for a draft and a different thing for an imported round, shown in the same strip under one word.
 
@@ -629,19 +629,19 @@ async def discard_condition_round(
 async def list_round_events(round_: ScopedRound, db: DbSession) -> list[ConditionEventPublic]:
     """One round's history, oldest first — the History section of the round-details sheet (S1-09).
 
-    ⚠️ THE READER LP-904 BUILT AN INDEX FOR AND NOBODY WROTE. `ix_condition_events_round_occurred`
+    THE READER LP-904 BUILT AN INDEX FOR AND NOBODY WROTE. `ix_condition_events_round_occurred`
     has carried the comment "One round's history in time order — the shape the round-details sheet
     reads (S1-09)" since the table was created, and no route, schema or service ever read it. So the
     index paid a write on every event insert — per created condition, per seen-again, per note, per
     round transition — to serve a query that did not exist. This is that query.
 
-    ⚠️ ITS SIBLING IS STILL UNJUSTIFIED, AND SAYING SO IS THE POINT.
+    ITS SIBLING IS STILL UNJUSTIFIED, AND SAYING SO IS THE POINT.
     `ix_condition_events_condition_occurred` is `(condition_id, occurred_at)` — one CONDITION's
     history — which nothing in this codebase asks for. It does not inherit this route's justification.
     Either something reads it, or it should go in a follow-up migration; it is named here so the next
     person does not read this route as covering both.
 
-    ⚠️ `detail` DOES NOT TRAVEL. `ConditionEventPublic` projects named scalars only — the column is
+    `detail` DOES NOT TRAVEL. `ConditionEventPublic` projects named scalars only — the column is
     classified NPI ("what changed, which is the lender's text"), `readonly.condition_events` drops it
     whole rather than scrubbing it, and `condition_import.py` states the rule at its own write site.
     A history panel is not a reason to open a door the readonly layer deliberately closed.
@@ -663,17 +663,17 @@ async def reparse_condition_round(
 ) -> ConditionRoundPublic:
     """Read a stored sheet again — screen S1-03's "Try again" and S1-02's stranded state.
 
-    ⚠️ 200, NOT 202, THOUGH A TASK IS QUEUED. The round already existed and is settled in place back
+    200, NOT 202, THOUGH A TASK IS QUEUED. The round already existed and is settled in place back
     to `PARSING`; nothing is created. A 202 would invite a client to look for a new id. The same
     argument `import` and `discard` make on this router.
 
-    ⚠️ NO REQUEST BODY AT ALL, which is why there is no defaulted-singleton parameter here.
+    NO REQUEST BODY AT ALL, which is why there is no defaulted-singleton parameter here.
     `documents.py` needs `body: DocumentReprocessRequest = _DEFAULT_REPROCESS_REQUEST` because
     FastAPI makes a Pydantic body REQUIRED even when every field on it has a default, so a body-less
     POST would 422. A reparse takes no options, so declaring an empty model to then default it would
     be machinery standing in for nothing.
 
-    ⚠️ THE ENQUEUE IS AFTER THE COMMIT AND IS GUARDED. Before it, a worker could pick the round up
+    THE ENQUEUE IS AFTER THE COMMIT AND IS GUARDED. Before it, a worker could pick the round up
     and find the old row; unguarded, a broker that is down strands the round the processor just
     asked to rescue.
 
@@ -704,12 +704,12 @@ async def update_condition_draft(
 ) -> ConditionRoundPublic:
     """Replace a draft's rows, completeness and date before import (screen S1-04).
 
-    ⚠️ THE EDITED TEXT IS WHAT IMPORTS. Spec §8's frontend test is "editing a row and importing sends
+    THE EDITED TEXT IS WHAT IMPORTS. Spec §8's frontend test is "editing a row and importing sends
     the edited text", so what a processor writes here is stored verbatim and is what the fingerprint
     is taken of — which means an edited row may match a different condition, or none. That is correct
     rather than unfortunate: the fingerprint is of what is imported, not of what was read.
 
-    ⚠️ 409 ON A STALE `expected_updated_at`, RATHER THAN A SILENT LAST-WRITE-WINS. Two tabs on one
+    409 ON A STALE `expected_updated_at`, RATHER THAN A SILENT LAST-WRITE-WINS. Two tabs on one
     draft is the case the spec names, but the same check also refuses a tab whose rows were changed
     by an enrich or a re-parse — both are the same hazard, overwriting work the caller never saw.
 
@@ -740,14 +740,14 @@ async def add_condition_by_hand(
 ) -> ConditionPublic:
     """Add one condition by hand (screen S1-12).
 
-    ⚠️ 201, UNLIKE THE OTHER THREE, because this one genuinely creates a resource with a new id.
+    201, UNLIKE THE OTHER THREE, because this one genuinely creates a resource with a new id.
 
-    ⚠️ IT TAKES THE LOCK BECAUSE IT MAY CREATE ROUND 1. On a file that has never imported a sheet
+    IT TAKES THE LOCK BECAUSE IT MAY CREATE ROUND 1. On a file that has never imported a sheet
     there is no round to file this into, so the service opens one with source `MANUAL` and assigns
     it a number — the same race the import has, and therefore the same narrowing. On a file that has
     imported, it joins the latest imported round and the lock costs nothing.
 
-    ⚠️ THE ROUND IT JOINS IS `PARTIAL`, ALWAYS. A round holding hand-typed conditions is not a claim
+    THE ROUND IT JOINS IS `PARTIAL`, ALWAYS. A round holding hand-typed conditions is not a claim
     that the lender's list is complete, and ADR-404 lets only a FULL round's absences mean anything —
     so marking it FULL would let Stage 2 later propose that everything nobody typed had been cleared.
 

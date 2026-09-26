@@ -24,7 +24,7 @@ variable "name_prefix" {
 # --- Network --------------------------------------------------------------- #
 
 variable "vpc_cidr" {
-  description = "VPC CIDR. ⚠️ Staging MUST differ from this if the two ever peer."
+  description = "VPC CIDR. Staging MUST differ from this if the two ever peer."
   type        = string
 }
 
@@ -51,7 +51,7 @@ variable "interface_endpoint_services" {
 # --- Secrets --------------------------------------------------------------- #
 
 variable "secret_recovery_window_days" {
-  description = "Secrets Manager recovery window. ⚠️ MUST BE 30 FOR STAGING — 0 only suits a throwaway environment."
+  description = "Secrets Manager recovery window. MUST BE 30 FOR STAGING — 0 only suits a throwaway environment."
   type        = number
 }
 
@@ -63,7 +63,7 @@ variable "kms_deletion_window_days" {
 variable "kms_create_alias" {
   description = <<-EOT
     Create a friendly KMS alias. Console readability only — every consumer uses the
-    ARN. ⚠️ An orphaned alias after destroy is what breaks rebuild; false here,
+    ARN. An orphaned alias after destroy is what breaks rebuild; false here,
     true for long-lived environments.
   EOT
   type        = bool
@@ -108,12 +108,12 @@ variable "rds_multi_az" {
 }
 
 variable "rds_deletion_protection" {
-  description = "Refuse to delete the database. ⚠️ MUST BE true FOR STAGING."
+  description = "Refuse to delete the database. MUST BE true FOR STAGING."
   type        = bool
 }
 
 variable "rds_skip_final_snapshot" {
-  description = "Skip the final snapshot on delete. ⚠️ MUST BE false FOR STAGING."
+  description = "Skip the final snapshot on delete. MUST BE false FOR STAGING."
   type        = bool
 }
 
@@ -188,7 +188,7 @@ variable "documents_bucket_name" {
   description = <<-EOT
     Name of the documents bucket, CREATED AND MANAGED by `module.documents`.
 
-    ⚠️ This description used to say the bucket was hand-made and "NEVER managed —
+    This description used to say the bucket was hand-made and "NEVER managed —
     must survive every terraform destroy". C4 changed that: Terraform now creates it
     (main.tf), CMK-encrypted, because it holds real borrower files and a CMK gives a
     separate audit trail and a revocation lever.
@@ -218,7 +218,7 @@ variable "image_tag" {
     Image tag the task definitions reference. Repositories are IMMUTABLE, so a tag
     always means the same bytes.
 
-    ⚠️ Must already be pushed. A task definition referencing a missing tag fails at
+    Must already be pushed. A task definition referencing a missing tag fails at
     launch with CannotPullContainerError, visible only in the service events.
 
     The `deploy` stage of scripts/deploy derives this from git as
@@ -234,12 +234,12 @@ variable "allowed_deploy_branches" {
   description = <<-EOT
     Git branches `./scripts/deploy <env> deploy` will ship FROM.
 
-    ⚠️ CONSUMED BY THE SCRIPT, NOT BY TERRAFORM. No module reads it. It is declared
+    CONSUMED BY THE SCRIPT, NOT BY TERRAFORM. No module reads it. It is declared
     here so that a value in terraform.tfvars does not raise "Value for undeclared
     variable" on every plan, and so the per-environment deploy policy lives with the
     rest of that environment's configuration rather than inside the tool.
 
-    ⚠️ Why it exists: this machine has several git worktrees on different branches,
+    Why it exists: this machine has several git worktrees on different branches,
     and `docker build` ships whatever is checked out in the directory it runs from.
     A commit SHA in the image tag names the commit but not the line of work, so a
     deploy from the wrong worktree produces a correctly-tagged image of the wrong
@@ -254,7 +254,7 @@ variable "allowed_deploy_branches" {
 
 variable "cpu_architecture" {
   description = <<-EOT
-    Must match the architecture of the pushed images. ⚠️ A mismatch fails with
+    Must match the architecture of the pushed images. A mismatch fails with
     `exec format error`, visible only in the CloudWatch log stream.
   EOT
   type        = string
@@ -323,7 +323,7 @@ variable "enable_container_insights" {
 }
 
 variable "enable_execute_command" {
-  description = "ECS Exec. ⚠️ A production access path — grants a shell in a task holding borrower data."
+  description = "ECS Exec. A production access path — grants a shell in a task holding borrower data."
   type        = bool
 }
 
@@ -380,7 +380,7 @@ variable "bedrock_profile_regions" {
   description = <<-EOT
     Regions a `us.` cross-region inference profile may route to.
 
-    ⚠️ VERIFIED, and wider than it looks: `aws bedrock get-inference-profile` shows
+    VERIFIED, and wider than it looks: `aws bedrock get-inference-profile` shows
     the us. profiles routing to us-east-1, us-east-2 AND us-west-2. The IAM policy
     needs the foundation-model ARN in every one — omitting a region produces an
     INTERMITTENT AccessDeniedException that only fires when Bedrock routes there.
@@ -398,7 +398,7 @@ variable "documents_bucket_kms_key_arn" {
     encryption is declared here, not discovered.
 
     Override only to protect documents with a key from another state (e.g. a
-    separate compliance-owned CMK). ⚠️ Whatever key is used must also be the one the
+    separate compliance-owned CMK). Whatever key is used must also be the one the
     application sends as S3_KMS_KEY_ID, or every upload fails against the bucket's
     default encryption.
   EOT
@@ -413,7 +413,7 @@ variable "inbox_domain" {
     MX record answers another is a borrower's documents going nowhere with nothing to
     notice it.
 
-    ⚠️ NOT UNDER `domain_name` ANY MORE (LP-836). This was `inbox.$${var.domain_name}` —
+    NOT UNDER `domain_name` ANY MORE (LP-836). This was `inbox.$${var.domain_name}` —
     (the `$$` is an escape, not a typo: Terraform interpolates `$${...}` inside a heredoc,
     including in a `description`, where a variable reference is not allowed at all — an
     unescaped one makes the whole environment fail to initialise)
@@ -434,12 +434,12 @@ variable "cors_allowed_origins" {
   description = <<-EOT
     Origins the API accepts, as a LIST — Terraform jsonencodes it.
 
-    ⚠️ The application parses this env var as JSON (pydantic-settings complex type).
+    The application parses this env var as JSON (pydantic-settings complex type).
     A bare "http://host" string raises SettingsError and the app REFUSES TO START,
     verified against the installed pydantic-settings. So this fails loudly rather
     than silently, unlike most of the config traps here.
 
-    ⚠️ CHICKEN AND EGG: the real value is the ALB's DNS name, which does not exist
+    CHICKEN AND EGG: the real value is the ALB's DNS name, which does not exist
     until after the first apply. It cannot be wired from module.compute.alb_dns_name
     because that would make the compute module depend on its own output. In practice
     the frontend and API share one ALB origin, so browser calls are SAME-ORIGIN and
@@ -464,7 +464,7 @@ variable "domain_name" {
 
 variable "enable_tls" {
   description = <<-EOT
-    ⚠️ THE PHASE GATE. false for phase 1, true for phase 2.
+    THE PHASE GATE. false for phase 1, true for phase 2.
 
     Phase 1 creates the hosted zone and emits its four nameservers. Those must then
     be entered at the registrar BY HAND and allowed to propagate. Only then does
@@ -483,7 +483,7 @@ variable "ssl_policy" {
 }
 
 variable "enable_cognito" {
-  description = "Authenticate every request at the ALB. ⚠️ Requires enable_tls."
+  description = "Authenticate every request at the ALB. Requires enable_tls."
   type        = bool
 }
 
@@ -498,7 +498,7 @@ variable "cognito_mfa_configuration" {
 }
 
 variable "cognito_session_timeout_seconds" {
-  description = "ALB auth session lifetime. ⚠️ Long on purpose — see the compute module README."
+  description = "ALB auth session lifetime. Long on purpose — see the compute module README."
   type        = number
 }
 
@@ -561,7 +561,7 @@ variable "ecr_keep_last_protected_images" {
 }
 
 variable "ecr_force_delete" {
-  description = "Let destroy remove repositories that still hold images. ⚠️ false here — a destroy would discard the image history."
+  description = "Let destroy remove repositories that still hold images. false here — a destroy would discard the image history."
   type        = bool
 }
 
@@ -569,15 +569,15 @@ variable "activate_environment_cost_allocation_tag" {
   description = <<-EOT
     Activate `Environment` as a cost allocation tag. ACCOUNT-LEVEL.
 
-    ⚠️ The budget filters on user:Environment$<name>, and AWS Budgets matches NOTHING
+    The budget filters on user:Environment$<name>, and AWS Budgets matches NOTHING
     until this is active — the budget would report $0 forever and never fire, while
     looking correctly configured.
 
-    ⚠️ Only ONE root module per account may set this true. A second environment in
+    Only ONE root module per account may set this true. A second environment in
     the same account must leave it false, or the two states fight over one
     account-wide setting.
 
-    ⚠️ MANAGEMENT-ACCOUNT ONLY. Cost Explorer tag activation cannot be performed
+    MANAGEMENT-ACCOUNT ONLY. Cost Explorer tag activation cannot be performed
     from a member account at all: the C5 phase-1 apply failed with
     "Linked account doesn't have access to cost allocation tags". This must be
     false in every member-account environment, and the activation done by hand from

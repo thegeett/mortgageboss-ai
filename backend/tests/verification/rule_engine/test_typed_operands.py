@@ -29,7 +29,7 @@ from app.verification.snapshot.tag import Tag, TagProducedBy, TagRole, TagStage
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ LP-508 review: these are RULE-LOGIC tests, so they run with the distrusted-field guard OFF.
+# LP-508 review: these are RULE-LOGIC tests, so they run with the distrusted-field guard OFF.
 #
 # ID-3 and ID-5 gate on tags whose source fields are on the distrust list (a hallucinated driver's-licence
 # date on docs 146/294), so with the guard live EVERY case here degrades to needs_review and the date

@@ -27,29 +27,29 @@ from __future__ import annotations
 # LP-488 (+MI-1 — conventional MI requirement; the PROGRAM axis's first use) -> 44.
 # LP-488 (+MI-4 — FHA upfront MIP, the FHA side of the program axis) -> 45.
 # LP-488 (+CO-1 — condo questionnaire presence) -> 46.
-# LP-488 (+AU-3 — AUS recommendation, DU/LPA closed vocabulary) -> 47. ⚠️ RE-2 was in the LP-488 cohort
+# LP-488 (+AU-3 — AUS recommendation, DU/LPA closed vocabulary) -> 47. RE-2 was in the LP-488 cohort
 # and is DROPPED, not deferred: no REO/retained-property concept exists in MISMO or the data model.
 # LP-490a (+CR-1, +CR-4, +CR-8 — activated on a SELF-CONSISTENCY rate with ratification as the safety
 # substitute, ADR-378; NOT a measured accuracy) -> 55.
 # LP-491 (+TI-1 — title commitment parties; a CATALOG EDIT to deterministic_only, so no model in its
 # chain and no self-consistency rate needed) -> 55.
 # LP-492 (+PR-2 — appraised value vs purchase price; deterministic, no model in its chain) -> 56.
-# LP-492 (+PR-7 deterministic; +PR-3/PR-4/PR-5 ratify-pending. ⚠️ PR-8 DROPPED — no FEMA/disaster field
+# LP-492 (+PR-7 deterministic; +PR-3/PR-4/PR-5 ratify-pending. PR-8 DROPPED — no FEMA/disaster field
 # exists in any of the 121 schema specs or MISMO, so its trigger is unstateable: CR-3's shape) -> 60.
-# LP-493 (+PC-8 — personal property, surfaces only. ⚠️ PC-5 BUILT BUT HELD: its derivation returned a
+# LP-493 (+PC-8 — personal property, surfaces only. PC-5 BUILT BUT HELD: its derivation returned a
 # uniform abstain BEFORE LP-493a's context fixes; the re-derivation after them scored a MEASURED
 # 0.5000 (2 cases, 1 disagreement), so PC-5 is held on a measured failure, not on an absent number. PC-1 DROPPED: duplicate
 # matcher + a 0/5 field) -> 61.
 # LP-494 +CO-3 +CO-4 (the condo lane; CO-5 built and held — no input resolves on any document) -> 63.
 # LP-495a +OC-1 (occupancy consistency — the FIRST rule activated on a NON-VACUOUS self-consistency
 # rate: 0.9474 over 19 cases with a REAL spread and one real disagreement, unlike PR-3/PR-4's n=2
-# single-valued 1.0. ⚠️ Its tag occupancy.consistent_with_signals is NOT re-kinded — it is SHARED
+# single-valued 1.0. Its tag occupancy.consistent_with_signals is NOT re-kinded — it is SHARED
 # with live OC-2, so re-kinding is a behaviour change on shipped code. The LP-406-4 activation
 # precondition is resolved by the STATUS: on ratify-pending BOTH rules route to a human) -> 67.
 # LP-495a +RE-1 +DT-6 (the mortgage-statement ↔ stated-liability reconciliation — ONE matcher serves both,
 # ADR-375; NEITHER can produce `fired`, and neither reads the still-orphaned property.is_retained_reo /
 # property.retained_pitia) +LO-2 (LOE completeness). All three deterministic — no model in their chain, so
-# no self-consistency rate and no ratification. ⚠️ LO-1 HELD: it needs the list of conditions that REQUIRE
+# no self-consistency rate and no ratification. LO-1 HELD: it needs the list of conditions that REQUIRE
 # an LOE, which is lender- and AUS-driven and enumerated in no document; deriving it from this run's own
 # findings would make it a META-RULE over other rules' output, which nothing in the architecture does. -> 66.
 # LP-496a +PE-1 +PE-3 (program eligibility). PE-1 decides only at the two ends of the conforming

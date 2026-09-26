@@ -105,12 +105,12 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
     # LP-447 ACTIVATED IH-1 (per_document over the 30 docs): LF-6T3N has NO homeowners binder, so 26 classified
     # non-binder docs → not_applicable and the 4 unclassified ("unknown"-type) docs → couldnt_check (we cannot
     # rule out an unclassified doc is a policy — the honest §8 abstention, the AS-6 shape). So +26 not_applicable
-    # +4 couldnt_check → 431. ⚠️ satisfied / needs_review MOVED at LP-508's review (23/2 → 21/4); fired is UNCHANGED — no
+    # +4 couldnt_check → 431. satisfied / needs_review MOVED at LP-508's review (23/2 → 21/4); fired is UNCHANGED — no
     # existing rule's verdict moved; IH-1 only adds honest not_applicable / couldnt_check where LF-6T3N has no
     # binder to judge. Any OTHER movement would be a regression.
     # LP-485 ACTIVATED CL-1 / CR-13 / PR-6 (all subject_enumeration: loan → ONE eval each): LF-6T3N carries no
     # loan estimate, no credit report and no appraisal, so all three derived numbers are "unknown" and the
-    # gate routes each to couldnt_check. +3 couldnt_check → 434. ⚠️ THIS IS THE PROPERTY, ON A REAL FIXTURE:
+    # gate routes each to couldnt_check. +3 couldnt_check → 434. THIS IS THE PROPERTY, ON A REAL FIXTURE:
     # a file missing the document reads couldnt_check, NEVER satisfied — the rules do not clear on absence.
     # satisfied / fired / needs_review stay 23 / 2 / 2.
     # LP-487 ACTIVATED IH-2 (per_document over the 30 docs) + IH-7 (loan-scoped): LF-6T3N has no homeowners
@@ -118,10 +118,10 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
     # an unclassified document cannot be ruled out as a binder). LF-6T3N's MISMO states no property type,
     # so IH-7's applicability predicate is UNDETERMINED → 1 couldnt_check, NOT not_applicable: an unstated
     # property type must not silently skip the condo check. +26 not_applicable +5 couldnt_check → 465.
-    # ⚠️ satisfied / fired / needs_review are UNCHANGED at 21 / 2 / 4. Neither new rule clears on absence,
+    # satisfied / fired / needs_review are UNCHANGED at 21 / 2 / 4. Neither new rule clears on absence,
     # and no existing rule's verdict moved. Any other movement would be a regression.
     # LP-488 ACTIVATED MI-1 (loan-scoped): LF-6T3N's MISMO states NO loan program, so MI-1's applicability
-    # predicate is UNDETERMINED → 1 couldnt_check. ⚠️ NOT not_applicable — an unstated program must be
+    # predicate is UNDETERMINED → 1 couldnt_check. NOT not_applicable — an unstated program must be
     # surfaced, which is exactly why the program axis is scoped as a PREDICATE and not an outcome. +1 → 466.
     # satisfied / fired / needs_review stay 21 / 2 / 4. LP-488 adds MI-4 (+1) and CO-1 (+1, no property type stated) → 468, then AU-3 (per_document over the
     # 30 docs, like IH-1/IH-2): 26 classified non-AUS docs → not_applicable, 4 unclassified → couldnt_check
@@ -129,25 +129,25 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
     # LP-490a ACTIVATED CR-1/CR-4/CR-6/CR-8/CR-10 on `ratify-pending` (ADR-378). LF-6T3N carries NO
     # credit report, so the per-LIABILITY rules (CR-1, CR-6, CR-8) yield no subjects at all and the two
     # per-BORROWER rules (CR-4, CR-10) abstain once per borrower: +4 couldnt_check → 502.
-    # ⚠️ satisfied / fired / needs_review are UNCHANGED at 21 / 2 / 4 — five rules activated and no
+    # satisfied / fired / needs_review are UNCHANGED at 21 / 2 / 4 — five rules activated and no
     # existing verdict moved, and none of the five clears on a missing credit report.
     # LP-491 ACTIVATED TI-1 (per_document over the 30 docs, the IH-1/IH-2 shape): LF-6T3N carries no
     # title commitment, so 26 classified documents → not_applicable and the 4 unclassified → couldnt_check
     # (an unclassified document cannot be ruled out as a commitment). +26 na +4 cc → 532; then TI-2 and TI-6 the same way (+52 na, +8 cc) → 592. LP-492 adds PR-2 (+1 cc: LF-6T3N states no loan purpose, so its
-    # applicability predicate is undetermined and is SURFACED rather than skipped) → 593. LP-492 then adds the four per-document appraisal rules the same way (+104 na, +16 cc) → 713. LP-493 adds PC-8 the same way (+25 na, +5 cc) → 743. ⚠️ LP-494 adds CO-3 and CO-4, both LOAN-scoped (one evaluation each, both couldnt_check — property_type is null on every stored file, the gap CO-1 and IH-7 already live with) → 745.
-    # ⚠️ LP-495a adds RE-1, DT-6 and LO-2, all per_document over the 30 docs → +90 → 835.
+    # applicability predicate is undetermined and is SURFACED rather than skipped) → 593. LP-492 then adds the four per-document appraisal rules the same way (+104 na, +16 cc) → 713. LP-493 adds PC-8 the same way (+25 na, +5 cc) → 743. LP-494 adds CO-3 and CO-4, both LOAN-scoped (one evaluation each, both couldnt_check — property_type is null on every stored file, the gap CO-1 and IH-7 already live with) → 745.
+    # LP-495a adds RE-1, DT-6 and LO-2, all per_document over the 30 docs → +90 → 835.
     #   RE-1 / DT-6: 22 classified non-statement docs → not_applicable; 8 couldnt_check — the 4 real
     #   mortgage_statements (each states NO lender_name, the 54/71 corpus gap) plus the 4 'unknown'-type
-    #   documents, which cannot be ruled out as statements. ⚠️ THE FAIL-CLOSED DIRECTION WORKING ON THE
+    #   documents, which cannot be ruled out as statements. THE FAIL-CLOSED DIRECTION WORKING ON THE
     #   FLAGSHIP FIXTURE: LF-6T3N carries FOUR mortgage statements and its MISMO states NO liabilities at
     #   all, and RE-1 abstains on every one rather than reporting four undisclosed mortgages. A matcher
     #   that read 'no stated side' as 'nothing disclosed' would produce 4 false needs_review here.
     #   LO-2: 30 not_applicable — LF-6T3N carries no letter of explanation of any of the 8 LOE types, and
     #   LO-2 never reports a MISSING letter (applicability_expected: false — LO-1's held blocker).
-    # ⚠️ LP-495a also activates OC-1 (LOAN-scoped, one evaluation) -> 836. Under the keyless stub the
+    # LP-495a also activates OC-1 (LOAN-scoped, one evaluation) -> 836. Under the keyless stub the
     # occupancy group abstains, so it is +1 couldnt_check. On a real run it reads the AI tag and
     # RATIFIES every verdict (ratify-pending, ADR-378).
-    # ⚠️ satisfied / fired / needs_review UNCHANGED at 21 / 2 / 4. FOUR rules activated and no existing
+    # satisfied / fired / needs_review UNCHANGED at 21 / 2 / 4. FOUR rules activated and no existing
     # verdict moved; none of the four clears on an absence. Any other movement would be a regression.
     # LP-495b adds THREE rules, not two, and DT-7 is not among them (it is held on the enum gap): OC-3
     # LOAN-scoped (+1) and IN-13 + IN-14 PER-BORROWER over LF-6T3N's two borrowers (+4) -> 841. A per-rule
@@ -158,7 +158,7 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
     # "unknown", and an undetermined predicate is couldnt_check (§8) — the same verdict from a different
     # step. What the predicate changes is the case the stub cannot reach: a tag resolving to "n/a" on a
     # non-investment file, which now yields not_applicable instead of a paid judgment call.
-    # ⚠️ satisfied / fired / needs_review UNCHANGED at 21 / 2 / 4 — TI-1 never clears on a missing
+    # satisfied / fired / needs_review UNCHANGED at 21 / 2 / 4 — TI-1 never clears on a missing
     # commitment, which would be a false all-clear on the document that establishes ownership.
     # LP-496a adds TWO rows, both loan-scoped and both couldnt_check: 841 -> 843. A per-rule diff of
     # the whole distribution before and after confirms PE-1 and PE-3 are the ONLY rows that appear
@@ -200,7 +200,7 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
             # (LP-487 — 4 unclassified docs that cannot be ruled out as binders, and an unstated property type)
             "not_applicable": 556,  # bug-016 +2 — the other side of the couldnt_check note above: IN-7's two per-borrower rows land here, a borrower who never changed jobs being out of scope rather than an unanswerable question.  # LP-498 +25 — FR-3 is per_document and scoped to purchase_agreement, so every other document is correctly out of scope. A per-rule diff confirms FR-3's rows are the ONLY ones that moved.  # LP-495a review -4 (see couldnt_check above)  # LP-495a +74 — RE-1 x22 + DT-6 x22 (classified non-statement docs) + LO-2 x30 (no LOE of any type on LF-6T3N)  # +PC-8 x25 (LP-493 — the 25 classified non-contract documents)  # +PR-3/PR-4/PR-5/PR-7 x26 each (LP-492 — the 26 classified non-appraisal docs)  # +TI-2 x26 +TI-6 x26 (LP-491 — the 26 classified non-commitment docs)  # +TI-1 x26 (LP-491 — 26 classified non-commitment documents)  # +AU-3 x26 (LP-488 — 26 classified non-AUS documents)  # +IH-1 x26 (LP-447 — 26 classified non-binder docs; no homeowners policy);
             # +IH-2 x26 (LP-487 — the same 26 classified non-binder docs)
-            # ⚠️ LP-508 review: satisfied 23 -> 21, needs_review 2 -> 4. TWO subjects that used to
+            # LP-508 review: satisfied 23 -> 21, needs_review 2 -> 4. TWO subjects that used to
             # AUTO-SATISFY now route to a human. That is the distrusted-field guard finally reaching the
             # rules it was written for: ID-5 gates on id.borrower_id_expiration, derived from a
             # driver's-licence expiry the extractor hallucinated on docs 146/294, and until the fix the
@@ -251,25 +251,25 @@ async def test_lf6t3n_full_verdict_distribution_is_stable() -> None:
             "IH-9": "couldnt_check",  # LP-509-D1 — no binder on LF-6T3N, so no expiration date to read
             "IN-3": "couldnt_check",  # LP-511 — loan-scoped again  # LP-417 — no homeowners binder on LF-6T3N (an honest absence)
             # LP-487 — IH-7's applicability predicate (property.type) is UNDETERMINED on LF-6T3N, whose MISMO
-            # states no property type. ⚠️ couldnt_check, NOT not_applicable: an unstated property type must be
+            # states no property type. couldnt_check, NOT not_applicable: an unstated property type must be
             # surfaced, never silently read as "not a condo".
             "IH-7": "couldnt_check",
             # LP-488 — MI-1's applicability predicate (program.type) is UNDETERMINED: LF-6T3N states no loan
-            # program. ⚠️ couldnt_check, never not_applicable — an unstated program is surfaced, not skipped.
+            # program. couldnt_check, never not_applicable — an unstated program is surfaced, not skipped.
             "MI-1": "couldnt_check",
             "MI-4": "couldnt_check",  # LP-488 — the FHA side, same undetermined program predicate
             # LP-492 — PR-2's applicability predicate (loan.purpose) is UNDETERMINED on LF-6T3N, whose MISMO
-            # states no purpose. ⚠️ couldnt_check, never not_applicable — an unstated purpose is surfaced.
+            # states no purpose. couldnt_check, never not_applicable — an unstated purpose is surfaced.
             "PR-2": "couldnt_check",
             "CO-1": "couldnt_check",  # LP-488 — LF-6T3N states no property type (the condo predicate)
-            # ⚠️ LP-494 — the SAME predicate, and the gap is worth naming: property_type is null on EVERY
+            # LP-494 — the SAME predicate, and the gap is worth naming: property_type is null on EVERY
             # stored file, so the whole condo lane (CO-1, CO-3, CO-4, IH-7) abstains on real data today.
             # That is a data-entry gap, not a rule defect, and it is logged in priya-open-questions.md §16.
             "CO-3": "couldnt_check",  # LP-494 — fidelity presence; same unstated property type
             "CO-4": "couldnt_check",  # LP-494 — date-keyed reserve floor; same unstated property type
             "PC-3": "couldnt_check",  # LP-407-4 — no MISMO subject-property address on LF-6T3N
             # LP-485 — the date-compare family. LF-6T3N has no loan estimate, no credit report and no
-            # appraisal, so each abstains. ⚠️ NOT "satisfied": a rule must never clear on a missing document.
+            # appraisal, so each abstains. NOT "satisfied": a rule must never clear on a missing document.
             "CL-1": "couldnt_check",
             "CR-13": "couldnt_check",
             "PR-6": "couldnt_check",

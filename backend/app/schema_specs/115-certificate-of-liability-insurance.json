@@ -60,7 +60,7 @@
   ],
 
   "notes": [
-    "⚠️ CO-3 CORRECTION (LP-467): the plan tied this type to CO-3 (condo master policy + fidelity bond). THAT IS WRONG. CO-3's inputs are master-PROPERTY coverage + a fidelity/crime bond, which arrive on an ACORD 27/28 (Evidence of Property Insurance) + a crime certificate — NOT this ACORD 25 (liability). Anyone building CO-3 must NOT look for its inputs here. This type serves NO rule (rules_served empty); it earns its catalog entry on PROCESSOR VISIBILITY (a real, distinct standard document that otherwise dilutes `unknown`), the same standard as wire_instructions (ADR-362/363).",
+    "CO-3 CORRECTION (LP-467): the plan tied this type to CO-3 (condo master policy + fidelity bond). THAT IS WRONG. CO-3's inputs are master-PROPERTY coverage + a fidelity/crime bond, which arrive on an ACORD 27/28 (Evidence of Property Insurance) + a crime certificate — NOT this ACORD 25 (liability). Anyone building CO-3 must NOT look for its inputs here. This type serves NO rule (rules_served empty); it earns its catalog entry on PROCESSOR VISIBILITY (a real, distinct standard document that otherwise dilutes `unknown`), the same standard as wire_instructions (ADR-362/363).",
     "The sample 073 is a homebuilder's (Taylor Morrison) liability certificate — CGL + Auto + Workers Comp for a project — not a condo master-property/fidelity cert.",
     "No _PII_FIELDS entry: certificate_number ('W'-prefixed), policy numbers (separator'd), NAIC (5-digit), and limits (<9 digits) do not trip the contiguous-digit guard. description_of_operations + project_or_property_reference get the 9+-digit scrub backstop (the ACORD 101 prints a bare loan number)."
   ]

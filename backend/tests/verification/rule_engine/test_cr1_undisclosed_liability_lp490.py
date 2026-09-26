@@ -1,15 +1,15 @@
-"""LP-490 — CR-1 (undisclosed liability). ⚠️ BUILDS INERT.
+"""LP-490 — CR-1 (undisclosed liability). BUILDS INERT.
 
-⚠️ INERT BY DESIGN. CR-1 gates on `liab.in_application`, an AI tag with no measured accuracy. Its bar is
+INERT BY DESIGN. CR-1 gates on `liab.in_application`, an AI tag with no measured accuracy. Its bar is
 `not-calibratable-yet`, for which `is_eligible()` returns False (LP-484), so CR-1 is NOT live. A test
 below pins that, so a later ticket cannot activate it by accident.
 
-⚠️ ONE MATCHER, TWO VIEWS. LP-483 built the comparison once, as the `credit_profile` AI group on the
+ONE MATCHER, TWO VIEWS. LP-483 built the comparison once, as the `credit_profile` AI group on the
 LIABILITY subject (ADR-375). CR-1 reads that per-liability judgment directly (WHICH debt); CR-4 reads
 `credit.undisclosed_tradeline`, a deterministic borrower rollup over the SAME tag. This file proves they
 cannot disagree about one file — the reason no second matcher was written here.
 
-⚠️ EVERY VERDICT ASSERTION RUNS THROUGH A REAL RULE EVALUATION (LP-487's standing rule): a scripted
+EVERY VERDICT ASSERTION RUNS THROUGH A REAL RULE EVALUATION (LP-487's standing rule): a scripted
 `credit_profile` reasoner drives materialize_tags(), which produces the per-liability tag AND the derived
 rollup, and both rules are then evaluated by the real evaluator. Nothing is asserted by calling a recipe.
 """
@@ -54,7 +54,7 @@ _BORROWER = (BorrowerRef(borrower_id=_BORROWER_ID, name="Test Borrower"),)
 class _ScriptedMatcher:
     """Replays the `credit_profile` group with a per-subject answer, keyed by the tradeline's creditor.
 
-    ⚠️ It answers the ONE narrow question the real group asks — "is THIS debt on the application?" — and
+    It answers the ONE narrow question the real group asks — "is THIS debt on the application?" — and
     nothing else. It never decides a verdict; the rule does.
     """
 
@@ -67,7 +67,7 @@ class _ScriptedMatcher:
         payload = json.loads(context_json)
         judgments = []
         for subject in payload.get("subjects", []):
-            # ⚠️ KEY ON THE SUBJECT'S OWN creditor_name, never on the whole context blob. The context
+            # KEY ON THE SUBJECT'S OWN creditor_name, never on the whole context blob. The context
             # deliberately includes ALL the stated liabilities (that is the other side of the
             # comparison), so a substring match against the blob resolves every subject to the same
             # answer — a fixture bug that would have made these assertions meaningless.
@@ -87,7 +87,7 @@ def _tradelines(rows: list[dict[str, str]]) -> DocumentEntry:
     return DocumentEntry(
         content_id="cr-1",
         document_type="credit_report",
-        # ⚠️ A BORROWER IS REQUIRED FOR CR-4. Borrower subjects come from documents' `belongs_to`
+        # A BORROWER IS REQUIRED FOR CR-4. Borrower subjects come from documents' `belongs_to`
         # (LP-202), and CR-4's rollup materialises on the BORROWER subject — with no borrower there is
         # no rollup and CR-4 abstains, which would make the CR-1/CR-4 agreement proof vacuous.
         belongs_to=_BORROWER,
@@ -107,7 +107,7 @@ def _tradelines(rows: list[dict[str, str]]) -> DocumentEntry:
 
 
 def _mismo(liabilities: list[tuple[str, str, str, str]]) -> dict[str, Field]:
-    # ⚠️ THE BORROWER FACTS ARE REQUIRED FOR CR-4. Borrower subjects are enumerated from MISMO
+    # THE BORROWER FACTS ARE REQUIRED FOR CR-4. Borrower subjects are enumerated from MISMO
     # `borrower.{n}.borrower_id` (NOT from documents' belongs_to), and CR-4's rollup materialises on the
     # borrower subject — without one there is no rollup, CR-4 abstains, and the CR-1/CR-4 agreement
     # proof below would pass vacuously.
@@ -138,7 +138,7 @@ def _snapshot(rows: list[dict[str, str]], liabilities: list[tuple[str, str, str,
 
 
 def _reasoners(answers: dict[str, str]) -> dict:
-    """⚠️ STUB EVERY DECLARED GROUP, then override `credit_profile`.
+    """STUB EVERY DECLARED GROUP, then override `credit_profile`.
 
     Overriding one group alone is NOT enough: materialize_tags runs every declared AI group, and any
     group without a seam falls through to the REAL MODEL. An earlier version of this file did exactly
@@ -156,10 +156,10 @@ async def _evaluate(snapshot: Snapshot, answers: dict[str, str], rule_id: str):
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ INERT — the first thing this cohort must prove
+# INERT — the first thing this cohort must prove
 # --------------------------------------------------------------------------- #
 def test_cr1_is_live_on_a_self_consistency_rate_not_a_measurement() -> None:
-    """⚠️ UPDATED AT LP-490a (ADR-378). CR-1 shipped INERT at LP-490; it is now LIVE on `ratify-pending`,
+    """UPDATED AT LP-490a (ADR-378). CR-1 shipped INERT at LP-490; it is now LIVE on `ratify-pending`,
     activated on a self-consistency rate (two independent Bedrock derivations, 13 cases, 0 disagreements)
     with RATIFICATION as the safety substitute. The rate is NOT evidence of correctness — a
     systematically wrong tag scores 1.0 — so `measured_accuracy` stays None and `validated` stays False."""
@@ -191,7 +191,7 @@ _LF96SV_ROWS = [
 
 
 async def test_lf96sv_shape_reports_no_undisclosed_debt_among_the_rows_extracted() -> None:
-    """⚠️ THE HONEST CLAIM IS BOUNDED. LF-96SV's payment total 1432 = 502+386+209+269+66 gives a 1:1
+    """THE HONEST CLAIM IS BOUNDED. LF-96SV's payment total 1432 = 502+386+209+269+66 gives a 1:1
     correspondence FROM DATA, so the expected answer is "none undisclosed". But the extraction is
     `partial` and `total_tradeline_count` is not a declared field, so completeness is UNVERIFIABLE: this
     file supports a negative among THE ROWS EXTRACTED, and cannot prove absence.
@@ -215,7 +215,7 @@ async def test_a_tradeline_with_no_counterpart_is_undisclosed() -> None:
     evaluations = await _evaluate(_snapshot(rows, _LF96SV_STATED), answers, "CR-1")
     fired = [e for e in evaluations if e.verdict is Verdict.FIRED]
     assert len(fired) == 1, "exactly the unmatched tradeline fires"
-    # ⚠️ The finding names WHICH debt — that is the whole reason CR-1 is per-liability rather than a
+    # The finding names WHICH debt — that is the whole reason CR-1 is per-liability rather than a
     # borrower-level yes/no. The sixth tradeline is row index 5.
     assert fired[0].subject_id == "cr-1-row5"
     satisfied = [e for e in evaluations if e.verdict is Verdict.SATISFIED]
@@ -223,7 +223,7 @@ async def test_a_tradeline_with_no_counterpart_is_undisclosed() -> None:
 
 
 async def test_an_ambiguous_pair_couldnt_checks_rather_than_guessing() -> None:
-    """⚠️ `unknown` → couldnt_check ON THAT DEBT ALONE. The rule does not need to be certain about every
+    """`unknown` → couldnt_check ON THAT DEBT ALONE. The rule does not need to be certain about every
     debt to be useful on the others — the other four still resolve."""
     answers = {row["creditor_name"]: "yes" for row in _LF96SV_ROWS} | {"DISCOVERC": "unknown"}
     evaluations = await _evaluate(_snapshot(_LF96SV_ROWS, _LF96SV_STATED), answers, "CR-1")
@@ -234,7 +234,7 @@ async def test_an_ambiguous_pair_couldnt_checks_rather_than_guessing() -> None:
 
 
 async def test_a_stated_liability_with_no_tradeline_is_not_a_cr1_finding() -> None:
-    """⚠️ THE REVERSE DIRECTION IS OUT OF SCOPE. CR-1 asks, of each REPORTED debt, "is it on the
+    """THE REVERSE DIRECTION IS OUT OF SCOPE. CR-1 asks, of each REPORTED debt, "is it on the
     application?". A stated liability with no tradeline is the opposite question, and CR-12's lesson
     (LP-486) is that leaving it in scope produces permanent, unfixable couldnt_checks — a file with 8
     stated liabilities produced 8 of them."""
@@ -250,7 +250,7 @@ async def test_a_stated_liability_with_no_tradeline_is_not_a_cr1_finding() -> No
 
 
 async def test_no_credit_report_yields_no_false_all_clear() -> None:
-    """⚠️ NEVER SATISFIED ON A MISSING DOCUMENT. "No undisclosed liabilities" on a file with no credit
+    """NEVER SATISFIED ON A MISSING DOCUMENT. "No undisclosed liabilities" on a file with no credit
     report is a false all-clear, which is worse than saying nothing. With no report there are no
     reported-liability subjects, so CR-1 produces no `satisfied` at all."""
     evaluations = await _evaluate(_snapshot([], _LF96SV_STATED), {}, "CR-1")
@@ -258,7 +258,7 @@ async def test_no_credit_report_yields_no_false_all_clear() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ CR-1 AND CR-4 CANNOT DISAGREE — the reason no second matcher was written
+# CR-1 AND CR-4 CANNOT DISAGREE — the reason no second matcher was written
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
     ("answers", "cr1_has_fired", "cr4_expected"),
@@ -315,11 +315,11 @@ def test_cr1_reads_no_distrusted_tag() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# LP-490a / ADR-378 — ⚠️ THE RATIFICATION PROOF, through a REAL rule evaluation
+# LP-490a / ADR-378 — THE RATIFICATION PROOF, through a REAL rule evaluation
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("rule_id", ["CR-1", "CR-4"])
 async def test_ratify_pending_findings_carry_ratification(rule_id: str) -> None:
-    """⚠️ RATIFICATION IS THE ENTIRE SAFETY SUBSTITUTE for the missing measurement (ADR-378), so it is
+    """RATIFICATION IS THE ENTIRE SAFETY SUBSTITUTE for the missing measurement (ADR-378), so it is
     proven HERE — through materialisation and the real evaluator — not by calling the mechanism.
 
     `deterministic.py` never set the flag before LP-490a. CR-1 and CR-4 both route through that path, so

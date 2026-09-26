@@ -222,7 +222,7 @@ def _result(
         # `ships` is metadata with no runtime consumer, so this per-finding flag is the only real
         # ratification mechanism (LP-508 Phase A §5).
         #
-        # ⚠️ LP-490a / ADR-378 — AND EVERY FINDING FROM A ratify-pending RULE. Those rules activate on a
+        # LP-490a / ADR-378 — AND EVERY FINDING FROM A ratify-pending RULE. Those rules activate on a
         # self-consistency rate rather than a measured accuracy, and ratification is the ENTIRE safety
         # substitute for the missing measurement. This path never set the flag before LP-490a, so an
         # ai_fuzzy_match rule (CR-1, CR-4, CR-5, OC-1, …) would have shipped an unmeasured AI judgment as
@@ -307,7 +307,7 @@ def _fact_value(entry: DocumentEntry, fact: SubjectFact) -> str | None:
         if not isinstance(field, Field) or not field.is_present or field.value is None:
             return None
         if fact.money and (amount := coerce_decimal(field.value)) is not None:
-            # ⚠️ Cents only when the SOURCE has them. This deliberately differs from LP-520's
+            # Cents only when the SOURCE has them. This deliberately differs from LP-520's
             # always-cents rule for AS-12's materiality floor, and the difference is the purpose: a
             # floor is a COMPUTED comparison a processor judges, so "$2,000" must be distinguishable
             # from a rounded "$1,999.87". This is a QUOTE from a document — a binder stating Coverage A
@@ -362,7 +362,7 @@ def _gated_tag_derivation(det: DeterministicEval, subject_tags: Mapping[str, Tag
 def _fix_for(det: DeterministicEval, entry: DocumentEntry | None) -> str | None:
     """The rule's couldnt-check fix, with the subject's facts filled in.
 
-    ⚠️ USED BY ALL THREE couldnt_check PATHS. There are three — the fail-closed gate, the applicability
+    USED BY ALL THREE couldnt_check PATHS. There are three — the fail-closed gate, the applicability
     resolver, and the confidently-absent-document check — and LP-524 wired only the gate. On the first
     real run that left 6 of 15 abstentions with no action at all (CR-6 x4 via applicability, ID-7 and
     IN-8 via absent-document), while the other 9 had one. One helper, three call sites, so a fourth path

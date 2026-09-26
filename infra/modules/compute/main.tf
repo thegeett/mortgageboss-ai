@@ -12,7 +12,7 @@ terraform {
 }
 
 locals {
-  # ⚠️ APPLIED TO EVERY BACKEND CONTAINER, and not environment-specific — it is a
+  # APPLIED TO EVERY BACKEND CONTAINER, and not environment-specific — it is a
   # property of how the image starts.
   #
   # The image CMD is `uv run ...`, and `uv run` performs a dependency SYNC before
@@ -44,7 +44,7 @@ locals {
     { name = k, value = local.merged_api_env[k] }
   ]
 
-  # ⚠️ HOSTNAME=0.0.0.0 IS LOAD-BEARING, and it is set HERE rather than left to the
+  # HOSTNAME=0.0.0.0 IS LOAD-BEARING, and it is set HERE rather than left to the
   # image, because the image's value does not survive ECS.
   #
   # Next.js standalone `server.js` binds to `process.env.HOSTNAME`. The Dockerfile
@@ -94,7 +94,7 @@ locals {
 
   migration_command = ["uv", "run", "alembic", "upgrade", "head"]
 
-  # ⚠️ The image bakes a Celery `inspect ping` HEALTHCHECK (verified with
+  # The image bakes a Celery `inspect ping` HEALTHCHECK (verified with
   # `docker image inspect`). It is correct for the worker and WRONG for the API,
   # which runs no Celery node — an API container that does not override it sits
   # UNHEALTHY FOREVER while serving traffic perfectly.
@@ -115,7 +115,7 @@ locals {
     "uv run celery -A app.tasks.celery_app inspect ping -d celery@$HOSTNAME || exit 1",
   ]
 
-  # ⚠️ THE FRONTEND HAS NO CONTAINER HEALTH CHECK, DELIBERATELY.
+  # THE FRONTEND HAS NO CONTAINER HEALTH CHECK, DELIBERATELY.
   #
   # It had one (`wget -q --spider http://127.0.0.1:3000/`) and it caused an outage
   # rather than catching one — see the HOSTNAME note above. The command itself was
@@ -128,7 +128,7 @@ locals {
   # deregisters a task that stops answering. Two checks of the same liveness, and
   # only one of them can kill the task.
   #
-  # ⚠️ The WORKER's check is NOT redundant and stays — it has no ALB in front of it,
+  # The WORKER's check is NOT redundant and stays — it has no ALB in front of it,
   # so `celery inspect ping` is the only way ECS can tell "alive" from "alive but
   # not consuming". That reasoning does not transfer to a load-balanced service.
   #
@@ -294,7 +294,7 @@ resource "aws_ecs_task_definition" "frontend" {
       essential = true
       # No command override: the image's CMD (`node server.js`) is correct.
       #
-      # ⚠️ The image also sets ENV HOSTNAME=0.0.0.0 and PORT=3000 — but ECS injects
+      # The image also sets ENV HOSTNAME=0.0.0.0 and PORT=3000 — but ECS injects
       # its own HOSTNAME at runtime and the image's value loses. That is why
       # HOSTNAME is set explicitly in local.frontend_env; see the note there.
 

@@ -101,7 +101,7 @@ AS-2:
     mapping (the 24.5% was a scoring artifact, NOT the model); has_identified_source 93.8% (n=16, its one miss
     the SAFE over-flag direction). Both AS-2 gates now measured -> calibratable-now. PROPOSED for Priya: a ~0.90
     AUTO bar, or ratify-only while this is one file; below-bar/unknown -> needs_review (LP-376-B).
-    ⚠️ CAVEAT (Priya weighs before sign-off): AS-2 FIRES on apparent_category == loan_proceeds, and LF-6T3N has
+    CAVEAT (Priya weighs before sign-off): AS-2 FIRES on apparent_category == loan_proceeds, and LF-6T3N has
     ZERO loan_proceeds transactions (n=17 covered payroll/interest/transfer_own/third_party) — the tag is
     measured broadly but its loan_proceeds VALUE is untested; a file with a loan-proceeds deposit would
     strengthen this. measured_accuracy is set to has_identified_source's 0.938 (the weaker MEASURED gate), not
@@ -145,7 +145,7 @@ OC-1:
   # OC-2 never needed the tag CALIBRATED; OC-1's auto-ship does. So it is not-calibratable-yet (produced but
   # unscored), threshold null, validated false → is_eligible=false → NOT activated. Calibrating the tag against
   # Priya's occupancy labels is a separate ticket; until then OC-1 is written + producing, held.
-  # ⚠️ LP-495a — ACTIVATED on a SELF-CONSISTENCY rate (ADR-378), not a measurement. The tag is NOT
+  # LP-495a — ACTIVATED on a SELF-CONSISTENCY rate (ADR-378), not a measurement. The tag is NOT
   # re-kinded: `occupancy.consistent_with_signals` is SHARED with live OC-2, so re-kinding it is a
   # behaviour change on shipped code and needs its own regression evidence. It stays `ai`.
   status: ratify-pending
@@ -162,28 +162,28 @@ OC-1:
   fp_fn: >-
     FN (clears a file whose occupancy declarations conflict — an occupancy misrepresentation is the
     single most consequential borrower-side defect, since pricing, LTV limits and the reps-and-warrants
-    all key on it) >> FP (a false conflict -> a human re-checks two 1003 answers). ⚠️ THE OBSERVED
+    all key on it) >> FP (a false conflict -> a human re-checks two 1003 answers). THE OBSERVED
     FALSE-POSITIVE DIRECTION IS THE ASYMMETRIC DECLARATION SET — see the disagreement below.
   rationale: >-
-    ⚠️ THE ACTIVATION PRECONDITION LP-406-4 RAISED IS RESOLVED BY THE STATUS ITSELF, NOT BY A CHANGE TO
+    THE ACTIVATION PRECONDITION LP-406-4 RAISED IS RESOLVED BY THE STATUS ITSELF, NOT BY A CHANGE TO
     OC-2. The precondition was that OC-1 would AUTO-ship while live OC-2 RATIFIES the same tag, so a "no"
     file would surface once auto and once ratified. On `ratify-pending`, `ratifies_every_finding` returns
     true for OC-1 too, so BOTH rules now route to a human and the double-surface is two ratified prompts
     rather than an auto-assertion racing a ratification. Live OC-2 is UNCHANGED — dropping
     consistent_with_signals from its reasoned_over is a domain call on shipped code and is NOT done here.
-    ⚠️ THE RATE IS 0.9474 (18/19), AND IT IS THE FIRST NON-VACUOUS ONE IN THIS COHORT. Unlike PR-3/PR-4
+    THE RATE IS 0.9474 (18/19), AND IT IS THE FIRST NON-VACUOUS ONE IN THIS COHORT. Unlike PR-3/PR-4
     (n=2, single-valued), the spread is real: call 1 {yes 10, unknown 9}, call 2 {yes 9, no 1, unknown 9}.
     Zero calls failed (the LP-491 expired-token trap), and the abstains are STRUCTURAL, not degraded — 9 of
     the 19 files state an occupancy with NO other declaration to compare it against, so `unknown` is the
     correct answer there. input_resolves reflects the other 10, where the tag genuinely resolves.
-    ⚠️ THE ONE DISAGREEMENT IS NOT NOISE, AND IT LOCATES THE WEAKNESS EXACTLY. LF-XU26 is the ONLY file in
+    THE ONE DISAGREEMENT IS NOT NOISE, AND IT LOCATES THE WEAKNESS EXACTLY. LF-XU26 is the ONLY file in
     the corpus with an ASYMMETRIC declaration set: borrower 1 states intent-to-occupy "Yes" but carries NO
     fhasecondaryresidenceindicator, while borrower 2 carries both. Call 1 read "both intend to occupy" ->
-    yes; call 2 read the missing indicator as a contradiction -> no. ⚠️ Call 2 is arguably WRONG on the
+    yes; call 2 read the missing indicator as a contradiction -> no. Call 2 is arguably WRONG on the
     prompt's own terms — a MISSING declaration is "missing or genuinely ambiguous", which the prompt
     assigns to `unknown`, not to `no`. So the residual risk is a FALSE CONFLICT on an incompletely-stated
     1003, which is the cheap direction and is why ratification is the right safety here.
-    ⚠️ WHAT THE RATE DOES NOT SHOW: every one of the 10 answerable files states `primary_residence` with
+    WHAT THE RATE DOES NOT SHOW: every one of the 10 answerable files states `primary_residence` with
     intent-to-occupy "Yes". THE INCONSISTENT ("no") PATH HAS NEVER BEEN OBSERVED ON A REAL FILE — the only
     "no" produced in this exercise is the disagreement above, which is probably a false positive. The rate
     measures verdict agreement between two independent derivations; it is NOT evidence of correctness, and
@@ -220,7 +220,7 @@ AS-6:
   #     accuracy is the min of those ROUTING DRIVERS = 1.0. The third read tag holder_name_variance (5/11 vs her
   #     exact labels, LP-403) is NOT a routing driver — so it is EXCLUDED from measured_accuracy (taking the
   #     weakest of ALL read tags, 0.45, would wrongly block a rule whose VERDICT routing is 11/11).
-  #     ⚠️ CORRECTION (LP-429 review): holder_name_variance is NOT purely reason-only — the SPEC gates on it
+  #     CORRECTION (LP-429 review): holder_name_variance is NOT purely reason-only — the SPEC gates on it
   #     (gated_tags: [stmt.holder_name_variance]): at runtime `holder_name_variance == unknown` → AS-6
   #     COULDNT_CHECK (the name could not be compared), and only a non-unknown value lets AS-6 proceed to the
   #     owner_matches routing. So it IS verdict-affecting via the couldnt_check GATE. The 5/11 is accuracy vs
@@ -239,7 +239,7 @@ AS-6:
   validated: true   # LP-429 — Priya approved 0.95, weighing the four items recorded above
   measured_accuracy: 1.0   # min of the ROUTING drivers owner_matches_borrower + non_borrower_co_holder (both 11/11)
   # The ROUTING drivers only (ADR-338). holder_name_variance is EXCLUDED from measured_accuracy — its 5/11 is
-  # category (reason-string) accuracy, not a routing driver. ⚠️ It is NOT unmeasured-and-harmless, though: the
+  # category (reason-string) accuracy, not a routing driver. It is NOT unmeasured-and-harmless, though: the
   # spec gates couldnt_check on it (gated_tags: [stmt.holder_name_variance]) — a wrong unknown-vs-not gate value
   # is a verdict effect, bounded to a VISIBLE couldnt_check (never a false verdict; see item (3) above).
   load_bearing_ai_tags: [stmt.owner_matches_borrower, stmt.non_borrower_co_holder]
@@ -254,9 +254,9 @@ AS-6:
     _co_holder (both 11/11 = 1.0), NOT holder_name_variance (5/11 category accuracy), the first multi-tag
     precedent (ADR-338). NB (LP-429 review) holder_name_variance is the spec's couldnt_check GATE, not reason-
     only — a wrong gate value is bounded to a visible couldnt_check, never a false verdict (see the comment
-    above); and the N2/P2 variance taxonomy RESIDUAL (a refinement it ships with). ⚠️ SYNTHETIC-DATA basis:
+    above); and the N2/P2 variance taxonomy RESIDUAL (a refinement it ships with). SYNTHETIC-DATA basis:
     the 4-fired/5-needs_review/2-satisfied proof is on the LP-401 fixture (constructed), and the 5 REAL LF-6T3N
-    statements are all `yes` (the FP direction) — the negative FN direction is proven only on synthetic cases. ⚠️
+    statements are all `yes` (the FP direction) — the negative FN direction is proven only on synthetic cases.
     D5 COVERAGE GAP: stmt_facts runs only on bank_statement/money_market, so investment/brokerage statements are
     NOT ownership-checked at all (its own ticket — widen stmt_facts' applicability). Validating this bar ACTIVATES
     the rule (LP-393-6 coupling) — the sign-off IS the activation.
@@ -381,7 +381,7 @@ AS-11:
     restricted; brokerage -> fully_liquid) — the earlier LP-390-6 66.7% was the AI UNDER-restricting a
     fully-vested 401(k), a prompt gap now fixed. Calculative -> ships AUTO. FN-dangerous (a restricted
     retirement account counted at full value overstates reserves) -> a HIGH bar. LP-393-6: Priya SIGNED OFF
-    0.90 AUTO — she OVERRODE the ratify-only recommendation KNOWINGLY (a named trust decision). ⚠️
+    0.90 AUTO — she OVERRODE the ratify-only recommendation KNOWINGLY (a named trust decision).
     SYNTHETIC-DATA CAVEAT (recorded, accepted by her): measured on CLEAN scenario data (LP-393-1) — this
     validates the REASONING, not robustness to real-document messiness; the only real-data check is LF-6T3N
     (n=2, indicative), and n=6 is thin. Below-bar/unknown -> needs_review (LP-376-B).
@@ -391,7 +391,7 @@ AS-12:
   # human ratifies every verdict regardless of the number (activation_mode returns 'ratify' for ships:ratify);
   # the threshold is the SURFACING floor. LP-390-7: Priya SIGNED OFF (validated:true); ACTIVE (_LP390_ACTIVATED).
   #
-  # ⚠️ CORRECTED, LP-518. This block used to end "never an auto verdict", and since LP-516 that has not been
+  # CORRECTED, LP-518. This block used to end "never an auto verdict", and since LP-516 that has not been
   # true of every path. A deposit matching a declared GUIDELINE EXEMPTION (`exempt_when` — payroll, and now
   # interest) is SATISFIED with ratification_pending=False, so it never reaches a human. That is deliberate:
   # the clearing is done by a deterministic predicate over `txn.apparent_category`, and the model's answer can
@@ -423,7 +423,7 @@ AS-12:
 
 IN-7:
   # LP-393-5: same_line_of_work re-scored 100% (13/13) on the LP-393-1 fixture (LP-393-4b) -> calibratable-now.
-  # LP-393-6: Priya SIGNED OFF the 0.90 bar (validated:true; ACTIVE via _LP393_ACTIVATED). ⚠️ CONFLICT: she
+  # LP-393-6: Priya SIGNED OFF the 0.90 bar (validated:true; ACTIVE via _LP393_ACTIVATED). CONFLICT: she
   # asked for AUTO, but IN-7 is JUDGMENTAL (rule_kinds.csv: ai_judgment) and LP-376-B's armor is enforced at
   # EVALUATION time (judgment.py hard-codes ratification_pending) — a judgment rule NEVER auto-ships. So ships
   # stays RATIFY: IN-7 surfaces to needs_review for human ratification regardless of any 'auto' request. Making
@@ -440,12 +440,12 @@ IN-7:
     fix + the LP-393-2a blind re-label; the interim 31% was the stale-golden trap, not the prompt). Judgmental
     -> ships RATIFY: a human ratifies every verdict regardless of the number, so the bar is the SURFACING floor
     (cf. AS-12). FP (a false same-line flag) is mostly noise — a human ratifies; the FN (accepting a
-    disqualifying job change) is caught at ratification. LP-393-6: Priya SIGNED OFF the 0.90 floor. ⚠️ She
+    disqualifying job change) is caught at ratification. LP-393-6: Priya SIGNED OFF the 0.90 floor. She
     asked for AUTO — but IN-7 is JUDGMENTAL and LP-376-B forbids a judgment rule from auto-shipping (enforced in
     judgment.py, not this bar), so ships STAYS ratify and IN-7 surfaces to needs_review; her 'auto' is NOT
     achievable without reclassifying IN-7's kind (a separate ticket — ADR-316). Not silently forced. reasoned_over
     also reads income.employment_start as CONTEXT — NOT load-bearing (only same_line_of_work gates), so it does
-    not block calibratable-now (the LP-390-6 / txn.counterparty precedent). ⚠️ SYNTHETIC-DATA CAVEAT: measured on
+    not block calibratable-now (the LP-390-6 / txn.counterparty precedent). SYNTHETIC-DATA CAVEAT: measured on
     CLEAN scenario data (LP-393-1) — validates REASONING, not real-document robustness (LF-6T3N n=2 only).
 
 IN-8:
@@ -453,7 +453,7 @@ IN-8:
   # Priya's blind labels over LP-418's voe/offer fixture (LP-420 worksheet). So calibratable-now, PROPOSED 0.95
   # AUTO bar (structural presence check, low error cost — a false 'VOE missing' costs a human glance; FP > FN).
   # LP-428 — VALIDATED. Priya SIGNED OFF the 0.95 bar, weighing the synthetic caveat below (the LP-412 pattern:
-  # her sign-off IS the activation). ⚠️ SYNTHETIC CAVEAT (she weighed it, per LP-426): the fixture is LP-418
+  # her sign-off IS the activation). SYNTHETIC CAVEAT (she weighed it, per LP-426): the fixture is LP-418
   # SCENARIO documents with HAND-SET document_type (always correct), so this measures income_docs' report GIVEN a
   # correctly-classified doc — NOT genuine recognition of a real VOE, nor classifier errors. n=12. Real VOEs are
   # the LP-393 synthetic-data caveat — IN-8 ships with it, on record.
@@ -516,7 +516,7 @@ IN-10:
     is_declining re-scored 100% (13/13, n=13, LP-393-4b) — the per-borrower re-scope (LP-390-1) landed and the
     tag now reaches the rule. Calculative -> ships AUTO. FN-dangerous (missing a real year-over-year decline
     uses unstable income at face value) -> a HIGH bar. LP-393-6: Priya SIGNED OFF 0.95 AUTO (measured 1.0 >=
-    0.95) — she OVERRODE the ratify-only recommendation KNOWINGLY (a named trust decision). ⚠️ SYNTHETIC-DATA
+    0.95) — she OVERRODE the ratify-only recommendation KNOWINGLY (a named trust decision). SYNTHETIC-DATA
     CAVEAT (recorded, accepted by her): measured on CLEAN scenario data (LP-393-1) — validates the REASONING,
     not robustness to real-document messiness; the only real-data check is LF-6T3N (n=2, indicative).
     Below-bar/unknown -> needs_review (LP-376-B).
@@ -542,7 +542,7 @@ IN-11:
     (two new candidate rules). Under that ruling B12 + B14's goldens became 'yes' (their originals preserved in
     the worksheet note) and has_2yr_history was RE-SCORED with the real reasoner to 100% (13/13, n=13) — the
     number CHANGED BY RE-SCORING, never by editing 0.85 -> 1.0. Calculative, FN-dangerous -> she SIGNED OFF 0.90
-    AUTO (measured 1.0 >= 0.90), OVERRIDING the ratify-only recommendation KNOWINGLY. ⚠️ SYNTHETIC-DATA CAVEAT
+    AUTO (measured 1.0 >= 0.90), OVERRIDING the ratify-only recommendation KNOWINGLY. SYNTHETIC-DATA CAVEAT
     (recorded, accepted by her): measured on CLEAN scenario data (LP-393-1) — validates REASONING, not
     real-document robustness (LF-6T3N n=2 only). NOTE: the spec's over-fire limitation (fires on any income
     lacking history, not just variable) is a separate ticket. Below-bar/unknown -> needs_review (LP-376-B).
@@ -551,7 +551,7 @@ IN-12:
   # LP-423 — ACTIVATED. LP-419 held IN-12 because its self-employment SCOPE gate (income.is_self_employed) rested
   # on income.type, which was thinly measured / unscored. LP-422 STRENGTHENED that gate with a DETERMINISTIC
   # Schedule C PRESENCE path (the LP-421 surfaced structure — a FACT, not an AI judgment, ADR-334): Schedule C ->
-  # "yes" needs no income.type. ⚠️ BUT income.type is NOT fully removed from the gate (LP-423 review): the recipe
+  # "yes" needs no income.type. BUT income.type is NOT fully removed from the gate (LP-423 review): the recipe
   # STILL needs income.type for the NOT_APPLICABLE path — a W-2 borrower reaches is_self_employed "no" (income
   # documents, none self-employment) ONLY via income.type; without it a non-self-employed borrower resolves to
   # "unknown" -> IN-12 couldnt_check, not not_applicable. income.type == self_employment is ALSO still a secondary
@@ -559,7 +559,7 @@ IN-12:
   # is RESTORED to load_bearing_ai_tags. What makes IN-12 eligible is the VERDICT tag has_2yr_history — measured
   # 100% (LP-393-6), Priya-validated at 0.9 via IN-11 (SAME tag/evidence, the IN-6 inherit pattern); measured_
   # accuracy (1.0) reflects THAT verdict tag. So calibratable-now, validated, 1.0 >= 0.9 -> is_eligible -> ACTIVE.
-  # ⚠️ ACCEPTED RISKS (LP-423 D3, ADR-335): (a) the Schedule-C path rests on the STARTER tax-return extractor
+  # ACCEPTED RISKS (LP-423 D3, ADR-335): (a) the Schedule-C path rests on the STARTER tax-return extractor
   # (ADR-333, no golden files) — a MISSED Schedule C is a wrong SCOPE (not_applicable), visible, and IN-11 (live)
   # still surfaces the 2-year gap, so nothing is lost. (b) the SCOPE also depends on the UNSCORED income.type —
   # a wage-earner MISCLASSIFIED as self_employment (no Schedule C) makes IN-12 apply and FIRE a spurious
@@ -808,7 +808,7 @@ AS-8:
     the derived stmt.continuity tag (LP-410, unblocking the LP-406-2/ADR-322 stop). LP-410 VERIFIED it resolves
     on the BASE LF-6T3N: stmt.continuity == "chained" → AS-8 SATISFIED. The input resolves — eligible. No Priya
     threshold (exact equality — statement N's ending balance IS N+1's opening balance; no tolerance).
-    ⚠️ CAVEAT (the AS-2 one-sided-trigger shape): LF-6T3N's 5 real statements CHAIN cleanly, so AS-8's FIRED
+    CAVEAT (the AS-2 one-sided-trigger shape): LF-6T3N's 5 real statements CHAIN cleanly, so AS-8's FIRED
     ("broken") path ships UNEXERCISED on real data. A statement series with a deliberate balance break (a
     fixture ticket, the LP-393-1 pattern) would exercise the finding path and strengthen this; the branch is
     proven on constructed snapshots (LP-406-2b tests). AS-8 must not falsely fire on a clean file — Phase-2 verified.
@@ -837,9 +837,9 @@ PC-7:
     (Q2, far-future) "90 DAYS" → max_days_until_closing=90. Both match the proposed defaults, now confirmed by
     her. is_eligible via the no-ai-threshold-pending gate (LP-411): input_resolves ∧ validated -> ACTIVE
     (registry _LP412_ACTIVATED). PC-7 is the FIRST rule live via the no-ai-threshold-pending status (LP-411).
-    ⚠️ CAVEAT (the AS-2/AS-8 one-sided-trigger shape): LF-6T3N closes in 1 day (SATISFIED), so BOTH fired paths
+    CAVEAT (the AS-2/AS-8 one-sided-trigger shape): LF-6T3N closes in 1 day (SATISFIED), so BOTH fired paths
     (past + far-future) ship UNEXERCISED on real data. A fixture with a past closing date and one with a far-out
-    ⚠️ CAVEAT (the AS-2/AS-8 one-sided-trigger shape): LF-6T3N closes in 1 day (SATISFIED), so BOTH fired paths
+    CAVEAT (the AS-2/AS-8 one-sided-trigger shape): LF-6T3N closes in 1 day (SATISFIED), so BOTH fired paths
     (past + far-future) ship UNEXERCISED on real data. A fixture with a past closing date and one with a far-out
     date (a fixture ticket, LP-393-1 pattern) would exercise them; the branches are proven on constructed
     snapshots (LP-406-1b tests). PC-7 must not falsely fire on a near-term closing — Phase-2 verified.
@@ -869,7 +869,7 @@ IH-3:
     fixture (build_insurance_in_force → SATISFIED; build_insurance_late → FIRED), so it is eligible. NO Priya
     threshold (exact — effective ON the closing date is in force; only AFTER fires). PRIYA CONFIRMATION
     (optional, non-blocking): whether same-day effective is acceptable (today yes — the ID-5 == boundary).
-    ⚠️ CAVEAT: LF-6T3N has NO homeowners binder (LP-414 A3 kept it off to not move the DTI insurance line), so
+    CAVEAT: LF-6T3N has NO homeowners binder (LP-414 A3 kept it off to not move the DTI insurance line), so
     IH-3 COULDNT_CHECKS there — an honest absence, not a bug; the branches are proven on the binder scenarios
     (LP-417 tests). A missing binder is couldnt_check, not not_applicable (insurance is required — D5).
 
@@ -916,7 +916,7 @@ IH-1:
     FAIL CLOSED: an unrecognised / absent basis is couldnt_check, never a guessed satisfied, so a false PASS is
     structurally impossible; a novel carrier phrasing degrades to couldnt_check, not a wrong verdict.
   rationale: >-
-    ⚠️ THE RULE'S SHAPE RESTS ON A REGULATORY RULING (ADR-340, recorded for re-check): Priya's ruling that
+    THE RULE'S SHAPE RESTS ON A REGULATORY RULING (ADR-340, recorded for re-check): Priya's ruling that
     Fannie/Freddie RETIRED the coverage-vs-loan / 80%-of-replacement-cost comparison, effective 2026-03-18, and
     replaced it with a dwelling loss-settlement BASIS check — replacement cost -> satisfied, actual cash value ->
     fired, missing/unreadable -> couldnt_check. So IH-1 reclassifies from the catalog's `calculative` to
@@ -992,10 +992,10 @@ IN-16:
     or 1099 is required to show 2 year history", pay stubs alone are insufficient. So the AS-8/IH-3/IN-15
     no-ai-dependency path, eligible on input_resolves alone (the ADR-334 escape hatch — no calibration round).
     The reason ASKS FOR THE DOCUMENT, never asserts the borrower cannot document their income (LP-430
-    discipline). ⚠️ OPTION 1 (LP-432/LP-433 D1, flagged for Priya): it fires on ANY borrower with pay stubs and
+    discipline). OPTION 1 (LP-432/LP-433 D1, flagged for Priya): it fires on ANY borrower with pay stubs and
     no W-2/1099 — including one documented ANOTHER way (e.g. a VOE) who is not relying on pay stubs for history
     (an OVER-FIRE). Narrowing to Option 2 (gate on income.has_2yr_history) is a one-line applicability change,
-    but that makes it AI-dependent (inherits IN-11's calibration) — deferred to her confirmation. ⚠️ ALSO OPEN
+    but that makes it AI-dependent (inherits IN-11's calibration) — deferred to her confirmation. ALSO OPEN
     for her: whether a VOE should ALSO satisfy (she said "W-2 or 1099" — NOT broadened here; a VOE-only borrower
     is not_applicable, not satisfied).
 
@@ -1023,7 +1023,7 @@ PC-3:
     normalizers. Because those normalizers cannot expand "St"->"Street", a mismatch is routed to NEEDS_REVIEW
     (ADR-325, the second instance after IN-6) — surfaced for a human, never auto-fired as a "different property".
     The input resolves on the address scenarios (build_address_*), so it is eligible; no Priya threshold.
-    ⚠️ CAVEAT: LF-6T3N has no MISMO subject-property address (LP-414 added only property.purchase_price) → PC-3
+    CAVEAT: LF-6T3N has no MISMO subject-property address (LP-414 added only property.purchase_price) → PC-3
     COULDNT_CHECKS there — an honest absence, not a bug; the branches are proven on the address scenarios
     (LP-407-4 tests). The AI-tolerant match (property.address_normalized_match's fact_tags design) is the future
     refinement that reduces the needs_review noise — a calibration ticket, deferred.
@@ -1048,7 +1048,7 @@ PC-2:
     LP-414 repaired the fixture field names so both tags materialize on the BASE LF-6T3N (contract.loan_sales_
     price == property.purchase_price == 365000 → PC-2 SATISFIED). The input resolves — eligible (registry
     _LP407_ACTIVATED). PRIYA REFINEMENT (optional, non-blocking): whether a sub-dollar rounding tolerance should
-    ever be allowed — today exact, per the classification. ⚠️ CAVEAT (the AS-8/PC-7 one-sided-trigger shape):
+    ever be allowed — today exact, per the classification. CAVEAT (the AS-8/PC-7 one-sided-trigger shape):
     LF-6T3N's prices MATCH (SATISFIED), so PC-2's FIRED (mismatch) path ships UNEXERCISED on real data; a
     mismatched-price fixture would exercise it — the branch is proven on a constructed snapshot (LP-407-3 tests).
     A refinance (no purchase agreement → contract.loan_sales_price "unknown") couldnt_checks, not not_applicable
@@ -1119,7 +1119,7 @@ IN-6:
     matching reuses IN-5's MEASURED normalizers (100%, LP-379-D) — no new judgment — so the bar is IN-5's own
     0.95 (same tag, same evidence). LP-412: PRIYA SIGNED OFF at 0.95 — HER RULING was "same as IN-5" (the same
     tag income.employer_normalized and the same 100% measurement she already approved for IN-5's 0.95 bar); NOT
-    an unreviewed default. 1.0 >= 0.95 -> is_eligible -> ACTIVE (registry _LP412_ACTIVATED). ⚠️ The `uncovered`
+    an unreviewed default. 1.0 >= 0.95 -> is_eligible -> ACTIVE (registry _LP412_ACTIVATED). The `uncovered`
     branch ships NEEDS_REVIEW, not fired (LP-406-3b D2 / ADR-325): the deterministic normalizer cannot resolve
     every short-form employer name, so a reported gap is surfaced for human confirmation rather than asserted —
     the honest routing until the AI fuzzy-residue is closed (a refinement, a caveat IN-6 ships live with).
@@ -1168,7 +1168,7 @@ CR-4:
 # LP-485 — the date-compare family. All three read PARSED dates through DERIVED numbers; no AI tag is in
 # any chain, so none can be blocked on calibration.
 #
-# ⚠️ WHERE OUR CALIBRATION LIVES, and why `validated` is NOT the place today. Each window is researched
+# WHERE OUR CALIBRATION LIVES, and why `validated` is NOT the place today. Each window is researched
 # and cited to the publisher's live guide — the value, section and page date sit in the SPEC's
 # reference_values, which is the calibration artifact and is authoritative now. The BAR's `validated` flag
 # is narrower: parse_bar REJECTS `validated: true` with `input_resolves: false` outright ("a threshold
@@ -1177,7 +1177,7 @@ CR-4:
 # true now would not activate anything — it would fail to load. The threshold is not in question; only the
 # activation flag is. See docs/domain/priya-open-questions.md.
 #
-# ⚠️ `input_resolves: true` is a DEVELOPMENT-MODE assertion (LP-485 policy): the parsed inputs are declared
+# `input_resolves: true` is a DEVELOPMENT-MODE assertion (LP-485 policy): the parsed inputs are declared
 # and their extraction fields exist, so the chain resolves whenever the documents are present. It is NOT a
 # claim that a loan file carries them today — end-to-end verification against real files is deferred to the
 # testing phase by explicit decision. Recorded here so a later reader does not mistake it for a measurement.
@@ -1194,7 +1194,7 @@ CL-1:
     FP (a false expiry warning -> a processor checks one date).
   rationale: >-
     No AI tag and NO domain threshold (a date ordering), so nothing awaits calibration — eligibility is
-    input_resolves alone. ⚠️ input_resolves here is a DEVELOPMENT-MODE ASSERTION, not measured evidence:
+    input_resolves alone. input_resolves here is a DEVELOPMENT-MODE ASSERTION, not measured evidence:
     ZERO loan_estimate documents exist on any loan file today, so rate_lock.expiration does not resolve
     anywhere (verified 2026-08-12). The rule is live because the build-first policy ships rules ahead of
     the corpus; on a file with no loan estimate it fail-closes to couldnt_check, which is the honest
@@ -1234,12 +1234,12 @@ PR-6:
 # LP-486 / ADR-376 — CR-12 (disputed accounts). Deterministic: no AI tag in the chain, no threshold (a
 # closed VOCABULARY, not a number), so eligibility is input_resolves alone.
 #
-# ⚠️ `input_resolves: true` here is the LP-485 DEVELOPMENT-MODE meaning: the input is declared, its
+# `input_resolves: true` here is the LP-485 DEVELOPMENT-MODE meaning: the input is declared, its
 # extraction field exists, and the producer resolves it on real stored data (verified on the two bench
 # credit reports AND on LF-96SV's free-text format). It is NOT the older meaning the 11 pre-LP-485 bars
 # use ("verified end-to-end on a live loan file"). ONE FIELD, TWO SEMANTICS — this bar asserts the former.
 #
-# ⚠️ SHIPS `auto`, forced by kind (structural). There is no human in the loop, which is exactly why the
+# SHIPS `auto`, forced by kind (structural). There is no human in the loop, which is exactly why the
 # closed-vocabulary ABSTAIN is the rule's safety: an unrecognised bureau encoding couldnt_checks rather
 # than silently reading as "not disputed".
 CR-12:
@@ -1262,12 +1262,12 @@ CR-12:
 # LP-487 — IH-2 (mortgagee clause) and IH-7 (condo master policy). Both deterministic; no AI tag is in
 # either chain.
 #
-# ⚠️ IH-2 CARRIES A CATALOG EDIT, not just a bar. rule_kinds.csv moved it from `ai_fuzzy_match` to
+# IH-2 CARRIES A CATALOG EDIT, not just a bar. rule_kinds.csv moved it from `ai_fuzzy_match` to
 # `deterministic_only` (the row count stays 135). That kind predates typed extraction: the perception
 # step is already spent by the extractor, which lands the mortgagee in `mortgagee_name` on 14 of 15
 # binders, so what remains is a normalised string compare. See the spec header and LP-487.md.
 #
-# ⚠️ `input_resolves: true` on both bars is the LP-485 DEVELOPMENT-MODE meaning — the inputs are declared,
+# `input_resolves: true` on both bars is the LP-485 DEVELOPMENT-MODE meaning — the inputs are declared,
 # their extraction fields exist, and the producers resolve them on real stored data. It is NOT the older
 # "verified end-to-end on a live loan file" meaning that the 11 pre-LP-485 bars use.
 IH-2:
@@ -1278,7 +1278,7 @@ IH-2:
   input_resolves: true
   load_bearing_ai_tags: []
   fp_fn: >-
-    ⚠️ THE FP DIRECTION IS THE DANGEROUS ONE HERE, which is why this rule cannot fire. A correspondent's
+    THE FP DIRECTION IS THE DANGEROUS ONE HERE, which is why this rule cannot fire. A correspondent's
     creditor and the investor who will hold the loan legitimately differ — the corpus's one binder+CD
     pairing reads "Sistar Mortgage Company" against "United Wholesale Mortgage" — so a firing rule would
     be WRONG ON A CORRECT FILE, repeatedly, and train a processor to dismiss it. A mismatch therefore
@@ -1306,12 +1306,12 @@ IH-7:
     No AI to measure; both bounds are DOMAIN numbers, researched and cited: Fannie Mae Selling Guide
     B7-4-01, page dated 08/05/2026 — general liability of at least $1 million for any single occurrence;
     B7-3-03, page dated 08/05/2026 — master property coverage of at least 100% of replacement cost. Both
-    values + citations live in the spec's reference_values, which is the calibration record. ⚠️ The
+    values + citations live in the spec's reference_values, which is the calibration record. The
     liability floor is in B7-4-01, NOT B7-3-03 — the catalog rationale names no section and the two live
     in different chapters. The fidelity/crime requirement (B7-4-02) is deliberately NOT evaluated: its
     unit-count input never resolves, and building on it would make IH-7 permanently couldnt_check. Logged
     in docs/domain/priya-open-questions.md.
-    ⚠️ input_resolves here is a DEVELOPMENT-MODE ASSERTION, not measured evidence — the same caveat CL-1
+    input_resolves here is a DEVELOPMENT-MODE ASSERTION, not measured evidence — the same caveat CL-1
     carries, recorded because the flag otherwise reads as verified. IH-7's applicability input
     property.type does NOT resolve today: tag_production.yaml records MISMO property_type as null on all
     three fixtures, and app/mismo has no property_type mapping at all, so IH-7 returns couldnt_check on
@@ -1323,13 +1323,13 @@ IH-7:
 # --------------------------------------------------------------------------- #
 # LP-488 — MI-1 (conventional MI requirement). Deterministic: no AI tag in the chain.
 #
-# ⚠️ `validated` IS NOT READ FOR THIS BAR. `is_eligible()` reads `input_resolves` ALONE for
+# `validated` IS NOT READ FOR THIS BAR. `is_eligible()` reads `input_resolves` ALONE for
 # `no-ai-dependency`; `validated` is only consulted on `calibratable-now` / `no-ai-threshold-pending`.
 # MI-1 DOES carry a researched threshold (80% LTV), but the threshold is not what gates it — there is no
 # AI accuracy to measure. Setting `validated: true` here would be DECORATIVE, so it stays false and this
 # comment says why. (CL-1 is the precedent; LP-485 recorded the same reasoning.)
 #
-# ⚠️ THE THRESHOLD IS NOW TIER P — Fannie Mae Selling Guide B7-1-01, page dated 04/02/2025, READ
+# THE THRESHOLD IS NOW TIER P — Fannie Mae Selling Guide B7-1-01, page dated 04/02/2025, READ
 # 2026-08-13 (LP-491 follow-up). It shipped at LP-488 as tier S with the page date marked NOT OBTAINED;
 # the page has since been fetched and the wording confirmed verbatim, so the caveat is lifted rather
 # than left to rot. The value and its citation live in the spec's reference_values.
@@ -1341,7 +1341,7 @@ MI-1:
   input_resolves: true
   load_bearing_ai_tags: []
   fp_fn: >-
-    ⚠️ NEITHER DIRECTION IS A FIRING RISK, because MI-1 cannot fire. An LTV above 80% routes to
+    NEITHER DIRECTION IS A FIRING RISK, because MI-1 cannot fire. An LTV above 80% routes to
     needs_review ("confirm the file carries MI") because the PRESENCE of mortgage insurance has no
     deterministic source in the system — no document type carries an MI certificate. The residual FN is
     a file whose LTV is understated by a missing appraisal, which the couldnt_check path catches
@@ -1357,7 +1357,7 @@ MI-1:
 # --------------------------------------------------------------------------- #
 # LP-488 — MI-4 (FHA upfront MIP). Deterministic: no AI tag in the chain.
 #
-# ⚠️ `validated` IS NOT READ FOR THIS BAR either (no-ai-dependency → is_eligible reads input_resolves
+# `validated` IS NOT READ FOR THIS BAR either (no-ai-dependency → is_eligible reads input_resolves
 # alone). MI-4's threshold IS tier-P — HUD ML 2023-05, published 2023-02-22, read this pass — but that is
 # recorded in the spec's reference_values, which is the calibration record. Setting `validated: true`
 # here would be decorative, so it stays false and this comment says why.
@@ -1379,7 +1379,7 @@ MI-4:
     2023-05, the publisher's own document, published 2023-02-22, effective for case numbers assigned on
     or after 2023-03-20 — recorded with its citation in the spec's reference_values. The inputs are two
     DIFFERENT MISMO elements (TERMS_OF_LOAN/BaseLoanAmount and TERMS_OF_LOAN/NoteAmount), so the check is
-    not an ADR-330 vacuity. ⚠️ Only the UPFRONT premium is evaluated: no document type in the system
+    not an ADR-330 vacuity. Only the UPFRONT premium is evaluated: no document type in the system
     carries a monthly MIP figure, so the annual leg — and ML 2023-05's per-cell annual rate matrix, which
     was NOT obtained — is deliberately unbuilt rather than invented.
 
@@ -1387,7 +1387,7 @@ MI-4:
 # LP-488 — CO-1 (condo questionnaire present). Deterministic document-type presence; no AI tag, no
 # threshold, so eligibility is input_resolves alone and `validated` is not read.
 #
-# ⚠️ PRESENCE ONLY, deliberately. Warrantability (CO-3/CO-5) is NOT decided here and is not buildable:
+# PRESENCE ONLY, deliberately. Warrantability (CO-3/CO-5) is NOT decided here and is not buildable:
 # property.is_warrantable_condo has no source field in any of the 121 schema specs, because it is a
 # project-review conclusion (Form 1076 / PERS), not a readable datum. Logged for Priya.
 CO-1:
@@ -1411,7 +1411,7 @@ CO-1:
 # LP-488 — AU-3 (AUS recommendation status). Deterministic: no AI tag, no threshold (a closed
 # VOCABULARY, not a number), so eligibility is input_resolves alone and `validated` is not read.
 #
-# ⚠️ THE THIN-CORPUS CAVEAT IS THE HONEST WEAKNESS HERE. n=1 across 303 documents, and that one is an
+# THE THIN-CORPUS CAVEAT IS THE HONEST WEAKNESS HERE. n=1 across 303 documents, and that one is an
 # LPA. The DU spellings in the vocabulary are RESEARCHED, not observed — no DU file has ever exercised
 # them. They ABSTAIN rather than misfire if wrong, which is why this is shippable at all, but whether a
 # rule calibrated on one document is worth shipping is logged for Priya.
@@ -1431,14 +1431,14 @@ AU-3:
     No AI tag and no threshold — a closed vocabulary spanning DU and LPA, recorded in the spec's
     reference_values and mirrored by the recipe. It resolves on the one real aus_findings document in the
     corpus: an LPA reading "ACCEPT" / "ELIGIBLE", which the DU-shaped catalog vocabulary does not contain
-    at all — the concrete evidence that a field-equality rule would have been wrong. ⚠️ n=1: the DU half
+    at all — the concrete evidence that a field-equality rule would have been wrong. n=1: the DU half
     of the vocabulary is researched, not observed.
 
 # --------------------------------------------------------------------------- #
-# LP-490 — the credit AI cohort. ⚠️ EVERY BAR HERE IS `not-calibratable-yet`, FOR WHICH `is_eligible()`
+# LP-490 — the credit AI cohort. EVERY BAR HERE IS `not-calibratable-yet`, FOR WHICH `is_eligible()`
 # RETURNS FALSE (LP-484). None of these rules is in ACTIVE_RULE_IDS; none runs on a live file. That is
 # the intended outcome of the ticket, not a blocker — the deliverable is a correct, CALIBRATABLE build,
-# and scoring is a later run against it. ⚠️ Do NOT set `validated: true` to force eligibility; the
+# and scoring is a later run against it. Do NOT set `validated: true` to force eligibility; the
 # loader would accept it and the rule would ship an unmeasured AI judgment as an auto verdict.
 CR-1:
   # CR-1 reads liab.in_application — the PER-LIABILITY judgment the credit_profile group produces
@@ -1456,7 +1456,7 @@ CR-1:
   validated: false
   load_bearing_ai_tags: [liab.in_application]
   fp_fn: >-
-    ⚠️ TWO-SIDED, and neither direction is safe — the note whoever sets the bar must weigh. A false MATCH
+    TWO-SIDED, and neither direction is safe — the note whoever sets the bar must weigh. A false MATCH
     ("yes", disclosed) HIDES a real undisclosed debt, which is the exact thing this rule exists to catch
     and Priya's #1 source of underwriting conditions. A false NON-MATCH ("no") FABRICATES a condition on
     a clean file and sends a processor chasing a debt that was always disclosed. The prompt tells the
@@ -1469,7 +1469,7 @@ CR-1:
     fixtures (ADR-332): a self-authored pair leaks its own answer, and the naming-convention variance
     that makes this judgment hard is precisely what invented data does not reproduce.
 CR-5:
-  # ⚠️ INERT — `not-calibratable-yet` → is_eligible False (LP-484).
+  # INERT — `not-calibratable-yet` → is_eligible False (LP-484).
   status: not-calibratable-yet
   ships: auto
   threshold: null
@@ -1479,17 +1479,17 @@ CR-5:
     FN (an unexplained inquiry masking new debt clears -> the DTI is understated by a debt nobody
     counted) >> FP (a processor requests a letter of explanation the borrower can write in minutes).
   rationale: >-
-    ⚠️ n≈0 IS THE BINDING PROBLEM HERE, not the producer. Exactly ONE inquiry row exists across all
+    n≈0 IS THE BINDING PROBLEM HERE, not the producer. Exactly ONE inquiry row exists across all
     THREE real credit reports, so there is almost nothing to score against. CALIBRATION WOULD REQUIRE:
     per-BORROWER labels ("is every recent inquiry accounted for?") on files with REAL inquiry activity —
     which the corpus does not contain, so this needs new real files, not fixtures (ADR-332). An invented
     inquiry pattern would leak its own answer: we would be authoring both the inquiry and the tradeline
     that supposedly explains it.
 CR-6:
-  # ⚠️ INERT. The seasoning arithmetic is deterministic, but its inputs (liab.derogatory_type / _date)
+  # INERT. The seasoning arithmetic is deterministic, but its inputs (liab.derogatory_type / _date)
   # are uncalibrated AI tags, so the CHAIN is uncalibrated.
   status: ratify-pending
-  # ⚠️ READ THE DENOMINATOR BEFORE QUOTING THE RATE. All 35 'cases' are NEGATIVE rows: this rule's
+  # READ THE DENOMINATOR BEFORE QUOTING THE RATE. All 35 'cases' are NEGATIVE rows: this rule's
   # trigger matched none of them (the corpus holds zero derogatory events / zero collection
   # codes), so both derivations were answering "no" every time. The rate therefore measures that
   # the model consistently finds nothing — NOT that it judges the thing correctly when it exists.
@@ -1502,7 +1502,7 @@ CR-6:
   self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
   self_consistency_date: "2026-08-13"
   input_resolves: true
-  # ⚠️ THE RATE COVERS NEGATIVE CASES ONLY, and that is the whole caveat. The corpus contains ZERO
+  # THE RATE COVERS NEGATIVE CASES ONLY, and that is the whole caveat. The corpus contains ZERO
   # derogatory events or public records, so both derivations were answering "no / none / not applicable" on all 35 real
   # tradelines. It measures the model's STABILITY AT SAYING NO — not its ability to recognise a bankruptcy, foreclosure or short sale.
   # Ratification is doing the real work here; treat the rate as evidence of nothing more than that the
@@ -1512,14 +1512,14 @@ CR-6:
   validated: false
   load_bearing_ai_tags: [liab.derogatory_type, liab.derogatory_date]
   fp_fn: >-
-    ⚠️ ASYMMETRIC, AND THE RULE IS BUILT AROUND IT. A wrong TYPE applies the wrong period entirely (a
+    ASYMMETRIC, AND THE RULE IS BUILT AROUND IT. A wrong TYPE applies the wrong period entirely (a
     foreclosure waits seven years, a short sale four); a wrong DATE seasons an event that is not yet
     seasoned. Both are FNs that clear an ineligible borrower. The FP direction is bounded by design:
     CR-6 NEVER returns a failure — an unseasoned event is needs_review ("an exception needs underwriting
     review"), because extenuating circumstances can shorten every period in the matrix.
   rationale: >-
     Blocked on calibration AND on an input gap, both recorded. CALIBRATION WOULD REQUIRE: per-EVENT
-    labels for derogatory_type and derogatory_date. ⚠️ ZERO public-record rows exist on any of the three
+    labels for derogatory_type and derogatory_date. ZERO public-record rows exist on any of the three
     real reports, so there is no derogatory event in the corpus at all — this needs real files carrying
     real bankruptcies and foreclosures (ADR-332). THE INPUT GAP: `public_records[]` carries
     `discharge_or_satisfied_date`, so a bankruptcy has a real event date; a foreclosure, short sale or
@@ -1528,7 +1528,7 @@ CR-6:
     value, so the Chapter 13 discharged/dismissed split (2 years vs 4) is not expressible — the spec
     applies the conservative 4 years to every bankruptcy. All logged for Priya.
 CR-8:
-  # ⚠️ INERT. A judgmental rule RATIFIES every verdict (needs_review / couldnt_check only), so it could
+  # INERT. A judgmental rule RATIFIES every verdict (needs_review / couldnt_check only), so it could
   # never auto-assert — but it is held on calibration regardless.
   status: ratify-pending
   self_consistency_rate: 0.9714
@@ -1542,21 +1542,21 @@ CR-8:
   validated: false
   load_bearing_ai_tags: [liab.is_mortgage, liab.structured_history_confident]
   fp_fn: >-
-    ⚠️ THE FP DIRECTION IS THE DANGEROUS ONE, which is why Priya designed the confidence gate. Reading a
+    THE FP DIRECTION IS THE DANGEROUS ONE, which is why Priya designed the confidence gate. Reading a
     60-day late out of an ambiguous 84-character history INVENTS a derogatory event on a clean borrower.
     The FN direction (a real excessive delinquency read as unclear) lands on needs_review, where a human
     reads the history — so the gate costs attention, not safety.
   rationale: >-
     Blocked on calibration. CALIBRATION WOULD REQUIRE: per-TRADELINE labels for is_mortgage and
     structured_history_confident, and — the harder one — a ground truth for the payment history itself,
-    which means reading the raw report. ⚠️ `payment_history_24mo` runs 0-84 chars across 17 DISTINCT
+    which means reading the raw report. `payment_history_24mo` runs 0-84 chars across 17 DISTINCT
     formats and `worst_delinquency` fills 2/35 in two incompatible formats, so the labelling effort is
     real and needs the source PDFs, not the extracted fields. Scoring structured_history_confident is the
     priority: it is the gate everything else hangs on.
 CR-10:
-  # ⚠️ INERT. Judgmental → ratifies; held on calibration regardless.
+  # INERT. Judgmental → ratifies; held on calibration regardless.
   status: ratify-pending
-  # ⚠️ READ THE DENOMINATOR BEFORE QUOTING THE RATE. All 35 'cases' are NEGATIVE rows: this rule's
+  # READ THE DENOMINATOR BEFORE QUOTING THE RATE. All 35 'cases' are NEGATIVE rows: this rule's
   # trigger matched none of them (the corpus holds zero derogatory events / zero collection
   # codes), so both derivations were answering "no" every time. The rate therefore measures that
   # the model consistently finds nothing — NOT that it judges the thing correctly when it exists.
@@ -1569,7 +1569,7 @@ CR-10:
   self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
   self_consistency_date: "2026-08-13"
   input_resolves: true
-  # ⚠️ THE RATE COVERS NEGATIVE CASES ONLY, and that is the whole caveat. The corpus contains ZERO
+  # THE RATE COVERS NEGATIVE CASES ONLY, and that is the whole caveat. The corpus contains ZERO
   # collection or charge-off codes, so both derivations were answering "no / none / not applicable" on all 35 real
   # tradelines. It measures the model's STABILITY AT SAYING NO — not its ability to recognise a real collection.
   # Ratification is doing the real work here; treat the rate as evidence of nothing more than that the
@@ -1585,21 +1585,21 @@ CR-10:
     occupancy defaulting there would clear every collection. The prompt is told to answer "unknown"
     instead.
   rationale: >-
-    ⚠️ THE TRIGGER IS ENTIRELY UNEXERCISED: ZERO collection or charge-off codes exist on any of the three
+    THE TRIGGER IS ENTIRELY UNEXERCISED: ZERO collection or charge-off codes exist on any of the three
     real credit reports. This rule is built against the schema and the guideline and has never been seen
     to fire. CALIBRATION WOULD REQUIRE: per-COLLECTION labels for is_medical_collection and
     collection_balance, on real files carrying real collections — which the corpus does not have at all
-    (ADR-332). ⚠️ ALSO BLOCKED ON A MISSING FACT, not just labels: the DU-vs-manual axis does not exist
+    (ADR-332). ALSO BLOCKED ON A MISSING FACT, not just labels: the DU-vs-manual axis does not exist
     (LP-501), so the rule abstains to `manual_underwriting_not_supported` rather than guessing a branch.
     Even a perfectly calibrated model cannot answer a question the file does not state.
 
 # --------------------------------------------------------------------------- #
-# LP-491 — TI-1 (title commitment parties). ⚠️ NOT a ratify-pending rule: the LP-491 catalog edit moved
+# LP-491 — TI-1 (title commitment parties). NOT a ratify-pending rule: the LP-491 catalog edit moved
 # it from ai_fuzzy_match to deterministic_only (IH-2's precedent — typed extraction already spends the
 # perception step), so there is NO model in its chain, nothing to self-derive, and nothing to ratify. It
 # activates on `no-ai-dependency` like any deterministic rule.
 #
-# ⚠️ `input_resolves: true` is the LP-485 DEVELOPMENT-MODE meaning — the inputs are declared, their
+# `input_resolves: true` is the LP-485 DEVELOPMENT-MODE meaning — the inputs are declared, their
 # extraction fields exist, and the producer resolves them on real stored data (vested_owner_name 4/4 on
 # the four real commitments, seller_name 5/5 on the purchase agreements).
 TI-1:
@@ -1610,7 +1610,7 @@ TI-1:
   input_resolves: true
   load_bearing_ai_tags: []
   fp_fn: >-
-    ⚠️ THE FP DIRECTION IS THE DANGEROUS ONE, which is why this rule cannot fire. A vesting difference is
+    THE FP DIRECTION IS THE DANGEROUS ONE, which is why this rule cannot fire. A vesting difference is
     frequently LEGITIMATE — a revocable trust, an estate, a name change on marriage or divorce, a deed
     not yet recorded — so a firing rule would be wrong on correct files repeatedly and train a processor
     to dismiss it. A mismatch routes to needs_review, where the true mismatch (wrong property, wrong
@@ -1619,17 +1619,17 @@ TI-1:
   rationale: >-
     No AI tag and no threshold — a declared normalisation vocabulary in the spec's reference_values,
     reusing IH-2's normaliser rather than cloning it so a fix to either rule's name handling reaches both.
-    ⚠️ The VESTING markers are speculative: all four real commitments carry a PLAIN NAME in
+    The VESTING markers are speculative: all four real commitments carry a PLAIN NAME in
     vested_owner_name (the recital lives in vesting_marital_recital, 0/4), so nothing in the corpus
     exercises them. They abstain-by-no-effect if wrong — stripping a marker that is not there changes
     nothing — which is why they are safe to ship unexercised.
 TI-2:
-  # ⚠️ LIVE — see the reconciliation note below. The fresh-context derivation could not run: the AWS SSO token expired
+  # LIVE — see the reconciliation note below. The fresh-context derivation could not run: the AWS SSO token expired
   # mid-ticket ("Token has expired and refresh failed"), so every judgment call returned
   # TokenRetrievalError and the rule failed closed to couldnt_check on all four commitments.
-  # ⚠️ THE RATE THAT RUN PRODUCED WAS 1.0000 OVER 4 CASES — AND IT IS AN ARTIFACT, exactly LP-490a's
+  # THE RATE THAT RUN PRODUCED WAS 1.0000 OVER 4 CASES — AND IT IS AN ARTIFACT, exactly LP-490a's
   # lesson repeating: two FAILED calls agree with each other perfectly. It is recorded nowhere.
-  # ⚠️ LIVE ANYWAY, DELIBERATELY — and the text above used to instruct the opposite of what the next
+  # LIVE ANYWAY, DELIBERATELY — and the text above used to instruct the opposite of what the next
   # line does, which is the defect the review caught. Reconciled here rather than left contradicting:
   # under the development-mode policy a rule ships BEFORE its evidence exists, so `ratify-pending` is
   # the intended status. But be exact about what the number below is and is NOT:
@@ -1645,18 +1645,18 @@ TI-2:
   self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
   self_consistency_date: "2026-08-13"
   input_resolves: true
-  # ⚠️ THE RATE COMPARES VERDICTS, NOT THE MODEL'S UNDERLYING ANSWERS — the honest limit of how it was
+  # THE RATE COMPARES VERDICTS, NOT THE MODEL'S UNDERLYING ANSWERS — the honest limit of how it was
   # measured. A judgment rule collapses every value it is given into `needs_review`, so two DIFFERENT
   # answers on the same commitment would still agree at the verdict level. TI-2 returned needs_review on all 4, so this rate carries the LEAST information of any in the
   # cohort: it shows the pipeline is stable, not that the judgment is.
-  # ⚠️ n=4 — four commitments is the entire corpus. Ratification is doing the real work.
+  # n=4 — four commitments is the entire corpus. Ratification is doing the real work.
   ships: ratify
   threshold: null
   validated: false
   load_bearing_ai_tags: [title.legal_description_matches]
   fp_fn: >-
     FN (a commitment for the WRONG PARCEL reads as matching -> the loan closes insured against a property
-    it does not encumber) >> FP (a processor reads a legal description). ⚠️ The likely error direction is
+    it does not encumber) >> FP (a processor reads a legal description). The likely error direction is
     a false "no": a legal description rarely repeats the street address, and the prompt is told in those
     words that absence of the address is NOT evidence of a mismatch.
   rationale: >-
@@ -1665,7 +1665,7 @@ TI-2:
     NOT redacted (verified before any rate was considered, which is the check CR-8 taught). A judgment
     rule ratifies every verdict, so it cannot auto-assert once activated. n=4 is the whole corpus.
 TI-6:
-  # ⚠️ LIVE, and the header used to say "BUILT, NOT ACTIVATED" while the next line activated it —
+  # LIVE, and the header used to say "BUILT, NOT ACTIVATED" while the next line activated it —
   # reconciled with TI-2's block. Same expired-SSO cause: the derivation never called the model, so the
   # 1.0000/4 below is two FAILED calls agreeing, NOT a measurement. It ships under the development-mode
   # policy, and what makes that safe is that `ai_judgment` ratifies every verdict to a human — not the
@@ -1677,11 +1677,11 @@ TI-6:
   self_consistency_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
   self_consistency_date: "2026-08-13"
   input_resolves: true
-  # ⚠️ THE RATE COMPARES VERDICTS, NOT THE MODEL'S UNDERLYING ANSWERS — the honest limit of how it was
+  # THE RATE COMPARES VERDICTS, NOT THE MODEL'S UNDERLYING ANSWERS — the honest limit of how it was
   # measured. A judgment rule collapses every value it is given into `needs_review`, so two DIFFERENT
   # answers on the same commitment would still agree at the verdict level. TI-6's spread DID vary (3 needs_review, 1 couldnt_check), so it at least distinguishes answered
   # from abstained — a stronger signal than TI-2's.
-  # ⚠️ n=4 — four commitments is the entire corpus. Ratification is doing the real work.
+  # n=4 — four commitments is the entire corpus. Ratification is doing the real work.
   ships: ratify
   threshold: null
   validated: false
@@ -1691,7 +1691,7 @@ TI-6:
     two-line chain). The rule cannot report "clean" below two transfers — that is insufficient_history,
     a distinct answer — so the commonest thin-chain case fails toward attention rather than clearance.
   rationale: >-
-    Blocked on a derivation that could not run. ⚠️ THE CORPUS IS THE DEEPER LIMIT: the four real
+    Blocked on a derivation that could not run. THE CORPUS IS THE DEEPER LIMIT: the four real
     commitments carry 1, 2, 1 and 0 chain rows, so exactly ONE consecutive pair exists anywhere to test
     continuity against, and the rapid-transfer signal has never been observed. Deterministic code
     computes the count, the continuity check and the shortest interval; only the meaning is judged.
@@ -1700,7 +1700,7 @@ TI-6:
 # LP-492 — PR-2 (appraised value vs purchase price). Deterministic: no AI tag in the chain, so no
 # self-consistency run and no ratification — it activates on `no-ai-dependency`.
 #
-# ⚠️ `input_resolves: true` is the LP-485 DEVELOPMENT-MODE meaning: the inputs are declared, their
+# `input_resolves: true` is the LP-485 DEVELOPMENT-MODE meaning: the inputs are declared, their
 # extraction fields exist, and the producer resolves them on real stored data (appraised_value 2/2 on the
 # real appraisals; property.purchase_price is a MISMO fact already declared at LP-488).
 PR-2:
@@ -1712,7 +1712,7 @@ PR-2:
   load_bearing_ai_tags: []
   fp_fn: >-
     FN (a value shortfall clears -> the file reaches underwriting with the wrong loan amount and the
-    borrower discovers the cash gap at the table) >> FP (a processor confirms two numbers). ⚠️ The
+    borrower discovers the cash gap at the table) >> FP (a processor confirms two numbers). The
     LOWEST appraised value is used deliberately: on a file with an original plus a replacement appraisal
     the lowest makes the shortfall larger, and missing a shortfall is the costly direction.
   rationale: >-
@@ -1722,7 +1722,7 @@ PR-2:
     comes from the appraisal and the price from the MISMO loan file, two documents — the appraisal's own
     contract_price_stated (1/2 fill) is deliberately not read.
 PR-7:
-  # ⚠️ NOT ratify-pending — no model in its chain. PR-7 follows PC-3 exactly: a catalog `ai_fuzzy_match`
+  # NOT ratify-pending — no model in its chain. PR-7 follows PC-3 exactly: a catalog `ai_fuzzy_match`
   # row whose body is a DETERMINISTIC compare (the shared _norm_address canonicalisers, no fuzzy
   # matcher), on a no-ai-dependency bar. No catalog edit was needed, and none was made.
   status: no-ai-dependency
@@ -1733,16 +1733,16 @@ PR-7:
   load_bearing_ai_tags: []
   fp_fn: >-
     FN (an appraisal for the WRONG PROPERTY reads as matching -> the file is underwritten against a value
-    that belongs to another address) >> FP (a processor compares two addresses). ⚠️ The residual FP is a
+    that belongs to another address) >> FP (a processor compares two addresses). The residual FP is a
     surface form the canonicaliser does not resolve — a unit designator is the known case (ADR-325) —
     which is why PC-3 routes ITS mismatch to needs_review; PR-7 fires because its consequence is larger.
   rationale: >-
-    Deterministic, reusing PC-3's canonicalisers rather than cloning them. ⚠️ Reads the MISMO SUBJECT
+    Deterministic, reusing PC-3's canonicalisers rather than cloning them. Reads the MISMO SUBJECT
     address only — never a borrower's current_address, which the parser can fill with a MAILING address
     (LP-407-4 D1) — and requires a COMPLETE address (street, city, state, postal) before comparing, so a
     partial one abstains rather than half-matching.
 PR-3:
-  # ⚠️ ratify-pending (ADR-378) — activated on a SELF-CONSISTENCY rate, not a measurement.
+  # ratify-pending (ADR-378) — activated on a SELF-CONSISTENCY rate, not a measurement.
   status: ratify-pending
   self_consistency_rate: 1.0
   self_consistency_cases: 2
@@ -1759,10 +1759,10 @@ PR-3:
     condominium is a condominium). The prompt is told that WORDING differences are not disagreements —
     "Condominium Unit" against "condo" is a match — because that is the likeliest false finding.
   rationale: >-
-    ⚠️ THE WEAKEST RATE IN ANY COHORT SO FAR, and it is recorded rather than dressed up. n=2 — two
+    THE WEAKEST RATE IN ANY COHORT SO FAR, and it is recorded rather than dressed up. n=2 — two
     appraisals is the whole corpus — AND the verdict spread is SINGLE-VALUED (needs_review on both), so
     the rate shows only that the pipeline is stable. It says nothing about whether the judgment is right.
-    Both real appraisals are condominiums; the ineligible path has never been observed. ⚠️ NO ALLOW-LIST
+    Both real appraisals are condominiums; the ineligible path has never been observed. NO ALLOW-LIST
     of eligible types was obtained (tier U) and none was invented — the rule surfaces an unplaceable type
     instead of comparing against a fabricated list.
 PR-4:
@@ -1797,18 +1797,18 @@ PR-5:
   validated: false
   load_bearing_ai_tags: [property.condition_assessment]
   fp_fn: >-
-    ⚠️ THE FP DIRECTION IS THE ONE TO WATCH, and the prompt is built around it: firing on C5 would flag
+    THE FP DIRECTION IS THE ONE TO WATCH, and the prompt is built around it: firing on C5 would flag
     an ordinary, perfectly eligible property on every such file. C1-C5 are eligible AS IS; ONLY C6 is a
     finding (Fannie B4-1.3-06, verified 2026-08-13). The FN (a C6 read as eligible) is bounded by the
     closed C1-C6 vocabulary, which abstains rather than guessing.
   rationale: >-
     Same caveat: n=2, SINGLE-VERDICT spread. The corpus holds C4 and C3 — both ELIGIBLE — so the C6 path
-    has never been observed and the rule is built against the guideline. ⚠️ The rating vocabulary is
+    has never been observed and the rule is built against the guideline. The rating vocabulary is
     closed and abstains (ADR-376): both real appraisals are UAD 2.6-era, and the 3.6 cutover in Nov 2026
-    may change the surface form. ⚠️ Freddie's stricter standard (C5 and C6 both ineligible) is NOT
+    may change the surface form. Freddie's stricter standard (C5 and C6 both ineligible) is NOT
     branched — the agency axis is not a fact on any file (LP-501). Logged for Priya.
 PC-8:
-  # ⚠️ ratify-pending (ADR-378). Judgmental → ratifies every verdict, and it has NO firing path at all.
+  # ratify-pending (ADR-378). Judgmental → ratifies every verdict, and it has NO firing path at all.
   status: ratify-pending
   self_consistency_rate: 1.0
   self_consistency_cases: 5
@@ -1821,20 +1821,20 @@ PC-8:
   validated: false
   load_bearing_ai_tags: [contract.personal_property]
   fp_fn: >-
-    ⚠️ THE FP DIRECTION IS THE ONE THAT MATTERS, and the prompt is built around it: calling a FIXTURE
+    THE FP DIRECTION IS THE ONE THAT MATTERS, and the prompt is built around it: calling a FIXTURE
     personal property puts a concession finding on an ordinary contract. Gas logs and built-in appliances
     are real estate; a refrigerator usually is not, and the wording rarely says which. The FN (missing
     included personal property) costs a value adjustment a human would likely catch at the appraisal.
   rationale: >-
-    ⚠️ THE STRONGEST RATE IN ANY COHORT SO FAR — and still only 5 cases. Unlike LP-492's single-verdict
+    THE STRONGEST RATE IN ANY COHORT SO FAR — and still only 5 cases. Unlike LP-492's single-verdict
     spreads, both derivations produced a GENUINELY TWO-VALUED answer ({unknown: 2, yes: 3}), so the rate
     reflects the model agreeing on DIFFERENT answers rather than agreeing on one. All three pre-rate
-    checks passed: context non-redacted, no failed calls, spread reported. ⚠️ The field is FREE TEXT
+    checks passed: context non-redacted, no failed calls, spread reported. The field is FREE TEXT
     ("None", "Gas Logs in fireplace...", "Refrigerator, Washer/Dryer"), and contract wording varies by
     STATE FORM more than a bureau field does — the bench's free reader once projected Texas TREC fields
     onto a North Carolina form, so unrecognised wording abstains.
 PC-5:
-  # ⚠️ BUILT, NOT ACTIVATED — and LP-493a changed WHY.
+  # BUILT, NOT ACTIVATED — and LP-493a changed WHY.
   #
   # The FIRST derivation scored 1.0000 over 2 cases with the spread {unknown: 2}, and LP-493's pre-rate
   # check 2 refused it as a uniform abstain. LP-493a then found the cause: the model was shown NEITHER
@@ -1842,13 +1842,13 @@ PC-5:
   # gathering, and transactions live in the legacy `entry.transactions` attribute that no context
   # serialised. It could not have answered anything else.
   #
-  # ⚠️ BOTH DEFECTS ARE NOW FIXED (the include_unattributed_documents / include_transactions opt-ins),
+  # BOTH DEFECTS ARE NOW FIXED (the include_unattributed_documents / include_transactions opt-ins),
   # and the RE-DERIVATION scores 0.5000 — 2 cases, 1 disagreement, {unknown: 2} against {no: 1,
   # unknown: 1}. THE FIXES WORKED AND THE RULE STILL DOES NOT ACTIVATE: it is no longer "could not see",
-  # it is "sees the data and cannot decide consistently". ⚠️ A PERFECT RATE WAS HIDING A COIN-FLIP —
+  # it is "sees the data and cannot decide consistently". A PERFECT RATE WAS HIDING A COIN-FLIP —
   # the sharpest evidence yet that a self-consistency rate is not an accuracy.
   #
-  # ⚠️ THE REMAINING BLOCKER IS A PROMPT/INPUT GAP, now identified: the prompt reserves "no" for when
+  # THE REMAINING BLOCKER IS A PROMPT/INPUT GAP, now identified: the prompt reserves "no" for when
   # "you can see the statements covering that period", which asks the model to judge COMPLETENESS —
   # and nothing tells it. No statement carries a period (start/end are absent on all five of LF-6T3N's)
   # and there is no account roster. The no/unknown boundary is unjudgeable as written, so the rate will
@@ -1862,13 +1862,13 @@ PC-5:
   load_bearing_ai_tags: [contract.emd_sourced]
   fp_fn: >-
     FN (an unsourced deposit clears -> a large sum enters the transaction undocumented) >> FP (a
-    processor produces a cancelled cheque). ⚠️ The prompt is told that "no" is a CLAIM the money did not
+    processor produces a cancelled cheque). The prompt is told that "no" is a CLAIM the money did not
     move from a verified account, to be made only when the statements would have shown it — because the
     likely error here is calling a deposit untraced merely because not every account is in the file.
   rationale: >-
     Blocked on a derivation that produced no usable signal, NOT on a producer: the tag materialises on
     both borrowers of LF-6T3N and the calls succeeded. CALIBRATION WOULD REQUIRE a file where the EMD
-    trace is KNOWN to exist, so "unknown" can be distinguished from a correct abstain. ⚠️ ALSO A REPORTED
+    trace is KNOWN to exist, so "unknown" can be distinguished from a correct abstain. ALSO A REPORTED
     INPUT GAP: `earnest_money_amount` is SINGULAR and no `additional_earnest_money_amount` field exists,
     so a contract with an initial AND an additional deposit contributes only the first (doc 183's $204k
     case). The prompt asks the model to name a second deposit in its reasoning; the tag cannot carry it.
@@ -1878,18 +1878,18 @@ PC-5:
 # after evidence-backed catalog edits, so there is no AI accuracy to measure and no self-consistency rate
 # to derive — and no model call was made for either.
 #
-# ⚠️ BOTH WERE BUILT INERT on `input_resolves: false`; the LP-494 revision flipped both to true and ACTIVATED them — the entries below are the current state, this paragraph is the history, and that flag is the honest one rather than the
+# BOTH WERE BUILT INERT on `input_resolves: false`; the LP-494 revision flipped both to true and ACTIVATED them — the entries below are the current state, this paragraph is the history, and that flag is the honest one rather than the
 # convenient one. LP-485's DEVELOPMENT-MODE meaning still requires that "the producer resolves it on real
 # stored data", and here it does not:
 #   * NO LOAN FILE CARRIES A CONDO QUESTIONNAIRE — condo_docs is empty on all 28 stored files, and
 #     property_type is null on every file that has documents at all.
 #   * The two questionnaires in the BENCH corpus are a CANCELLATION NOTICE and a genuinely UNANSWERED
-#     standard form. ⚠️ That was verified AT THE DOCUMENT, not inferred from a fill rate: the standard
+#     standard form. That was verified AT THE DOCUMENT, not inferred from a fill rate: the standard
 #     form is 450 KB and yielded 90 catch-all labels against 1 typed field — the exact signature of the
 #     LP-493a plumbing defect — but all 90 carry an EMPTY VALUE. The form asks the questions and nobody
 #     answered them. Every substantive field fills 0/4.
 #
-# ⚠️ THIS IS NOT THE TI-3/4/5 BLOCK, and the difference is why these were built rather than dropped.
+# THIS IS NOT THE TI-3/4/5 BLOCK, and the difference is why these were built rather than dropped.
 # There, four RICHLY EXTRACTED title commitments left the fields null — the documents do not carry the
 # data. Here the fields exist, the document type exists and classifies, and the documents on hand are
 # blank. The rules work the day a completed questionnaire arrives; nothing is inferred in the meantime.
@@ -1898,7 +1898,7 @@ CO-3:
   ships: auto
   threshold: null
   validated: false
-  # ⚠️ THE STRONGEST-RESOLVING INPUT IN THE CONDO LANE: fidelity_crime_coverage_present and
+  # THE STRONGEST-RESOLVING INPUT IN THE CONDO LANE: fidelity_crime_coverage_present and
   # fidelity_crime_coverage_amount both fill 8/8 on the bench's master policies.
   input_resolves: true
   load_bearing_ai_tags: []
@@ -1909,7 +1909,7 @@ CO-3:
     because a project of 20 units or fewer is exempt and the file never states the count.
   rationale: >-
     No AI tag and no threshold to sign off — the exemption figures are cited primaries (B7-4-02, page
-    dated 08/05/2026, fetched). ⚠️ THIS RULE WAS DROPPED EARLIER IN THIS SAME TICKET AND THE DROP WAS
+    dated 08/05/2026, fetched). THIS RULE WAS DROPPED EARLIER IN THIS SAME TICKET AND THE DROP WAS
     WRONG: the reasoning was that it duplicates live IH-7, but IH-7's own header excludes fidelity
     explicitly, so this is the gap IH-7 documented rather than a second verdict on the same comparison.
     It is a PRESENCE read, not an adequacy one, and the spec says so: B7-4-02 measures the amount against
@@ -1920,12 +1920,12 @@ CO-4:
   status: no-ai-threshold-pending
   ships: auto
   threshold: null
-  # ⚠️ SELF-CALIBRATED, the CR-13 / PR-6 precedent ("OUR calibration: the window is researched + cited in
+  # SELF-CALIBRATED, the CR-13 / PR-6 precedent ("OUR calibration: the window is researched + cited in
   # the spec's reference_values"). Both figures are researched and cited; the 15% step-up is tier S with
   # the failed primary fetch reported in full. Holding a researched, cited threshold for an expert
   # sign-off is the deferral this project does not do.
   validated: true
-  # ⚠️ FLIPPED ON EVIDENCE, after a SECOND search found what the first missed. `reserve_percentage` reads
+  # FLIPPED ON EVIDENCE, after a SECOND search found what the first missed. `reserve_percentage` reads
   # from the HOA STATEMENT type — which is where HOA BUDGETS classify (the 2026 budget and a revised 2026
   # budget both extract it). The first pass searched only documents LABELLED condo_questionnaire and
   # concluded no budget document type existed; that was wrong.
@@ -1942,12 +1942,12 @@ CO-4:
     fanniemae.com returned HTTP 403 for both the landing page and the PDF, robots.txt allows both paths,
     and circumventing the bot protection was declined; two independent secondary sources confirm it
     verbatim, and the 08/05/2026 Guide page still states 10% with no sunset, which is consistent with a
-    Lender Letter not yet incorporated. ⚠️ THE THIN-CORPUS CAVEAT IS THE HONEST WEAKNESS: the input
+    Lender Letter not yet incorporated. THE THIN-CORPUS CAVEAT IS THE HONEST WEAKNESS: the input
     resolves on ONE PROJECT. Six bench documents carry reserve_percentage, but they are duplicates of two
     budgets from a SINGLE association, all stating 10% — n=1 project, not six. The rule ships because the
     producer demonstrably reads a real budget and every direction is proven on fixtures, and because 10%
     is exactly the floor: that project is compliant today and SHORT from 2027-01-04, which is the rule's
-    whole reason to exist. ⚠️ AND IT WILL ABSTAIN ON EVERY STORED FILE TODAY, because property_type is
+    whole reason to exist. AND IT WILL ABSTAIN ON EVERY STORED FILE TODAY, because property_type is
     null on all 28 — the same gap CO-1 and IH-7 already live with, logged for Priya rather than hidden.
 CO-5:
   status: no-ai-dependency
@@ -1971,7 +1971,7 @@ CO-5:
 
 # --------------------------------------------------------------------------------------------------- #
 # LP-495a — the REO reconciliation lane (RE-1 / DT-6) and LOE completeness (LO-2).
-# ⚠️ ALL THREE ARE DETERMINISTIC: no AI tag, no threshold, therefore NO self-consistency rate and NO
+# ALL THREE ARE DETERMINISTIC: no AI tag, no threshold, therefore NO self-consistency rate and NO
 # ratification. They activate on `input_resolves` alone (no-ai-dependency), which is the LP-485
 # development-mode meaning — THE PRODUCER RESOLVES IT ON REAL STORED DATA, verified per rule below.
 # --------------------------------------------------------------------------------------------------- #
@@ -1980,32 +1980,32 @@ RE-1:
   ships: auto
   threshold: null
   validated: false
-  # ⚠️ VERIFIED ON REAL STORED DATA, not on the bench: reo.statement_disclosure materialises on 6 mortgage
+  # VERIFIED ON REAL STORED DATA, not on the bench: reo.statement_disclosure materialises on 6 mortgage
   # statements across 2 active loan files and resolves on ALL SIX — 4 `undisclosed`, 2 `disclosed`. BOTH
   # branches are exercised by real files, which is rare in this codebase and worth recording.
   input_resolves: true
   load_bearing_ai_tags: []
   fp_fn: >-
-    ⚠️ NEITHER DIRECTION IS A FINDING — the rule cannot produce `fired` (pinned by test). An unmatched
+    NEITHER DIRECTION IS A FINDING — the rule cannot produce `fired` (pinned by test). An unmatched
     statement routes to needs_review because it is a QUESTION, not a defect: it may be a loan paid off
     since the application, a duplicate under a servicer's other name, or a co-signed debt the borrower is
     not obliged on. The costly direction is the FN (a genuinely undisclosed mortgage never surfaces, and
     the DTI is computed from an incomplete liability list); the FP costs a processor one comparison.
   rationale: >-
     No AI tag and no threshold — a tolerant NAME match, reusing IH-2's `_normalise_lender_name` /
-    `_lender_names_agree` rather than cloning a second matcher. ⚠️ ONE MATCHER SERVES RE-1 AND DT-6
+    `_lender_names_agree` rather than cloning a second matcher. ONE MATCHER SERVES RE-1 AND DT-6
     (ADR-375): both read tags produced by the same `_reo_match_statement`, so the two rules can never
     disagree about which stated liability a statement matched.
-    ⚠️ THE ABSTAIN RATE IS ~24% AND IS STATED HERE RATHER THAN DISCOVERED LATER: `lender_name` fills 54 of
+    THE ABSTAIN RATE IS ~24% AND IS STATED HERE RATHER THAN DISCOVERED LATER: `lender_name` fills 54 of
     71 mortgage statements in the corpus (LP-495a Phase A), so roughly a quarter of statements resolve to
     couldnt_check on the name alone. Abstain is the safe direction — the alternative is reading an unnamed
     statement as an undisclosed debt. The match also abstains when the application states NO mortgage
     liabilities (a file whose 1003 was never imported must not read as a file full of undisclosed debts)
     and when a lender matches MORE THAN ONE stated liability (a first and a second with one servicer is
     ordinary, and picking one would attach DT-6's payment comparison to a liability chosen by list order).
-    ⚠️ THE MATCH IS ON NAME BECAUSE THERE IS NO OTHER KEY: MISMO emits no property address on a liability,
+    THE MATCH IS ON NAME BECAUSE THERE IS NO OTHER KEY: MISMO emits no property address on a liability,
     so the statement's `property_address` has nothing to match against.
-    ⚠️ THIS RULE ASSERTS NOTHING ABOUT RETENTION and does not read `property.is_retained_reo` or
+    THIS RULE ASSERTS NOTHING ABOUT RETENTION and does not read `property.is_retained_reo` or
     `property.retained_pitia` — those stay vocabulary orphans with no producer (pinned by test). RE-2
     stays dropped: it asserted a CONSEQUENCE from the retention inference; this surfaces a DISCREPANCY.
 DT-8:
@@ -2049,18 +2049,18 @@ DT-6:
   ships: auto
   threshold: null
   validated: false
-  # ⚠️ VERIFIED ON REAL STORED DATA: reo.statement_payment_coverage materialises on the same 6 statements
+  # VERIFIED ON REAL STORED DATA: reo.statement_payment_coverage materialises on the same 6 statements
   # and resolves on the 2 that MATCHED (both `short`); the 4 unmatched abstain BY DESIGN so DT-6 never
   # double-reports the discrepancy RE-1 already surfaced.
   input_resolves: true
   load_bearing_ai_tags: []
   fp_fn: >-
-    ⚠️ NEITHER DIRECTION IS A FINDING — the rule cannot produce `fired` (pinned by test). FN (a retained
+    NEITHER DIRECTION IS A FINDING — the rule cannot produce `fired` (pinned by test). FN (a retained
     property's full PITIA never reaches the DTI, so the ratio understates the obligation and a file
     qualifies that should not) >> FP (a processor compares two payment figures). The FP direction is real
     and expected: a property under contract legitimately shows a stated payment below the billed one.
   rationale: >-
-    No AI tag and no threshold. ⚠️ THE SINGLE MOST IMPORTANT CORRECTNESS POINT, AND IT IS A MEASURED FACT
+    No AI tag and no threshold. THE SINGLE MOST IMPORTANT CORRECTNESS POINT, AND IT IS A MEASURED FACT
     ABOUT THE EXTRACTOR RATHER THAN AN ASSUMPTION: the statement's `monthly_payment` IS ALREADY THE PITIA
     and is NOT added to `escrow_amount`. The extraction prompt defines them as "the total monthly payment
     (principal+interest+escrow)" and "the escrow PORTION of the payment" — escrow is a COMPONENT, not an
@@ -2068,13 +2068,13 @@ DT-6:
     fields and report a shortfall on nearly every file, which is the CO-5 mistake (a 30-day figure
     compared against a 60-day cap) in a new place. The escrow figure rides the REASONING instead, because
     it is usually the EXPLANATION for a real shortfall — a 1003 commonly carries principal and interest
-    only. ⚠️ On the two statements that matched on real stored data, escrow is ABSENT entirely, so both
+    only. On the two statements that matched on real stored data, escrow is ABSENT entirely, so both
     `short` verdicts are clean stated-vs-billed comparisons with no escrow arithmetic involved.
-    ⚠️ NO TOLERANCE BAND, AND THAT IS A CHECKED CONCLUSION (ADR-361), NOT AN OMISSION: no source
+    NO TOLERANCE BAND, AND THAT IS A CHECKED CONCLUSION (ADR-361), NOT AN OMISSION: no source
     establishes a de-minimis difference between a stated housing payment and a servicer's billed PITIA, so
     any band would be invented. The comparison is exact and a difference of any size routes to
     needs_review.
-    ⚠️ THE CATALOG'S "or net rental" PATH IS UNAVAILABLE AND IS NOT FAKED: the snapshot models
+    THE CATALOG'S "or net rental" PATH IS UNAVAILABLE AND IS NOT FAKED: the snapshot models
     ScheduleEPropertyRecord but there are ZERO property rows across the 15 real tax returns, so
     B3-3.8-02's 75% factor is not used. (And it would not apply to a Schedule E figure even with rows:
     the guide computes that path as a cash-flow analysis, not a 75% haircut — LP-641.)
@@ -2083,13 +2083,13 @@ LO-2:
   ships: auto
   threshold: null
   validated: false
-  # ⚠️ VERIFIED ON REAL STORED DATA: loe.is_explanation_letter materialises on 98 documents across 8 loan
+  # VERIFIED ON REAL STORED DATA: loe.is_explanation_letter materialises on 98 documents across 8 loan
   # files and resolves on ALL of them (96 `no`, 2 `yes`); loe.completeness materialises on the 2 letters
   # and resolves on both.
   input_resolves: true
   load_bearing_ai_tags: []
   fp_fn: >-
-    ⚠️ THE RULE CANNOT PRODUCE `fired` — an incomplete letter routes to needs_review, deliberately. On the
+    THE RULE CANNOT PRODUCE `fired` — an incomplete letter routes to needs_review, deliberately. On the
     ONE document type that carries the three legs, `referenced_date` fills 6/9 and
     `borrower_signature_present` 7/9, so an empty extracted field cannot be distinguished from a field the
     extraction missed; a `fired` verdict would assert a defect on a letter that may well state its date on
@@ -2098,29 +2098,29 @@ LO-2:
     honest routing.
   rationale: >-
     No AI tag and no threshold — a three-way presence check on typed extractor fields.
-    ⚠️ THE APPROVED DIRECTIVE SAID "all six LOX types" AND THE THREE FIELDS EXIST ON EXACTLY ONE OF THEM.
+    THE APPROVED DIRECTIVE SAID "all six LOX types" AND THE THREE FIELDS EXIST ON EXACTLY ONE OF THEM.
     Verified against every extractor in app/ai/extraction/ AND the bench corpus: only
     `letter_of_explanation` (9 docs) carries explanation_summary / referenced_date /
     borrower_signature_present. `_misc` (9), `_asset` (7), `_property` (7), `_income` (2) and
     `_child_care` (0) carry DIFFERENT fields (letter_date, reason_or_cause, signature_date,
     borrower_certification); `credit_explanation_letter` (4) has NO EXTRACTOR AT ALL (the bench records
     status `no_extractor`); `application_loe` carries the signature field only.
-    ⚠️ PHASE A'S "9/34 · 6/34 · 7/34" ARE CORRECT BUT THEIR DENOMINATOR IS THE WHOLE FAMILY WHILE THEIR
+    PHASE A'S "9/34 · 6/34 · 7/34" ARE CORRECT BUT THEIR DENOMINATOR IS THE WHOLE FAMILY WHILE THEIR
     NUMERATOR CAN ONLY COME FROM THE 9 BASE LETTERS — they are really 9/9, 6/9 and 7/9 on the only type
     with the fields. Building "across all six" on them would have reported 25 of 34 letters incomplete.
-    ⚠️ THE OTHER TYPES' FIELDS ARE NOT ALIASED ONTO THE LEGS: `letter_date` is when the letter was
+    THE OTHER TYPES' FIELDS ARE NOT ALIASED ONTO THE LEGS: `letter_date` is when the letter was
     WRITTEN and `referenced_date` is the date of the EVENT; `borrower_certification` is a prose attestation
     and `borrower_signature_present` is whether a signature is on the page. Different facts.
-    ⚠️ EVERY LOE TYPE IS STILL IN SCOPE — none is silently skipped. THREE distinct states, proven by test:
+    EVERY LOE TYPE IS STILL IN SCOPE — none is silently skipped. THREE distinct states, proven by test:
     "no letter exists" -> not_applicable and NO finding; "a letter exists but its type carries no
     completeness fields" -> couldnt_check; "a letter exists and is incomplete" -> needs_review.
-    ⚠️ `applicability_expected` IS FALSE, and that is LO-1's held question showing through: declaring a
+    `applicability_expected` IS FALSE, and that is LO-1's held question showing through: declaring a
     missing letter a gap needs the list of conditions that REQUIRE one, which is lender- and AUS-driven
     and enumerated nowhere in the file.
-    ⚠️ THE AMOUNT LEG IS DELIBERATELY ABSENT — `referenced_amount` fills 0/34 across the family and 0/9 on
+    THE AMOUNT LEG IS DELIBERATELY ABSENT — `referenced_amount` fills 0/34 across the family and 0/9 on
     the one type that declares it (the TI-3/4/5 block). Only `letter_of_explanation_asset` produces list
     rows; the base type's `explanation_items` produces none, so no per-item read exists.
-    ⚠️ `borrower_signature_present` IS A TYPED FIELD, so the catalog's "signature (AI for scans)" is STALE
+    `borrower_signature_present` IS A TYPED FIELD, so the catalog's "signature (AI for scans)" is STALE
     — LP-487's question answering yes a SIXTH time. REPORTED, NOT RE-KINDED (rule_kinds.csv stays 135).
 
 # --------------------------------------------------------------------------------------------------- #

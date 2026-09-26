@@ -49,7 +49,7 @@ _ACTIVATED = frozenset(
         "CO-1",  # LP-488 — condo questionnaire presence (document-type read)
         # LP-494 — the condo lane. CO-3 is the FIDELITY leg IH-7 explicitly excludes (inputs 8/8);
         # CO-4 reads the reserve percentage off the HOA STATEMENT type, where HOA budgets classify.
-        # ⚠️ CO-5 is deliberately absent: not one of its five inputs resolves on any document.
+        # CO-5 is deliberately absent: not one of its five inputs resolves on any document.
         "CO-3",
         "CO-4",
         # LP-495a — the REO reconciliation lane (ONE matcher, ADR-375) + LOE completeness.
@@ -287,7 +287,7 @@ def test_the_held_rules_each_fail_for_a_named_reason() -> None:
     # OC-1 — the LP-406-4 rule STILL held: its AI tag occupancy.consistent_with_signals is unscored
     # (not-calibratable-yet). (PC-7 was the no-ai-threshold-pending held example through LP-411; LP-412 signed
     # off its window, so it is now live — see test_pc7_is_live_via_no_ai_threshold_pending_after_signoff.)
-    # ⚠️ OC-1 IS NO LONGER HELD (LP-495a). It moved not-calibratable-yet -> ratify-pending on a
+    # OC-1 IS NO LONGER HELD (LP-495a). It moved not-calibratable-yet -> ratify-pending on a
     # self-consistency rate of 0.9474 over 19 cases (ADR-378), with ratification as the safety
     # substitute for the missing measurement. Its tag is NOT re-kinded — see
     # test_oc1_occupancy_consistency_lp495a.py.

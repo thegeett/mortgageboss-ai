@@ -246,7 +246,7 @@ def finalize_output(
     """Write the cross-document ``_SUMMARY.md`` + ``_FINDINGS.csv`` from all records. Per-document JSON is
     already on disk (written incrementally by :func:`write_record`). No DB.
 
-    ⚠️ Infrastructure failures (throttling, auth, unexpected errors) are NOT coverage gaps — they are
+    Infrastructure failures (throttling, auth, unexpected errors) are NOT coverage gaps — they are
     partitioned OUT of every finding and reported as their own counts. And if NOTHING succeeded, the
     summary is marked **FAILED** at the top, so a run where every call failed can never read like a
     coverage result (as the 246x "AI call failed" run did)."""
@@ -346,7 +346,7 @@ def _render_summary(
     total = breakdown["total"]
     usable = breakdown["usable"]
     top_err = breakdown.get("top_error_type")
-    # ⚠️ REAL-PII banner FIRST, before anything else — redaction was removed, so this output contains real
+    # REAL-PII banner FIRST, before anything else — redaction was removed, so this output contains real
     # SSNs, DOBs, home addresses, and account numbers from real documents.
     lines: list[str] = [
         "> 🔴 **This run captures REAL PII.** The output folder contains real SSNs, dates of birth, home"
@@ -359,7 +359,7 @@ def _render_summary(
     if total > 0 and usable == 0:
         cause = f" ({top_err})" if top_err else ""
         lines += [
-            f"# ⚠️ RUN FAILED — 0 of {total} documents produced a result",
+            f"# RUN FAILED — 0 of {total} documents produced a result",
             "",
             f"> Every model call failed{cause}. This is an **INFRASTRUCTURE failure** (e.g. credentials /"
             " access / throttling), **NOT a coverage result** — there are no findings below to read. Fix"
@@ -373,7 +373,7 @@ def _render_summary(
     lines += [
         "# Extraction bench — cross-document report",
         "",
-        "> ⚠️ This measures **COVERAGE** (was a field POPULATED), **NOT accuracy** (whether the value is correct).",
+        "> This measures **COVERAGE** (was a field POPULATED), **NOT accuracy** (whether the value is correct).",
         "> A high fill rate is NOT evidence the extractor reads the field correctly. Values are captured"
         " **verbatim** (identity fields included) — nothing is redacted, and nothing is persisted to the"
         " database.",
@@ -393,7 +393,7 @@ def _render_summary(
             parts.append(f"{err} error{'s' if err != 1 else ''}")
         cause = f" — top cause: `{top_err}`" if top_err else ""
         lines += [
-            f"- ⚠️ **Infrastructure failures (excluded from findings): {', '.join(parts)}**{cause}. These"
+            f"- **Infrastructure failures (excluded from findings): {', '.join(parts)}**{cause}. These"
             " are NOT coverage gaps — do not read them as schema problems.",
         ]
     else:
@@ -433,7 +433,7 @@ def _render_summary(
                 f"{k} {c['populated']}/{c['of']}" for k, c in list(f["coverage"].items())[:12]
             )
             + (" …" if len(f["coverage"]) > 12 else ""),
-            "- ⚠️ **Open-ended fields (cannot back a deterministic rule)**: "
+            "- **Open-ended fields (cannot back a deterministic rule)**: "
             + (", ".join(open_ended) if open_ended else "none flagged"),
             "- **Stranded (catch-all) top labels**: "
             + (", ".join(f"{lbl} x{n}" for lbl, n in stranded) if stranded else "none"),

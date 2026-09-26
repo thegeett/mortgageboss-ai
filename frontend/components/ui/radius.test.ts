@@ -32,7 +32,7 @@ import { describe, expect, it } from "vitest";
 /** Read a sibling primitive. Resolved from this file so it survives the suite's cwd. */
 function source(file: string): string {
   const text = readFileSync(new URL(`./${file}`, import.meta.url).pathname, "utf8");
-  // ⚠️ A GUARD, NOT CEREMONY. An unreadable or emptied file would make every assertion below pass
+  // A GUARD, NOT CEREMONY. An unreadable or emptied file would make every assertion below pass
   // against nothing — `expect("").not.toMatch(...)` is true. That failure mode has cost this ticket
   // four assertions already.
   expect(text.length, `${file} is empty or unreadable`).toBeGreaterThan(200);
@@ -69,7 +69,7 @@ describe("the radius split is fixed at the primitives", () => {
   });
 
   it("does not read a radius out of a comment", () => {
-    // ⚠️ THE POSITIVE CONTROL. Without it, a `codeOnly` that silently returned "" would make both
+    // THE POSITIVE CONTROL. Without it, a `codeOnly` that silently returned "" would make both
     // tests above pass — the not-toMatch halves trivially, and the toMatch halves would fail, so
     // this specifically pins that stripping works rather than that it is total.
     const withComment = codeOnly('// rounded-md in prose\nconst x = "rounded-lg";');

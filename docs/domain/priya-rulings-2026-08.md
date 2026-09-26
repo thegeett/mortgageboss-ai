@@ -6,7 +6,7 @@ The resident domain expert ("sister") answered six outstanding questions in subs
 someone builds it. **Do not convert a ruling into an implementation while reading it** — several change how
 rules are STORED, and a half-applied design is worse than a recorded one.
 
-> ⚠️ **Provenance.** These are her rulings as of **2026-08**, citing agency guidance that has effective dates
+> **Provenance.** These are her rulings as of **2026-08**, citing agency guidance that has effective dates
 > and CHANGES. A future reader must re-check the agency source before relying on a value. Where a ruling
 > SUPERSEDES an earlier one, that is called out (Ruling 2).
 
@@ -22,7 +22,7 @@ eligibility](#ruling-5--reserve-eligibility) · [6 Gift funds](#ruling-6--gift-f
 **Question asked.** How should the pay-stub earnings lines (base vs variable vs non-cash) be classified for
 qualifying income — is it a lookup on the line's text label?
 
-**Her answer (her framing).** ⚠️ **"Do not classify solely from the text label."** She gave a **decision
+**Her answer (her framing).** **"Do not classify solely from the text label."** She gave a **decision
 procedure**, not a label list — a fail-closed cascade:
 
 ```
@@ -34,7 +34,7 @@ else                                                                 -> UNKNOWN
                                                                         request_employer_earning_code_definition = true
 ```
 
-⚠️ **The `UNKNOWN` branch is load-bearing.** An unrecognised label must **NOT** silently become base income — it
+**The `UNKNOWN` branch is load-bearing.** An unrecognised label must **NOT** silently become base income — it
 falls to `UNKNOWN` and **requests the employer's earning-code definition**. This is the fail-closed procedure and
 it is the point of the ruling.
 
@@ -59,12 +59,12 @@ analysed separately.
 **Affects.** IN-10, IN-11, and any income classifier (the `earnings_lines` consumer LP-448 scoped).
 
 **What remains open.** The classifier is unbuilt. LP-448 concluded this is judgment, not a lookup, and needs
-this ruling — now recorded. ⚠️ **`earnings_lines` may be null in the stored corpus** (LP-446 added it; the
+this ruling — now recorded. **`earnings_lines` may be null in the stored corpus** (LP-446 added it; the
 stored extractions predate that), so the classifier may have nothing to read until a re-extraction.
 
 ---
 
-## Ruling 2 — Declining income ⚠️ SUPERSEDES LP-393-6
+## Ruling 2 — Declining income SUPERSEDES LP-393-6
 
 **Question asked.** When income declines year-over-year, is that an automatic failure?
 
@@ -81,7 +81,7 @@ income_review_result = FLAG
 **Production decision (verbatim).** *"Component-level decline = NEEDS_REVIEW; total qualifying income decline =
 separate result. **Do not make 'any year-over-year decrease' an automatic failure.**"*
 
-> ⚠️ **THIS SUPERSEDES the earlier `is_declining` ruling recorded in LP-393-6.**
+> **THIS SUPERSEDES the earlier `is_declining` ruling recorded in LP-393-6.**
 > - **Superseded (LP-393-6, do NOT follow):** *"any YoY decrease = declining, no materiality threshold"*,
 >   applied at the **borrower level** (the `income.is_declining` tag: "a year-over-year decrease" over the
 >   borrower's documents — decisions.md ADR context, income_stability prompt).
@@ -119,7 +119,7 @@ numerical threshold must be labeled as an **internal processing policy**, not an
 | unpaid overdraft balance or overdraft line | **potential undisclosed liability** |
 | event after the latest verified statement | reverification required |
 
-⚠️ **Event TYPE matters, not just the count** — six types to distinguish: `nsf_fee` ·
+**Event TYPE matters, not just the count** — six types to distinguish: `nsf_fee` ·
 `overdraft_transfer_from_savings` · `overdraft_line_of_credit_advance` · `returned_payment` ·
 `negative_daily_balance` · `negative_ending_balance`.
 
@@ -160,13 +160,13 @@ findings → product rules → lender/investor overlays → internal processing 
 **Selector inputs:** agency · program · product · underwriting method · AUS recommendation ·
 application/note/case-assignment date · investor · overlay version.
 
-⚠️ **When the agency is not yet selected, return COMPARATIVE results** — `Fannie = X`, `Freddie = Y`,
+**When the agency is not yet selected, return COMPARATIVE results** — `Fannie = X`, `Freddie = Y`,
 `FHA = n/a`, `final = UNKNOWN_PENDING_AGENCY_SELECTION`. **Do not silently choose one.**
 
-⚠️ **The warning that lands on the current design:** *"A lender may deliberately adopt a conservative overlay,
+**The warning that lands on the current design:** *"A lender may deliberately adopt a conservative overlay,
 but that should be stored as an explicit `LENDER_OVERLAY`, **not disguised as agency policy**."*
 
-**⚠️ Record plainly:** `activation_bars.yaml` holds **ONE threshold per rule and CANNOT express this** (an
+**Record plainly:** `activation_bars.yaml` holds **ONE threshold per rule and CANNOT express this** (an
 agency-versioned rule with a selector). This is an **architectural decision, not a threshold** — six rules are
 gated on the DESIGN, not on a number.
 
@@ -191,12 +191,12 @@ borrower's accessible interest · vested life-insurance cash surrender value.
 **Excluded (Fannie):** unvested funds · inaccessible retirement · unlisted private stock · unsecured loans ·
 interested-party and lender contributions · subject-property cash-out proceeds · **gift of equity**.
 
-⚠️ **Retirement accounts — the haircut is AGENCY-SPECIFIC** (this corrects a widespread "blanket 60/70%"
+**Retirement accounts — the haircut is AGENCY-SPECIFIC** (this corrects a widespread "blanket 60/70%"
 assumption):
 
 | agency | treatment |
 |---|---|
-| **Fannie** | ⚠️ **"Do NOT apply a blanket 60% or 70% haircut."** Verified vested accessible balance − account loans − pledged amounts |
+| **Fannie** | **"Do NOT apply a blanket 60% or 70% haircut."** Verified vested accessible balance − account loans − pledged amounts |
 | **Freddie** | documented vested balance/percentage; reserves generally need no liquidation |
 | **FHA** | **60% × account value − existing loans**, unless documentation establishes a higher available amount |
 

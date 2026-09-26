@@ -5,7 +5,7 @@ Run: ``uv run python -m app.scripts.seed_lender_codes``
 IDEMPOTENT. Every row is keyed `(lender_id, code)` — the table's own unique index — so a re-run
 updates the shipped fields and leaves everything else alone. Safe to run on every deploy.
 
-⚠️ IT MATCHES ON `canonical_lender_key`, AND NEVER ON THE SLUG. This is the STOP AND ASK the survey
+IT MATCHES ON `canonical_lender_key`, AND NEVER ON THE SLUG. This is the STOP AND ASK the survey
 raised and the product owner answered (option 1, 2026-09-23). `lenders` is company-scoped with a slug
 unique only per company (ADR-045), each company choosing its own — so "UWM" may be `uwm`,
 `uwm-wholesale`, `united-wholesale` or absent, and two companies' UWM rows are two different
@@ -93,7 +93,7 @@ async def _upsert(db: AsyncSession, *, lender_id: UUID, row: LenderCodeRow) -> s
         await db.flush()
         return "inserted"
 
-    # ⚠️ THE ORDER HERE IS LOAD-BEARING, and it is a shape rather than a defect today. `before` is
+    # THE ORDER HERE IS LOAD-BEARING, and it is a shape rather than a defect today. `before` is
     # captured, every field is then ASSIGNED, and `after` is compared — so the "unchanged" return
     # below hands back an object that has already been written to. That is harmless while equality
     # is identity (SQLAlchemy sees no net change and emits no UPDATE), and stops being harmless the
@@ -118,7 +118,7 @@ async def _upsert(db: AsyncSession, *, lender_id: UUID, row: LenderCodeRow) -> s
     # demote a human decision back to SEEDED. An OBSERVED_UNMAPPED row that the seed now explains
     # becomes SEEDED, which is the case this exists for.
     #
-    # ⚠️ THE RULE MOVED OUT OF THIS FILE AND THIS IS NOW ITS SECOND CALLER, NOT ITS OWNER (LP-909
+    # THE RULE MOVED OUT OF THIS FILE AND THIS IS NOW ITS SECOND CALLER, NOT ITS OWNER (LP-909
     # review). It lived here as a local promotion — correct while the seed was the ONLY writer of
     # these rows. LP-909's import is the second, and one rule stated independently in two places is
     # how the two drift. `resolved_status` is the single statement; this line applies it.

@@ -1,6 +1,6 @@
 """The condition-sheet upload endpoint (LP-905 section 1, spec §6).
 
-⚠️ THE CROSS-TENANT TEST IS THE POINT OF THIS FILE, and it was nearly deferred to section 2. The
+THE CROSS-TENANT TEST IS THE POINT OF THIS FILE, and it was nearly deferred to section 2. The
 review's argument for writing it now was cost rather than principle: the fixture, the pattern and a
 worked example already exist (`tests/api/test_documents_endpoints.py`'s "CRITICAL: cross-tenant
 isolation"), so it is a handful of lines against machinery that works. Deferring it would have left
@@ -13,7 +13,7 @@ returns before the round is created. What happens to an accepted sheet is a prop
 `parse_round`, which the door only enqueues, so it is pinned in `tests/tasks/test_condition_parse.py`
 against a round created through the same `create_round_from_sheet` this endpoint calls.
 
-⚠️ THAT SPLIT ONCE HID A REAL DEFECT, AND THE PARAGRAPH HERE HELPED. It used to say the success case
+THAT SPLIT ONCE HID A REAL DEFECT, AND THE PARAGRAPH HERE HELPED. It used to say the success case
 "belongs to section 2" and stop — which read as a plan and was treated as coverage. Section 2 then
 tested the parse only for an upload whose rules READ cleanly, so the branch where a reader asks for
 the AI went unexercised at every door but paste, and a sheet arriving as a PDF waited forever for a
@@ -39,7 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 @pytest.fixture
 async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
-    """⚠️ SHADOWS THE ROOT `client` FIXTURE, AND MUST.
+    """SHADOWS THE ROOT `client` FIXTURE, AND MUST.
 
     `tests/conftest.py`'s `client` builds an `AsyncClient` over the app but overrides NOTHING, so the
     request resolves `get_db` to a fresh session of its own. The suite isolates tests by running each
@@ -105,7 +105,7 @@ def _pdf() -> bytes:
 async def test_company_b_cannot_open_a_round_on_company_a_file(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ 404, NOT 403 — the file is out of scope, not forbidden.
+    """404, NOT 403 — the file is out of scope, not forbidden.
 
     `get_loan_file` builds from `_scoped(company_id)` and returns None for another company's file,
     so B is told the file does not exist rather than that it exists and is theirs to envy. And the
@@ -176,7 +176,7 @@ async def test_an_oversized_upload_is_refused_before_it_is_all_in_memory(
     The cap is lowered for the test rather than a 20 MB body being constructed: the property is that
     the read stops, and asserting it with real megabytes would only prove the machine has memory.
 
-    ⚠️ THE PARAMETER MUST BE TYPED `pytest.MonkeyPatch`, AND AN EARLIER VERSION SAID `object`.
+    THE PARAMETER MUST BE TYPED `pytest.MonkeyPatch`, AND AN EARLIER VERSION SAID `object`.
     That made it a plain annotation rather than a request for pytest's fixture, so nothing was
     patched, the cap stayed at 20 MB, and the upload ran to completion — failing much later on
     `ModuleNotFoundError: app.tasks.conditions`. The test was accidentally proving section 2's
@@ -191,7 +191,7 @@ async def test_an_oversized_upload_is_refused_before_it_is_all_in_memory(
     # The endpoint reads `settings.condition_sheet_max_bytes` at call time off the module-level
     # singleton, so patching the attribute is what takes effect.
     #
-    # ⚠️ 100, NOT 1024 — the fixture PDF is 843 bytes, so a 1024-byte cap would not be exceeded and
+    # 100, NOT 1024 — the fixture PDF is 843 bytes, so a 1024-byte cap would not be exceeded and
     # this test would pass through to the success path while still claiming to assert a 413. The cap
     # is lowered below the real payload rather than the payload padded above the cap: the property
     # is that the chunked read ABORTS, and a megabyte of filler would only prove the machine has

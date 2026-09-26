@@ -13,7 +13,7 @@ the surviving borrowed-funds duty carries no threshold of its own. Inheriting 50
 test the guide withdrew; the 10% used instead is a deliberate overlay, and the finding shows its
 arithmetic so a processor can judge the number rather than take it on faith.
 
-⚠️ These tests do NOT call `materialize_tags`. `dti.qualifying_income_monthly` derives from MISMO stated
+These tests do NOT call `materialize_tags`. `dti.qualifying_income_monthly` derives from MISMO stated
 income, so materializing a fixture with no MISMO overwrites the injected figure with "unknown" — the
 same pattern `test_as1_income_via_loan_tag.py` follows. The derivation itself is covered by
 `tag_materialization/test_qualifying_income.py`; what is under test here is the GATE.
@@ -142,7 +142,7 @@ async def test_a_deposit_below_the_purchase_floor_is_scoped_out_silently() -> No
 async def test_a_deposit_above_the_purchase_floor_reaches_the_model_and_shows_the_arithmetic() -> (
     None
 ):
-    """⚠️ THE TRANSPARENCY REQUIREMENT. A bare threshold is unauditable — a processor who cannot see
+    """THE TRANSPARENCY REQUIREMENT. A bare threshold is unauditable — a processor who cannot see
     where $5,000 came from cannot judge whether it is the right number. The finding must carry the
     derivation, not just the verdict."""
     evaluation, reasoner = await _evaluate(amount="8000.00")
@@ -156,7 +156,7 @@ async def test_a_deposit_above_the_purchase_floor_reaches_the_model_and_shows_th
 
 
 async def test_the_same_deposit_is_out_on_a_purchase_and_in_on_a_refinance() -> None:
-    """⚠️ THE DECISIVE TEST — the two fractions are not decoration.
+    """THE DECISIVE TEST — the two fractions are not decoration.
 
     $2,000 sits between the refinance floor ($1,000) and the purchase floor ($5,000). Identical deposit,
     identical income, opposite outcomes. If both purposes ever resolved to one fraction this is the test
@@ -181,7 +181,7 @@ async def test_the_floor_is_strict_so_a_deposit_exactly_at_it_is_out_of_scope() 
 
 
 async def test_an_unknown_income_reviews_at_any_amount_rather_than_reporting_a_gap() -> None:
-    """⚠️ THE REGRESSION GUARD, and the reason this gate never emits couldnt_check.
+    """THE REGRESSION GUARD, and the reason this gate never emits couldnt_check.
 
     `dti.qualifying_income_monthly` derives from MISMO STATED income and abstains to "unknown" whenever
     no import states an income line — a large share of real files. The floor is a TRIAGE FILTER this
@@ -238,7 +238,7 @@ async def test_the_guides_escape_hatch_still_overrides_the_widened_exemption() -
 
 
 def test_the_purpose_map_covers_every_loan_purpose_the_vocabulary_allows() -> None:
-    """⚠️ TOTALITY. A purpose with no entry falls through to "reviewed at any amount" — safe, but it
+    """TOTALITY. A purpose with no entry falls through to "reviewed at any amount" — safe, but it
     silently disables the floor for that whole loan type. If the vocabulary ever gains a third purpose
     (construction, cash-out as its own value), this fails and forces a decision about its fraction."""
     materiality = _AS12.judgment.materiality if _AS12.judgment else None
@@ -276,7 +276,7 @@ def test_a_materiality_naming_an_undeclared_reference_key_fails_at_load() -> Non
 
 
 async def test_an_unreadable_model_answer_never_clears_an_exempt_deposit() -> None:
-    """⚠️ REVIEW FINDING 1 (pre-existing since LP-516, live on staging until this lands).
+    """REVIEW FINDING 1 (pre-existing since LP-516, live on staging until this lands).
 
     `_resolve` maps a MALFORMED or OFF-DOMAIN model response to "unknown". "unknown" is not in
     `exempt_unless_judgment_in` (which lists only "yes"), so it fell straight through to the predicate:
@@ -292,7 +292,7 @@ async def test_an_unreadable_model_answer_never_clears_an_exempt_deposit() -> No
 
 
 async def test_the_message_names_which_exemption_cleared_the_deposit() -> None:
-    """⚠️ REVIEW FINDING 4. Both of AS-12's exemptions read the SAME tag, so a message built from the
+    """REVIEW FINDING 4. Both of AS-12's exemptions read the SAME tag, so a message built from the
     tag alone renders a payroll clear and an interest clear identically. The matched condition's VALUE
     is the only thing that distinguishes them, and a processor reading "satisfied" on a borrowed-funds
     check needs to know which one applied."""
@@ -305,7 +305,7 @@ async def test_the_message_names_which_exemption_cleared_the_deposit() -> None:
 
 
 def test_an_unparseable_fraction_fails_at_load_rather_than_disabling_the_floor() -> None:
-    """⚠️ REVIEW FINDING 3. Key-exists was not enough: "fifty percent" is present and unreadable, and
+    """REVIEW FINDING 3. Key-exists was not enough: "fifty percent" is present and unreadable, and
     would degrade every subject to "reviewed at any amount" exactly as a typo'd key does. Validated with
     the SAME parser the evaluator uses (`parse_reference_fraction`), so the guard cannot certify a value
     the evaluator then rejects."""
@@ -320,7 +320,7 @@ def test_an_unparseable_fraction_fails_at_load_rather_than_disabling_the_floor()
 
 
 def test_a_loan_tag_is_rejected_where_the_evaluator_would_never_resolve_it() -> None:
-    """⚠️ REVIEW FINDING 2. `loan_tag` is resolved by `applicability` ALONE. In `exempt_when` (and
+    """REVIEW FINDING 2. `loan_tag` is resolved by `applicability` ALONE. In `exempt_when` (and
     `when_tags`, and `gather_filter`) the evaluator does `subject_tags.get(cond.tag_id)`, so the name
     resolves and the tag is then absent on every subject — an `eq` guard silently never holds and an
     `ne` guard always does. Exactly the trap an author would fall into by copying LP-517's AS-2

@@ -8,7 +8,7 @@ import { TriangleAlert } from "lucide-react";
 /**
  * What each failure kind means, in the processor's words.
  *
- * ⚠️ THESE ARE THE KINDS THE BACKEND CAN ACTUALLY WRITE, and the list came from the code rather than
+ * THESE ARE THE KINDS THE BACKEND CAN ACTUALLY WRITE, and the list came from the code rather than
  * from the mockup: `unreadable`, `no_text`, `bytes_unavailable`, `ai_unavailable`, `enqueue_failed`,
  * and the base `parse_failed`. S1-03's example shows `NO_CONDITIONS_FOUND`, which does not exist —
  * see the deviation recorded in the ticket.
@@ -30,7 +30,7 @@ const HEADLINE: Record<string, string> = {
 function reasonLine(round: ConditionRound): string {
   const report = round.parse_report;
   const parts = [`reason: ${report.failure_kind ?? "unknown"}`];
-  // ⚠️ ONE READER, NOT A LIST. The mockup shows "reader uwm v1, champions v1, generic v1" — the
+  // ONE READER, NOT A LIST. The mockup shows "reader uwm v1, champions v1, generic v1" — the
   // readers that were TRIED — and nothing records that: `parse_report.reader` is singular and is
   // written `None` on the failure path. Rendering a list here would be inventing provenance, which
   // is a worse failure than showing less.
@@ -45,7 +45,7 @@ function reasonLine(round: ConditionRound): string {
 /**
  * A round the reader could not turn into conditions (screen S1-03).
  *
- * ⚠️ BUILT FOR THE FAILURES THAT EXIST, WHICH IS A DEVIATION FROM THE REFERENCE SCREEN AND WAS
+ * BUILT FOR THE FAILURES THAT EXIST, WHICH IS A DEVIATION FROM THE REFERENCE SCREEN AND WAS
  * APPROVED AS ONE. S1-03 depicts a PDF that "has text, but no condition rows or lender headings" —
  * but that case does not fail: the parse task settles unconditionally to `DRAFT` with whatever rows
  * it found, so a non-condition PDF becomes a draft holding ZERO rows. The screen therefore shows a

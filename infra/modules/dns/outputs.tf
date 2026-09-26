@@ -10,7 +10,7 @@ output "zone_name" {
 
 output "name_servers" {
   description = <<-EOT
-    ⚠️ THE FOUR NAMESERVERS TO ENTER AT THE REGISTRAR.
+    THE FOUR NAMESERVERS TO ENTER AT THE REGISTRAR.
 
     This is the output of phase 1 and the input to the manual delegation step. Until
     these are live for the subdomain, ACM cannot validate and phase 2 will fail.

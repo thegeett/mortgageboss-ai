@@ -316,7 +316,7 @@ def _latest_ytd(
     """The MOST RECENT year-to-date gross across ``entries`` → (ytd, its pay date, any_present,
     any_unknown).
 
-    ⚠️ THE LATEST, NEVER THE SUM. Year-to-date is CUMULATIVE: an April stub's YTD already contains
+    THE LATEST, NEVER THE SUM. Year-to-date is CUMULATIVE: an April stub's YTD already contains
     March's. Summing two stubs double-counts every month they share — on LF-WCHG the two stubs read
     36,376.62 and 42,404.64 and the recipe used 78,781.26, which is exactly their sum and roughly
     twice the true figure.
@@ -384,7 +384,7 @@ def _income_ytd_annualized_shortfall(
       3. `elapsed_months` was `max(pay_dates).month`, so a pay date of 4 April counted as four whole
          months when about 3.1 had passed. Now a real elapsed fraction from the day of year.
 
-    ⚠️ LOAN-SCOPED, not per-borrower — LP-511 reverted that half of A3. Moving it to per_borrower made
+    LOAN-SCOPED, not per-borrower — LP-511 reverted that half of A3. Moving it to per_borrower made
     the rule produce NOTHING on the first real file: the per_borrower enumerator resolves borrowers via
     documents' `belongs_to`, and on that file the attribution yields no borrower subjects at all (LP-513,
     which affects IN-1, IN-12..IN-16, ID-5, CR-4 and CR-10 the same way). Per-borrower remains the right
@@ -483,7 +483,7 @@ def _qualifying_income_monthly(
     (NEVER 0) when no income is stated or a line is unparseable — fail-closed, so a rule reading it
     couldnt_checks on a missing income rather than sizing a threshold from 0.
 
-    ⚠️ The vocabulary (``fact_tags.csv``, xlsx-generated) still describes this as "sum of
+    The vocabulary (``fact_tags.csv``, xlsx-generated) still describes this as "sum of
     income.qualifying_monthly" — STALE: it reads STATED income. STATED >= QUALIFYING (qualifying haircuts
     declining/variable pay), so a threshold sized on this is LOOSER than 50%-of-qualifying; the AS-1 wiring
     (LP-366-B) must account for it, and the xlsx description needs reconciling."""
@@ -1289,7 +1289,7 @@ def _other_financed(snapshot: Snapshot) -> list[dict[str, str]]:
     Excluded, each for a reason the guide gives: a block marked as the subject (only a true counts —
     see LP-596 on why the false is worthless), and anything being sold or pending sale.
 
-    ⚠️ A ROW WITH NO STATED LIEN BALANCE IS KEPT. It used to be filtered out here alongside a
+    A ROW WITH NO STATED LIEN BALANCE IS KEPT. It used to be filtered out here alongside a
     free-and-clear property, which had two consequences: the aggregate's "a retained financed property
     states no lien balance" abstention became DEAD CODE (nothing without a balance ever reached it),
     and three retained financed properties whose export omits ``OwnedPropertyLienUPBAmount`` produced
@@ -1831,7 +1831,7 @@ def _loan_effective_date(
     DISAGREE on it → unknown (ambiguous — the multi-binder abstain, LP-374), never a silently-picked date.
     DESCRIPTIVE — the date only; whether it is after closing is IH-3's judgment (LP-400).
 
-    ⚠️ Scoped to ``homeowners_insurance`` documents ONLY. UNLIKE contract.closing_date — which only the
+    Scoped to ``homeowners_insurance`` documents ONLY. UNLIKE contract.closing_date — which only the
     purchase_agreement extractor emits — the ``effective_date`` FIELD is ALSO emitted by the divorce_decree
     extractor, so the parsed ins.effective_date tag leaks onto a decree (a document tag is scoped by field
     name, not document type). Reading it from every subject would let a divorce decree's date drive (or, via a
@@ -1877,7 +1877,7 @@ def _ins_policy_expired(
 ) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """ins.policy_expired — has the homeowners policy already lapsed as at the file date? (LP-509-D1)
 
-    ⚠️ COMPARED TO THE SNAPSHOT'S OWN BUILD DATE, NEVER THE CLOSING DATE, and that is the whole point.
+    COMPARED TO THE SNAPSHOT'S OWN BUILD DATE, NEVER THE CLOSING DATE, and that is the whole point.
     LF-WCHG carried an ACORD 27 running 06/25/2024 to 06/25/2025 — thirteen months lapsed at processing,
     and the single most useful thing anyone could have said about that file. Nothing reported it. The
     only rule reading those binder dates was IH-3, which compares the EFFECTIVE date to the CLOSING
@@ -2031,13 +2031,13 @@ def _dwelling_settlement_basis(
 # test_ih2_vocabulary_matches_the_spec pins the two identical so the spec (where the vocabulary is
 # reviewed) and the recipe (which runs) cannot drift — the CR-12 arrangement.
 #
-# ⚠️ WHY THIS IS DETERMINISTIC AND NOT AI. The catalog planned IH-2 as `ai_fuzzy_match`, which predates
+# WHY THIS IS DETERMINISTIC AND NOT AI. The catalog planned IH-2 as `ai_fuzzy_match`, which predates
 # typed extraction: the PERCEPTION step — reading the clause off the binder — is already spent by the
 # extractor, which lands it in `mortgagee_name` on 14 of 15 binders. What remains is comparing two
 # strings that differ by ISAOA/ATIMA, a corporate suffix, case and punctuation. rule_kinds.csv is
 # amended accordingly (LP-487).
 #
-# ⚠️ AND WHY A MISMATCH IS NEVER `fired`. The corpus's one file pairing a binder with a Closing
+# AND WHY A MISMATCH IS NEVER `fired`. The corpus's one file pairing a binder with a Closing
 # Disclosure reads "Sistar Mortgage Company" on the CD against "United Wholesale Mortgage" in the
 # clause. In broker and correspondent deals the CD names the CREDITOR and the clause names the
 # INVESTOR/SERVICER who will hold the loan, and they legitimately differ. A rule that fires there is
@@ -2188,12 +2188,12 @@ def _lender_names_agree(clause: list[str], lender: list[str]) -> bool:
 
     Equal token lists, or one a TOKEN-PREFIX of the other with at least two tokens in common.
 
-    ⚠️ TOKEN-PREFIX, NOT SUBSTRING. Substring matching on the raw string would let a two-letter suffix
+    TOKEN-PREFIX, NOT SUBSTRING. Substring matching on the raw string would let a two-letter suffix
     fragment match inside an unrelated word; comparing whole tokens in order cannot. The prefix rule is
     what absorbs the real corpus variance — "amerihome mortgage company llc a delaware limited liability
     company" against a CD's "amerihome mortgage" agrees on both tokens it states.
 
-    ⚠️ THE KNOWN FALSE-SATISFIED DIRECTION, stated rather than discovered later: a CD naming "First
+    THE KNOWN FALSE-SATISFIED DIRECTION, stated rather than discovered later: a CD naming "First
     National" against a clause naming "First National Bank of Chicago" agrees under this rule. Two
     tokens of agreement is a real tolerance, and `satisfied` is the one verdict no human re-reads. It is
     accepted because the alternative — demanding equality — would route the ordinary ISAOA/suffix
@@ -2281,12 +2281,12 @@ def _parsed_strings(snapshot: Snapshot, tag_id: str) -> list[str]:
 def _file_lender_name(snapshot: Snapshot) -> tuple[str | None, str]:
     """This loan's lender, and where it came from.
 
-    ⚠️ THE CD OUTRANKS THE LE, deliberately. The Closing Disclosure is the final, binding statement of
+    THE CD OUTRANKS THE LE, deliberately. The Closing Disclosure is the final, binding statement of
     the creditor; a Loan Estimate is preliminary and can be superseded by a re-issue. The LE is a
     FALLBACK so that a file early in processing — which has no CD yet — is still checkable rather than a
     permanent couldnt_check.
 
-    ⚠️ Disagreement WITHIN a source abstains. Two Closing Disclosures naming different creditors is a
+    Disagreement WITHIN a source abstains. Two Closing Disclosures naming different creditors is a
     contradiction the file has to resolve; picking one would be a guess.
     """
     for tag_id, label in (
@@ -2296,7 +2296,7 @@ def _file_lender_name(snapshot: Snapshot) -> tuple[str | None, str]:
         values = _parsed_strings(snapshot, tag_id)
         if not values:
             continue
-        # ⚠️ Dedup on the NORMALISED TOKENS, not the raw string (reported finding). The token normaliser
+        # Dedup on the NORMALISED TOKENS, not the raw string (reported finding). The token normaliser
         # lives in this same module and strips punctuation and entity suffixes; keying on the raw text
         # meant "United Wholesale Mortgage, LLC" on the initial CD and "UNITED WHOLESALE MORTGAGE LLC" on
         # the final CD read as TWO creditors and IH-2 abstained. Nearly every real file carries both, so a
@@ -2358,7 +2358,7 @@ def _mortgagee_clause_correct(
 #     Fannie Mae Selling Guide B7-4-01, "General Liability Insurance Requirements for Project
 #     Developments", page dated 08/05/2026: "The amount of coverage must be at least $1 million for
 #     bodily injury and property damage for any single occurrence."
-#     ⚠️ B7-4-01, NOT B7-3-03 — B7-3-03 is MASTER PROPERTY insurance and states no liability limit.
+#     B7-4-01, NOT B7-3-03 — B7-3-03 is MASTER PROPERTY insurance and states no liability limit.
 #   replacement-cost basis
 #     Fannie Mae Selling Guide B7-3-03, "Master Property Insurance Requirements for Project
 #     Developments", page dated 08/05/2026: "The master property insurance coverage amount must equal
@@ -2366,7 +2366,7 @@ def _mortgagee_clause_correct(
 #     common elements and residential structures." The same section accepts GUARANTEED and EXTENDED
 #     replacement cost as ways to substantiate it — hence both are in the recognised vocabulary.
 #
-# ⚠️ THE BASIS FIELD IS PROSE, NOT A CODE — and this widens ADR-376 deliberately, so the widening is
+# THE BASIS FIELD IS PROSE, NOT A CODE — and this widens ADR-376 deliberately, so the widening is
 # stated rather than slipped in. The four master policies in the corpus read:
 #     "Guaranteed Replacement Cost"
 #     "Replacement Cost"
@@ -2383,7 +2383,7 @@ def _mortgagee_clause_correct(
 # replacement cost dwelling") is a human question, not a pass.
 # --------------------------------------------------------------------------- #
 
-# ⚠️ NAMED, not inlined, so the spec↔code drift test can pin the CODE (reported finding). It was
+# NAMED, not inlined, so the spec↔code drift test can pin the CODE (reported finding). It was
 # hardcoded as `>= 2` while the spec declared min_prefix_tokens_for_match: "2" and the drift test compared
 # the spec's literal against the literal "2" — so changing the code to 3 left the test green and the spec
 # silently wrong about what runs. The other two IH-2 vocabulary values were already pinned spec↔constant.
@@ -2423,7 +2423,7 @@ def _master_policy_basis(raw: str) -> str | None:
     text = _WS.sub(" ", text).strip()
     has_acv = any(phrase in text for phrase in _MASTER_POLICY_ACV_PHRASES)
     has_rc = any(phrase in text for phrase in _MASTER_POLICY_RC_PHRASES)
-    # ⚠️ A MIXED BASIS ABSTAINS, whichever phrase leads. "ACV roof, replacement cost dwelling" states
+    # A MIXED BASIS ABSTAINS, whichever phrase leads. "ACV roof, replacement cost dwelling" states
     # two bases for two parts of the building; neither reading is the policy's basis, and calling it
     # actual_cash_value would fire IH-7 on a policy that may well be adequate for the structure.
     if has_acv and has_rc:
@@ -2437,18 +2437,18 @@ def _master_policy_basis(raw: str) -> str | None:
 
 # --- LP-494 — the CONDO PROJECT lane (CO-4 reserves, CO-5 project eligibility). ---------------------- #
 #
-# THRESHOLD PROVENANCE (ADR-361 — cited, never recalled from memory). ⚠️ EVERY CONSTANT BELOW IS PINNED
+# THRESHOLD PROVENANCE (ADR-361 — cited, never recalled from memory). EVERY CONSTANT BELOW IS PINNED
 # AGAINST ITS SPEC'S DECLARED reference_values BY TEST, so the code and the citation cannot drift apart.
 #
-#   Replacement reserves — ⚠️ A DATE-KEYED PAIR, THE FIRST IN THE SYSTEM (ADR-379).
+#   Replacement reserves — A DATE-KEYED PAIR, THE FIRST IN THE SYSTEM (ADR-379).
 #     10% of the annual budgeted assessment income — Fannie Mae Selling Guide B4-2.2-02, "Full Review
 #     Process", page dated 08/05/2026 (tier P, fetched): "provides for the funding of replacement reserves
 #     for capital expenditures and deferred maintenance that is at least 10% of the budget".
 #     15%, for loan applications dated ON OR AFTER 2027-01-04 — Fannie Mae Lender Letter LL-2026-03,
-#     issued 2026-03-18. ⚠️ TIER S, NOT P: the primary is behind an HTTP 403 to this client on
+#     issued 2026-03-18. TIER S, NOT P: the primary is behind an HTTP 403 to this client on
 #     singlefamily.fanniemae.com (both the landing page and the PDF at /media/44986/display; robots.txt
 #     ALLOWS both paths — the refusal is bot protection, and working around it was declined). Confirmed
-#     verbatim against two independent secondary sources. ⚠️ The 08/05/2026 Selling Guide page still
+#     verbatim against two independent secondary sources. The 08/05/2026 Selling Guide page still
 #     states 10% with no sunset, which is consistent: a Lender Letter sits outside the Guide until
 #     incorporated. This is why CO-4's bar carries threshold_needs_signoff.
 #
@@ -2460,13 +2460,13 @@ def _master_policy_basis(raw: str) -> str | None:
 #     (tier P, fetched): "no more than 35% of a condo or co-op project or 35% of the building in which the
 #     project is located be commercial space".
 #
-#   Single-entity ownership — ⚠️ THE TICKET'S SOURCES CONFLICTED (>20% vs 10%) AND THE PRIMARY RESOLVES IT
+#   Single-entity ownership — THE TICKET'S SOURCES CONFLICTED (>20% vs 10%) AND THE PRIMARY RESOLVES IT
 #     RATHER THAN EITHER BEING GUESSED. B4-2.1-03 (08/05/2026, tier P, fetched) is TIERED, and neither
 #     figure in the ticket describes it: "projects with 21 or more units - 20%", and projects of 5-20 units
 #     allow a maximum of 2 units. Under 5 units the guide states no single-entity limit, so this leg
 #     abstains there rather than inventing one.
 #
-# ⚠️ NO LITIGATION THRESHOLD EXISTS AND NONE IS INVENTED. B4-2.1-03 turns on the NATURE and SCOPE of the
+# NO LITIGATION THRESHOLD EXISTS AND NONE IS INVENTED. B4-2.1-03 turns on the NATURE and SCOPE of the
 # litigation, which is a judgment; the catalog rationale says "Surface". So disclosed litigation is
 # SURFACED to the processor with the questionnaire's own words, and never adjudicated here.
 _CONDO_RESERVE_MIN_PCT_BEFORE = Decimal("10")
@@ -2479,10 +2479,10 @@ _CONDO_SINGLE_ENTITY_MAX_UNITS_SMALL = Decimal("2")
 # (the condo document-type sets are defined once, above — a second binding here silently won.)
 
 
-# ⚠️ A CLOSED VOCABULARY (ADR-376) — an unrecognised litigation answer ABSTAINS, and that direction is the
+# A CLOSED VOCABULARY (ADR-376) — an unrecognised litigation answer ABSTAINS, and that direction is the
 # whole point: "PENDING - SEE ATTACHED" must never be read as "no litigation" and clear the project.
 _CONDO_LITIGATION_YES = frozenset({"yes", "y", "true", "pending", "disclosed"})
-# ⚠️ "n/a"/"na" are NOT here (reported finding). They assert NOTHING about litigation — a form that
+# "n/a"/"na" are NOT here (reported finding). They assert NOTHING about litigation — a form that
 # leaves the line not-applicable has not told us there is none — so reading them as "no" is exactly
 # the direction this block's own comment and the vocabulary description forbid ("an unfamiliar answer
 # can never be read as 'no litigation'"). They fall through to the abstain.
@@ -2535,7 +2535,7 @@ def _property_type(
     processor to supply something the file already contains. The same export carries
     PropertyInProjectIndicator, PUDIndicator, FinancedUnitCount and ConstructionMethodType.
 
-    ⚠️ `in_project` IS THE DECISIVE CONDO SIGNAL, and `attachment_type` is deliberately not used as
+    `in_project` IS THE DECISIVE CONDO SIGNAL, and `attachment_type` is deliberately not used as
     one. A condominium is by definition a property in a project, so `in_project == false` rules it
     out. "Detached" does NOT: Fannie Mae recognises DETACHED CONDOMINIUMS, so reading detached as
     "not a condo" would clear the condo rules on a file they were written for. This was checked
@@ -2619,7 +2619,7 @@ def _to_int_or_none(text: str | None) -> int | None:
 def _condo_scope(snapshot: Snapshot) -> tuple[str | None, str]:
     """The shared condo applicability read: (None, reason) when this is not a condo file to judge.
 
-    ⚠️ ONE implementation for both recipes, so CO-4 and CO-5 can never disagree about whether the subject
+    ONE implementation for both recipes, so CO-4 and CO-5 can never disagree about whether the subject
     property is a condominium — the ADR-375 discipline applied to a scoping read rather than a matcher.
     """
     property_types = {v.casefold() for v in _parsed_strings(snapshot, "property.type")}
@@ -2671,11 +2671,11 @@ def _condo_fidelity_coverage(
 ) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """ins.condo_fidelity_coverage — does the project's master policy EVIDENCE fidelity/crime cover? (CO-3)
 
-    ⚠️ THIS IS THE ONE CONDO-INSURANCE QUESTION NO LIVE RULE ASKS. IH-7's spec header excludes fidelity
+    THIS IS THE ONE CONDO-INSURANCE QUESTION NO LIVE RULE ASKS. IH-7's spec header excludes fidelity
     explicitly, so this is not a second verdict on the same comparison (ADR-375) — it is the gap IH-7
     documented and left open.
 
-    ⚠️ PRESENCE, NOT ADEQUACY, AND THE LIMIT IS STATED RATHER THAN FUDGED. B7-4-02 sets the required
+    PRESENCE, NOT ADEQUACY, AND THE LIMIT IS STATED RATHER THAN FUDGED. B7-4-02 sets the required
     amount at "the sum of three months of assessments on all units in the project" and exempts projects of
     20 units or fewer. NEITHER the unit count NOR the assessment base resolves on any document in the
     corpus, so this recipe does not compare the amount against anything. It reports whether coverage is
@@ -2713,7 +2713,7 @@ def _condo_fidelity_coverage(
             "the master policy on file does not state whether fidelity/crime coverage is carried",
         )
     if answers <= _CONDO_FIDELITY_YES:
-        # ⚠️ THE AMOUNT IS EVIDENCE, NOT A GATE (reported finding). This recipe deliberately does not
+        # THE AMOUNT IS EVIDENCE, NOT A GATE (reported finding). This recipe deliberately does not
         # judge the amount — B7-4-02's required figure needs a unit count and an assessment base that
         # resolve on no document here. So a PROBLEM reading it (two master policies stating $50,000 and
         # $75,000 — a prior-year certificate beside the current renewal, a routine pairing) must not flip
@@ -2727,7 +2727,7 @@ def _condo_fidelity_coverage(
         else:
             detail = ""
         return "present", (
-            f"the condominium project's master policy evidences fidelity/crime coverage{detail}. ⚠️ The "
+            f"the condominium project's master policy evidences fidelity/crime coverage{detail}. The "
             "AMOUNT is not verified against Fannie B7-4-02's requirement (three months of assessments on "
             "all units): neither the project's unit count nor its assessment base is stated on any "
             "document in the file"
@@ -2739,7 +2739,7 @@ def _condo_fidelity_coverage(
             "or fewer, or would need $5,000 of coverage or less"
         )
     if answers & _CONDO_FIDELITY_YES and answers & _CONDO_FIDELITY_NO:
-        # ⚠️ DISAGREEMENT IS ITS OWN ANSWER (reported finding) — the same bug fixed one function below in
+        # DISAGREEMENT IS ITS OWN ANSWER (reported finding) — the same bug fixed one function below in
         # _condo_project_eligibility. Two master policies answering "Yes" and "No" match neither subset,
         # fell to the unrecognised branch, and reported sorted(answers)[0]: "the indicator reads 'no',
         # which is not a recognised yes/no answer". 'no' IS recognised; the reason was false and it hid a
@@ -2763,7 +2763,7 @@ def _condo_reserve_adequacy(
 ) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """condo.reserve_adequacy — do the HOA's budgeted replacement reserves meet the floor? (CO-4)
 
-    ⚠️ THE FLOOR IS DATE-KEYED, and the date is the APPLICATION's, never today's. Fannie LL-2026-03 raises
+    THE FLOOR IS DATE-KEYED, and the date is the APPLICATION's, never today's. Fannie LL-2026-03 raises
     the minimum from 10% to 15% for applications dated on or after 2027-01-04, so a rule keyed on the
     current date would apply next year's floor to an application taken this year and fire on a compliant
     project. An ABSENT application date is the one input that cannot be defaulted: it SELECTS the floor,
@@ -2777,7 +2777,7 @@ def _condo_reserve_adequacy(
             else "the subject property is not a condominium — no HOA reserve floor applies"
         )
 
-    # ⚠️ TWO INDEPENDENT SOURCES, NEITHER PREFERRED. The HOA statement's reserve_percentage resolves on
+    # TWO INDEPENDENT SOURCES, NEITHER PREFERRED. The HOA statement's reserve_percentage resolves on
     # real data (6/59, four of them "10"); the condo questionnaire's is the same fact from the association's
     # own form. Read together so a disagreement ABSTAINS instead of one silently overriding the other —
     # IH-7's no-cross-document-pooling finding, applied across document TYPES rather than copies.
@@ -2856,7 +2856,7 @@ def _condo_delinquent_60day_pct(
 ) -> tuple[JsonValue, str]:
     """condo.delinquent_units_pct — units 60+ DAYS past due as a percent of total units (CO-5).
 
-    ⚠️ COMPUTED FROM THE 60-DAY COUNT, not the questionnaire's generic ``delinquency_percentage``
+    COMPUTED FROM THE 60-DAY COUNT, not the questionnaire's generic ``delinquency_percentage``
     (reported finding). B4-2.2-02's 15% cap is stated on units **60 or more days** past due; the generic
     field carries whatever period the form chose — commonly 30+ — and the extractor prompt attaches no
     definition to it. Comparing a 30-day figure to a 60-day cap fires CO-5 on a compliant project.
@@ -2889,7 +2889,7 @@ def _condo_project_eligibility(
 ) -> tuple[JsonValue, str]:
     """condo.project_eligibility — delinquency, concentration and litigation surfaced (CO-5).
 
-    ⚠️ "clear" REQUIRES ALL FOUR LEGS TO HAVE BEEN READ. A blank questionnaire resolves to "unknown", never
+    "clear" REQUIRES ALL FOUR LEGS TO HAVE BEEN READ. A blank questionnaire resolves to "unknown", never
     "clear": telling a processor a project is eligible because nobody answered the questions is the exact
     false all-clear this lane exists to prevent.
     """
@@ -2929,7 +2929,7 @@ def _condo_project_eligibility(
         )
     concentration_read = False
     if total_units is not None and single_entity_units is not None and total_units > 0:
-        # ⚠️ READ, not "missing" (reported finding). B4-2.1-03's tiers do not extend below 5 units, so a
+        # READ, not "missing" (reported finding). B4-2.1-03's tiers do not extend below 5 units, so a
         # 4-unit project has no stated single-entity limit — but that is the leg being ANSWERED (no limit
         # applies), not unanswered. Setting it here rather than inside the tiers stops the roll-call below
         # reporting "the condo questionnaire does not answer the single-entity concentration" about a form
@@ -2964,7 +2964,7 @@ def _condo_project_eligibility(
         elif litigation_answers & _CONDO_LITIGATION_YES and (
             litigation_answers & _CONDO_LITIGATION_NO
         ):
-            # ⚠️ DISAGREEMENT IS ITS OWN ANSWER (reported finding). Two questionnaires answering "Yes"
+            # DISAGREEMENT IS ITS OWN ANSWER (reported finding). Two questionnaires answering "Yes"
             # and "No" match neither subset and fell into the unrecognised-value branch, which then
             # reported sorted(...)[0] — rendering "the litigation answer reads 'no', which is not a
             # recognised yes/no answer". The verdict was right and the reason was false, and it hid a
@@ -3018,7 +3018,7 @@ def _condo_master_policy(
     ``present_adequate`` / ``present_inadequate`` on the basis and liability limit · ``unknown`` whenever
     an input is missing or unrecognised. Never reads a missing input as adequate.
     """
-    # ⚠️ THE SHARED SCOPE (reported finding). _condo_scope's docstring claims to be "ONE implementation
+    # THE SHARED SCOPE (reported finding). _condo_scope's docstring claims to be "ONE implementation
     # ... so CO-4 and CO-5 can never disagree", while this byte-identical block sat inline here for live
     # IH-7 — so a future fix (accepting a MISMO "Condominium" spelling, say) would land in one copy and
     # IH-7 would then disagree with CO-4/CO-5 about whether the subject is a condo.
@@ -3028,7 +3028,7 @@ def _condo_master_policy(
     if scope == "n/a":
         return "n/a", "the subject property is not a condominium — no master policy is required"
 
-    # ⚠️ PRESENCE IS ABOUT THE DOCUMENT, not one extracted field (reported finding). Keying `absent` on
+    # PRESENCE IS ABOUT THE DOCUMENT, not one extracted field (reported finding). Keying `absent` on
     # condo.master_policy_number alone meant a master-policy certificate that IS on the file but whose
     # number failed to extract reported "absent" and FIRED, telling a processor to request a document
     # already in front of them. That contradicts this recipe's own discipline two branches down, where an
@@ -3068,7 +3068,7 @@ def _condo_master_policy(
             "replacement-cost or actual-cash-value term — abstaining rather than inferring",
             policy_docs,
         )
-    # ⚠️ NO CROSS-DOCUMENT POOLING (reported finding). These values are gathered across EVERY master-policy
+    # NO CROSS-DOCUMENT POOLING (reported finding). These values are gathered across EVERY master-policy
     # document with no pairing, so two certificates — a current one and a superseded one — were being
     # judged as if they described one policy. Mixed bases fired `present_inadequate` with reasoning that
     # flatly asserted "written on an actual-cash-value basis" when one of them was replacement cost.
@@ -3104,7 +3104,7 @@ def _condo_master_policy(
                 "abstaining rather than treating it as zero",
                 policy_docs,
             )
-    # ⚠️ Same reasoning as the basis above: `min()` across unrelated certificates judged the CURRENT
+    # Same reasoning as the basis above: `min()` across unrelated certificates judged the CURRENT
     # policy by a SUPERSEDED one's limit — a live $2,000,000 certificate beside an old $500,000 one fired.
     if len({*parsed_limits}) > 1:
         return (
@@ -3132,7 +3132,7 @@ def _condo_master_policy(
 # review) — a list-name is not a unique key, so a future extractor reusing `tradelines` cannot pollute the
 # credit aggregate.
 #
-# ⚠️ THE D3 FINDING (the LP-448 lesson, second instance): the row VOCABULARY is OPEN-ENDED bureau text —
+# THE D3 FINDING (the LP-448 lesson, second instance): the row VOCABULARY is OPEN-ENDED bureau text —
 # account_type is terse bureau codes (AUTO / INST / REV, and elsewhere MTG / EDU / COLL / CHG …), account_status
 # is bureau phrasing (AS AGREED / PAID …), payment_status is Metro-2 codes (I1 / R1 …), is_disputed is FREE-TEXT
 # that includes NON-disputes (forbearance, "closed by grantor"), and payment_history_24mo is a VARIABLE-LENGTH
@@ -3157,7 +3157,7 @@ def _credit_undisclosed_tradeline(
     tradeline is accounted for. DEMOTED from an AI tag to this recipe so the borrower answer is a pure
     function of the per-liability answers — CR-4 and CR-1 cannot disagree about the same file.
 
-    ⚠️ FAIL-CLOSED, and this is the seam where a false all-clear would slip in. It ABSTAINS to "unknown"
+    FAIL-CLOSED, and this is the seam where a false all-clear would slip in. It ABSTAINS to "unknown"
     (NEVER "no") when there is nothing to aggregate — no credit report, no tradeline subjects, or no
     ``liab.in_application`` produced on any of them. "No undisclosed debt" on a file with no credit report
     is a false ALL-CLEAR, which is worse than saying nothing. A subject the matcher answered "unknown" for
@@ -3369,7 +3369,7 @@ def _property_address_match(
     ADR-325 — the canonicalizer does not resolve EVERY surface form, e.g. unit designators, so a residual
     mismatch is surfaced for a human, not fired as certain).
 
-    ⚠️ THE MAILING-ADDRESS TRAP (LP-407-4 D1): reads the MISMO SUBJECT-property address (property.address_*), NEVER
+    THE MAILING-ADDRESS TRAP (LP-407-4 D1): reads the MISMO SUBJECT-property address (property.address_*), NEVER
     the borrower's ``current_address`` (which the MISMO parser can fill with a MAILING address) and NEVER a
     retained-property tax bill (a different property). A file lacking a complete subject-property address ->
     unknown (couldnt_check), never a comparison against the wrong address type.
@@ -3500,7 +3500,7 @@ def _contract_days_until_closing(
 #
 # All three mirror _contract_days_until_closing: gather ONE date across subjects, dedup by the PARSED date
 # (one date rendered two ways is one value), abstain to _UNKNOWN when none parse AND when documents
-# DISAGREE, and emit ONLY the number. ⚠️ The tag is DESCRIPTIVE — the acceptable window belongs to the
+# DISAGREE, and emit ONLY the number. The tag is DESCRIPTIVE — the acceptable window belongs to the
 # RULE (its reference_values), never to the tag. A tag carrying a threshold is a rule in disguise.
 # --------------------------------------------------------------------------- #
 
@@ -3523,7 +3523,7 @@ def _parsed_dates(snapshot: Snapshot, tag_id: str) -> dict[date, str]:
 def _single_parsed_date(snapshot: Snapshot, tag_id: str) -> tuple[date | None, str | None]:
     """The file's ONE parseable value of ``tag_id`` as a date, or ``(None, reason)``.
 
-    ⚠️ ABSTAIN-ON-DISAGREEMENT. Correct only for a tag that states ONE FACT many times — ``contract
+    ABSTAIN-ON-DISAGREEMENT. Correct only for a tag that states ONE FACT many times — ``contract
     .closing_date`` is the case it was written for: every document restates the same closing, so two
     distinct values mean the file genuinely contradicts itself and there is no answer to pick.
 
@@ -3541,7 +3541,7 @@ def _single_parsed_date(snapshot: Snapshot, tag_id: str) -> tuple[date | None, s
     return next(iter(dates)), None
 
 
-# ⚠️ THE DATE-SELECTION POLICY IS PER TAG, NOT PER FAMILY (a reported regression, corrected here).
+# THE DATE-SELECTION POLICY IS PER TAG, NOT PER FAMILY (a reported regression, corrected here).
 #
 # A per-document date tag can appear several times on one file, and the right pick differs by tag. An
 # earlier fix replaced abstain-on-disagreement with most-recent-wins for ALL THREE date tags on the
@@ -3583,7 +3583,7 @@ def _earliest_parsed_date(snapshot: Snapshot, tag_id: str) -> tuple[date | None,
     The conservative pick, for a tag whose duplicates cannot be ranked by supersession from the snapshot
     alone (see the policy note above): the oldest appraisal effective date, the soonest lock expiry.
 
-    ⚠️ It trades a known false-positive for an unacceptable false-negative, deliberately. A file carrying
+    It trades a known false-positive for an unacceptable false-negative, deliberately. A file carrying
     a genuinely REPLACED appraisal (a second full report, not a 1004D) ages from the superseded one and
     may flag when it need not — a processor confirms which report governs. The alternative is closing a
     loan on a fifteen-month-old value because an update reset the clock. Given PR-6/CL-1's stated
@@ -3610,7 +3610,7 @@ def _shift_months(anchor: date, months: int) -> date:
 def _completed_months(earlier: date, later: date) -> int:
     """COMPLETE calendar months from ``earlier`` to ``later`` — a partial month does NOT count.
 
-    ⚠️ THE COUNTERPART TO :func:`_age_months_ceiling`, AND THE DIRECTION MATTERS MORE THAN THE NAME.
+    THE COUNTERPART TO :func:`_age_months_ceiling`, AND THE DIRECTION MATTERS MORE THAN THE NAME.
     Rounding is not a stylistic choice here; it decides which way the rule fails:
 
     * AGEING a document (CR-13, PR-6) — a bigger number makes the rule MORE likely to fire, so rounding
@@ -3630,10 +3630,10 @@ def _completed_months(earlier: date, later: date) -> int:
 def _age_months_ceiling(earlier: date, later: date) -> int:
     """Calendar months from ``earlier`` to ``later``, ROUNDED UP on any partial month.
 
-    ⚠️ CALENDAR MONTHS, NOT A DAY COUNT. Fannie's B1-1-03 / B4-1.2-04 windows are stated in months, and a
+    CALENDAR MONTHS, NOT A DAY COUNT. Fannie's B1-1-03 / B4-1.2-04 windows are stated in months, and a
     30-day approximation differs from the calendar by up to three days at four months.
 
-    ⚠️ AND IT ROUNDS UP — the reported finding. The previous version floored to COMPLETE months while
+    AND IT ROUNDS UP — the reported finding. The previous version floored to COMPLETE months while
     CR-13/PR-6 compare with strict ``>``, so ``floor(age) > 4`` only fired at five complete months and a
     document up to a full month past its window passed: a credit report pulled 2026-03-02 against a
     2026-08-01 closing is **152 days** old — 4 months 30 days — and floored to ``4``, clearing a four-month
@@ -3648,7 +3648,7 @@ def _age_months_ceiling(earlier: date, later: date) -> int:
     Negative when ``later`` precedes ``earlier`` (the caller decides what that means — see
     :func:`_age_in_months_at_closing`, which refuses to age a document dated after closing).
 
-    ⚠️ FOR AGEING A DOCUMENT ONLY. Rounding up is conservative when a bigger number makes the rule
+    FOR AGEING A DOCUMENT ONLY. Rounding up is conservative when a bigger number makes the rule
     MORE likely to fire. For SEASONING — where a bigger number CLEARS the borrower — it is the
     permissive direction and clears an event early; use :func:`_completed_months` there.
     """
@@ -3669,13 +3669,13 @@ def _age_in_months_at_closing(
 ) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """Shared body for CR-13 / PR-6: COMPLETE calendar months from a document's date to the closing date.
 
-    ⚠️ THE OPERAND SUBSTITUTION, stated where it happens: the guideline measures to the **note date**; the
+    THE OPERAND SUBSTITUTION, stated where it happens: the guideline measures to the **note date**; the
     snapshot carries only ``contract.closing_date``. They are usually the same day and not always. Recorded
     as an explicit assumption in docs/tickets/LP-485.md rather than silently treated as identical.
 
     Fail-closed: either date absent, unparseable, or disagreed-upon → ``unknown`` (never 0, never a default).
 
-    ⚠️ ``pick`` is the caller's DATE-SELECTION POLICY and is deliberately explicit — see the policy note
+    ``pick`` is the caller's DATE-SELECTION POLICY and is deliberately explicit — see the policy note
     above :func:`_most_recent_parsed_date`. Credit ages from the newest pull; an appraisal ages from the
     ORIGINAL effective date. Defaulting either way silently is how the 1004D regression happened.
     The CLOSING date stays abstain-on-disagreement: that is one fact restated, so a contradiction is real.
@@ -3692,7 +3692,7 @@ def _age_in_months_at_closing(
     if closing is None:
         return _UNKNOWN, f"the closing date is {why_closing} — cannot age the {label}"
     if doc_date > closing:
-        # ⚠️ Reported finding: a negative age matched no `>` outcome and fell through to the DEFAULT
+        # Reported finding: a negative age matched no `>` outcome and fell through to the DEFAULT
         # `satisfied`, rendering "-3 complete calendar month(s) before closing" as a clean pass. A document
         # dated after closing is a mis-parse, a transposition, or a stale closing date — never a fact to
         # certify. Every other path in this family fails closed; so does this one now.
@@ -3727,7 +3727,7 @@ def _appraisal_age_months(
     """property.appraisal_age_months_at_closing — calendar months from the appraisal's EFFECTIVE date to
     closing (PR-6). B4-1.2-04 measures from the effective date, not the report/signature date.
 
-    ⚠️ EARLIEST effective date. Both of PR-6's bands run from the ORIGINAL appraisal — a Form 1004D update
+    EARLIEST effective date. Both of PR-6's bands run from the ORIGINAL appraisal — a Form 1004D update
     does not restart the twelve-month clock, and the classifier cannot tell an update from a replacement
     (one `appraisal` type). Taking the newest let an update reset the clock and reported a fifteen-month-old
     value as `satisfied`.
@@ -3746,7 +3746,7 @@ def _rate_lock_days_to_closing(
     A day count is correct here (unlike the month-stated guideline windows): a lock expires on a date, and
     the question is simply which date comes first. Fail-closed to unknown on either side.
     """
-    # ⚠️ SOONEST expiry, not the latest. This tag's value is an EXPIRY, not a document date, so "latest"
+    # SOONEST expiry, not the latest. This tag's value is an EXPIRY, not a document date, so "latest"
     # means "the most permissive lock anywhere in the file" — a superseded loan estimate locked through
     # September would mask a re-lock that expired in July, and CL-1 would pass an expired lock.
     expiry, why = _earliest_parsed_date(snapshot, "rate_lock.expiration")
@@ -3772,7 +3772,7 @@ def _rate_lock_days_to_closing(
 # --------------------------------------------------------------------------- #
 # LP-486 / ADR-376 — the CLOSED-VOCABULARY ABSTAIN pattern, for CR-12 (disputed accounts).
 #
-# ⚠️ WHY THIS EXISTS. `is_disputed` carries a CLEAN Y/N on the two bench credit reports (34 N, 1 Y across
+# WHY THIS EXISTS. `is_disputed` carries a CLEAN Y/N on the two bench credit reports (34 N, 1 Y across
 # 35 rows) and FREE TEXT on LF-96SV — a different bureau format — where the same field holds
 # "ACCOUNT IN FORBEARANCE", "ACCOUNT CLOSED BY CREDIT GRANTOR" and
 # "ACCOUNT PREVIOUSLY IN DISPUTE-NOW RESOLVED-REPORTED BY SUBSCRIBER". ONE FIELD, TWO ENCODINGS.
@@ -3781,7 +3781,7 @@ def _rate_lock_days_to_closing(
 # negative on a fraud-adjacent rule that ships `auto`. So the recipe recognises a CLOSED SET and ABSTAINS
 # on anything else. It NEVER classifies open vocabulary, never stems, never fuzzy-matches, never infers.
 #
-# ⚠️ "PREVIOUSLY IN DISPUTE-NOW RESOLVED" is deliberately NOT in either list: it is unrecognised, so it
+# "PREVIOUSLY IN DISPUTE-NOW RESOLVED" is deliberately NOT in either list: it is unrecognised, so it
 # abstains. Reading it as "not disputed" would be an inference the bureau did not state.
 #
 # The vocabulary is DOMAIN DATA and is mirrored in CR-12's spec reference_values, where Priya edits it;
@@ -4113,7 +4113,7 @@ def _liability_dispute_status(
 ) -> tuple[JsonValue, str]:
     """liab.is_disputed — is THIS tradeline flagged as disputed by the consumer? (CR-12, ADR-376)
 
-    Recognises a CLOSED vocabulary and abstains on everything else. ⚠️ An unrecognised value is
+    Recognises a CLOSED vocabulary and abstains on everything else. An unrecognised value is
     ``unknown``, NOT "no": the encoding varies by bureau, and inferring from unfamiliar text is exactly how
     a dispute gets missed. Absent field → ``unknown`` too (absent ≠ not disputed).
     """
@@ -4122,7 +4122,7 @@ def _liability_dispute_status(
 
     if not isinstance(subject_raw, LiabilityRow):
         return _UNKNOWN, "not a liability subject"
-    # ⚠️ Resolve the CANONICAL name through the liability alias map, never the raw column. The alias map
+    # Resolve the CANONICAL name through the liability alias map, never the raw column. The alias map
     # is the documented place a ListSpec rename is absorbed; hard-coding the column meant a rename would
     # keep every other liability reader working while this recipe abstained on every tradeline on every
     # file — the silent false-negative ADR-376 exists to prevent, and one the tests could not catch
@@ -4148,13 +4148,13 @@ def _liability_dispute_status(
 
 
 # --------------------------------------------------------------------------- #
-# LP-488 — MI-1's LTV. ⚠️ THE ARITHMETIC IS NOT REIMPLEMENTED HERE. app/verification/ltv.py already owns
+# LP-488 — MI-1's LTV. THE ARITHMETIC IS NOT REIMPLEMENTED HERE. app/verification/ltv.py already owns
 # it (LP-77) as pure functions, with the two subtleties baked in: a PURCHASE divides by the LESSER OF
 # purchase price and appraised value, a REFINANCE by the appraised value alone. This recipe resolves the
 # inputs from the snapshot and calls that module, so the rule path and the display path can never drift
 # into two different LTVs for one file.
 #
-# ⚠️ THESE TAGS DESCRIBE, THEY DO NOT JUDGE. `mi.required` exists in fact_tags.csv as an enum "Is MI
+# THESE TAGS DESCRIBE, THEY DO NOT JUDGE. `mi.required` exists in fact_tags.csv as an enum "Is MI
 # required (LTV>80 conv)" — and it is deliberately left INERT, because materialising it would put the 80%
 # threshold inside a PRODUCER. The threshold belongs to MI-1's reference_values, where it is reviewable
 # and citable; the tag emits the number and the rule judges it.
@@ -4175,7 +4175,7 @@ def _parsed_decimals(snapshot: Snapshot, tag_id: str) -> list[Decimal]:
 def _first_loan_decimal(snapshot: Snapshot, tag_id: str) -> Decimal | None:
     """The parseable value of a LOAN-SCOPED numeric tag, or None.
 
-    ⚠️ Correct only for a tag materialised on the loan subject, where there is exactly one — the MISMO
+    Correct only for a tag materialised on the loan subject, where there is exactly one — the MISMO
     facts (``loan.amount``, ``loan.note_amount``, ``property.purchase_price``). A PER-DOCUMENT numeric
     tag can appear many times on one file and the right pick is a policy decision, NOT "whichever subject
     iterated first" — see :func:`_conservative_appraised_value`.
@@ -4187,7 +4187,7 @@ def _first_loan_decimal(snapshot: Snapshot, tag_id: str) -> Decimal | None:
 def _appraised_value_from_appraisal(snapshot: Snapshot) -> Decimal | None:
     """The LOWEST value stated by an APPRAISAL DOCUMENT, or None. No stated-value fallback.
 
-    ⚠️ THE STRICT VARIANT, and the one a rule about the appraisal must use. ``property.appraised_value``
+    THE STRICT VARIANT, and the one a rule about the appraisal must use. ``property.appraised_value``
     is document-scoped to `appraisal`, so None here means exactly "no appraisal on this file states a
     value" — which is what a rule like PR-2 needs to hear in order to abstain.
     :func:`_conservative_appraised_value` adds a MISMO stated-value fallback for the LTV consumers, and
@@ -4203,7 +4203,7 @@ def _appraised_value_from_appraisal(snapshot: Snapshot) -> Decimal | None:
 def _conservative_appraised_value(snapshot: Snapshot) -> Decimal | None:
     """The LOWEST appraised value on the file, or None.
 
-    ⚠️ THE LOWEST, NOT THE FIRST — a reported defect of the same shape as the LP-487 review findings.
+    THE LOWEST, NOT THE FIRST — a reported defect of the same shape as the LP-487 review findings.
     ``property.appraised_value`` is PER APPRAISAL DOCUMENT, so a file carrying two appraisals (an
     original plus a replacement, or a 1004D the classifier cannot distinguish from a full report) used to
     get whichever subject happened to iterate first: an arbitrary LTV denominator on a real, ordinary
@@ -4218,13 +4218,13 @@ def _conservative_appraised_value(snapshot: Snapshot) -> Decimal | None:
     appraised = _appraised_value_from_appraisal(snapshot)
     if appraised is not None:
         return appraised
-    # ⚠️ FALL BACK TO THE WORKSHEET'S OWN FIELDS. The "the rule path and the display path cannot drift
+    # FALL BACK TO THE WORKSHEET'S OWN FIELDS. The "the rule path and the display path cannot drift
     # into two different LTVs" claim covered only the ARITHMETIC: the worksheet takes `valuation_amount
     # or estimated_value` off the property record, this took the appraisal DOCUMENT's value, so a
     # MISMO-imported file with a valuation and no appraisal PDF showed a real LTV on the worksheet and
     # couldnt_check on the rule. Same fields, same priority, so the two agree on input.
     #
-    # ⚠️ AND THE FALLBACK IS WHY THIS FUNCTION IS NOT THE DEFAULT (reported finding). A MISMO-stated
+    # AND THE FALLBACK IS WHY THIS FUNCTION IS NOT THE DEFAULT (reported finding). A MISMO-stated
     # value is the BORROWER'S estimate, not an appraisal. That is the right input for an LTV consumer,
     # which needs a denominator; it is the WRONG input for any rule whose question is "what did the
     # appraisal say", because the estimate usually EQUALS the price on a MISMO import — so a file with no
@@ -4259,7 +4259,7 @@ def _loan_ltv_basis_is_appraised(
     """
     if _appraised_value_from_appraisal(snapshot) is not None:
         return "yes", "an appraisal on the file supplies the value the ratio divides by"
-    # ⚠️ THE PURCHASE PRICE IS ONE OF THESE, and leaving it out made this guard INERT on every
+    # THE PURCHASE PRICE IS ONE OF THESE, and leaving it out made this guard INERT on every
     # purchase. `value_basis` divides a purchase by the LESSER of price and appraised value, so a
     # purchase stating a price and carrying no appraisal produces a perfectly good `loan.ltv_percent`
     # — while this returned "unknown", MI-1's `eq "no"` never matched, and MI-1 went on clearing the
@@ -4321,7 +4321,7 @@ def _loan_ltv_percent(
 ) -> tuple[JsonValue, str]:
     """loan.ltv_percent — base loan amount over the value basis, as a percent (LP-488).
 
-    ⚠️ Reads the BASE loan amount (loan.amount = MISMO BaseLoanAmount), NOT the note amount. On an FHA
+    Reads the BASE loan amount (loan.amount = MISMO BaseLoanAmount), NOT the note amount. On an FHA
     file the note amount includes financed upfront MIP, so dividing by it would overstate the LTV and
     could push a conventional-equivalent file over the 80% line for the wrong reason. (MI-4 reads the
     difference between the two deliberately; MI-1 must not.)
@@ -4366,13 +4366,13 @@ def _loan_ltv_percent(
 # --------------------------------------------------------------------------- #
 # LP-488 — MI-4's FHA upfront MIP, as a RATE.
 #
-# ⚠️ WHY THIS IS NOT VACUOUS (ADR-330). The two operands are two DIFFERENT MISMO elements:
+# WHY THIS IS NOT VACUOUS (ADR-330). The two operands are two DIFFERENT MISMO elements:
 # TERMS_OF_LOAN/BaseLoanAmount (the model maps it to loan_amount — its own comment records the mapping)
 # and TERMS_OF_LOAN/NoteAmount. On an FHA loan the borrower signs a note for the base amount PLUS the
 # financed upfront MIP, so the difference between them is the premium. On the three conventional MISMO
 # fixtures in the repo the two are equal, which is exactly right: no UFMIP on a conventional loan.
 #
-# ⚠️ THE RATE, NOT A VARIANCE — so the 175-bps figure stays in MI-4's reference_values where it is cited
+# THE RATE, NOT A VARIANCE — so the 175-bps figure stays in MI-4's reference_values where it is cited
 # and reviewable, instead of being hard-coded into this recipe.
 # --------------------------------------------------------------------------- #
 
@@ -4396,7 +4396,7 @@ def _fha_ufmip_percent(
         return _UNKNOWN, "the base loan amount is not a positive number"
     financed = note - base
     if financed <= 0:
-        # ⚠️ The reason text is processor-visible evidence on MI-4's needs_review row, and that row IS the
+        # The reason text is processor-visible evidence on MI-4's needs_review row, and that row IS the
         # note <= base case — so "exceeds ... by 0.00" (or "by -5000") was the sentence a processor read.
         return "0.0000", (
             f"the note amount ({note}) does not exceed the base loan amount ({base}), so no upfront MIP "
@@ -4414,11 +4414,11 @@ def _condo_questionnaire_present(
 ) -> tuple[JsonValue, str] | tuple[JsonValue, str, tuple[str, ...]]:
     """condo.questionnaire_present — does the file carry a condo questionnaire? (CO-1, LP-488)
 
-    ⚠️ A DOCUMENT-TYPE PRESENCE READ — the classifier's type label, never extracted fields (the
+    A DOCUMENT-TYPE PRESENCE READ — the classifier's type label, never extracted fields (the
     IN-8/IN-9/IN-16 discipline). A questionnaire that classified correctly but extracted badly still
     EXISTS; judging its contents is CO-3/CO-5's job, not CO-1's.
 
-    ⚠️ An empty file abstains rather than answering "no". A file with no documents at all is not
+    An empty file abstains rather than answering "no". A file with no documents at all is not
     evidence that a questionnaire is missing — it is evidence that nothing has been uploaded yet.
     """
     if snapshot.documents.absent or not snapshot.documents.entries:
@@ -4443,7 +4443,7 @@ def _condo_questionnaire_present(
     types = set(by_type)
     if found := [cid for t in sorted(types & _CONDO_QUESTIONNAIRE_DOC_TYPES) for cid in by_type[t]]:
         return "yes", "the file carries a condo questionnaire", tuple(found)
-    # ⚠️ ABSTAIN ON THE ADJACENT TYPE (reported finding). `hoa_certification` is a sibling Tier-1 type the
+    # ABSTAIN ON THE ADJACENT TYPE (reported finding). `hoa_certification` is a sibling Tier-1 type the
     # classifier is explicitly told is confusable with this one ("the project-eligibility certification,
     # distinct from ... condo_questionnaire"), and it carries the very facts CO-1's how_to_fix asks for —
     # unit counts, owner-occupancy, delinquency, litigation. Firing "request a questionnaire" at a file
@@ -4465,7 +4465,7 @@ def _condo_questionnaire_present(
 
 
 # --------------------------------------------------------------------------- #
-# LP-488 — AU-3's AUS recommendation. ⚠️ THE `is_disputed` MISTAKE, AVOIDED ON REAL EVIDENCE.
+# LP-488 — AU-3's AUS recommendation. THE `is_disputed` MISTAKE, AVOIDED ON REAL EVIDENCE.
 #
 # The catalog vocabulary for `aus.recommendation` is DU's: approve_eligible / approve_ineligible / refer
 # / out_of_scope. The ONE aus_findings document in the 303-document corpus is an **LPA** (Freddie's Loan
@@ -4476,18 +4476,18 @@ def _condo_questionnaire_present(
 # So the recipe recognises a DECLARED closed vocabulary spanning both engines and ABSTAINS on anything
 # else. It never stems, never fuzzy-matches, never infers.
 #
-# ⚠️ THE DU/LPA EQUIVALENCE IS A DOMAIN CLAIM, and it is logged for Priya rather than buried here.
+# THE DU/LPA EQUIVALENCE IS A DOMAIN CLAIM, and it is logged for Priya rather than buried here.
 # DU splits its answer into a recommendation (Approve / Refer) plus an eligibility (Eligible /
 # Ineligible); LPA gives a risk class (Accept / Caution) plus an eligibility. Treating LPA "Accept" as
 # DU "Approve" is the standard industry equivalence, but it IS a mapping, not a reading.
 #
-# ⚠️ THIN CORPUS: n=1, and that one is LPA. The DU spellings below are researched, NOT observed in our
+# THIN CORPUS: n=1, and that one is LPA. The DU spellings below are researched, NOT observed in our
 # data. They abstain rather than misfire if wrong, which is the safe direction — but no DU file has ever
 # exercised them.
 # --------------------------------------------------------------------------- #
 
 # Vendor-spanning, mirrored in AU-3's spec reference_values and pinned identical by test.
-# ⚠️ SYMMETRIC (reported finding). Approve carried both /eligible and /ineligible while refer carried
+# SYMMETRIC (reported finding). Approve carried both /eligible and /ineligible while refer carried
 # only /eligible, so `Refer/Ineligible` — an ordinary DU recommendation — abstained on a rule already
 # caveated at n=1. Slashed forms are normalised before lookup (see _normalise_aus_decision), so the
 # equally common spaced rendering "Approve / Eligible" no longer misses either.
@@ -4549,7 +4549,7 @@ def _aus_recommendation(
     """
     if not isinstance(subject_raw, DocumentEntry) or subject_raw.document_type != "aus_findings":
         return None, "not an AUS findings document — no recommendation tag"
-    # ⚠️ The RUN IDENTITY, inline (reported finding). AU-3's evidence_required promises "the AUS engine …
+    # The RUN IDENTITY, inline (reported finding). AU-3's evidence_required promises "the AUS engine …
     # and the submission date — inline on the finding, so a processor can tell a current run from a
     # superseded one without reopening the report", and the spec justifies per-document evaluation on
     # exactly that. Without it, a file with two submissions produced two findings a processor could not
@@ -4605,7 +4605,7 @@ def _aus_recommendation(
             f"the AUS approved the loan but found it INELIGIBLE for delivery ({str(raw)!r}, "
             f"eligibility {stated!r})"
         )
-    # ⚠️ An approval whose ELIGIBILITY we cannot read abstains. "Approve" alone does not mean
+    # An approval whose ELIGIBILITY we cannot read abstains. "Approve" alone does not mean
     # deliverable, and reading it as approve_eligible would turn an unread field into a clearance.
     return _UNKNOWN, (
         f"the AUS recommendation reads {str(raw)!r} but the eligibility is not stated in a recognised "
@@ -4616,12 +4616,12 @@ def _aus_recommendation(
 # --------------------------------------------------------------------------- #
 # LP-490 — CR-6's seasoning arithmetic and CR-10's aggregate.
 #
-# ⚠️ THE SEASONING IS MEASURED FROM THE EVENT'S OWN DATE, never from the credit report's date. Priya was
+# THE SEASONING IS MEASURED FROM THE EVENT'S OWN DATE, never from the credit report's date. Priya was
 # explicit: a discharge, dismissal or completion date is the only honest anchor. Using the report date
 # would season an event to whenever the report happened to be pulled — a four-year bankruptcy waiting
 # period would "complete" the moment someone re-pulled credit. When the event has no date, this abstains.
 #
-# ⚠️ THESE RECIPES CARRY NO WAITING PERIOD. The matrix (4 years / 2 years / 7 years by event type) lives
+# THESE RECIPES CARRY NO WAITING PERIOD. The matrix (4 years / 2 years / 7 years by event type) lives
 # in CR-6's reference_values, where it is reviewable and cited to Priya. The tag emits ELAPSED MONTHS and
 # the rule judges them — tags describe, rules judge.
 # --------------------------------------------------------------------------- #
@@ -4679,12 +4679,12 @@ def _non_medical_collection_balances(
     if snapshot.tags.absent:
         return None, "no tags materialized, so no collection balances to aggregate"
 
-    # ⚠️ FILE-WIDE ROWS CANNOT BE ATTRIBUTED ON A JOINT FILE. LiabilityRow carries no borrower link, so
+    # FILE-WIDE ROWS CANNOT BE ATTRIBUTED ON A JOINT FILE. LiabilityRow carries no borrower link, so
     # every borrower would receive BOTH borrowers' collections while CR-10 compares against PER-BORROWER
     # thresholds ($250/$1,000/$2,000/$5,000) — borrower B's collections pushing borrower A over. On a
     # single-borrower file the file total IS that borrower's; on a joint file it is not. Attributing
     # properly needs a document link on the row (an enumerator change), not a guess here.
-    # ⚠️ THE JOINT-FILE ABSTAIN IS DEFERRED UNTIL IT MATTERS (reported finding — mine, from the previous
+    # THE JOINT-FILE ABSTAIN IS DEFERRED UNTIL IT MATTERS (reported finding — mine, from the previous
     # review). Abstaining on EVERY multi-borrower file was right in principle and wrong in effect: once
     # CR-10 went live, `credit.has_collections` resolved to "unknown" for both borrowers, and
     # resolve_applicability maps an unknown predicate to couldnt_check — so every joint file (the common
@@ -4711,7 +4711,7 @@ def _non_medical_collection_balances(
         judged_rows += 1
         if str(kind.value) not in {"collection", "charge_off"}:
             continue
-        # ⚠️ A charged-off MORTGAGE is not a collection for this rule. CR-10's prompt says "do not fold
+        # A charged-off MORTGAGE is not a collection for this rule. CR-10's prompt says "do not fold
         # one into this decision" — which the model cannot do, because it only receives the summed
         # aggregate. One six-figure mortgage charge-off cleared every threshold on a file whose real
         # non-mortgage collections were zero. A charged-off mortgage seasons under CR-6 instead.
@@ -4741,7 +4741,7 @@ def _non_medical_collection_balances(
             "separated from the co-borrower's".format(n=len(balances))
         )
     if not balances:
-        # ⚠️ A CONFIDENT ZERO IS A FALSE ALL-CLEAR unless a credit report was actually read.
+        # A CONFIDENT ZERO IS A FALSE ALL-CLEAR unless a credit report was actually read.
         # _credit_undisclosed_tradeline abstains in exactly this situation, for exactly this reason:
         # "no undisclosed debt on a file with no credit report is a false ALL-CLEAR, which is worse
         # than saying nothing."
@@ -4763,11 +4763,11 @@ def _collection_aggregate_balance(
 ) -> tuple[JsonValue, str]:
     """credit.collection_aggregate_balance — the borrower's NON-MEDICAL collection total (CR-10).
 
-    ⚠️ ABSTAINS IF ANY CONTRIBUTING BALANCE IS UNREADABLE. A partial sum understates the aggregate and
+    ABSTAINS IF ANY CONTRIBUTING BALANCE IS UNREADABLE. A partial sum understates the aggregate and
     could clear a $1,000 or $2,000 threshold the file does not actually clear — the one direction that
     turns a missing number into a pass.
 
-    ⚠️ MEDICAL collections are EXCLUDED (Fannie's payoff limits do not count them), and a tradeline
+    MEDICAL collections are EXCLUDED (Fannie's payoff limits do not count them), and a tradeline
     whose medical status is unknown is treated as CONTRIBUTING: excluding an unknown would be the
     permissive guess. Row selection lives in :func:`_non_medical_collection_balances`.
     """
@@ -4785,7 +4785,7 @@ def _collection_largest_single_balance(
 ) -> tuple[JsonValue, str]:
     """credit.largest_single_collection_balance — the biggest single non-medical collection (CR-10).
 
-    ⚠️ THE MISSING HALF OF THE DU MATRIX (reported finding). CR-10's prompt requires "payoff_required if
+    THE MISSING HALF OF THE DU MATRIX (reported finding). CR-10's prompt requires "payoff_required if
     any INDIVIDUAL collection is $250 or more, OR the aggregate is above $1,000", but the model received
     only the aggregate — so an investment property with one $300 collection gave aggregate 300 (<= $1,000)
     and no per-collection view, and the model answered no_payoff_required for a collection that must be
@@ -4807,7 +4807,7 @@ def _has_collections(
 ) -> tuple[JsonValue, str]:
     """credit.has_collections — does this borrower have ANY non-medical collection? (CR-10's gate)
 
-    ⚠️ CR-10 had NO applicability predicate (reported finding), so every borrower on every file got an AI
+    CR-10 had NO applicability predicate (reported finding), so every borrower on every file got an AI
     call and a needs_review finding — including the overwhelmingly common file with zero collections (all
     three real reports carry none). The spec's own applicability.trigger already said "a borrower with
     none is not applicable"; this makes that expressible, since the predicate DSL is eq/ne on a tag and
@@ -4827,12 +4827,12 @@ def _has_collections(
 
 
 # --------------------------------------------------------------------------- #
-# LP-491 — TI-1's vested-owner compare. ⚠️ IH-2's SHAPE, AND IT REUSES IH-2's NORMALISER RATHER THAN
+# LP-491 — TI-1's vested-owner compare. IH-2's SHAPE, AND IT REUSES IH-2's NORMALISER RATHER THAN
 # CLONING IT (LP-487): truncate at an assignment/care-of marker, strip punctuation, drop corporate-suffix
 # tokens from BOTH sides, compare whole tokens in order with a two-token prefix tolerance. One normaliser,
 # so a fix to either rule's name handling reaches both.
 #
-# ⚠️ THE VESTING TOKENS BELOW ARE SPECULATIVE — the reported finding. ALL FOUR real title commitments
+# THE VESTING TOKENS BELOW ARE SPECULATIVE — the reported finding. ALL FOUR real title commitments
 # carry a PLAIN NAME in vested_owner_name (2-3 words, no TRUSTEE / HUSBAND AND WIFE / ET UX); the recital
 # lives in `vesting_marital_recital`, which fills 0/4. Real-world titles do carry these forms, so they are
 # stripped — but nothing in our corpus exercises them, and that is recorded rather than implied.
@@ -4863,7 +4863,7 @@ _VESTING_MARKER_RE = re.compile(
 def _normalise_party_name(raw: str) -> list[str]:
     """A title party's name reduced to comparable tokens — IH-2's normaliser plus vesting recitals.
 
-    ⚠️ MARKERS MATCH ON WORD BOUNDARIES, and that is the whole correctness of this function. A bare
+    MARKERS MATCH ON WORD BOUNDARIES, and that is the whole correctness of this function. A bare
     ``str.find`` matched a marker INSIDE an ordinary name and truncated it to a shared prefix, which does
     not merely lose precision — it manufactures agreement:
 
@@ -4885,12 +4885,12 @@ def _normalise_party_name(raw: str) -> list[str]:
 def _file_counterparty(snapshot: Snapshot) -> tuple[list[list[str]], str]:
     """The parties the vested owner should match, chosen by loan purpose.
 
-    ⚠️ RETURNS EVERY NAME, not the first (reported finding). _title_vested_owner_matches deliberately
+    RETURNS EVERY NAME, not the first (reported finding). _title_vested_owner_matches deliberately
     matches against vested_owner_name OR vested_owner_name_2 because 3 of 4 real commitments are
     co-owned — but this side took sellers[0] / names[0] only, so a couple selling jointly whose
     commitment vests in the SECOND seller produced a needs_review on a correct file.
 
-    ⚠️ THE PURPOSE BRANCH LIVES HERE, NOT IN AN APPLICABILITY PREDICATE, and the reason is that TI-1
+    THE PURPOSE BRANCH LIVES HERE, NOT IN AN APPLICABILITY PREDICATE, and the reason is that TI-1
     applies to BOTH purposes — there is no single predicate value to scope on. The abstain that a
     predicate would have given is preserved exactly: an unstated purpose returns no counterparty, the tag
     resolves to "unknown", and the gate routes that to couldnt_check. A file that does not state its
@@ -4936,7 +4936,7 @@ def _borrower_display_names(snapshot: Snapshot) -> list[str]:
         if first is None:
             break
         last = snapshot.mismo.facts.get(f"borrower.{index}.last_name")
-        # ⚠️ A borrower name is PII, so a fact here may be a PiiField carrying only a MASKED display.
+        # A borrower name is PII, so a fact here may be a PiiField carrying only a MASKED display.
         # Read the display for one and the value for a plain Field — never assume `.value` exists.
         parts = [
             str(value)
@@ -4956,7 +4956,7 @@ def _title_vested_owner_matches(
 ) -> tuple[JsonValue | None, str]:
     """title.vested_owner_matches — does this commitment's vested owner match the file's counterparty?
 
-    Per COMMITMENT (declines for any other subject, the IH-1 shape). ⚠️ Matches against EITHER vested
+    Per COMMITMENT (declines for any other subject, the IH-1 shape). Matches against EITHER vested
     owner: 3 of the 4 real commitments carry a second owner, and a co-owned property matching only the
     second name is still a match.
     """
@@ -4980,7 +4980,7 @@ def _title_vested_owner_matches(
     for owner in owners:
         tokens = _normalise_party_name(owner)
         if not tokens:
-            # ⚠️ ABSTAIN, don't answer "no" (reported finding). The vocabulary declares this tag
+            # ABSTAIN, don't answer "no" (reported finding). The vocabulary declares this tag
             # "unknown" when nothing identifying survives normalisation — "never a guessed match" — and
             # IH-2 abstains in exactly this case. Falling through to "no" turned an unreadable name into
             # a needs_review finding instead of an honest couldnt_check.
@@ -4998,16 +4998,16 @@ def _title_vested_owner_matches(
 
 
 # --------------------------------------------------------------------------- #
-# LP-491 — TI-6's chain facts. ⚠️ NOT AN ADR-330 VACUITY, and this was the Phase A question. A chain gap
+# LP-491 — TI-6's chain facts. NOT AN ADR-330 VACUITY, and this was the Phase A question. A chain gap
 # is grantee[n] vs grantor[n+1] — a continuity check ACROSS ROWS, which is exactly AS-8's shape (a
 # statement's ending balance against the next statement's opening). One field judged against itself would
 # be vacuous; consecutive rows judged against each other is a real comparison.
 #
-# ⚠️ DETERMINISTIC CODE COMPUTES THE FACTS; TI-6's AI JUDGES THEM. The count, the gap and the shortest
+# DETERMINISTIC CODE COMPUTES THE FACTS; TI-6's AI JUDGES THEM. The count, the gap and the shortest
 # interval are arithmetic and a name compare — no judgment in them. Whether a 40-day resale with a price
 # jump is a flip is the judgment, and that is the rule's.
 #
-# ⚠️ THE CORPUS IS THIN HERE: the four real commitments carry 1, 2, 1 and 0 chain rows, so exactly ONE
+# THE CORPUS IS THIN HERE: the four real commitments carry 1, 2, 1 and 0 chain rows, so exactly ONE
 # consecutive pair exists to test a gap against. Recorded on the spec.
 # --------------------------------------------------------------------------- #
 
@@ -5040,7 +5040,7 @@ def _title_chain_transfer_count(
         return None, "not a title commitment — no chain tag"
     rows = _chain_rows(subject_raw)
     if not rows:
-        # ⚠️ NEVER 0. A commitment with no chain section is not a property with no transfers.
+        # NEVER 0. A commitment with no chain section is not a property with no transfers.
         return _UNKNOWN, "this commitment lists no chain of title"
     return str(len(rows)), f"the chain lists {len(rows)} transfer(s)"
 
@@ -5050,7 +5050,7 @@ def _title_chain_has_gap(
 ) -> tuple[JsonValue | None, str]:
     """title.chain_has_gap — does a transfer's grantee fail to be the next transfer's grantor? (TI-6)
 
-    ⚠️ Uses the SAME name normaliser as TI-1 and IH-2, so a name-handling fix reaches all three. A name
+    Uses the SAME name normaliser as TI-1 and IH-2, so a name-handling fix reaches all three. A name
     that does not normalise abstains rather than reading as a gap: an unreadable name is not a break.
     """
     if (
@@ -5063,7 +5063,7 @@ def _title_chain_has_gap(
         return _UNKNOWN, (
             f"the chain lists {len(rows)} transfer(s) — at least two are needed to check continuity"
         )
-    # ⚠️ SORT BY TRANSFER DATE FIRST (reported finding). This paired grantee->grantor in RAW LIST ORDER,
+    # SORT BY TRANSFER DATE FIRST (reported finding). This paired grantee->grantor in RAW LIST ORDER,
     # and nothing guarantees oldest-first: the extraction prompt gives the model no ordering instruction,
     # and real title commitments commonly list transfers NEWEST-first. On a reversed chain the comparison
     # is inverted and almost always fails, reporting `chain_gap` on a perfectly continuous chain. The
@@ -5124,18 +5124,18 @@ def _property_value_vs_price_gap(
 ) -> tuple[JsonValue, str]:
     """property.value_vs_price_gap — appraised value minus purchase price (PR-2, LP-492).
 
-    ⚠️ NOT A VACUITY (ADR-330), traced in Phase A. The appraised value comes from the APPRAISAL
+    NOT A VACUITY (ADR-330), traced in Phase A. The appraised value comes from the APPRAISAL
     (`property.appraised_value`, document-scoped) and the price from the MISMO loan file
     (`property.purchase_price`) — two documents. The appraisal's own `contract_price_stated` field is
     deliberately NOT used: it fills on 1 of the 2 real appraisals, and reading it would make PR-2 compare
     the appraisal against itself, which is DT-4's fate.
 
-    ⚠️ TAKES THE LOWEST APPRAISED VALUE (LP-488). A file carrying an original plus a replacement
+    TAKES THE LOWEST APPRAISED VALUE (LP-488). A file carrying an original plus a replacement
     appraisal otherwise gets whichever subject iterated first — an arbitrary answer on an ordinary file
     shape. The conservative pick is the lowest: it makes the shortfall larger, and PR-2's costly error is
     missing one.
     """
-    # ⚠️ THE STRICT HELPER (reported finding). _conservative_appraised_value falls back to the MISMO
+    # THE STRICT HELPER (reported finding). _conservative_appraised_value falls back to the MISMO
     # stated value for the LTV consumers, and on a MISMO import that estimate usually EQUALS the price —
     # so a file with NO APPRAISAL yielded a gap of 0 and PR-2 answered SATISFIED, "the appraised value
     # supports the purchase price", which this rule's own spec forbids ("never a guessed pass"). The
@@ -5144,7 +5144,7 @@ def _property_value_vs_price_gap(
     appraised = _appraised_value_from_appraisal(snapshot)
     if appraised is None:
         return _UNKNOWN, "no appraisal in the file states an appraised value"
-    # ⚠️ EITHER PRICE SOURCE (reported finding). Reading only the MISMO fact silently narrowed PR-2 to
+    # EITHER PRICE SOURCE (reported finding). Reading only the MISMO fact silently narrowed PR-2 to
     # MISMO-IMPORTED files: a document-only file carrying an uploaded purchase contract and an appraisal
     # has both numbers and still couldnt_checked forever. `contract.loan_sales_price` is the loan-level
     # promotion of the contract's sales price that LP-407-2 added for exactly this scope. MISMO first
@@ -5164,7 +5164,7 @@ def _property_value_vs_price_gap(
 # --------------------------------------------------------------------------- #
 # LP-492 — PR-5's condition rating and PR-7's address match.
 #
-# ⚠️ THE CONDITION VOCABULARY IS CLOSED AND ABSTAINS (ADR-376). Both real appraisals are UAD 2.6-era
+# THE CONDITION VOCABULARY IS CLOSED AND ABSTAINS (ADR-376). Both real appraisals are UAD 2.6-era
 # ("9/2011", "9/2011 (Updated 1/2014)") and spell the rating "C4" / "C3". The UAD 3.6 cutover lands in
 # Nov 2026 and MAY spell it differently; an equality against one layout is the `is_disputed` mistake, so
 # anything unrecognised resolves to "unknown" and the rule couldnt_checks rather than guessing.
@@ -5200,11 +5200,11 @@ def _property_appraisal_address_match(
 ) -> tuple[JsonValue | None, str]:
     """property.appraisal_address_match — does THIS appraisal's subject address match the file's? (PR-7)
 
-    ⚠️ Mirrors PC-3's `_property_address_match` and REUSES its canonicalisers (`_norm_address`: street
+    Mirrors PC-3's `_property_address_match` and REUSES its canonicalisers (`_norm_address`: street
     suffixes, US state names, ZIP+4 → ZIP5) rather than cloning them — no fuzzy matcher, so this is a
     deterministic compare and PR-7 carries no model.
 
-    ⚠️ THE MAILING-ADDRESS TRAP (LP-407-4 D1, and the ticket names it again). Reads the MISMO
+    THE MAILING-ADDRESS TRAP (LP-407-4 D1, and the ticket names it again). Reads the MISMO
     SUBJECT-property address only — never a borrower's `current_address`, which the parser can fill with
     a MAILING address. A file lacking a COMPLETE subject address (line + city + state + postal) resolves
     to unknown, never a comparison against a partial or wrong-typed address.
@@ -5234,30 +5234,30 @@ def _property_appraisal_address_match(
 # --------------------------------------------------------------------------- #
 # LP-495a — THE MORTGAGE-STATEMENT ↔ STATED-LIABILITY RECONCILIATION (ADR-375: ONE MATCHER, TWO RULES).
 #
-# ⚠️ ONE matcher answers two DIFFERENT questions, and RE-1 / DT-6 each read one of them:
+# ONE matcher answers two DIFFERENT questions, and RE-1 / DT-6 each read one of them:
 #     RE-1  is this statement's obligation DISCLOSED among the app's stated liabilities?  (reo.statement_disclosure)
 #     DT-6  for a MATCHED obligation, does the STATED payment cover the statement's true PITIA?
 #           (reo.statement_payment_coverage)
 # Two matchers would let the two rules disagree about the same pair of documents — the CR-1/CR-4
 # precedent that ADR-375 exists to prevent.
 #
-# ⚠️ NEITHER RULE MAY ASSERT RETENTION, AND NEITHER EVER FIRES. Both SURFACE a discrepancy as
+# NEITHER RULE MAY ASSERT RETENTION, AND NEITHER EVER FIRES. Both SURFACE a discrepancy as
 # `needs_review` and hand the question to the processor. An unmatched statement can be a paid-off loan, a
 # duplicate, or a co-signed debt; an understated payment can be a property under contract. "Retained" is an
 # INFERENCE no document, field or MISMO fact in this system states (LP-495a Phase A), so a rule that
 # asserted it would put a PITIA into the DTI for a property being sold and fail a qualified borrower.
 #
-# ⚠️ `property.is_retained_reo` and `property.retained_pitia` STAY VOCABULARY ORPHANS. Neither recipe here
+# `property.is_retained_reo` and `property.retained_pitia` STAY VOCABULARY ORPHANS. Neither recipe here
 # reads them; they have no `tag_production.yaml` entry and no producer, exactly as
 # `property.is_warrantable_condo` does. A test pins that, so this lane can never be mistaken for coverage
 # of the retention question.
 #
-# ⚠️ NO PROPERTY ADDRESS IS AVAILABLE ON THE STATED SIDE. MISMO emits only
+# NO PROPERTY ADDRESS IS AVAILABLE ON THE STATED SIDE. MISMO emits only
 # `liability.{k}.type / .monthly_payment / .unpaid_balance / .holder_name` — there is no address on a
 # liability — so the match is on HOLDER NAME, reusing IH-2's `_normalise_lender_name` /
 # `_lender_names_agree` rather than cloning a second name matcher.
 #
-# ⚠️ THE ABSTAIN RATE IS REAL AND STATED, NOT DISCOVERED LATER: `lender_name` fills 54/71 mortgage
+# THE ABSTAIN RATE IS REAL AND STATED, NOT DISCOVERED LATER: `lender_name` fills 54/71 mortgage
 # statements (LP-495a Phase A), so ~24% of statements abstain on the name alone. Abstain is the safe
 # direction — the alternative is reading an unnamed statement as an undisclosed debt.
 # --------------------------------------------------------------------------- #
@@ -5265,7 +5265,7 @@ def _property_appraisal_address_match(
 _REO_STATEMENT_DOC_TYPE = "mortgage_statement"
 # The MISMO `liability.{k}.type` value that means "a mortgage", casefolded. StatedLiability carries
 # MortgageLoan / Revolving / Installment / HELOC / Open30Day; only MortgageLoan is the comparison set for a
-# mortgage statement. ⚠️ HELOC is deliberately NOT included: a HELOC statement is a different document type
+# mortgage statement. HELOC is deliberately NOT included: a HELOC statement is a different document type
 # and a HELOC liability is not what a mortgage statement evidences — folding it in would match a first
 # mortgage's statement onto a line of credit.
 _REO_STATED_MORTGAGE_TYPE = "mortgageloan"
@@ -5347,7 +5347,7 @@ def _mortgage_statement_entries(snapshot: Snapshot) -> list[DocumentEntry]:
 
 
 def _reo_match_statement(snapshot: Snapshot, entry: DocumentEntry) -> _StatementMatch:
-    """⚠️ THE ONE MATCHER (ADR-375) — match ONE mortgage statement to the app's stated mortgage liabilities.
+    """THE ONE MATCHER (ADR-375) — match ONE mortgage statement to the app's stated mortgage liabilities.
 
     Tolerant on the holder/lender name (IH-2's normaliser + token-prefix agreement), and ABSTAINS rather
     than guessing at every ambiguity:
@@ -5486,7 +5486,7 @@ def _reo_statement_disclosure(
     Per mortgage statement: returns ``None`` (DECLINE — no tag materialises) for any other subject, so the
     tag lands only on the documents RE-1 reads (the IH-1 / IH-2 shape).
 
-    ⚠️ ``undisclosed`` is a DISCREPANCY, NOT A DEFECT, and RE-1 routes it to ``needs_review``, never to a
+    ``undisclosed`` is a DISCREPANCY, NOT A DEFECT, and RE-1 routes it to ``needs_review``, never to a
     finding. A statement with no matching stated liability can be a loan paid off since the application, a
     duplicate of a liability recorded under a servicer's different name, or a debt the borrower co-signed
     and is not obliged on. The rule surfaces the question; the processor answers it.
@@ -5598,7 +5598,7 @@ def _reo_statement_payment_coverage(
 ) -> tuple[JsonValue | None, str]:
     """reo.statement_payment_coverage — does the STATED payment cover this statement's PITIA? (DT-6)
 
-    ⚠️ THE STATEMENT'S ``monthly_payment`` IS ALREADY THE PITIA — IT IS NOT ADDED TO ``escrow_amount``.
+    THE STATEMENT'S ``monthly_payment`` IS ALREADY THE PITIA — IT IS NOT ADDED TO ``escrow_amount``.
     The extractor's own prompt defines the fields as ``monthly_payment (number) the total monthly payment
     (principal+interest+escrow)`` and ``escrow_amount (number) the escrow PORTION of the payment``. Escrow
     is a COMPONENT of the total, not an addend. Summing them would double-count escrow on all 50 of the 67
@@ -5607,12 +5607,12 @@ def _reo_statement_payment_coverage(
     REASONING instead, because it is usually the EXPLANATION for a real shortfall: a 1003 commonly states
     principal and interest only, and the escrow is exactly the gap.
 
-    ⚠️ NO TOLERANCE BAND, AND THAT IS A CHECKED CONCLUSION, NOT AN OMISSION (ADR-361). No source
+    NO TOLERANCE BAND, AND THAT IS A CHECKED CONCLUSION, NOT AN OMISSION (ADR-361). No source
     establishes a de-minimis difference between a stated housing payment and a servicer's billed PITIA, so
     any band here would be invented. The comparison is exact, and a difference of any size routes to
     ``needs_review`` — which costs a processor one glance, never an automatic finding.
 
-    ⚠️ UNMATCHED IS ``unknown``, NOT A PASS AND NOT A SECOND REPORT. RE-1 already surfaces an unmatched
+    UNMATCHED IS ``unknown``, NOT A PASS AND NOT A SECOND REPORT. RE-1 already surfaces an unmatched
     statement; DT-6 cannot compare a payment against a liability it never found, so it abstains rather
     than double-reporting the same discrepancy under a second rule.
     """
@@ -5660,7 +5660,7 @@ def _reo_statement_payment_coverage(
 # --------------------------------------------------------------------------- #
 # LP-495a — LO-2, LETTER-OF-EXPLANATION COMPLETENESS.
 #
-# ⚠️ THE APPROVED DIRECTIVE SAID "explanation_summary + referenced_date + borrower_signature_present,
+# THE APPROVED DIRECTIVE SAID "explanation_summary + referenced_date + borrower_signature_present,
 # document_type-scoped across ALL SIX LOX TYPES". THOSE THREE FIELDS EXIST ON EXACTLY ONE OF THEM.
 # Verified against every extractor in `app/ai/extraction/` and against the bench corpus:
 #
@@ -5671,33 +5671,33 @@ def _reo_statement_payment_coverage(
 #     letter_of_explanation_property       7  none — reason_or_cause / letter_date / signature_date
 #     letter_of_explanation_income         2  none — reason_or_cause / letter_date / signature_date
 #     letter_of_explanation_child_care     0  none — no_expense_reason / letter_date
-#     credit_explanation_letter            4  ⚠️ NO EXTRACTOR AT ALL (bench status: `no_extractor`)
+#     credit_explanation_letter            4  NO EXTRACTOR AT ALL (bench status: `no_extractor`)
 #     application_loe                      0  borrower_signature_present only; no summary, no referenced_date
 #
-# ⚠️ PHASE A'S "9/34 · 6/34 · 7/34" DENOMINATORS ARE THE WHOLE FAMILY, BUT THE NUMERATORS CAN ONLY EVER
+# PHASE A'S "9/34 · 6/34 · 7/34" DENOMINATORS ARE THE WHOLE FAMILY, BUT THE NUMERATORS CAN ONLY EVER
 # COME FROM THE 9 BASE DOCUMENTS. Read as a sparse fill across 34 letters, those rates invite a rule that
 # reports 25 of 34 LOX documents incomplete; read correctly they are 9/9, 6/9 and 7/9 on the ONLY type
 # whose extractor has the fields. Building "across all six types" on them would have produced a false
 # finding on every letter of the other types — the same shape of error as LP-494's CO-3 drop and LP-495a's
 # own RE-1/DT-6 drop: a number believed without checking what its denominator ranged over.
 #
-# ⚠️ SO THE LEGS ARE NOT ALIASED ONTO THE OTHER TYPES' FIELDS, DELIBERATELY. `letter_date` is when the
+# SO THE LEGS ARE NOT ALIASED ONTO THE OTHER TYPES' FIELDS, DELIBERATELY. `letter_date` is when the
 # letter was written; `referenced_date` is the date of the event being explained — different facts.
 # `borrower_certification` / `accuracy_certification` are a prose attestation; `borrower_signature_present`
 # is whether a signature is on the page — different facts. Mapping one onto the other would answer LO-2's
 # question with a fact that is not its answer.
 #
-# ⚠️ EVERY LOE TYPE IS STILL IN SCOPE — NONE IS SILENTLY SKIPPED. A letter whose type carries no
+# EVERY LOE TYPE IS STILL IN SCOPE — NONE IS SILENTLY SKIPPED. A letter whose type carries no
 # completeness fields resolves to `unknown` → LO-2 `couldnt_check` ("an explanation letter is on file but
 # its completeness cannot be read"), which is a DIFFERENT verdict from "no explanation letter exists" and
 # a different verdict from "this letter is incomplete". Fail closed: absent ≠ empty ≠ unknown.
 #
-# ⚠️ THE AMOUNT LEG IS DELIBERATELY ABSENT. `referenced_amount` fills 0/34 across the family and 0/9 on
+# THE AMOUNT LEG IS DELIBERATELY ABSENT. `referenced_amount` fills 0/34 across the family and 0/9 on
 # the one type that declares it — the TI-3/4/5 block. A leg that never resolves cannot be load-bearing.
-# ⚠️ Only `letter_of_explanation_asset` produces list rows (`transfer_path_or_chronology`, 8 rows); the
+# Only `letter_of_explanation_asset` produces list rows (`transfer_path_or_chronology`, 8 rows); the
 # base type's `explanation_items` produces none, so no per-item completeness read is available.
 #
-# ⚠️ `borrower_signature_present` IS A TYPED EXTRACTOR FIELD, so the catalog's "signature (AI for scans)"
+# `borrower_signature_present` IS A TYPED EXTRACTOR FIELD, so the catalog's "signature (AI for scans)"
 # is STALE — LP-487's question answering yes a sixth time. REPORTED, NOT RE-KINDED: re-kinding needs its
 # own Phase A, and rule_kinds.csv stays 135 rows this ticket.
 # --------------------------------------------------------------------------- #
@@ -5734,7 +5734,7 @@ def _loe_is_explanation_letter(
 ) -> tuple[JsonValue | None, str]:
     """loe.is_explanation_letter — is this document an explanation letter? (LO-2's applicability predicate)
 
-    ⚠️ A SEPARATE PREDICATE TAG EXISTS BECAUSE THE APPLICABILITY DSL HAS ONLY ``eq`` / ``ne``, and LO-2's
+    A SEPARATE PREDICATE TAG EXISTS BECAUSE THE APPLICABILITY DSL HAS ONLY ``eq`` / ``ne``, and LO-2's
     scope is EIGHT document types. Gating on ``document.document_type eq letter_of_explanation`` would
     silently drop the other seven; gating on the completeness tag itself would resolve every NON-letter in
     the file to ``couldnt_check`` (an absent predicate tag is undetermined, not out-of-scope — LP-487), so
@@ -7281,7 +7281,7 @@ _RECIPES: dict[str, Recipe] = {
     "condo_fidelity_coverage": _condo_fidelity_coverage,  # LP-494 — CO-3
     "condo_reserve_adequacy": _condo_reserve_adequacy,  # LP-494 — CO-4
     "condo_project_eligibility": _condo_project_eligibility,  # LP-494 — CO-5
-    # LP-495a — ⚠️ ONE MATCHER, TWO RULES (ADR-375). Both recipes call `_reo_match_statement`; RE-1 reads
+    # LP-495a — ONE MATCHER, TWO RULES (ADR-375). Both recipes call `_reo_match_statement`; RE-1 reads
     # the disclosure question, DT-6 the payment question, so the two rules cannot disagree about which
     # stated liability a statement matched. Neither asserts retention and neither can fire.
     "reo_statement_disclosure": _reo_statement_disclosure,  # LP-495a — RE-1

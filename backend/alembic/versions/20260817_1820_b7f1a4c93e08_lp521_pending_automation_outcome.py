@@ -1,6 +1,6 @@
 """LP-521 — let the outcome constraints store `pending_automation`.
 
-⚠️ THIS IS A LIVE BREAKAGE FIX. LP-391 added `pending_automation` to the Python `EvaluationOutcome`
+THIS IS A LIVE BREAKAGE FIX. LP-391 added `pending_automation` to the Python `EvaluationOutcome`
 enum and the engine has produced it ever since, but NO migration extended the database's CHECK
 constraints, which still carry LP-316's original five values. Nothing had ever hit it, because the
 outcome is emitted only by the pending-checks pass — for a rule that is BLOCKED (not activated) yet
@@ -48,7 +48,7 @@ _OUTCOMES = (
 )
 _PREVIOUS = tuple(v for v in _OUTCOMES if v != "pending_automation")
 
-# ⚠️ THE finding_events NAMES ARE DOUBLE-PREFIXED, AND THAT IS NOT A TYPO. Read from the live schema
+# THE finding_events NAMES ARE DOUBLE-PREFIXED, AND THAT IS NOT A TYPO. Read from the live schema
 # (pg_constraint), not from LP-316's source: that migration passed an already-prefixed name to
 # `sa.CheckConstraint(name="ck_finding_events_finding_event_from_outcome")` inside `create_table`, and
 # the metadata naming convention `ck_%(table_name)s_%(constraint_name)s` prefixed it AGAIN. The
@@ -92,7 +92,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Narrow the constraints back to the LP-316 five.
 
-    ⚠️ This DELETES any `pending_automation` row first. Postgres validates a new CHECK against existing
+    This DELETES any `pending_automation` row first. Postgres validates a new CHECK against existing
     rows, so leaving them would make the downgrade fail outright — and a downgrade that cannot run is
     worse than one that is explicit about what it discards. The rows are reproducible: they are derived
     per run by the pending-checks pass, not authored by a human.

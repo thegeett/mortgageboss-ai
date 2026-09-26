@@ -15,12 +15,12 @@ function noteDate(value: string | null): string | null {
 /**
  * The file's imported conditions, grouped by the lender's own heading (S1-05, S1-08).
  *
- * ⚠️ READ-ONLY, AND THE ABSENCE OF CONTROLS IS THE FEATURE. No edit, no remove, and above all no
+ * READ-ONLY, AND THE ABSENCE OF CONTROLS IS THE FEATURE. No edit, no remove, and above all no
  * status control of any kind — design rule 3: nothing in Stage 1 says cleared, done, satisfied, open
  * or to do. The review screen is where a processor changes what a round says; once imported it is
  * the lender's record of what they asked for, and only the lender clears a condition.
  *
- * ⚠️ THE `R1 R2` CHIPS COME FROM `round_numbers`, WHICH IS DERIVED FROM EVENTS SERVER-SIDE. Not from
+ * THE `R1 R2` CHIPS COME FROM `round_numbers`, WHICH IS DERIVED FROM EVENTS SERVER-SIDE. Not from
  * `first_round_id` / `last_seen_round_id`: two columns cannot express "appeared on R1 and R3 but not
  * R2", and that is exactly what the chips are for. A condition on one round shows one chip and is
  * NOT marked missing, removed or cleared for the rounds it is absent from (S1-08).
@@ -47,7 +47,7 @@ export function ImportedConditions({ conditions }: { conditions: Condition[] }) 
         const showChip = label.toLowerCase() !== group.heading.toLowerCase();
         return (
           <div
-            // ⚠️ A GROUP IS A RUN OF ROWS, NOT A HEADING, so one heading can own two runs — a
+            // A GROUP IS A RUN OF ROWS, NOT A HEADING, so one heading can own two runs — a
             // full round that leaves some conditions behind, or two hand-typed ones with no heading
             // around a printed one. Keyed by heading alone, S1-08 raised a React duplicate-key
             // error per repeat in a browser (LP-909 §5).

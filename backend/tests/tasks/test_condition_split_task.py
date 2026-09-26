@@ -1,6 +1,6 @@
 """Settling a pasted round with the AI split (LP-908 section 2).
 
-⚠️ THESE DRIVE `split_round`, NOT THE CELERY WRAPPER, for the reason every task test in this repo
+THESE DRIVE `split_round`, NOT THE CELERY WRAPPER, for the reason every task test in this repo
 does: `task_session()` builds its own engine and the suite isolates each test inside a transaction
 that is never committed, so a task opening its own session would not see the round the test created.
 
@@ -55,7 +55,7 @@ async def _parsing_round(db: AsyncSession, *, text: str = PROSE) -> ConditionRou
 async def _uploaded_parsing_round(db: AsyncSession) -> ConditionRound:
     """A round that arrived as a PDF and is `PARSING` with nothing extracted from it — S1-03's state.
 
-    ⚠️ BUILT THROUGH THE REAL DOOR RATHER THAN BY DOCTORING A PASTED ROUND. `has_stored_sheet` answers
+    BUILT THROUGH THE REAL DOOR RATHER THAN BY DOCTORING A PASTED ROUND. `has_stored_sheet` answers
     from stored bytes, so setting `sources` by hand would assert the branch against a shape no writer
     produces — and a hand-built source dict is exactly how the client's `has_bytes` bug survived
     (LP-909 review). No parse runs here, so the bytes only need to BE a valid PDF; `raw_text` staying
@@ -114,7 +114,7 @@ async def test_a_split_settles_the_round_to_draft(
 async def test_the_report_records_that_the_ai_actually_ran(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """⚠️ `needs_ai` AND `ai_used` ARE READ TOGETHER. Before this task the pair says "waiting";
+    """`needs_ai` AND `ai_used` ARE READ TOGETHER. Before this task the pair says "waiting";
     after it, "done". `parse_report_for` hardcodes `ai_used=False` because it is written for the
     rule readers, so the task sets it — otherwise a finished round is indistinguishable from one
     still queued."""
@@ -152,7 +152,7 @@ async def test_rejected_rows_are_counted_on_the_round(
 async def test_an_unreachable_model_leaves_a_typed_failure_not_a_stranded_round(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """⚠️ THE STATE LP-907 REFUSED TO CREATE BEFORE THIS WORKER EXISTED. A round in `PARSING` with
+    """THE STATE LP-907 REFUSED TO CREATE BEFORE THIS WORKER EXISTED. A round in `PARSING` with
     no exit is the gap LP-905 recorded; a failed split must land in `PARSE_FAILED` with a reason the
     processor can act on."""
     round_ = await _parsing_round(db_session)
@@ -200,7 +200,7 @@ async def test_a_round_with_no_text_fails_rather_than_calling_the_model(
 async def test_a_pdf_with_no_text_is_not_told_to_paste_what_it_never_pasted(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """⚠️ THE SENTENCE S1-03 ACTUALLY SHOWED ON A BLANK UPLOAD (LP-909 §5 visual check).
+    """THE SENTENCE S1-03 ACTUALLY SHOWED ON A BLANK UPLOAD (LP-909 §5 visual check).
 
     `raw_text` is written on every path since LP-908's review, so the realistic occupant of the
     `if not text:` branch is no longer a paste — it is a PDF that extracted to nothing, a blank page
@@ -227,7 +227,7 @@ async def test_a_pdf_with_no_text_is_not_told_to_paste_what_it_never_pasted(
 async def test_a_whitespace_only_paste_does_not_reach_the_model(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """⚠️ A TRUTHY COLUMN IS NOT THE SAME AS SOMETHING TO SPLIT.
+    """A TRUTHY COLUMN IS NOT THE SAME AS SOMETHING TO SPLIT.
 
     `ConditionPasteRequest.text` is `min_length=1`, so a paste of three spaces passes the door; the
     generic reader answers `needs_ai` for text with no structure, the round opens `PARSING`, and it
@@ -250,7 +250,7 @@ async def test_a_whitespace_only_paste_does_not_reach_the_model(
 async def test_a_second_delivery_settles_nothing_and_appends_no_event(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """⚠️ THE COMPARE-AND-SET, AND WHY THIS TASK REUSES IT WHERE THE ENRICH MERGE DOES NOT. This
+    """THE COMPARE-AND-SET, AND WHY THIS TASK REUSES IT WHERE THE ENRICH MERGE DOES NOT. This
     genuinely IS a parse settling a `PARSING` round, so the guard means what it says: the second
     delivery matches no row, writes nothing, and appends no event — which matters because
     `condition_events` is append-only and a duplicate could never be taken back."""
@@ -276,7 +276,7 @@ async def test_a_discarded_round_is_not_resurrected(
     round_ = await _parsing_round(db_session)
     round_.status = ConditionRoundStatus.DISCARDED
     await db_session.flush()
-    # ⚠️ NOT `== []`. A paste that needs the AI still carries whatever the RULES managed to read —
+    # NOT `== []`. A paste that needs the AI still carries whatever the RULES managed to read —
     # `create_round_from_paste` writes `draft_rows` either way — so "empty" was never the property.
     # What matters is that the split left them exactly as it found them.
     before = list(round_.draft_rows or [])

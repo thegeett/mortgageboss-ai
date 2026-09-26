@@ -38,7 +38,7 @@ infra/modules/compute/README.md:110  ·  infra/README.md:304
 backend/app/core/config.py:143-144, 274-275, 466-475
 ```
 
-⚠️ **`envs/staging/terraform.tfvars` sets it EXPLICITLY** — it does not fall through
+**`envs/staging/terraform.tfvars` sets it EXPLICITLY** — it does not fall through
 to a module default. The module declares no default for it at all, so the tfvars
 value is the only source.
 
@@ -72,7 +72,7 @@ The `us.` prefix is a **cross-region inference profile**, which consumes the
 **"Cross-region model inference requests per minute"** quota — the one at 10,000 for
 both models in use. Not the "Global cross-region" family.
 
-⚠️ **Two decoy quotas sit next to the ones that matter**, and both are three orders
+**Two decoy quotas sit next to the ones that matter**, and both are three orders
 of magnitude lower:
 
 | decoy | value | when it would bite |
@@ -105,7 +105,7 @@ reasoning, and the per-process warning.
 - **Kept, not unset.** At 10,000 RPM it is mostly insurance, but a runaway loop is
   far cheaper to notice at 2000 than unbounded.
 
-⚠️ **The limiter is PER PROCESS, not per environment.** At `desired_count = 1` this
+**The limiter is PER PROCESS, not per environment.** At `desired_count = 1` this
 value *is* the effective rate; at N worker tasks the effective rate is **N × 2000**.
 That warning now sits directly above the variable, so scaling the worker cannot
 silently multiply the request rate. (The same warning already exists in
@@ -130,7 +130,7 @@ ai_requests_per_minute_anthropic: None
 resolve_requests_per_minute()   : 2000
 ```
 
-⚠️ **`backend/.env` is gitignored**, so this change is **not in the commit**. It is
+**`backend/.env` is gitignored**, so this change is **not in the commit**. It is
 per-worktree and lives only on this machine — another worktree, or a fresh clone,
 still has whatever its own `.env` says.
 
@@ -143,7 +143,7 @@ returns the Bedrock value and never consults it. Nothing to change.
 
 ---
 
-## ⚠️ Three independent settings, no relationship between them
+## Three independent settings, no relationship between them
 
 | setting | source | scope |
 |---|---|---|
@@ -185,7 +185,7 @@ image tag from git, detects that the Alembic head is unchanged and skips the
 migration, applies the tfvars change, and waits for all three services to finish
 rolling.
 
-⚠️ **The branch matters.** `allowed_deploy_branches` now permits
+**The branch matters.** `allowed_deploy_branches` now permits
 `bedrock_integration` and `bedrock_integration_with_rules_staging`; the deploy stage
 refuses anything else.
 

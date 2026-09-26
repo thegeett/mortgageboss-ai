@@ -129,7 +129,7 @@ the key protecting state would itself need state — and costs $1/month for no a
 control. The threat model for a state bucket is "someone without S3 access reads
 it", which the managed key already covers.
 
-### ⚠️ `use_lockfile` is NOT verified at v1.15.8
+### `use_lockfile` is NOT verified at v1.15.8
 
 Confirming it requires `terraform init`, which was out of scope.
 
@@ -155,7 +155,7 @@ resource "aws_dynamodb_table" "locks" {
 
 3. Apply bootstrap **before** initialising staging.
 
-⚠️ **Never set both** — Terraform treats that as a conflict.
+**Never set both** — Terraform treats that as a conflict.
 
 **Version note worth carrying forward:** the S3 backend is a **Terraform core**
 feature, initialised before providers load. The `~> 5.0` AWS provider pin has no
@@ -178,7 +178,7 @@ than a coincidence of matching strings.
 This is noted in `envs/staging/main.tf` itself, next to the module call, specifically
 so the old reasoning is not re-applied by someone who finds the C4 doc later.
 
-### ⚠️ The cost-allocation tag had to move, and this was nearly a silent breakage
+### The cost-allocation tag had to move, and this was nearly a silent breakage
 
 `infra/shared` also held `aws_ce_cost_allocation_tag.environment`, which is
 **account-level**, not environment-level.
@@ -259,7 +259,7 @@ deletion, and one fewer service in the critical path of every plan, are.
 
 ## What to check on the first apply
 
-1. **⚠️ `use_lockfile` is accepted by v1.15.8.** First thing on the initial
+1. **`use_lockfile` is accepted by v1.15.8.** First thing on the initial
    `terraform init`. Fallback fully specified above.
 2. **The account guard asserts `058190633983`** in both bootstrap and staging — a
    `precondition`, so a wrong-account apply is a hard plan failure.

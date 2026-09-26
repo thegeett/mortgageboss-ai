@@ -421,7 +421,7 @@ def test_as2_is_scoped_to_purchases_lp517() -> None:
     first real file — a refinance — AS-2 produced 10 `satisfied` findings for a check that cannot apply,
     which is false assurance rather than noise.
 
-    ⚠️ NOT symmetric across the family: B3-4.2-02 waives large-deposit DOCUMENTATION on a refinance but
+    NOT symmetric across the family: B3-4.2-02 waives large-deposit DOCUMENTATION on a refinance but
     expressly RETAINS the borrowed-funds duty, so AS-12 must NOT be scoped out the same way.
     """
     assert _as2_txn("loan_proceeds", "no", purpose="refinance")[0].verdict is Verdict.NOT_APPLICABLE

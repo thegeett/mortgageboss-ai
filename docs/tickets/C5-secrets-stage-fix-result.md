@@ -59,7 +59,7 @@ the prompt leaks into the captured value.
 
 Readline on, so a 130-character URL can be edited rather than only retyped.
 
-⚠️ Checked before relying on it, because the stage is sometimes driven with piped
+Checked before relying on it, because the stage is sometimes driven with piped
 input: with non-terminal stdin, `-e` degrades to a plain read and still returns the
 piped line intact (bash 3.2, verified). `read -i` remains unavailable in bash 3.2, so
 the suggestion still cannot be pre-loaded into the line editor — pressing Enter
@@ -206,7 +206,7 @@ STOPPED Refusing to populate redis-url while the cluster has no AUTH token.
 
 The `mbai-staging` in that command is resolved live, not templated.
 
-⚠️ **Consequence:** `./scripts/deploy staging secrets` will now stop at `redis-url`
+**Consequence:** `./scripts/deploy staging secrets` will now stop at `redis-url`
 until the AUTH token is applied. That is the intended behaviour — it is the check
 that did not exist. `database-url`, `jwt-secret-key` and `encryption-key` are
 processed before it and are unaffected.

@@ -84,7 +84,7 @@ LOAN_SUBJECT = "loan"
 _UNKNOWN_DOC_TYPE = "unknown"
 
 # Document types that describe the PROPERTY rather than a borrower, so an absent `belongs_to` is a
-# genuine "file-level", not a failed attribution. ⚠️ A type NOT listed here (including an unclassified
+# genuine "file-level", not a failed attribution. A type NOT listed here (including an unclassified
 # document) is never handed to a borrower it was not linked to — see _borrower_context.
 # LP-495b review — `lease_agreement` joins them: a lease on the subject (or a retained) property describes the
 # PROPERTY and its rent, not a borrower, so it typically carries no belongs_to. That is exactly the
@@ -271,7 +271,7 @@ def _loan_context(
 # --------------------------------------------------------------------------- #
 # liability (LP-483)
 #
-# ⚠️ WHY THIS FAMILY DID NOT EXIST, AND WHAT IT UNBLOCKS. ``KNOWN_SUBJECTS`` held only
+# WHY THIS FAMILY DID NOT EXIST, AND WHAT IT UNBLOCKS. ``KNOWN_SUBJECTS`` held only
 # transaction/document/loan/borrower, so a tag declared with ``entity: liability`` had nowhere to be
 # produced — the loader rejects an unknown subject. That is why ALL 14 ``liab.*`` tags sit in
 # ``fact_tags.csv`` DECLARED AND UNPRODUCED (account_type, balance, dti_payment, in_application,
@@ -279,13 +279,13 @@ def _loan_context(
 # has_open_judgment_lien, is_derogatory, payment_status, representative_score). This family is therefore
 # NOT CR-1 overhead — it is the missing floor under the whole credit tag vocabulary.
 #
-# ⚠️ IDENTITY. The subject ids MUST equal what the rule-engine's ``per_liability`` enumerator emits, or a
+# IDENTITY. The subject ids MUST equal what the rule-engine's ``per_liability`` enumerator emits, or a
 # tag materialises under an id no rule reads. Both call ``liability_rows`` (rule_engine/enumerators.py) —
 # ONE derivation, so they cannot drift.
 # --------------------------------------------------------------------------- #
 
 # The two sources name the same fact differently. This maps a DECLARATION's canonical field name to each
-# source's own column. ⚠️ It normalises NAMES ONLY — never values: mapping a bureau's ``REV`` to the
+# source's own column. It normalises NAMES ONLY — never values: mapping a bureau's ``REV`` to the
 # vocabulary's ``revolving`` would be the open-vocabulary CLASSIFICATION that ADR-353 defers to Priya,
 # which is why ``liab.account_type`` has no parsed producer (see LP-483's ticket doc).
 _LIABILITY_FIELD_ALIASES: dict[str, dict[str, str]] = {
@@ -297,7 +297,7 @@ _LIABILITY_FIELD_ALIASES: dict[str, dict[str, str]] = {
         "creditor_name": "creditor_name",
         "is_disputed": "is_disputed",
         "payment_status": "payment_status",
-        # ⚠️ `heloc_credit_limit` was REMOVED here (reported finding). It aliased the vocabulary's
+        # `heloc_credit_limit` was REMOVED here (reported finding). It aliased the vocabulary's
         # HELOC-specific limit onto `credit_limit_or_high_credit`, which every REVOLVING tradeline
         # populates — so the mapping is only true when the account IS a HELOC, and deciding that is the
         # open-vocabulary classification this very block says it refuses to do. It was unconditional, and
@@ -360,7 +360,7 @@ def _liability_context(
       ``ListSpec.redact`` covers a field a spec did not name, so an account number a bureau prints
       inside ``creditor_name`` would otherwise reach the model unscrubbed.
 
-    ⚠️ ``include_stated_liabilities`` IS now honoured here — the design question the review deferred has
+    ``include_stated_liabilities`` IS now honoured here — the design question the review deferred has
     been answered (ADR-375). The matcher is liability-scoped, so the app's stated set is the comparison
     set THIS subject needs; the loader guard was widened from borrower-only to ``{borrower, liability}``
     deliberately, not incidentally. It is added ONLY to a ``credit_report_reported`` subject: a
@@ -417,7 +417,7 @@ def _scrub_list_value(value: object) -> object:
 def _serialize_transactions(entry: DocumentEntry, cap: int) -> dict[str, object]:
     """A document's LEGACY ``transactions`` serialised for an AI context (LP-493a), capped and scrubbed.
 
-    ⚠️ These do NOT live in ``entry.lists``. They are the per-document ``transactions`` attribute that
+    These do NOT live in ``entry.lists``. They are the per-document ``transactions`` attribute that
     ``all_transactions()`` reads and AS-1 rides, and nothing serialised them into a context before — so a
     cross-source rule asking "did this deposit leave a verified account?" was shown account-level
     balances and nothing else.
@@ -428,7 +428,7 @@ def _serialize_transactions(entry: DocumentEntry, cap: int) -> dict[str, object]
     """
     rows = tuple(entry.transactions or ())
     shown = rows[:cap]
-    # ⚠️ ABSENT FIELDS ARE OMITTED, not emitted as null (reported finding). A TransactionRecord's
+    # ABSENT FIELDS ARE OMITTED, not emitted as null (reported finding). A TransactionRecord's
     # date/amount/direction/description are REQUIRED Field objects, so `field is not None` filtered
     # nothing and an absent value serialised as an explicit `"direction": null`. _serialize_row drops
     # absent fields precisely to preserve absent != empty, and this function's docstring claims the same
@@ -620,14 +620,14 @@ def _borrower_context(
             attributed = entry.belongs_to is not None and any(
                 str(ref.borrower_id) == raw.borrower_id for ref in entry.belongs_to
             )
-            # ⚠️ LP-493a — an UNATTRIBUTED document is file-level, not "someone else's". A purchase
+            # LP-493a — an UNATTRIBUTED document is file-level, not "someone else's". A purchase
             # agreement, a title commitment or an appraisal has no belongs_to because it describes the
             # PROPERTY, and dropping it silently is what left PC-5 reasoning about an earnest money
             # deposit with the contract absent. A group that declares include_unattributed_documents
             # gets them; one that does not is byte-unchanged.
-            # ⚠️ ANOTHER BORROWER'S document is still never gathered — that would be the guessed
+            # ANOTHER BORROWER'S document is still never gathered — that would be the guessed
             # attribution LP-332/LP-336 forbid. Only genuinely unattributed documents are added.
-            # ⚠️ SCOPED TO GENUINELY PROPERTY-LEVEL TYPES (reported finding). `belongs_to is None` does
+            # SCOPED TO GENUINELY PROPERTY-LEVEL TYPES (reported finding). `belongs_to is None` does
             # NOT only mean "file-level" — it also means ATTRIBUTION FAILED, and the fail-open doc-type
             # filter below keeps None/"unknown" types. So the relaxation was handing a borrower
             # unclassified, unattributed documents that may be a CO-BORROWER'S: on LF-6T3N borrower 2's
@@ -658,7 +658,7 @@ def _borrower_context(
             # Only when the group declared include_lists → an existing borrower group is byte-unchanged.
             if opts.include_lists and entry.lists:
                 doc["lists"] = _serialize_lists(entry, opts.list_row_cap)
-            # ⚠️ LP-493a — a document's TRANSACTIONS live in the legacy `entry.transactions` attribute,
+            # LP-493a — a document's TRANSACTIONS live in the legacy `entry.transactions` attribute,
             # NOT in `entry.lists`. Serialising them is the only way a cross-source rule can see a debit.
             if opts.include_transactions and entry.transactions:
                 doc["transactions"] = _serialize_transactions(entry, opts.list_row_cap)

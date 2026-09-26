@@ -34,7 +34,7 @@
   "nested_lists": [],
 
   "rejected": [
-    {"name":"property_taxes_paid (parsed from Box 10)","reason":"⚠️ Box 10 is FREE TEXT ('Other information') — a servicer may print real-estate taxes, insurance-from-escrow, or anything. Parsing it into a typed property_taxes_paid Decimal is the is_disputed lesson: a field that looks like a clean value but holds free text will misfire. Capture Box 10 verbatim as other_information; a rule/reasoner interprets it. Tags describe; rules judge."},
+    {"name":"property_taxes_paid (parsed from Box 10)","reason":"Box 10 is FREE TEXT ('Other information') — a servicer may print real-estate taxes, insurance-from-escrow, or anything. Parsing it into a typed property_taxes_paid Decimal is the is_disputed lesson: a field that looks like a clean value but holds free text will misfire. Capture Box 10 verbatim as other_information; a rule/reasoner interprets it. Tags describe; rules judge."},
     {"name":"annual_housing_expense / total_housing_cost","reason":"a COMPUTED figure (interest + taxes + insurance) — a judgment for a rule (DT-6), not a value on the form."},
     {"name":"is_investment_property / is_owner_occupied","reason":"a JUDGMENT inferred from Box 8 ≠ borrower address — the fact (the two addresses) is captured; the occupancy conclusion is a rule's call."},
     {"name":"form_number / form_revision_date / omb_number","reason":"the form is identified by classification; these are boilerplate — catch-all."},
@@ -56,7 +56,7 @@
   ],
 
   "notes": [
-    "⚠️ GENUINE RULE TIE, not visibility-only: on BOTH samples Box 8 (the property securing the mortgage, in WA) differs from the borrower address (NC) — these are RETAINED / non-owner-occupied properties, so the 1098 evidences the housing expense (Box 1 interest + Box 10 taxes) and the debt balance (Box 2) on a retained property, which DT-6 reads. This is better than the plan assumed (it framed the type as processor-visibility); form_1098 has a real DT-6 tie.",
+    "GENUINE RULE TIE, not visibility-only: on BOTH samples Box 8 (the property securing the mortgage, in WA) differs from the borrower address (NC) — these are RETAINED / non-owner-occupied properties, so the 1098 evidences the housing expense (Box 1 interest + Box 10 taxes) and the debt balance (Box 2) on a retained property, which DT-6 reads. This is better than the plan assumed (it framed the type as processor-visibility); form_1098 has a real DT-6 tie.",
     "PII: borrower_tin_masked registered (SSN, pre_masked=true — last-4 only). account_number reuses the existing global 'account_number' (ACCOUNT, from_raw) registration — masked display + a value-hash join to the loan's other documents. lender_tin is NOT masked — an EIN is a business identifier (LP-457), and its hyphenated format is guard-safe.",
     "No nested list — a 1098 is flat (one property per form; Box 9 is a count)."
   ]

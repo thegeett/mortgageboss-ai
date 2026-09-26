@@ -1,29 +1,29 @@
-# CR-6 — Derogatory seasoning — calculative rule SPEC (LP-490). ⚠️ BUILDS LIVE (ratify-pending since LP-490a).
+# CR-6 — Derogatory seasoning — calculative rule SPEC (LP-490). BUILDS LIVE (ratify-pending since LP-490a).
 #
 # A major derogatory event carries a waiting period before the borrower is eligible again. This measures
 # the elapsed time from THE EVENT'S OWN DATE and compares it with the period for that event type.
 #
-# ⚠️ INERT. `credit.derogatory_months_elapsed` is derived, but its inputs — `liab.derogatory_type` and
+# INERT. `credit.derogatory_months_elapsed` is derived, but its inputs — `liab.derogatory_type` and
 # `liab.derogatory_date` — are AI tags with no measured accuracy, so the chain is uncalibrated:
 # `not-calibratable-yet` → `is_eligible()` False (LP-484). LIVE in ACTIVE_RULE_IDS since LP-490a (ratify-pending).
 #
-# ⚠️ CR-6 NEVER RETURNS A FAILURE. Priya was explicit: extenuating-circumstance exceptions exist, and a
+# CR-6 NEVER RETURNS A FAILURE. Priya was explicit: extenuating-circumstance exceptions exist, and a
 # rule that returns FAIL on an unseasoned event asserts an ineligibility the file may well overcome. So
 # an unseasoned event resolves to NEEDS_REVIEW — "standard eligibility is not met; an exception needs
 # underwriting review" — never to `fired`. A test pins that no outcome can produce `fired`.
 #
-# ⚠️ SEASONING IS MEASURED FROM THE EVENT'S OWN DATE, NEVER FROM THE CREDIT REPORT'S DATE. Priya was
+# SEASONING IS MEASURED FROM THE EVENT'S OWN DATE, NEVER FROM THE CREDIT REPORT'S DATE. Priya was
 # explicit about this too, and it is the reason the producer abstains rather than substituting: using the
 # report date would let a four-year waiting period "complete" the moment someone re-pulled credit. An
 # event with no date of its own resolves to couldnt_check.
 #
-# ⚠️ ORDINARY CONSUMER LATES ARE A SEPARATE TRACK and are NOT evaluated here. Priya's guidance — last 12
+# ORDINARY CONSUMER LATES ARE A SEPARATE TRACK and are NOT evaluated here. Priya's guidance — last 12
 # months high attention, 13–24 months still relevant, beyond 24 months context rather than a finding,
 # weighed together with severity, frequency and re-established credit — is a JUDGMENT, not a waiting
 # period, and mixing it into this matrix would apply a four-year bar to a single 30-day late. Mortgage
 # lates are CR-8's; consumer lates are logged for Priya as an open question.
 #
-# ⚠️ AN INPUT GAP, RECORDED RATHER THAN PAPERED OVER. `public_records[]` carries
+# AN INPUT GAP, RECORDED RATHER THAN PAPERED OVER. `public_records[]` carries
 # `discharge_or_satisfied_date`, so a BANKRUPTCY has a real event date. A FORECLOSURE, SHORT SALE or
 # DEED-IN-LIEU usually appears as a tradeline status rather than a public record, and no field states its
 # COMPLETION date. Where that date is absent this rule couldnt_checks — correctly, but it means those
@@ -45,7 +45,7 @@ criteria: >-
   can apply one. An event with no date of its own resolves to couldnt_check — the seasoning is never
   computed from the credit report's date.
 
-# ⚠️ A BANKRUPTCY HAS NO SUBJECT TO ATTACH TO — REPORTED, NOT FIXED HERE.
+# A BANKRUPTCY HAS NO SUBJECT TO ATTACH TO — REPORTED, NOT FIXED HERE.
 # The scope below says "each derogatory event on a credit-report tradeline OR PUBLIC RECORD", and both the
 # activation bar and priya-open-questions §11b rest on "public_records[] carries discharge_or_satisfied_date,
 # so a bankruptcy has a real event date". It does not reach this rule: `liability_rows`
@@ -66,7 +66,7 @@ reference_values:
   priya_validated: false          # must equal rule_kinds.csv
   threshold_needs_signoff: true   # must equal rule_kinds.csv
   values:
-    # ⚠️ PROVENANCE TIER P — these are the DOMAIN EXPERT'S OWN RULINGS, given directly (LP-490), stated
+    # PROVENANCE TIER P — these are the DOMAIN EXPERT'S OWN RULINGS, given directly (LP-490), stated
     # as Fannie's waiting periods. Cited as domain rulings, not recalled from memory (ADR-361).
     #   Chapter 7 / Chapter 11 ....... 4 years from discharge OR dismissal
     #   Chapter 13 DISCHARGED ........ 2 years from discharge
@@ -75,7 +75,7 @@ reference_values:
     #   Short sale ................... 4 years from completion
     #   Deed-in-lieu ................. 4 years from completion
     #   Mortgage charge-off .......... 4 years from completion / charge-off
-    # ⚠️ THE CHAPTER 13 SPLIT IS NOT EXPRESSIBLE TODAY. `liab.derogatory_type` has ONE "bankruptcy"
+    # THE CHAPTER 13 SPLIT IS NOT EXPRESSIBLE TODAY. `liab.derogatory_type` has ONE "bankruptcy"
     # value; nothing distinguishes chapter, or discharge from dismissal. Applying the SHORTER 2-year
     # period to an undifferentiated bankruptcy would clear a Chapter 7 two years early, so this spec
     # applies the 4-year period to every bankruptcy — the conservative direction — and the missing
@@ -104,7 +104,7 @@ required_inputs:
     snapshot_path: 'tags.by_subject[<tradeline row_id>]["liab.derogatory_type"]'
     description: >-
       the event type (AI, LP-490): bankruptcy / foreclosure / short_sale / deed_in_lieu / collection /
-      charge_off / none. ⚠️ UNCALIBRATED.
+      charge_off / none. UNCALIBRATED.
 
 subject_enumeration: per_liability
 subject_key_fields: [liability]
@@ -124,10 +124,10 @@ requires_documents:
 
 spec_version: 1
 
-# ⚠️ ORDERED, FIRST-MATCH-WINS. Each row pairs an event TYPE with its own window, so one rule can carry a
+# ORDERED, FIRST-MATCH-WINS. Each row pairs an event TYPE with its own window, so one rule can carry a
 # type-keyed matrix; `when_tags` and `when_compare` must BOTH hold for a row to match.
 deterministic:
-  # ⚠️ GATE ON THE DEROGATORY EVENT, not merely on the source (reported finding). Filtering only on
+  # GATE ON THE DEROGATORY EVENT, not merely on the source (reported finding). Filtering only on
   # liability.source meant every ordinary credit card reached the rule, and credit.derogatory_months_elapsed
   # is `unknown` for a non-derogatory account — so the real corpus (35 tradelines, ZERO derogatory events)
   # produced 35 unfixable couldnt_check findings telling a processor to "read the event's own date from the
@@ -198,7 +198,7 @@ deterministic:
       when_compare: {op: ">=", left: months, right: charge_off}
       reasoning: >-
         the charge-off is {months} month(s) old, meeting the {charge_off}-month waiting period
-    # --- NOT YET SEASONED → needs_review. ⚠️ NEVER `fired`: an extenuating-circumstance exception can
+    # --- NOT YET SEASONED → needs_review. NEVER `fired`: an extenuating-circumstance exception can
     # shorten every one of these periods, and only an underwriter can apply one. ---
     - verdict: needs_review
       when_tags: [{tag: liab.derogatory_type, op: eq, value: "bankruptcy"}]
@@ -246,7 +246,7 @@ deterministic:
         seasoning requirement, while an ordinary consumer charge-off is treated as a collection (CR-10).
         Documented extenuating circumstances can shorten the period.
     # --- The terminal row. `collection` and `none` reach it (neither carries a waiting period), as does
-    # any future type. ⚠️ COULDNT_CHECK, not satisfied: an unrecognised event type must never read as
+    # any future type. COULDNT_CHECK, not satisfied: an unrecognised event type must never read as
     # seasoned. The gate already routes an absent/"unknown" months or type here first.
     - verdict: couldnt_check
       default: true
@@ -255,5 +255,5 @@ deterministic:
         event, or the event states no discharge, dismissal or completion date of its own
       how_to_fix: >-
         Read the event's own date from the discharge order, the recorded deed or the closing documents.
-        ⚠️ Do not substitute the credit report's date: it records when the report was pulled, not when
+        Do not substitute the credit report's date: it records when the report was pulled, not when
         the event completed.

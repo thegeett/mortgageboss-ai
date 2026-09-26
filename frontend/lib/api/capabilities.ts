@@ -42,7 +42,7 @@ export interface Capabilities {
  * missing, which is what this version looks like anyway.
  */
 /**
- * ⚠️ UNDER `/api/v1`, LIKE EVERY OTHER ROUTE — AND IT WAS NOT. This asked for `/capabilities`, which
+ * UNDER `/api/v1`, LIKE EVERY OTHER ROUTE — AND IT WAS NOT. This asked for `/capabilities`, which
  * the server does not serve (`main.py` mounts the router under `API_V1_PREFIX`), so every request
  * 404'd and the fail-closed default above read BOTH switches as off on every deployment. Invisible
  * while both are off everywhere — which they are — and it would have hidden the inbound panel

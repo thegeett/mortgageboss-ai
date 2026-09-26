@@ -181,7 +181,7 @@ def _guideline_exempts(
       readily-identifiable source still warrants review because the lender has questions anyway;
     * the model's answer is ``"unknown"`` — see below.
 
-    ⚠️ ``"unknown"`` NEVER EXEMPTS, and this is not the same guard as the predicate-tag one above.
+    ``"unknown"`` NEVER EXEMPTS, and this is not the same guard as the predicate-tag one above.
     ``_resolve`` maps a MALFORMED or OFF-DOMAIN model response to ``"unknown"``, so without this a
     response the parser could not read would fall through to the predicate and ship a SATISFIED finding
     with ``ratification_pending=False`` — a pass with no human in the loop, produced by an AI failure.
@@ -212,7 +212,7 @@ def _exempt_message(
     A processor reading "satisfied" on a borrowed-funds check is entitled to know the guideline did the
     clearing rather than a model, AND which exemption did it.
 
-    ⚠️ The MESSAGE IS BUILT FROM THE MATCHED CONDITION'S VALUE, not from the tag's reasoning. Two
+    The MESSAGE IS BUILT FROM THE MATCHED CONDITION'S VALUE, not from the tag's reasoning. Two
     reasons. First, with alternatives declared (LP-518) both of AS-12's conditions read the same tag, so
     anything derived from the tag alone renders a payroll clear and an interest clear identically — the
     condition's `value` is the only thing that distinguishes them. Second, `tag.reasoning` is the
@@ -434,7 +434,7 @@ def _resolve_floor(
     * every input resolved AND the amount fell at or below the floor -> not_applicable (out of scope);
     * anything else -> the subject PROCEEDS, carrying a note saying whether the floor applied.
 
-    ⚠️ AN UNRESOLVABLE FLOOR MUST NOT MANUFACTURE A GAP. The floor is a triage filter this rule added,
+    AN UNRESOLVABLE FLOOR MUST NOT MANUFACTURE A GAP. The floor is a triage filter this rule added,
     not an input its question depends on: "does this deposit suggest borrowed funds?" is still fully
     answerable from the transaction tags when nobody can say what 50% of income is. Failing the subject
     to couldnt_check would stop asking the model and hand the processor LESS than they got before this

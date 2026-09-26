@@ -87,7 +87,7 @@ From `rule_kinds.csv` (the gate of record) + the tag vocabulary. All 14 are in-s
 | IN-3 | YTD income consistency | calculative | deterministic (bookend) | per_borrower | `income.ytd_gross`, `income.pay_date`, `income.documented_monthly` → **derived** annualized |
 | IN-4 | Employment gap | structural | deterministic (date) | per_borrower | `income.employment_start/end` → **derived** gap-days vs window |
 | IN-5 | Employer name consistency | structural | **consistency** (LP-325 fuzzy) | per_borrower | `income.employer_normalized` gathered across docs |
-| IN-6 | Pay-stub ↔ W-2 coverage | structural | **⚠ set-coverage** (see Phase 6) | per_borrower cross-doc-type | `income.employer_normalized` sets from paystub vs W-2 |
+| IN-6 | Pay-stub ↔ W-2 coverage | structural | **set-coverage** (see Phase 6) | per_borrower cross-doc-type | `income.employer_normalized` sets from paystub vs W-2 |
 | IN-7 | Same line of work (job change) | judgmental | **judgment** (LP-327/331) | per_borrower | `income.same_line_of_work` (+ context) |
 | IN-8 | VOE present | structural | deterministic (presence) | per_borrower | `income.voe_present` (yes/no) |
 | IN-9 | Future employment (offer letter) | structural | deterministic (presence) | per_borrower | `income.future_employment`, `income.offer_letter_present` |
@@ -173,7 +173,7 @@ thresholds → none; no `reference_values` for income). Below is the plan, with 
 | IN-12 | self-employment | 2-yr returns, Form 1084 add-backs — method Priya-validated (CSV rationale) | B3-3.2 | OVERLAY-PENDING |
 | IN-13 | continuance | income must continue ≥ 3 years | B3-3.1-09 | AGENCY-DEFAULT (confirm 3yr) |
 
-### ⚠ THE IN-3 / IN-1 DISCREPANCY (a correction the ticket asked me to confirm)
+### THE IN-3 / IN-1 DISCREPANCY (a correction the ticket asked me to confirm)
 The ticket says *"IN-3 is the known exception: Priya HAS validated the stated-vs-documented income
 variance at 5%."* **That rule id is IN-1, not IN-3.** `rule_kinds.csv`: **IN-1** = "Stated vs documented
 income variance" (`used_by` for `income.documented_monthly` = IN-1); **IN-3** = "YTD income consistency".

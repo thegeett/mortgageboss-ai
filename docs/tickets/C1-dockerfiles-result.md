@@ -164,7 +164,7 @@ Non-root confirmed: `docker run --rm --entrypoint sh mbai-frontend:test -c id` �
 
 ---
 
-## ⚠️ The build-time API URL — the most likely deployment mistake in the C series
+## The build-time API URL — the most likely deployment mistake in the C series
 
 **`NEXT_PUBLIC_*` variables are inlined into the JavaScript at build time. They are not read at
 runtime.** Setting `NEXT_PUBLIC_API_URL` in an ECS task definition does **nothing** — the value

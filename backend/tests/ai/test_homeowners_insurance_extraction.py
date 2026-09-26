@@ -127,7 +127,7 @@ def test_failed_factory() -> None:
 
 
 def test_homeowners_prompt_is_hand_maintained_not_the_bare_starter() -> None:
-    """⚠️ GUARD (LP-458). homeowners_insurance.txt is HAND-MAINTAINED: the generator runs in DIFF-MODE for
+    """GUARD (LP-458). homeowners_insurance.txt is HAND-MAINTAINED: the generator runs in DIFF-MODE for
     every shipping extractor (it emits only a STARTER placeholder, never overwrites). LP-446/447 added the
     DWELLING-vs-personal-property anti-conflation block by hand, and LP-458 added carrier-HO-form-number
     handling for policy_form. A spec `prompt_hint` does NOT reach this prompt. If a future regeneration

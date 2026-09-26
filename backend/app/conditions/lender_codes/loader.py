@@ -94,7 +94,7 @@ def _row(raw: Any, *, source: str) -> LenderCodeRow:
         raise LenderCodeSeedError(f"{source}: every entry under `codes:` must be a mapping")
 
     code = raw.get("code")
-    # ⚠️ THE LEADING-ZERO GUARD. Unquoted `0006` parses as the integer 6, and `str(6)` would give
+    # THE LEADING-ZERO GUARD. Unquoted `0006` parses as the integer 6, and `str(6)` would give
     # `"6"` — an identifier that looks plausible and matches nothing. Refused, never coerced.
     if not isinstance(code, str):
         raise LenderCodeSeedError(

@@ -166,7 +166,7 @@ know a limiter exists.
 
 Async token bucket or simple spacing, whichever fits the codebase style. **Process-local.**
 
-⚠️ **State clearly in the result doc that this is per-process, not global.** Once the worker
+**State clearly in the result doc that this is per-process, not global.** Once the worker
 scales past one ECS task, the effective rate is N × the setting. The deployed value must
 therefore be *the account quota divided by task count*, not the quota itself. Two tasks each
 pacing at 8 against a 10 RPM account throttles anyway — and looks like a broken limiter.

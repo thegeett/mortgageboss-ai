@@ -15,7 +15,7 @@ diagnosis before it needs a fix.
 
 ---
 
-## ⚠️ What is EVIDENCE and what is INFERENCE — read this before planning the fix
+## What is EVIDENCE and what is INFERENCE — read this before planning the fix
 
 ### Evidence
 | type | failed | succeeded |
@@ -29,16 +29,16 @@ diagnosis before it needs a fix.
 **Prior repo notes rule out token truncation:** every failure recorded `failure_reason: none` and none neared
 the token cap. **So the response was not cut off** — the failure is earlier than that.
 
-### ⚠️ Inference — NOT established
+### Inference — NOT established
 **"Long documents fail" is the best available hypothesis, not a finding.** Five data points, and *length is
 confounded*:
 - Long documents are also more likely to be **scanned**, **multi-section**, or **table-heavy**.
-- ⚠️ **174 is specifically noted as "likely scanned/image-based — defeated pypdf text on both readers."**
+- **174 is specifically noted as "likely scanned/image-based — defeated pypdf text on both readers."**
   **That is a different cause that happens to also be long.**
 
 **Do not build a fix on the correlation. Establish the cause first.**
 
-### ⚠️ A specific hypothesis worth testing first
+### A specific hypothesis worth testing first
 **LP-462 proved Bedrock rejects oversized CLASSIFICATION requests** (4 documents, 118–177 pages). It was
 fixed by capping classification to 15 pages. **Extraction still sends the whole document.**
 
@@ -53,7 +53,7 @@ exactly. **Test this before anything else.**
 It is a **generic Python error** meaning "a value was not what the code expected." It is raised by numeric
 conversion, date parsing, structural unpacking, and dozens of other operations.
 
-**We have a symptom with no location.** ⚠️ **The first job is capturing the traceback and message** — the
+**We have a symptom with no location.** **The first job is capturing the traceback and message** — the
 line that raised it. Without that, any fix is a guess.
 
 ---
@@ -69,8 +69,8 @@ line that raised it. Without that, any fix is a guess.
    - `uniform_residential_loan_application` **206** (fails) vs — no short control exists; use another type
    **A matched pair is what separates length from structure.**
 4. **Check 174 separately.** If it is image-only, it is a **scanned-document** problem, not this bug.
-   ⚠️ **Do not let one cause hide inside another.**
-5. **Report the root cause(s).** ⚠️ **It may be more than one** — the pattern is suggestive, not proof.
+   **Do not let one cause hide inside another.**
+5. **Report the root cause(s).** **It may be more than one** — the pattern is suggestive, not proof.
 
 **Output: what raised the error, on which documents, and whether it is one bug or several.**
 
@@ -82,11 +82,11 @@ Scope depends entirely on Phase 1. The three candidate shapes:
 
 | if the cause is | the fix |
 |---|---|
-| **an oversized payload** | page-capping or chunking for extraction — the LP-462 pattern, applied here. ⚠️ **But extraction genuinely needs more pages than classification** — a 15-page cap would lose a 1003's later sections |
+| **an oversized payload** | page-capping or chunking for extraction — the LP-462 pattern, applied here. **But extraction genuinely needs more pages than classification** — a 15-page cap would lose a 1003's later sections |
 | **a parse/validation error** | harden the specific path, with a regression test on the failing structure |
 | **scanned / image-only input** | a separate concern — OCR or an honest "unreadable" outcome, not a parse fix |
 
-### ⚠️ Regardless of cause — a permanent guard for the 1003
+### Regardless of cause — a permanent guard for the 1003
 **Both loan applications in the set failed. 100% of the type.**
 
 The 1003 is read by **28 rules — more than any other document.** Document 205 alone lost ~90 fields including
@@ -115,12 +115,12 @@ $136/mo, condition C3).
    the free reader read everything — a clean extractor bug"*
 4. **homeowners_insurance 103, property_profile 198, appraisal 272**
 
-### ⚠️ One document needs two fixes
+### One document needs two fixes
 **261** is an **ALTA Settlement Statement** (sale $446,035, loan $437,955, ~140 readable fields) that failed
 with `ValueError` **and** was classified `miscellaneous_document` at 0.75 — the wrong schema.
 
 **Fixing the crash alone would extract it against the wrong schema.**
-⚠️ **But LP-463 may have already changed this** — with declining now legitimate, a forced 0.75 pick may
+**But LP-463 may have already changed this** — with declining now legitimate, a forced 0.75 pick may
 resolve differently. **Re-classify it before assuming it needs a cue.**
 
 ---
@@ -130,5 +130,5 @@ resolve differently. **Re-classify it before assuming it needs a cue.**
 **Phase 3 first if you want a quick win** — it is independent and needs no diagnosis.
 **Otherwise Phase 1 → 2 → 4**, because everything else depends on knowing the cause.
 
-**⚠️ Do not skip Phase 1.** The length correlation is suggestive and confounded; 174 already looks like a
+**Do not skip Phase 1.** The length correlation is suggestive and confounded; 174 already looks like a
 different problem wearing the same error.

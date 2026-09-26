@@ -43,7 +43,7 @@ What it does, in order:
 
 `staging-$(git rev-parse --short HEAD)`, and **the working tree must be clean.**
 
-⚠️ **Untracked files count as dirty, and that is not pedantry.** `docker build`
+**Untracked files count as dirty, and that is not pedantry.** `docker build`
 sends the **working tree** as its build context, not the commit. An untracked file
 that `.dockerignore` does not exclude is *in the image*. Allowing it would let the
 tag name a commit that does not describe the built bytes — which is the exact class
@@ -99,11 +99,11 @@ org.opencontainers.image.version  = <tag>
 **A remote-divergence report.** Ahead → *"shipping work that is not pushed"*; behind
 → *"N commits behind (as of the last fetch)"*.
 
-⚠️ It does **not** fetch. A deploy command should not quietly mutate refs, and the
+It does **not** fetch. A deploy command should not quietly mutate refs, and the
 case that matters most — being ahead — needs no fetch to detect. The output says the
 comparison is against the last fetch and suggests `git fetch` for a current one.
 
-⚠️ `bedrock_integration` currently has **no upstream at all**, which the stage reports
+`bedrock_integration` currently has **no upstream at all**, which the stage reports
 loudly: *"this code exists only on this machine, so the deployed image will be the
 only copy of it outside this worktree."*
 
@@ -120,7 +120,7 @@ task definition — reading a table needs no new image.
 - Heads differ → **migrate before the services roll**, and say so.
 - Deployed head empty (fresh database) → treated as differing.
 
-⚠️ **The migration runs on the NEW image, via one extra task-definition revision.**
+**The migration runs on the NEW image, via one extra task-definition revision.**
 This is the design decision in this ticket that most deserves scrutiny.
 
 The migration must run the new code — the new image is what carries the new
@@ -166,7 +166,7 @@ update precedes the apply.
   in sync?               YES -- staging is running this worktree's HEAD
 ```
 
-⚠️ **The deployed tag is read from what the API service is RUNNING**, not from
+**The deployed tag is read from what the API service is RUNNING**, not from
 tfvars. tfvars is the *desired* state and is ahead of reality whenever an apply
 failed or is in flight; reporting it as "deployed" would be exactly wrong at the
 moment the question matters most. Both are shown, side by side, so a disagreement is
@@ -198,7 +198,7 @@ TO RETURN TO THE PREVIOUS IMAGE
     rm -f infra/envs/staging/terraform.tfvars.bak
     ./scripts/deploy staging phase2
 
-  ⚠️ That reverts the IMAGE. It does not revert a migration that already
+  That reverts the IMAGE. It does not revert a migration that already
      ran: Alembic downgrades are not part of this stage, and the old code
      may not tolerate the new schema.
 ```
@@ -279,7 +279,7 @@ parsed as `count=1 state=COMPLETED running=1 desired=1` → steady. Correct.
 with a diff confirming **every other line is byte-identical**, and the value reads
 back through the parser.
 
-### ⚠️ What is NOT verified
+### What is NOT verified
 
 `register-task-definition` and `run-task` were never **called** — that would have
 created a task-definition revision and run a container, which this ticket forbids. So

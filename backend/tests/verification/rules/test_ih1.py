@@ -120,7 +120,7 @@ def test_recipe_reads_the_typed_dwelling_field_only_not_a_list() -> None:
 # The branches, on the real-shaped binder scenarios (materialized end to end)
 # --------------------------------------------------------------------------- #
 async def test_replacement_cost_binder_satisfies() -> None:
-    # ⚠️ LP-508 / ADR-377 — VERDICT MOVED, BY DESIGN. IH-1's only gated tag,
+    # LP-508 / ADR-377 — VERDICT MOVED, BY DESIGN. IH-1's only gated tag,
     # ins.dwelling_settlement_basis, is on the DISTRUSTED-field list (doc 104 read "coinsurance contract"
     # off a replacement-cost HO3), so the gate degrades EVERY binder to needs_review + ratification_pending
     # BEFORE the rule body runs. IH-1 no longer auto-asserts at all — not "rarely", never — until the
@@ -141,7 +141,7 @@ async def test_replacement_cost_binder_satisfies() -> None:
 
 
 async def test_actual_cash_value_binder_fires() -> None:
-    # ⚠️ LP-508 / ADR-377 — VERDICT MOVED, BY DESIGN. IH-1's only gated tag,
+    # LP-508 / ADR-377 — VERDICT MOVED, BY DESIGN. IH-1's only gated tag,
     # ins.dwelling_settlement_basis, is on the DISTRUSTED-field list (doc 104 read "coinsurance contract"
     # off a replacement-cost HO3), so the gate degrades EVERY binder to needs_review + ratification_pending
     # BEFORE the rule body runs. IH-1 no longer auto-asserts at all — not "rarely", never — until the
@@ -179,7 +179,7 @@ async def test_multiple_binders_are_judged_per_binder() -> None:
     # being per_document — judges EACH: SATISFIED on the replacement-cost binder AND FIRED on the ACV binder.
     # This is deliberate/fail-closed (no operative-policy signal), but it CAN flag a superseded ACV binder.
     # If Priya later rules that multiple binders reconcile to one operative policy, this test changes with it.
-    # ⚠️ LP-508 / ADR-377 — VERDICT MOVED, BY DESIGN. IH-1's only gated tag,
+    # LP-508 / ADR-377 — VERDICT MOVED, BY DESIGN. IH-1's only gated tag,
     # ins.dwelling_settlement_basis, is on the DISTRUSTED-field list (doc 104 read "coinsurance contract"
     # off a replacement-cost HO3), so the gate degrades EVERY binder to needs_review + ratification_pending
     # BEFORE the rule body runs. IH-1 no longer auto-asserts at all — not "rarely", never — until the
@@ -219,7 +219,7 @@ async def test_ih1_reason_is_distinct_from_ih3() -> None:
     ih3 = load_rule_spec("IH-3")
     # IH-1 talks about the loss-settlement BASIS; IH-3 about the effective DATE / coverage gap. On the SAME
     # adequate binder, IH-1's satisfied reason names the settlement basis and never the effective date.
-    # ⚠️ LP-508 — read the SATISFIED outcome's reasoning off the SPEC, not off a live verdict: IH-1's
+    # LP-508 — read the SATISFIED outcome's reasoning off the SPEC, not off a live verdict: IH-1's
     # gated tag is now distrusted (ADR-377) so it degrades before its body runs and never reaches
     # satisfied. What this test protects — that IH-1 talks about the BASIS and IH-3 about the DATE, and
     # that their inputs do not overlap — is unchanged and still asserted.

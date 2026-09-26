@@ -1,13 +1,13 @@
 # CO-3 — Master insurance / fidelity — DETERMINISTIC structural rule SPEC (LP-494).
 #
-# ⚠️ THIS RULE WAS DROPPED EARLIER IN LP-494 AND THAT DROP WAS WRONG. The reasoning was that CO-3
+# THIS RULE WAS DROPPED EARLIER IN LP-494 AND THAT DROP WAS WRONG. The reasoning was that CO-3
 # duplicates live IH-7 (ADR-375, one matcher per comparison). It does not: IH-7's own spec header says
 # "WHAT THIS RULE DOES NOT CHECK ... Fannie also requires FIDELITY/CRIME coverage (B7-4-02) ... NOT
 # evaluated by this rule". So the fidelity leg is the one condo-insurance question NO live rule asks —
 # the gap IH-7 documented and left open — and building it duplicates nothing. The drop came from
 # searching too narrowly; recorded rather than quietly reversed.
 #
-# ⚠️ AND IT IS A PRESENCE READ, NOT AN ADEQUACY ONE. B7-4-02 sets the required amount at "the sum of
+# AND IT IS A PRESENCE READ, NOT AN ADEQUACY ONE. B7-4-02 sets the required amount at "the sum of
 # three months of assessments on all units in the project" and exempts projects of 20 units or fewer.
 # NEITHER the unit count NOR the assessment base is stated on any document in the corpus: `total_units`
 # lives on the condo questionnaire (0/4) and on hoa_certification (0 documents exist). So this rule does
@@ -15,7 +15,7 @@
 # coverage EVIDENCED, itself a requirement the lender must verify — and carries the amount inline so a
 # processor can finish the arithmetic the file cannot. CO-1's discipline exactly.
 #
-# ⚠️ ABSENT COVERAGE IS needs_review, NEVER fired, and the exemption is why. A project of 20 units or
+# ABSENT COVERAGE IS needs_review, NEVER fired, and the exemption is why. A project of 20 units or
 # fewer needs no fidelity coverage at all, and nothing in the file states the unit count — so firing
 # would call a CORRECT file defective. IH-2's and TI-1's precedent, on the same reasoning.
 #
@@ -26,7 +26,7 @@
 #     that would need fidelity/crime insurance coverage of $5,000 or less"
 #     amount: "...the fidelity/crime insurance coverage amount must equal at least ... the sum of three
 #     months of assessments on all units in the project."
-#   ⚠️ A SILENT 404 WAS CAUGHT HERE: the slug is "fidelitycrime-", not "fidelity-crime-".
+#   A SILENT 404 WAS CAUGHT HERE: the slug is "fidelitycrime-", not "fidelity-crime-".
 #
 # INPUT STRENGTH: `fidelity_crime_coverage_present` and `fidelity_crime_coverage_amount` fill 8/8 on the
 # bench's master policies — the strongest-resolving input in the condo lane.
@@ -59,7 +59,7 @@ reference_values:
   priya_validated: false          # must equal rule_kinds.csv
   threshold_needs_signoff: false  # must equal rule_kinds.csv — structural; the figures are tier P
   values:
-    # Recorded for the reasoning text and pinned by test. ⚠️ NEITHER IS APPLIED — see the header.
+    # Recorded for the reasoning text and pinned by test. NEITHER IS APPLIED — see the header.
     fidelity_exempt_max_units: "20"
     fidelity_exempt_max_required_coverage: "5000"
   guideline_text: >-
@@ -98,7 +98,7 @@ requires_documents:
 spec_version: 1
 
 deterministic:
-  # ⚠️ THE CONDO SCOPING IS AN APPLICABILITY PREDICATE, NOT AN OUTCOME — IH-7's finding (LP-487).
+  # THE CONDO SCOPING IS AN APPLICABILITY PREDICATE, NOT AN OUTCOME — IH-7's finding (LP-487).
   applicability:
     tag: property.type
     op: eq
@@ -117,7 +117,7 @@ deterministic:
         funds — the amount is reported on the finding but is not measured against B7-4-02's
         three-months-of-assessments requirement, which the file does not state the inputs for
     - verdict: needs_review
-      # ⚠️ needs_review, NEVER fired — a project of 20 units or fewer is exempt and no document states the
+      # needs_review, NEVER fired — a project of 20 units or fewer is exempt and no document states the
       # count, so firing would call a correct file defective.
       when_tags:
         - {tag: ins.condo_fidelity_coverage, op: eq, value: "absent"}

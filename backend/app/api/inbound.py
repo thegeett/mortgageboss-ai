@@ -265,7 +265,7 @@ async def use_as_condition_sheet(
 ) -> UseAsConditionSheetResponse:
     """Use an emailed PDF as this file's condition sheet (LP-905, screen S1-13).
 
-    ⚠️ THE PATH CARRIES THE LOAN FILE, AND THE SPEC'S DOES NOT. Spec §LP-905 writes
+    THE PATH CARRIES THE LOAN FILE, AND THE SPEC'S DOES NOT. Spec §LP-905 writes
     `POST /api/inbound/attachments/{attachment_id}/condition-round` with `loan_file_id` in the body
     when the message is unrouted. This router is mounted at `/loan-files/{file_identifier}/inbound`,
     so the real path is `…/inbound/attachments/{id}/condition-round` — and that is the better shape,
@@ -273,14 +273,14 @@ async def use_as_condition_sheet(
     A file id in the body would have to be scoped by hand, which is the check everyone forgets.
     Recorded as a spec-vs-code difference; the code wins, per the survey's rule.
 
-    ⚠️ THE CAPABILITY THE SPEC DESCRIBED IS GENUINELY GONE, AND THAT IS AN EXISTING RULE RATHER THAN
+    THE CAPABILITY THE SPEC DESCRIBED IS GENUINELY GONE, AND THAT IS AN EXISTING RULE RATHER THAN
     A NEW ONE. Spec §LP-905 puts `loan_file_id` in the body "if the message is unrouted"; here an
     unrouted attachment 404s at `_scoped_attachment`. `attachment_preview` in this module already
     reasons the same way on purpose — "the unrouted queue is visible to EVERY company" — and
     forwarding has the same exposure: it would create a round on a file from a message no company
     owns yet. Route the message first, then forward it.
 
-    ⚠️ TWO OUTCOMES, TWO STATUS CODES, AND THE DIFFERENCE IS WHETHER ANYTHING WAS CREATED. Without
+    TWO OUTCOMES, TWO STATUS CODES, AND THE DIFFERENCE IS WHETHER ANYTHING WAS CREATED. Without
     `attach_to_round_id` this opens a new round and answers **202**: the round comes back `PARSING`
     and the UI polls it. With one, it MERGES into that round and answers **200** — nothing was
     created, nothing was queued, and there is nothing to poll. LP-905 refused that branch with a
@@ -291,7 +291,7 @@ async def use_as_condition_sheet(
     )
 
     if payload.attach_to_round_id is not None:
-        # ⚠️ LP-907 ARRIVED, SO THE `501` IS GONE. This merges into the named round and creates NO
+        # LP-907 ARRIVED, SO THE `501` IS GONE. This merges into the named round and creates NO
         # second round — which is why it answers 200 rather than the 202 the create path uses: there
         # is nothing to poll, because nothing was queued and nothing was created.
         try:
@@ -312,7 +312,7 @@ async def use_as_condition_sheet(
         await db.commit()
         await db.refresh(merged)
         await db.refresh(attachment)
-        # ⚠️ SET EXPLICITLY, BECAUSE THE DECORATOR'S 202 IS THE DEFAULT FOR THE WHOLE HANDLER AND
+        # SET EXPLICITLY, BECAUSE THE DECORATOR'S 202 IS THE DEFAULT FOR THE WHOLE HANDLER AND
         # RETURNING A MODEL DOES NOT OVERRIDE IT. The first version of this branch documented "two
         # outcomes, two status codes" and shipped one — the merge answered 202 while the docstring
         # said 200, which is a comment asserting behaviour the code did not have. `auth.py` injects
@@ -342,7 +342,7 @@ async def use_as_condition_sheet(
 
     # After the commit, for the same reason the upload endpoint enqueues there: a worker that picked
     # the round up before the transaction landed would find no row.
-    # ⚠️ UNGUARDED, DELIBERATELY. `api/conditions.py`'s `_enqueue_split_or_fail` guards the same call
+    # UNGUARDED, DELIBERATELY. `api/conditions.py`'s `_enqueue_split_or_fail` guards the same call
     # on the paste door and this one does not: the round is committed in `PARSING` before `.delay()`
     # is reached, so a broker that is down strands it exactly the same way. Left as LP-905 shipped
     # it — changing a committed door inside an AI-split ticket is how a ticket becomes a refactor —

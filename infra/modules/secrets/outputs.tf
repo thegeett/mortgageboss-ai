@@ -1,4 +1,4 @@
-# ⚠️ The depends_on below is load-bearing. Do not remove it as "redundant because the
+# The depends_on below is load-bearing. Do not remove it as "redundant because the
 # value already references the key".
 #
 # aws_kms_key_policy is a SIBLING of aws_kms_key, not an ancestor, so without this the

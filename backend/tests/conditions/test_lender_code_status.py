@@ -1,6 +1,6 @@
 """A lender code's status is raised, never lowered (LP-909 §2, review).
 
-⚠️ THIS RULE HAD NO TEST, AND A FILE LOOKED AS THOUGH IT COVERED IT. Nothing under `tests/`
+THIS RULE HAD NO TEST, AND A FILE LOOKED AS THOUGH IT COVERED IT. Nothing under `tests/`
 referenced `seed_lender_codes` at all, and `test_lender_code_loader.py` — which sounds like the code
 map's test — covers the YAML parser only: ten tests, no database, no status, no upsert. A writer that
 demoted `MAPPED` back to `SEEDED` would have passed the entire suite.
@@ -32,7 +32,7 @@ def test_an_unmapped_code_takes_whatever_explains_it() -> None:
 
 
 def test_a_human_decision_outranks_shipped_data() -> None:
-    """⚠️ THE CASE THE RULE EXISTS FOR. `MAPPED` is a person who reviewed the code and gave it a
+    """THE CASE THE RULE EXISTS FOR. `MAPPED` is a person who reviewed the code and gave it a
     meaning. A seed re-run, or a sheet arriving with that code on it, must not overrule them."""
     assert (
         resolved_status(LenderCodeStatus.MAPPED, LenderCodeStatus.SEEDED) is LenderCodeStatus.MAPPED
@@ -54,7 +54,7 @@ def test_seeded_is_not_demoted_by_a_sheet_mentioning_the_code() -> None:
 
 
 def test_the_rule_is_not_an_ordering_and_that_is_the_trap() -> None:
-    """⚠️ `LenderCodeStatus` DECLARES `SEEDED, OBSERVED_UNMAPPED, MAPPED` IN THAT ORDER.
+    """`LenderCodeStatus` DECLARES `SEEDED, OBSERVED_UNMAPPED, MAPPED` IN THAT ORDER.
 
     So a `>`-style implementation — the obvious way to write "raised, never lowered" — would treat
     SEEDED as the lowest rank and happily demote it to OBSERVED_UNMAPPED, while reading as correct

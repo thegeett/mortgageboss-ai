@@ -1,13 +1,13 @@
 """Reading a file's rounds and conditions (LP-909 section 1, spec §LP-909).
 
-⚠️ TWO FIELDS HERE HAVE EXISTED SINCE LP-904 WITH NOTHING TO FILL THEM, which is the same shape as
+TWO FIELDS HERE HAVE EXISTED SINCE LP-904 WITH NOTHING TO FILL THEM, which is the same shape as
 `text_fingerprint` — a column declared, documented, indexed and never written, green because nothing
 executed it. `ConditionRoundPublic.condition_count` defaults to 0 and `ConditionPublic.round_numbers`
 to `[]`, and until this module the only producer of either was the default. A round strip rendering
 `0 on sheet` and `R1 R2` chips that never appear would have looked like a UI bug for as long as
 anyone cared to look.
 
-⚠️ AND THEY ARE THE SAME JOIN, READ IN OPPOSITE DIRECTIONS. A condition "appeared on" a round exactly
+AND THEY ARE THE SAME JOIN, READ IN OPPOSITE DIRECTIONS. A condition "appeared on" a round exactly
 when the round's import wrote a `CONDITION_CREATED` or `CONDITION_SEEN_AGAIN` event naming both. Ask
 it per condition and you get the `R1 R2` chips; ask it per round and you get the round card's count.
 So ONE query answers both, which is the point: the alternative is a query per row, and this repo has
@@ -43,7 +43,7 @@ APPEARED_ON = (ConditionEventKind.CONDITION_CREATED, ConditionEventKind.CONDITIO
 async def list_rounds(db: AsyncSession, *, loan_file_id: UUID) -> list[ConditionRound]:
     """The file's active rounds, newest first.
 
-    ⚠️ DISCARDED ROUNDS ARE INCLUDED, and that is deliberate rather than an oversight. A processor
+    DISCARDED ROUNDS ARE INCLUDED, and that is deliberate rather than an oversight. A processor
     who threw a draft away should see that they did — the round strip is a history, and a discarded
     round silently vanishing reads as data loss. `status` is what the UI filters on; soft-deleted
     rows are what `only_active` removes, and those are a different thing entirely.
@@ -108,7 +108,7 @@ async def appearances_for_file(
     numbers: dict[UUID, set[int]] = defaultdict(set)
     per_round: dict[UUID, set[UUID]] = defaultdict(set)
     for condition_id, round_id, number in rows:
-        # ⚠️ DEFENCE, NOT A DESCRIBED CASE — and an earlier comment here claimed otherwise, saying a
+        # DEFENCE, NOT A DESCRIBED CASE — and an earlier comment here claimed otherwise, saying a
         # numberless round "still counts toward that round's own total". That state cannot be
         # reached: appearance events are written only by paths that operate on an IMPORTED round
         # (import itself, and `_merge_conditions`), and `rows_on_sheet` reads these counts only for
@@ -129,25 +129,25 @@ async def appearances_for_file(
 async def events_for_round(db: AsyncSession, *, round_id: UUID) -> list[ConditionEvent]:
     """One round's history, oldest first — the history on screen S1-09.
 
-    ⚠️ THE FIRST READER `ix_condition_events_round_occurred` HAS EVER HAD, AND THAT IS THE POINT.
+    THE FIRST READER `ix_condition_events_round_occurred` HAS EVER HAD, AND THAT IS THE POINT.
     LP-904 declared that index with the comment "One round's history in time order — the shape the
     round-details sheet reads (S1-09)", and no such reader was ever written. So the index paid a
     write on every event insert — per created condition, per seen-again, per note, per round
     transition — to serve a query nobody made. `(round_id, occurred_at)` is exactly this ordering, so
     this function is what finally makes that cost buy something.
 
-    ⚠️ ITS SIBLING STILL HAS NO READER. `ix_condition_events_condition_occurred` is
+    ITS SIBLING STILL HAS NO READER. `ix_condition_events_condition_occurred` is
     `(condition_id, occurred_at)` — a single CONDITION's history in time order, which is a different
     question from a round's and which nothing in this codebase asks. It does not get this function's
     justification, and it is named here so the next person to look does not assume it did.
 
-    ⚠️ NEWEST FIRST, BECAUSE THE DESIGN DECIDED IT. The first version was oldest-first, argued from
+    NEWEST FIRST, BECAUSE THE DESIGN DECIDED IT. The first version was oldest-first, argued from
     first principles: "a history is read downwards as a sequence". But S1-09's mock runs
     `4:31 → 4:22 → 4:20`, and its *May differ* covers only the sheet width and whether times show —
     so the order is a Must-match, and reasoning my way to the other answer was re-deciding something
     the design pack had already settled. Raised in review; as built the Visual check would have failed.
 
-    ⚠️ ROUND-LEVEL EVENTS ONLY — `condition_id IS NULL`. Without this a 30-row import renders thirty
+    ROUND-LEVEL EVENTS ONLY — `condition_id IS NULL`. Without this a 30-row import renders thirty
     "A condition was added" lines and the panel the README calls "a SHORT history" is anything but:
     measured on a real paste → import → paste → import flow, round 2 came back with NINE lines, six of
     them detail-less `CONDITION_SEEN_AGAIN`.
@@ -160,7 +160,7 @@ async def events_for_round(db: AsyncSession, *, round_id: UUID) -> list[Conditio
     The index still serves this: `(round_id, occurred_at)` is used as a prefix, with the null check as
     a filter.
 
-    ⚠️ NO COMPANY FILTER HERE, AND THAT IS NOT AN OMISSION. The caller resolves the round through
+    NO COMPANY FILTER HERE, AND THAT IS NOT AN OMISSION. The caller resolves the round through
     `get_scoped_round`, which filters `company_id` INSIDE its statement — so an id that reaches this
     function has already been proven to belong to the caller. Adding a second filter would read as
     the gate rather than as a belt, and the gate is the one that must not be forgotten.
@@ -176,7 +176,7 @@ async def events_for_round(db: AsyncSession, *, round_id: UUID) -> list[Conditio
 def rows_on_sheet(round_: ConditionRound, imported_counts: dict[UUID, int]) -> int:
     """How many conditions this round carried — "11 on sheet" on the round card.
 
-    ⚠️ THE ANSWER COMES FROM A DIFFERENT PLACE DEPENDING ON STATUS, and conflating them would make a
+    THE ANSWER COMES FROM A DIFFERENT PLACE DEPENDING ON STATUS, and conflating them would make a
     draft look empty. Before import the rows live in `draft_rows` and no `Condition` exists yet;
     after import the rows ARE conditions and `draft_rows` is cleared. So a draft counts its rows and
     an imported round counts its appearances.
@@ -194,17 +194,17 @@ async def import_counts_for_file(
     ONE QUERY FOR THE WHOLE FILE, the rule `appearances_for_file` states: the round strip draws every
     card at once, so a per-card query is the N+1 that helper exists to avoid.
 
-    ⚠️ THE NUMBERS LIVE IN AN EVENT, NOT ON THE ROW. `condition_rounds` stores neither count.
+    THE NUMBERS LIVE IN AN EVENT, NOT ON THE ROW. `condition_rounds` stores neither count.
     `condition_import.py` writes them into the `ROUND_IMPORTED` detail and returns them to whoever
     called the import — and that response is gone by the next page load, which is why the card could
     not show them. The event is the only durable record of what an import did.
 
-    ⚠️ NEWEST WINS, DELIBERATELY. `condition_events` is APPEND-ONLY, so a round imported twice has
+    NEWEST WINS, DELIBERATELY. `condition_events` is APPEND-ONLY, so a round imported twice has
     two `ROUND_IMPORTED` rows and the later one describes the file as it stands. `occurred_at DESC,
     id DESC` is the same tie-break `events_for_round` uses, and keeping the first row seen per round
     is what makes "newest" the answer rather than "whichever the planner returned".
 
-    ⚠️ A DETAIL THAT CANNOT ANSWER IS SKIPPED, NOT ZEROED. Recording a malformed or partial detail as
+    A DETAIL THAT CANNOT ANSWER IS SKIPPED, NOT ZEROED. Recording a malformed or partial detail as
     `(0, 0)` would put a confident wrong number on the card — precisely the failure
     `condition_count`'s own default produced. Absent here becomes `None` on the wire.
     """
@@ -238,7 +238,7 @@ def import_counts(
 ) -> tuple[int | None, int | None]:
     """The `(created, seen_again)` this round's card should show, or `(None, None)`.
 
-    ⚠️ ONLY AN IMPORTED ROUND HAS AN ANSWER — the same status-dependence `rows_on_sheet` documents
+    ONLY AN IMPORTED ROUND HAS AN ANSWER — the same status-dependence `rows_on_sheet` documents
     one function above, and for the same reason. A draft has never been imported, so "0 new" would
     be a statement about an event that never happened rather than a count of nothing.
     """

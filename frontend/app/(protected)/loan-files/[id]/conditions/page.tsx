@@ -18,17 +18,17 @@ import { useRef, useState } from "react";
 /**
  * Conditions tab (LP-909 §3, §4) — replacing the LP-33 placeholder.
  *
- * ⚠️ THIS PAGE IS WHAT MAKES THE DASHBOARD REACHABLE AT ALL. Until it existed `ConditionsDashboard`
+ * THIS PAGE IS WHAT MAKES THE DASHBOARD REACHABLE AT ALL. Until it existed `ConditionsDashboard`
  * had no caller: the route rendered `TabPlaceholder`, so every screen beneath it was built, tested,
  * and shown to nobody. `lib/unwired-components.test.ts` exists for exactly that failure and could
  * not see this one, because it regex-matches component names against raw file text and the name
  * appeared in prose comments — the blind spot is recorded in LP-909 rather than papered over.
  *
- * ⚠️ NO `Suspense` BOUNDARY, UNLIKE THE DOCUMENTS TAB. That one needs it because it reads
+ * NO `Suspense` BOUNDARY, UNLIKE THE DOCUMENTS TAB. That one needs it because it reads
  * `useSearchParams`; nothing here does. Adding one anyway would be a boundary whose fallback can
  * never render.
  *
- * ⚠️ EVERY BUTTON ON THIS TAB NOW DOES WHAT ITS LABEL SAYS, AND TWO OF THEM DID NOT (LP-909 review).
+ * EVERY BUTTON ON THIS TAB NOW DOES WHAT ITS LABEL SAYS, AND TWO OF THEM DID NOT (LP-909 review).
  * The first version answered *Paste conditions* and *Add one by hand* with a "not built yet" toast,
  * which was at least honest, and answered *Upload a different PDF* with `notifyError` — an ERROR
  * for doing exactly what the button offered. That was the third control in this stage whose handler
@@ -45,7 +45,7 @@ export default function ConditionsPage() {
 
   const [pasteOpen, setPasteOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
-  // ⚠️ A HIDDEN INPUT RATHER THAN A SECOND DROPZONE. `ConditionsEmpty` owns the drop target for a
+  // A HIDDEN INPUT RATHER THAN A SECOND DROPZONE. `ConditionsEmpty` owns the drop target for a
   // file with no rounds; this is the "upload another" path from a round that is already on screen,
   // where there is nowhere to drop. One input, opened on demand, keeps the upload contract in one
   // hook instead of two components that can disagree about the ceiling.
@@ -118,7 +118,7 @@ export default function ConditionsPage() {
                 consequence:
                   "The stored PDF goes back to the reader. This page updates on its own.",
               }),
-            // ⚠️ THE SERVER'S OWN SENTENCE, NEVER A GENERIC FAILURE. A reparse is refused for five
+            // THE SERVER'S OWN SENTENCE, NEVER A GENERIC FAILURE. A reparse is refused for five
             // different reasons — still being read, already imported, discarded, already a draft, or
             // pasted with no PDF stored — and each leads a processor somewhere different. Collapsing
             // them into "could not retry" is what makes a refusal a dead end (spec §9.8).

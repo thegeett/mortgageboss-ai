@@ -40,7 +40,7 @@
   "nested_lists": [],
 
   "rejected": [
-    {"name":"finance_charge / amount_financed / total_of_payments","reason":"⚠️ CD-ONLY. The LE has NO 'Loan Calculations' box — its page-3 'Comparisons' gives In-5-Years + APR + TIP instead. Including these on the LE would create three permanently-null fields on every LE (the LP-461 lesson, applied before building). They live on closing_disclosure only."},
+    {"name":"finance_charge / amount_financed / total_of_payments","reason":"CD-ONLY. The LE has NO 'Loan Calculations' box — its page-3 'Comparisons' gives In-5-Years + APR + TIP instead. Including these on the LE would create three permanently-null fields on every LE (the LP-461 lesson, applied before building). They live on closing_disclosure only."},
     {"name":"closing_date / disbursement_date / seller_name / settlement_agent","reason":"CD-only — an LE is issued early, has no closing/disbursement date, no seller, no settlement agent."},
     {"name":"A-J itemized cost tables / transaction summaries / AIR table","reason":"serve out-of-scope TRID/ARM rules; the headline totals are captured; Tier 3 carries the rest (ADR)."},
     {"name":"contact information block (page 3)","reason":"lender/broker contact names, NMLS IDs, phones — not captured (avoids phone/NMLS PII for a visibility type); Tier 3."},

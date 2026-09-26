@@ -316,7 +316,7 @@ resource "aws_vpc_security_group_ingress_rule" "vpce_https" {
 # subset of AZs is the single biggest lever on their cost: five endpoints across
 # two AZs is roughly double the same five in one.
 #
-# ⚠️ TASKS AND ENDPOINTS MUST MOVE TOGETHER. A task in an AZ with no local endpoint
+# TASKS AND ENDPOINTS MUST MOVE TOGETHER. A task in an AZ with no local endpoint
 # still works — private DNS resolves VPC-wide — but every call crosses an AZ
 # boundary, which costs transfer and quietly gives back the AZ independence the
 # placement was supposed to buy. Whatever AZs are listed here, put the tasks in the

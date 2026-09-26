@@ -10,7 +10,7 @@ file, 15 of 25 attention items were `couldnt_check`, and every one of them:
 * carried no `how_to_fix` at all, because `how_to_fix` lives on an OUTCOME and the gate short-circuits
   before any outcome runs. LP-522 gave judgment verdicts a fix; this path had none either way.
 
-⚠️ THIS IS THE TEMPLATE FLOOR, not the finished text. It cannot yet mention the document's own facts —
+THIS IS THE TEMPLATE FLOOR, not the finished text. It cannot yet mention the document's own facts —
 IH-1 still cannot say "Coverage A of $577,000" or name the HQ-220 endorsement, because a rule sees only
 its tags. That is the next layer; this is what sits underneath it and what a failed or rejected
 composition falls back to.
@@ -68,7 +68,7 @@ def test_a_derived_recipes_sentence_becomes_the_message() -> None:
 
 
 def test_an_ai_tags_prose_is_NOT_promoted_to_the_message() -> None:
-    """⚠️ THE LINE THIS DRAWS. A derived tag's reasoning is authored code — reviewed, stable, written
+    """THE LINE THIS DRAWS. A derived tag's reasoning is authored code — reviewed, stable, written
     for this purpose. An AI tag's is model prose of unpredictable length written for a different
     audience: on AS-12 it ran ~400 words and buried the one fact that mattered. Those keep the generic
     wording until a composer layer can summarise them."""
@@ -82,7 +82,7 @@ def test_an_ai_tags_prose_is_NOT_promoted_to_the_message() -> None:
 
 @pytest.mark.parametrize("label", ["parsed", "fixture-labeled", "n/a", ""])
 def test_a_label_is_not_a_sentence_and_never_becomes_the_message(label: str) -> None:
-    """⚠️ THE BUG THE EXISTING TESTS CAUGHT. A first version promoted ANY non-AI reasoning, and the
+    """THE BUG THE EXISTING TESTS CAUGHT. A first version promoted ANY non-AI reasoning, and the
     suite's own fixtures carry things like "parsed" — which would have reached a processor's screen as
     the entire explanation. Worse than the generic sentence it replaced."""
     _status, reason = _gate(_tag("unknown", produced_by=TagProducedBy.DERIVED, reasoning=label))
@@ -121,7 +121,7 @@ def _ih1_finding(reasoning: str = _AUTHORED):
 
 
 def test_a_couldnt_check_finding_now_says_what_would_resolve_it() -> None:
-    """⚠️ THE HEADLINE DEFECT. `how_to_fix` lives on an OUTCOME and the gate short-circuits before any
+    """THE HEADLINE DEFECT. `how_to_fix` lives on an OUTCOME and the gate short-circuits before any
     outcome runs, so NO couldn't-check finding could carry one — 15 of 25 items on the real file."""
     result = _ih1_finding()
 

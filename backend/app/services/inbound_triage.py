@@ -45,7 +45,7 @@ from app.services.activity_log import log_activity
 from app.services.documents import create_document
 from app.storage import get_storage_backend
 
-# ⚠️ THE MODEL IS A TOP-LEVEL IMPORT; ONLY THE SERVICE IS FUNCTION-LOCAL. An earlier version put
+# THE MODEL IS A TOP-LEVEL IMPORT; ONLY THE SERVICE IS FUNCTION-LOCAL. An earlier version put
 # `ConditionRound` under `TYPE_CHECKING`, reasoning about a cycle — but the cycle concern belongs to
 # `app.services.condition_rounds`, which this module calls into, NOT to `app.models.condition_round`,
 # which imports no services at all. The result was a name available to mypy and absent at runtime:
@@ -262,7 +262,7 @@ async def _round_carrying(
 ) -> ConditionRound | None:
     """The active round on this file whose `sources` already carry this attachment, if any.
 
-    ⚠️ ONE QUESTION, ASKED BY BOTH DOORS, AND SPLITTING IT IS HOW THE INVARIANT BROKE TWICE. The
+    ONE QUESTION, ASKED BY BOTH DOORS, AND SPLITTING IT IS HOW THE INVARIANT BROKE TWICE. The
     attachment→round link is DERIVED from `sources` rather than stored as a column (screen S1-13
     renders "Used as condition sheet → Round N" from it), and that derivation assumes ONE-TO-ONE.
 
@@ -300,7 +300,7 @@ async def forward_attachment_as_sheet(
 ) -> ConditionRound:
     """Use an emailed PDF as a condition sheet, keeping it as CORRESPONDENCE (LP-905, spec §6).
 
-    ⚠️ IT LIVES HERE BY PRECEDENT, NOT BY TASTE. This module already imports the domain service that
+    IT LIVES HERE BY PRECEDENT, NOT BY TASTE. This module already imports the domain service that
     owns what an attachment becomes — `from app.services.documents import create_document` (line 44),
     called by `accept_attachment` at line 192 — so "a triage action reaches into the domain service
     that owns the object it produces" is the established pattern in this exact file, and this is that
@@ -310,7 +310,7 @@ async def forward_attachment_as_sheet(
     has already settled, and would need `_attachment_bytes` promoted across a module boundary to do
     it. `condition_rounds` does not import this module, so the dependency still runs one way only.
 
-    ⚠️ THE ATTACHMENT DOES NOT BECOME A DOCUMENT, and that is the whole point of the action. A
+    THE ATTACHMENT DOES NOT BECOME A DOCUMENT, and that is the whole point of the action. A
     lender's letter satisfies no need and would be classified against a 166-type BORROWER taxonomy —
     the same reasoning that created `CORRESPONDENCE` in the first place (ADR-403). So the bytes are
     re-derived and handed to `create_round_from_sheet`, which stores them with `save_at`; no
@@ -328,7 +328,7 @@ async def forward_attachment_as_sheet(
     if message is None:
         raise CannotAcceptError("The original message is no longer available.")
 
-    # ⚠️ THE SAME GUARDS AS `accept_attachment`, COPIED RATHER THAN SHARED — AND THEY HAVE ALREADY
+    # THE SAME GUARDS AS `accept_attachment`, COPIED RATHER THAN SHARED — AND THEY HAVE ALREADY
     # DIVERGED, which is the argument rather than a hypothetical one. `accept_attachment` refuses
     # anything that is not PENDING (line 174); this admits PENDING *or* CORRESPONDENCE, because a
     # processor may file an attachment as correspondence first and decide to read it as a sheet
@@ -345,7 +345,7 @@ async def forward_attachment_as_sheet(
             f"This attachment is {attachment.safety_state.value}, not safe to use. "
             f"{attachment.safety_reason or ''}".strip()
         )
-    # ⚠️ ALREADY USED? THE GUARD BELOW CANNOT ANSWER THIS, BY CONSTRUCTION. It admits PENDING or
+    # ALREADY USED? THE GUARD BELOW CANNOT ANSWER THIS, BY CONSTRUCTION. It admits PENDING or
     # CORRESPONDENCE, and this function ends by SETTING CORRESPONDENCE — so the first call creates
     # exactly the state the next call requires, and it stays true forever. A self-permitting loop:
     # N forwards gave N rounds, all PARSING, all reading identical bytes.
@@ -381,7 +381,7 @@ async def forward_attachment_as_sheet(
         sheet=SheetBytes(
             content=content,
             source_kind=ConditionSourceKind.EMAIL,
-            # ⚠️ WHAT THE SENDER'S MAIL CLIENT DECLARED, passed through rather than assumed, so a
+            # WHAT THE SENDER'S MAIL CLIENT DECLARED, passed through rather than assumed, so a
             # refusal quotes the claim the sender actually made (LP-905 §1 review, Q1).
             declared_content_type=attachment.declared_content_type,
             inbound_attachment_id=attachment.id,
@@ -413,14 +413,14 @@ async def merge_attachment_into_round(
     This is what spec §LP-905's `attach_to_round_id` always meant, and what LP-905 refused with a
     `501` because the merge did not exist yet.
 
-    ⚠️ THE ROUND IS LOADED SCOPED TO THIS LOAN FILE, AND THAT IS NOT OPTIONAL. `round_id` arrives in
+    THE ROUND IS LOADED SCOPED TO THIS LOAN FILE, AND THAT IS NOT OPTIONAL. `round_id` arrives in
     a REQUEST BODY, so it is a caller-supplied id for a globally-unique row — the one shape that
     cannot be trusted to belong to the file in the path. The route proves the caller owns the FILE;
     nothing but this query proves the ROUND is on it. Scoping inside the statement rather than
     fetching and comparing means a mismatched (file, round) pair is unfetchable, not merely
     rejected.
 
-    ⚠️ THE `sources` GUARD APPLIES HERE TOO, AND AN EARLIER VERSION OF THIS DOCSTRING ARGUED IT
+    THE `sources` GUARD APPLIES HERE TOO, AND AN EARLIER VERSION OF THIS DOCSTRING ARGUED IT
     SHOULD NOT. The argument was that merging creates no second round, so the duplicate guard did not
     fit — true as far as it went, and it left a hole a review found by execution: forward an
     attachment (round 1 carries its id), then merge the SAME attachment into a different round, and
@@ -487,7 +487,7 @@ async def merge_attachment_into_round(
         # What the sender's mail client declared, so a refusal quotes the sender's own claim.
         declared_content_type=attachment.declared_content_type,
         actor_user_id=actor_user_id,
-        # ⚠️ EMAIL, NOT THE DEFAULT. This letter arrived as a forwarded attachment, and `sources`
+        # EMAIL, NOT THE DEFAULT. This letter arrived as a forwarded attachment, and `sources`
         # records how each arrival reached us. The enrich hard-coded `PDF_UPLOAD` until now, so every
         # round merged from a forward has been claiming someone uploaded it.
         source_kind=ConditionSourceKind.EMAIL,

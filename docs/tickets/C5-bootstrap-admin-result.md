@@ -31,7 +31,7 @@
 then shows a summary, asks one `[y/N]`, and runs the task. `add-user` is the same
 with a `Role (ADMIN or PROCESSOR)` prompt and a `Company slug (must already exist)`.
 
-⚠️ **Then create the matching Cognito user**, or the account cannot be reached at
+**Then create the matching Cognito user**, or the account cannot be reached at
 all — the database row gets you past the *application's* login, not past the ALB:
 
 ```bash
@@ -109,7 +109,7 @@ what the tool would do.
 
 **Guard (b) — an explicit environment allowlist.**
 
-⚠️ **Deliberately not `settings.is_production`.** That predicate is
+**Deliberately not `settings.is_production`.** That predicate is
 `environment == "production"` and nothing else, so **every "not in production" guard
 in this codebase is OFF in staging** — including `seed_dev_data.py`'s. That is the
 reason this guard exists, so reusing the predicate would have reproduced the bug it
@@ -196,7 +196,7 @@ created user processor@example.com as processor in example
 Tested: the hash, the password, and even the substring `$2` are absent from the
 success line and from every refusal message.
 
-> ⚠️ **One judgement call to flag.** The brief said both "not the email's domain"
+> **One judgement call to flag.** The brief said both "not the email's domain"
 > and 'report only "created company <slug>, user <email>"'. Those conflict; I
 > followed the explicit format line and the email **is** printed, because it is the
 > identifier you need to correlate the run. If you would rather it were not, the
@@ -240,7 +240,7 @@ transaction-rollback isolation:
 Also verified: `$2a$` hashes are accepted (a legitimate bcrypt variant), and the
 supplied hash is stored **verbatim** rather than re-hashed.
 
-### ⚠️ 21 pre-existing failures in the full suite, unrelated to this change
+### 21 pre-existing failures in the full suite, unrelated to this change
 
 `pytest` over the whole backend reports `21 failed, 4053 passed`. All 21 are in
 `tests/ai/` and `tests/tasks/test_document_processing.py`, and all are caused by this

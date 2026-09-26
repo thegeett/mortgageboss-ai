@@ -749,7 +749,7 @@ async def test_type_mismatch_not_applied_and_free_extracted_for_review(
     await db_session.refresh(doc)
 
     assert doc.status == DocumentStatus.NEEDS_REVIEW
-    assert doc.document_type == "unknown"  # ⚠️ the wrong w2 label was NOT applied
+    assert doc.document_type == "unknown"  # the wrong w2 label was NOT applied
     assert analyze.call_count == 1  # still read (free extraction)
     assert extract.call_count == 0
     assert doc.generic_analysis is not None
@@ -1200,7 +1200,7 @@ async def test_throttled_extraction_is_not_a_content_failure(
 
     assert doc.status == DocumentStatus.NEEDS_REVIEW
     assert doc.processing_error == "extraction incomplete (rate_limited) — re-runnable"
-    # ⚠️ NO FAILED extraction version — the call never produced content, so none is recorded.
+    # NO FAILED extraction version — the call never produced content, so none is recorded.
     assert await _current_extraction(db_session, doc.id) is None
     review = [e for e in logs if e["event"] == "document_needs_review"]
     assert review and review[0]["reason"] == "rate_limited" and review[0]["infra_failure"] is True

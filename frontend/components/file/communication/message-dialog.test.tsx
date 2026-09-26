@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 /**
  * How long to let a real ProseMirror editor mount in jsdom before calling it a failure.
  *
- * ⚠️ `vi.waitFor` DEFAULTS TO 1000ms, AND THAT IS THE ARBITRARY PART — not the assertion. Measured on
+ * `vi.waitFor` DEFAULTS TO 1000ms, AND THAT IS THE ARBITRARY PART — not the assertion. Measured on
  * a Raspberry Pi: the editor-mount cases here run 566-610ms IDLE, and the neighbouring mail-client
  * cases 738-902ms, so the whole file sits at 60-90% of the default budget before any load. Under the
  * full suite's parallel workers one of them failed with "expected null not to be null" — the wait
@@ -23,7 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * Waiting longer for an async mount is exactly what `waitFor` is for; a 1s cap on a real editor is a
  * coin flip on slower hardware, and a CI runner is routinely slower than a dev box.
  *
- * ⚠️ DELIBERATELY BELOW vitest's 5000ms `testTimeout` (which this repo leaves at the default), so a
+ * DELIBERATELY BELOW vitest's 5000ms `testTimeout` (which this repo leaves at the default), so a
  * genuinely broken editor reports THIS wait failing rather than a bare test timeout. The difference
  * is a message naming `.ProseMirror` versus one naming nothing at all.
  */

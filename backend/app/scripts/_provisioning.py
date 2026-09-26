@@ -5,14 +5,14 @@ Both run as one-off ECS tasks against a deployed environment, so every guard
 here exists to make a mistake fail *before* it touches the database rather than
 after.
 
-⚠️ **These scripts take a bcrypt HASH, never a password.** The operator hashes
+**These scripts take a bcrypt HASH, never a password.** The operator hashes
 locally (``scripts/hash-password``) and passes only the hash, because the value
 travels through ``aws ecs run-task --overrides``: visible in ``describe-tasks``
 for about an hour and recorded in the CloudTrail ``RunTask`` event. A bcrypt
 hash at cost 12 with a random salt is not meaningfully sensitive in either
 place; a plaintext password would be.
 
-⚠️ **Do not reuse ``settings.is_production`` as a guard here.** It is defined as
+**Do not reuse ``settings.is_production`` as a guard here.** It is defined as
 ``environment == "production"`` and nothing else, so every "not in production"
 check in this codebase is OFF in staging — which is precisely the environment
 these scripts are for. The environment allowlist below is explicit for that
@@ -54,7 +54,7 @@ def require_env(name: str) -> str:
 def normalize_email(value: str, *, var_name: str) -> str:
     """Validate an email and return it in the exact form login will look up.
 
-    ⚠️ **The stored value has to match what the login endpoint searches for.**
+    **The stored value has to match what the login endpoint searches for.**
     ``POST /auth/login`` parses the body through ``LoginRequest.email: EmailStr``,
     so pydantic hands ``authenticate_user`` an address already normalized by
     email-validator — domain lowercased, local part left alone — and the lookup
@@ -117,7 +117,7 @@ def validate_bcrypt_hash(value: str, *, var_name: str) -> str:
 def assert_environment_allowed(*, current: str, allowed_raw: str, allowlist_var: str) -> None:
     """Refuse to run outside an explicitly allowed environment.
 
-    ⚠️ Deliberately NOT ``settings.is_production``. That predicate is true only
+    Deliberately NOT ``settings.is_production``. That predicate is true only
     for the literal string ``production``, so it would permit these scripts to
     run in development, staging, or any typo'd environment name. This one names
     the environments it permits and refuses everything else, including an

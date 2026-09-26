@@ -25,10 +25,10 @@ machine, several screens are partial (LP-909 §5), and one STOP AND ASK is open.
 |---|---|---|
 | [LP-903](../tickets/LP-903.md) | ADR-403…407, glossary terms, `phase4.5-boundaries.md` — no code | done; ADR-403…407 all **Accepted** |
 | [LP-904](../tickets/LP-904.md) | four condition tables, four `lenders` columns, migration `d1f4b8c25e93`, five readonly views | done; downgrade never run |
-| [LP-905](../tickets/LP-905.md) | upload and email-forward doors, the parse task, migration `e5a2c7f31b84` | done; ⚠️ its table lists a §2 that has no body in the file |
+| [LP-905](../tickets/LP-905.md) | upload and email-forward doors, the parse task, migration `e5a2c7f31b84` | done; its table lists a §2 that has no body in the file |
 | [LP-906](../tickets/LP-906.md) | rule readers: line model, UWM, Champions, generic; UWM from PDF | done |
 | [LP-907](../tickets/LP-907.md) | the paste door and reader, fingerprint, `attach-pdf` enrich | done |
-| [LP-908](../tickets/LP-908.md) | the AI splitter (`split_v1`) and its enqueue wiring | done; ⚠️ its table still reads §2 "next" though §2 is written |
+| [LP-908](../tickets/LP-908.md) | the AI splitter (`split_v1`) and its enqueue wiring | done; its table still reads §2 "next" though §2 is written |
 | [LP-909](../tickets/LP-909.md) | read endpoints, import under the needs lock, draft / discard / add-by-hand, the Conditions tab and all 13 screens, round history | §1–§4 done; §5 in progress |
 | [LP-910](../tickets/LP-910.md) | UWM and Champions code maps (28 codes each), loader, seed keyed on `canonical_lender_key` | done; the seed has never run against a database |
 

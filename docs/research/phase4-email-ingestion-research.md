@@ -1,6 +1,6 @@
 # Phase 4 external research — inbound email, mailbox access, and compliance
 
-- **Date:** 2026-09-06. Facts marked ⚠ are inferred or from secondary sources.
+- **Date:** 2026-09-06. Facts marked are inferred or from secondary sources.
 - **Companion:** `docs/phases/phase4.md` — the architecture and ticket plan that acts on this.
 - Labels: **[LAW]** binding legal requirement · **[CONTRACT]** binding via GSE/investor contract ·
   **[PRACTICE]** industry norm · **[REC]** recommendation. Not legal advice.
@@ -12,14 +12,14 @@
 | | **SES inbound** | **SendGrid Parse** | **Postmark** | **Mailgun Routes** | **CloudMailin** |
 |---|---|---|---|---|---|
 | MX target | `inbound-smtp.<region>.amazonaws.com` | `mx.sendgrid.net` | `inbound.postmarkapp.com` | `mxa/mxb.mailgun.org` | CloudMailin MX |
-| Max message | **40 MB → S3**; 150 KB → SNS | 30 MB | 35 MB attachments | ⚠ ~25 MB parse; `store()` above | ⚠ verify |
+| Max message | **40 MB → S3**; 150 KB → SNS | 30 MB | 35 MB attachments | ~25 MB parse; `store()` above | verify |
 | Delivery model | **Store-then-notify, into your S3** | Direct webhook POST | Direct webhook POST | Webhook, or `store()`+notify | Webhook, or direct-to-your-S3 |
 | Raw MIME | Always — the S3 object *is* raw | Opt-in toggle (**use it**) | Parsed JSON only | Both | Raw format option |
-| Retry | SMTP-level + Lambda/SQS; you own durability from S3 forward | 72 h, then **silent drop, no bounce, no alert** | 10 tries / ~6 h; `403` stops | 6 tries / 8 h; `406` stops | ⚠ |
-| Signature | n/a — no webhook (IAM/S3) | ECDSA headers and/or OAuth | **HTTP Basic in the URL only** | HMAC-SHA256(ts+token) | ⚠ HMAC |
+| Retry | SMTP-level + Lambda/SQS; you own durability from S3 forward | 72 h, then **silent drop, no bounce, no alert** | 10 tries / ~6 h; `403` stops | 6 tries / 8 h; `406` stops | |
+| Signature | n/a — no webhook (IAM/S3) | ECDSA headers and/or OAuth | **HTTP Basic in the URL only** | HMAC-SHA256(ts+token) | HMAC |
 | Auth verdicts | spf / dkim / **dmarc** / dmarcPolicy / spam / virus | `SPF`, `dkim` map, SpamAssassin — **no dmarc** | SpamAssassin headers | raw headers | raw headers |
 | Provider retains message | **No — your bucket, your CMK** | Yes (transient) | ≤1 MB, **attachments not retained at all** | **3 days** via `store()` | 30 d metadata; body → your bucket |
-| BAA / regulated data | **Yes (AWS BAA; SES is HIPAA-eligible)** | **No — explicitly refused** | **No — explicitly refused** | Yes (published BAA), but "you are responsible for encrypting" | ⚠ none found |
+| BAA / regulated data | **Yes (AWS BAA; SES is HIPAA-eligible)** | **No — explicitly refused** | **No — explicitly refused** | Yes (published BAA), but "you are responsible for encrypting" | none found |
 | Price | $0.10/1k received + $0.09/1k 256 KB chunks | bundled | bundled | bundled | 10k/mo free, then tiered |
 
 **Conclusion: SES.** NPI custody (the message never leaves our account), the 40 MB store-then-notify
@@ -142,7 +142,7 @@ one object.
 **Idempotency key**, in preference order: provider message id (SES `messageId` = the S3 object key) →
 normalised RFC 5322 `Message-ID` → `sha256(raw MIME)`. Materialise as `UNIQUE (company_id,
 ingest_key)` with `ON CONFLICT DO NOTHING`, and **return 200 on a duplicate** — a non-2xx drives the
-provider into its retry schedule forever. ⚠ `Message-ID` is not reliably unique in practice (Exchange
+provider into its retry schedule forever. `Message-ID` is not reliably unique in practice (Exchange
 rewrites it, some MTAs omit it) — never make it the sole key.
 
 **Threading:** generate and **store** a `Message-ID` for every outbound message; resolve inbound by
@@ -186,7 +186,7 @@ run `decode_header` on the result if it still looks encoded.
 | | ~~`flanker`~~ | **abandoned.** Do not adopt |
 | Type sniffing | `puremagic` / `python-magic` | active |
 | PDF sanitise / rasterize | `pikepdf` / `pypdfium2` | active |
-| TNEF | `tnefparse` (or `pytnef`) | ⚠ low activity — verify |
+| TNEF | `tnefparse` (or `pytnef`) | low activity — verify |
 | HTML→text | `selectolax` or bs4+lxml | active; strip `<script>`, `<style>`, **and comments** (a favourite injection hiding place) |
 | DMARC alignment | `publicsuffix2` / `tldextract` | needed to compute organizational-domain alignment yourself |
 
@@ -219,7 +219,7 @@ TLS-RPT; enrol in Google Postmaster Tools, Yahoo CFL and Microsoft SNDS.
 | Option | Time | Google/MS review | Cost | Multi-tenant | Send-as | Key risk |
 |---|---|---|---|---|---|---|
 | **A. Admin routing/transport rule → our ingest address** | **1–3 days** | **none** | ~$0 | yes | no | forwarded mail fails SPF; no backfill; no read/label state |
-| **B. Customer-owned OAuth client, "Internal" consent** | ~1 week | ⚠ see below | $0 | no — repeats per customer | yes | customer must own a GCP project; per-tenant toil |
+| **B. Customer-owned OAuth client, "Internal" consent** | ~1 week | see below | $0 | no — repeats per customer | yes | customer must own a GCP project; per-tenant toil |
 | C. Our OAuth client, unverified production, admin-allowlisted | ~1 week | none yet | $0 | **≤100 users lifetime on that project, unresettable** | yes | burns the project — use a throwaway |
 | D. Aggregator on *their* verified app (Nylas / Unipile) | 3–10 days | **none — shifts to vendor** | $15–49/mo + ~$2/account | yes | yes | a new subprocessor holding mortgage NPI; **their** brand on the consent screen |
 | E. Aggregator, BYO OAuth (Aurinko, EmailEngine) | 1–3 weeks | **yes — CASA still ours** | $1/acct; EmailEngine $1,450/yr self-hosted | yes | yes | EmailEngine never stores bodies, but adds a Node+Redis service |
@@ -239,11 +239,11 @@ configuration and deserves its own ADR.*
 (≈ $500–$1,800, 1–3 weeks) and AL2 "Lab Tested" (≈ $4,500, 2–4 weeks), Google assigning the level by
 data sensitivity and user count. **Re-assessment every 12 months** from the previous Letter of
 Validation. The App Defense Alliance now sits under the Linux Foundation. The **CASA Accelerator**
-maps existing SOC 2 / ISO 27001 / PCI evidence across. ⚠ The widely-cited $15k–$75k figure traces to
+maps existing SOC 2 / ISO 27001 / PCI evidence across. The widely-cited $15k–$75k figure traces to
 a Nylas post last updated in **2021**, before CASA existed in this form — the lab fee is small; the
 **remediation engineering (2–6 weeks of senior time) is the real cost**.
 
-⚠ **Unresolved and load-bearing:** Google's restricted-scope-verification page lists "the app is used
+**Unresolved and load-bearing:** Google's restricted-scope-verification page lists "the app is used
 only by people in your Google Workspace or Cloud Identity organization" among the scenarios where
 verification isn't required — but the *same page* states that "every app that requests access to
 Google users' restricted data and has the ability to access data from or through a third-party server

@@ -27,7 +27,7 @@ branched.
 | `phase3_bucket_2_fast` | `6d6e295` — 116 commits, 379 files from base |
 | both worktrees | clean, 0 changes, before and after |
 
-⚠️ **`bedrock_integration` IS pushed.** The brief says that line exists only on this
+**`bedrock_integration` IS pushed.** The brief says that line exists only on this
 machine; that is no longer true. `origin/bedrock_integration` is at `9ab2936` —
 **0 commits ahead** — so the remote has all of it. Only the *tracking* is
 unconfigured, which is why `@{u}` still reports "no upstream". Worth correcting
@@ -35,7 +35,7 @@ because the deploy stage's divergence warning reads the same way.
 
 ---
 
-## ⚠️ The rule count: 37 → 75, and what that does to the comparison
+## The rule count: 37 → 75, and what that does to the comparison
 
 The brief's "37 live rules" is this branch's number. The incoming branch carries
 **75**. The 38 extra rules *are* the rule-engine work being merged (LP-485…LP-498,
@@ -73,7 +73,7 @@ the divergence is in how a *failed* AI call is classified, not in rule logic. Th
 merge takes bedrock's client — which is correct and intended, since staging runs
 Bedrock — and AS-12's fail-closed verdict follows it.
 
-⚠️ **This only describes the offline harness.** AS-12 is a judgment rule; the
+**This only describes the offline harness.** AS-12 is a judgment rule; the
 harness forces its AI call to fail (no key). `couldnt_check` is arguably the more
 honest verdict for "the call failed" than `needs_review`, which implies a judgment
 was made. **In production, with a working Bedrock path, the call succeeds and this
@@ -106,7 +106,7 @@ Both lines appended ADRs and **both continued numbering from 361**:
 - **C-series** (deployment/Bedrock): ADR-362…ADR-377, 16 entries
 - **LP-series** (rule engine): ADR-362…ADR-383, 22 entries
 
-⚠️ **ADR-362 through ADR-377 now name two different decisions each.**
+**ADR-362 through ADR-377 now name two different decisions each.**
 
 **Resolved by keeping both blocks in full, unrenumbered**, under a header that
 states the collision and tells readers to cite the series alongside the number.
@@ -120,7 +120,7 @@ Everything else auto-merged: 379 files, no other conflict.
 
 ---
 
-## ⚠️ FINDING 3 — the fourth model setting is wired only by coincidence
+## FINDING 3 — the fourth model setting is wired only by coincidence
 
 `anthropic_model_analysis` **is present** (hazard A's "there may now be a fourth"),
 and `config.py` is **byte-identical on both branches** — so hazard A produced no
@@ -140,7 +140,7 @@ analysis   claude-sonnet-4-5  -> us.anthropic.claude-sonnet-4-5-20250929-v1:0
 so it matches the *reasoning* pair in `resolve_model`'s three-tier loop. The config
 comment even says "Same default value, distinct knob."
 
-⚠️ **The moment that knob is re-pointed — its entire purpose — `resolve_model` raises
+**The moment that knob is re-pointed — its entire purpose — `resolve_model` raises
 `ModelResolutionError` under Bedrock**, which is what staging runs.
 
 **Why the mechanical fix is unsafe.** The boot validator refuses an *ambiguous*
@@ -178,7 +178,7 @@ superset of the old, so every existing row still satisfies the recreated constra
 it cannot fail on data. Alembic runs it in a transaction (Postgres has transactional
 DDL), so the window with no constraint is not observable.
 
-⚠️ Two notes for the deploy. It takes an `ACCESS EXCLUSIVE` lock on
+Two notes for the deploy. It takes an `ACCESS EXCLUSIVE` lock on
 `document_findings` — instant on staging's single loan file, but not free on a real
 table. And it chains from `9f0a5f88b6f8`, which is exactly where staging's database
 sits, so the deploy stage will detect the difference and run it before the services
@@ -190,12 +190,12 @@ roll.
 
 | # | Criterion | Result |
 |---|---|---|
-| 1 | Rules produce identical verdicts | ⚠️ **2 findings** — AS-12 ×15, ID-5 ×2. 858/875 unchanged, none lost |
+| 1 | Rules produce identical verdicts | **2 findings** — AS-12 ×15, ID-5 ×2. 858/875 unchanged, none lost |
 | 2 | Extractors ↔ catalog Tier-1 | ✅ **bijective, 121 ↔ 121** (163 catalog types total) |
 | 3 | `SNAPSHOT_VERSION == 4`, golden fixture loads | ✅ 4; golden eval tests pass in the clean run |
 | 4 | Catalog ↔ classifier guard | ✅ 62 passed |
 | 5 | `test_model_selection_lp457.py` passes, unmodified | ✅ 3 passed; byte-identical to **both** branches |
-| 6 | Full suite, ruff, mypy | ⚠️ **7 failed, 4847 passed** — all pre-existing (below). ruff ✅, format ✅ (927 files), mypy ✅ (415 files) |
+| 6 | Full suite, ruff, mypy | **7 failed, 4847 passed** — all pre-existing (below). ruff ✅, format ✅ (927 files), mypy ✅ (415 files) |
 | 7 | `terraform fmt -check` + validate ×3 | ✅ clean; bootstrap / envs/staging / envs/dev all valid |
 | 8 | Model tier resolution | ✅ below |
 | 9 | Bedrock-line files present and unmodified | ✅ all, one correction below |
@@ -223,7 +223,7 @@ the one permitted allowlist line.
 `alembic/env.py` confirmed still using `create_async_engine` with no
 `set_main_option` — the `ValueError` fix is intact.
 
-⚠️ **`scripts/sso-status` does not exist and never did** — 0 hits on *either*
+**`scripts/sso-status` does not exist and never did** — 0 hits on *either*
 branch. The brief lists it as something this line carries; it does not. Nothing was
 lost in the merge.
 
@@ -232,7 +232,7 @@ lost in the merge.
 All in `tests/ai/generator/test_generator.py`. **Pre-existing on the incoming
 branch**: the same 7 fail there (`7 failed, 16 passed`) with no merge involved.
 
-⚠️ **The ~21 failures the brief predicted did not occur, and cannot.** That
+**The ~21 failures the brief predicted did not occur, and cannot.** That
 divergence was `backend/.env` setting `AI_PROVIDER=bedrock` while tests asserted the
 anthropic default. This worktree's `.env` no longer sets `AI_PROVIDER` at all. Both
 provider settings now produce the **identical** 7 failures, so that defect is gone

@@ -1,6 +1,6 @@
 """Attaching the lender's PDF to a round that was pasted (LP-907 section 2, spec §LP-907).
 
-⚠️ THE ACCEPTANCE PROPERTY IS "NO SECOND ROUND AND NOTHING REMOVED" (spec §8 step 3), so that is what
+THE ACCEPTANCE PROPERTY IS "NO SECOND ROUND AND NOTHING REMOVED" (spec §8 step 3), so that is what
 most of these assert. The rest pin the guard, which is deliberately not `status = DRAFT`.
 """
 
@@ -68,7 +68,7 @@ async def test_the_pdf_fills_the_letter_details_a_paste_could_not_carry(
 
 
 async def test_no_second_round_is_created(db_session: AsyncSession) -> None:
-    """⚠️ THE WHOLE POINT OF THE TICKET. A second round would put round 2 on the strip twice and
+    """THE WHOLE POINT OF THE TICKET. A second round would put round 2 on the strip twice and
     split one sheet's conditions across both."""
     round_, loan_file = await _pasted_round(db_session)
 
@@ -103,7 +103,7 @@ async def test_the_sources_are_appended_not_replaced(db_session: AsyncSession) -
 
 
 async def test_matching_rows_are_not_duplicated(db_session: AsyncSession) -> None:
-    """⚠️ THE FINGERPRINT DOING ITS JOB. The pasted rows and the PDF's rows are the same six
+    """THE FINGERPRINT DOING ITS JOB. The pasted rows and the PDF's rows are the same six
     conditions; the merge must recognise them rather than append a second copy of each."""
     round_, _file = await _pasted_round(db_session)
     before = len(round_.draft_rows or [])
@@ -116,7 +116,7 @@ async def test_matching_rows_are_not_duplicated(db_session: AsyncSession) -> Non
 
 
 async def test_a_pasted_row_the_pdf_does_not_carry_is_kept(db_session: AsyncSession) -> None:
-    """⚠️ ADR-404: A PARTIAL SOURCE MAY ADD AND UPDATE, NEVER REMOVE. The extra row stays and is
+    """ADR-404: A PARTIAL SOURCE MAY ADD AND UPDATE, NEVER REMOVE. The extra row stays and is
     reported in a warning so the processor can look, rather than vanishing."""
     extra = (
         "Closing (PTF)\n 9999         Invoice                       Provide the parking receipt."
@@ -149,7 +149,7 @@ async def test_a_pdf_row_the_paste_missed_is_added_to_this_round(
 async def test_the_merge_never_overwrites_wording_the_processor_can_see(
     db_session: AsyncSession,
 ) -> None:
-    """⚠️ OUR RULE, NOT THE SPEC'S — recorded in the ticket. The PDF may fill a hole; it never
+    """OUR RULE, NOT THE SPEC'S — recorded in the ticket. The PDF may fill a hole; it never
     replaces a value already on the row, and `verbatim_text` is never touched by a merge."""
     round_, _file = await _pasted_round(db_session)
     rows = list(round_.draft_rows or [])
@@ -165,7 +165,7 @@ async def test_the_merge_never_overwrites_wording_the_processor_can_see(
 async def test_the_format_is_upgraded_from_pasted_text(db_session: AsyncSession) -> None:
     """A pasted round's format was inferred from row shapes; the PDF names the layout outright.
 
-    ⚠️ A NUMBERED LIST RATHER THAN PROSE, and the difference is LP-908 §2. Prose sets `needs_ai`, so
+    A NUMBERED LIST RATHER THAN PROSE, and the difference is LP-908 §2. Prose sets `needs_ai`, so
     the paste now opens `PARSING` and enrich refuses it — correctly, because the split task owns that
     state. A numbered list is structure the generic reader recognises, so the round lands `DRAFT`
     with `PASTED_TEXT`, which is the state this test is actually about.
@@ -200,7 +200,7 @@ async def test_enriching_writes_a_round_enriched_event(db_session: AsyncSession)
         .all()
     )
     assert len(events) == 1
-    # ⚠️ Counts and names only — never the sheet's text (spec §9.5).
+    # Counts and names only — never the sheet's text (spec §9.5).
     assert set(events[0].detail) == {
         "reader",
         "matched",
@@ -212,7 +212,7 @@ async def test_enriching_writes_a_round_enriched_event(db_session: AsyncSession)
 
 
 async def test_attaching_a_second_pdf_is_refused(db_session: AsyncSession) -> None:
-    """⚠️ THE GUARD IS "NO PDF SOURCE YET", so this is the same shape of refusal the forward door
+    """THE GUARD IS "NO PDF SOURCE YET", so this is the same shape of refusal the forward door
     now gives a repeated forward — and it is what stops one sheet being merged twice."""
     round_, _file = await _pasted_round(db_session)
     await enrich_round_with_pdf(db_session, round_=round_, content=_round_2_pdf())
@@ -229,7 +229,7 @@ async def test_attaching_a_second_pdf_is_refused(db_session: AsyncSession) -> No
 async def test_a_round_that_is_not_active_cannot_be_enriched(
     db_session: AsyncSession, status: ConditionRoundStatus
 ) -> None:
-    """⚠️ `PARSING` IS EXCLUDED DELIBERATELY. The parse task owns that state through a compare-and-set
+    """`PARSING` IS EXCLUDED DELIBERATELY. The parse task owns that state through a compare-and-set
     guarded on it; enriching a round mid-parse would race the task that is writing it."""
     round_, _file = await _pasted_round(db_session)
     round_.status = status
@@ -257,7 +257,7 @@ async def test_an_imported_round_merges_into_its_conditions(db_session: AsyncSes
                 first_round_id=round_.id,
                 last_seen_round_id=round_.id,
                 sequence=index,
-                # ⚠️ NO CODE, which is the realistic state: a pasted excerpt often has none, and
+                # NO CODE, which is the realistic state: a pasted excerpt often has none, and
                 # filling it from the PDF is the enrichment the spec asks for.
                 lender_code=None,
                 bucket_heading=row["bucket_heading"],
@@ -299,7 +299,7 @@ async def test_an_imported_round_merges_into_its_conditions(db_session: AsyncSes
 async def test_a_condition_the_pdf_adds_to_an_imported_round_records_that_it_appeared(
     db_session: AsyncSession,
 ) -> None:
-    """⚠️ IMPORT IS NOT THE ONLY WRITER OF CONDITIONS, AND THIS IS THE SECOND ONE.
+    """IMPORT IS NOT THE ONLY WRITER OF CONDITIONS, AND THIS IS THE SECOND ONE.
 
     "Which rounds did a condition appear on" is derived from `CONDITION_CREATED` /
     `CONDITION_SEEN_AGAIN` events (spec §LP-909) — the `R1 R2` chips, and the round card's own
@@ -364,7 +364,7 @@ async def test_a_condition_the_pdf_adds_to_an_imported_round_records_that_it_app
         .all()
     )
     assert {event.condition_id for event in created} <= condition_ids
-    # ⚠️ Counts and codes only — never the lender's wording (spec §9.5).
+    # Counts and codes only — never the lender's wording (spec §9.5).
     assert all(set(event.detail) == {"source", "lender_code"} for event in created)
 
 

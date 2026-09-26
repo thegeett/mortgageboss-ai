@@ -220,7 +220,7 @@ export const CALCULATOR_STATUS: Record<CalculatorStatus, StatusMeta> = {
 
 // --- condition round (lib/types/conditions.ts ConditionRoundStatus) --------- //
 //
-// ⚠️ EVERY LABEL HERE IS ABOUT THE SHEET, NEVER ABOUT A CONDITION. Stage 1 has no
+// EVERY LABEL HERE IS ABOUT THE SHEET, NEVER ABOUT A CONDITION. Stage 1 has no
 // status controls at all (ADR-404): nothing in this product may say a condition
 // is cleared, done, satisfied or open, and the reference screens repeat it as a
 // standing rule. A round moving to `imported` says the lender's list is now the

@@ -1,15 +1,15 @@
 """LP-488 — CO-1 (condo questionnaire present).
 
-⚠️ EVERY VERDICT ASSERTION RUNS THROUGH A REAL RULE EVALUATION (LP-487's standing rule).
+EVERY VERDICT ASSERTION RUNS THROUGH A REAL RULE EVALUATION (LP-487's standing rule).
 
-⚠️ PRESENCE ONLY, AND THAT IS A DELIBERATE SCOPE LIMIT. Priya's standing point is that condo rules must
+PRESENCE ONLY, AND THAT IS A DELIBERATE SCOPE LIMIT. Priya's standing point is that condo rules must
 distinguish WARRANTABLE from non-warrantable rather than merely confirm a questionnaire exists. That is
 CO-3/CO-5's job and it is not buildable: `property.is_warrantable_condo` has NO source field in any of
 the 121 schema specs (LP-487), because warrantability is a project-review CONCLUSION (Form 1076 / PERS),
 not a readable datum. A test below pins that the tag stays inert, so nobody wires it to an invented
 source and quietly widens CO-1 into a warrantability rule.
 
-⚠️ A DOCUMENT-TYPE PRESENCE READ — the classifier's TYPE LABEL, never extracted fields (the IN-8/IN-9/
+A DOCUMENT-TYPE PRESENCE READ — the classifier's TYPE LABEL, never extracted fields (the IN-8/IN-9/
 IN-16 discipline). This matters concretely: the one condo questionnaire in the bench corpus fills 0 of
 its unit-count fields, and CO-1 is still correct to report it present.
 """
@@ -43,7 +43,7 @@ async def _one(builder) -> Verdict:
 
 
 async def test_a_questionnaire_in_the_file_is_satisfied() -> None:
-    """⚠️ The fixture's questionnaire states NO unit counts — the shape of the one real questionnaire in
+    """The fixture's questionnaire states NO unit counts — the shape of the one real questionnaire in
     the corpus. CO-1 reads the TYPE LABEL, so it is still correct to report it present."""
     assert await _one(build_co1_questionnaire_present_snapshot) is Verdict.SATISFIED
 
@@ -57,7 +57,7 @@ async def test_a_non_condo_is_not_applicable() -> None:
 
 
 async def test_an_empty_file_couldnt_checks_never_fires() -> None:
-    """⚠️ THE ABSTAIN THAT MATTERS. A file with no documents at all is not evidence the questionnaire is
+    """THE ABSTAIN THAT MATTERS. A file with no documents at all is not evidence the questionnaire is
     missing — it is evidence nothing has been uploaded. Firing here would put a false gap on every condo
     file the moment it is created."""
     verdict = await _one(build_co1_empty_file_snapshot)
@@ -83,7 +83,7 @@ def test_the_condo_scoping_is_an_applicability_predicate() -> None:
 
 
 def test_warrantability_is_not_wired_into_co1() -> None:
-    """⚠️ THE SCOPE FENCE. `property.is_warrantable_condo` has no source field anywhere — it is a
+    """THE SCOPE FENCE. `property.is_warrantable_condo` has no source field anywhere — it is a
     project-review conclusion (Form 1076 / PERS), not a readable datum. If someone declares it against an
     invented source and CO-1 starts reading it, this fails: warrantability belongs to CO-3/CO-5, with a
     real input, not to a presence check quietly widened."""

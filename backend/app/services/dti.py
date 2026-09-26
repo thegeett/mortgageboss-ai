@@ -723,7 +723,7 @@ async def build_dti_calculation(
         # PITIA was considered and why it is not in the total. A line that silently vanishes is worse
         # than one counted wrongly, because nobody can tell it was weighed at all.
         #
-        # ⚠️ The exclusion is applied AFTER `_to_items`, not through `excluded_reason`, and the
+        # The exclusion is applied AFTER `_to_items`, not through `excluded_reason`, and the
         # difference matters. `_to_items` treats an override as DISPUTING an exclusion and re-includes
         # the line (LP-569) — right for a debt, where the exclusion is a claim about the file. Here it
         # is structural: the borrower does not live in the subject, and correcting its tax figure does

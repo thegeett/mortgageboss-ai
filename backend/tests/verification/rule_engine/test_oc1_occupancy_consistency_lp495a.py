@@ -1,20 +1,20 @@
 """LP-495a — OC-1 (occupancy consistency), activated on a SELF-CONSISTENCY rate (ADR-378).
 
-⚠️ EVERY VERDICT ASSERTION RUNS THROUGH A REAL RULE EVALUATION (LP-487's standing rule), and the
+EVERY VERDICT ASSERTION RUNS THROUGH A REAL RULE EVALUATION (LP-487's standing rule), and the
 RATIFICATION PROOF in particular runs through `materialize_tags()` → `evaluate_rules()` rather than
 calling `ratifies_every_finding` — ratification is the ENTIRE safety substitute for the missing
 measurement, so proving it by calling the mechanism would prove nothing (LP-508's lesson).
 
-⚠️ THE TAG IS NOT RE-KINDED. `occupancy.consistent_with_signals` stays `ai`. It is SHARED with LIVE
+THE TAG IS NOT RE-KINDED. `occupancy.consistent_with_signals` stays `ai`. It is SHARED with LIVE
 OC-2, so re-kinding it is a behaviour change on shipped code and needs its own regression evidence — a
 test below pins that it is still declared `ai` and still consumed by both rules.
 
-⚠️ THE LP-406-4 ACTIVATION PRECONDITION IS RESOLVED BY THE STATUS, NOT BY CHANGING OC-2. The precondition
+THE LP-406-4 ACTIVATION PRECONDITION IS RESOLVED BY THE STATUS, NOT BY CHANGING OC-2. The precondition
 was that OC-1 would AUTO-ship while live OC-2 RATIFIES the same tag. On `ratify-pending` both rules route
 to a human, so the double-surface is two ratified prompts rather than an auto-assertion racing a
 ratification. Live OC-2 is untouched.
 
-⚠️ THE SEAM IS ALWAYS FULL: `{**stub_materialization_reasoners(), "occupancy": ...}`. A partial seam is
+THE SEAM IS ALWAYS FULL: `{**stub_materialization_reasoners(), "occupancy": ...}`. A partial seam is
 not a seam — LP-490 spent real money discovering that, and LP-494 repeated it.
 """
 
@@ -99,7 +99,7 @@ def _snapshot(occupancy: str | None = "primary_residence") -> Snapshot:
 
 
 async def _evaluate(value: str, occupancy: str | None = "primary_residence"):
-    # ⚠️ THE FULL SEAM — every declared group stubbed, then `occupancy` overridden.
+    # THE FULL SEAM — every declared group stubbed, then `occupancy` overridden.
     reasoners = {**stub_materialization_reasoners(), "occupancy": _occupancy_reasoner(value)}
     snapshot = await materialize_tags(_snapshot(occupancy), ai_reasoners=reasoners)
     evaluations, _tags = await evaluate_rules(snapshot, rule_ids=("OC-1",))
@@ -115,14 +115,14 @@ async def test_agreeing_declarations_are_satisfied() -> None:
 
 
 async def test_a_contradicting_declaration_fires() -> None:
-    """⚠️ Unlike RE-1/DT-6/LO-2, OC-1 DOES fire — a borrower's own 1003 declarations contradicting each
+    """Unlike RE-1/DT-6/LO-2, OC-1 DOES fire — a borrower's own 1003 declarations contradicting each
     other is a defect the file must resolve, not an inference handed to a processor."""
     evaluations = await _evaluate("no")
     assert [e.verdict for e in evaluations] == [Verdict.FIRED]
 
 
 async def test_an_unknown_signal_couldnt_checks_and_never_clears() -> None:
-    """⚠️ THE ABSTAIN THAT MATTERS, and it is 9 of the 19 real files: a loan stating an occupancy with NO
+    """THE ABSTAIN THAT MATTERS, and it is 9 of the 19 real files: a loan stating an occupancy with NO
     other declaration to compare it against must not read as consistent."""
     evaluations = await _evaluate("unknown")
     assert [e.verdict for e in evaluations] == [Verdict.COULDNT_CHECK]
@@ -135,11 +135,11 @@ async def test_no_stated_occupancy_never_clears() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ THE RATIFICATION PROOF — through a real evaluation, per LP-490a's requirement
+# THE RATIFICATION PROOF — through a real evaluation, per LP-490a's requirement
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("value,expected", [("no", Verdict.FIRED), ("yes", Verdict.SATISFIED)])
 async def test_every_oc1_finding_carries_ratification(value: str, expected: Verdict) -> None:
-    """⚠️ RATIFICATION IS THE ENTIRE SAFETY SUBSTITUTE for the missing measurement (ADR-378), so it is
+    """RATIFICATION IS THE ENTIRE SAFETY SUBSTITUTE for the missing measurement (ADR-378), so it is
     proven HERE — through materialisation and the real evaluator — not by calling the mechanism.
 
     Including `satisfied`: a wrong `satisfied` is exactly what would clear a file whose occupancy
@@ -167,7 +167,7 @@ def test_oc1_is_active_on_a_self_consistency_rate() -> None:
     assert bar.self_consistency_disagreements == 1
     assert bar.self_consistency_model == "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
     assert bar.input_resolves is True
-    # ⚠️ LOAD-BEARING: a rule whose tag was MEASURED and FAILED is measured-and-failing, not unmeasured,
+    # LOAD-BEARING: a rule whose tag was MEASURED and FAILED is measured-and-failing, not unmeasured,
     # and must stay held. A self-consistency rate must never override a real measurement.
     assert bar.measured_accuracy is None
     assert is_eligible(bar)
@@ -175,7 +175,7 @@ def test_oc1_is_active_on_a_self_consistency_rate() -> None:
 
 
 def test_the_occupancy_tag_is_not_rekinded_and_is_shared_with_live_oc2() -> None:
-    """⚠️ THE FENCE. `occupancy.consistent_with_signals` is SHARED with LIVE OC-2. Re-kinding it to
+    """THE FENCE. `occupancy.consistent_with_signals` is SHARED with LIVE OC-2. Re-kinding it to
     deterministic is a behaviour change on shipped code and needs its own Phase A and regression
     evidence — it was explicitly NOT done here. If someone re-kinds it, this fails."""
     from app.verification.tag_materialization.declarations import ProductionMode
@@ -192,7 +192,7 @@ def test_the_occupancy_tag_is_not_rekinded_and_is_shared_with_live_oc2() -> None
 
 
 def test_oc1_and_oc2_both_route_to_a_human() -> None:
-    """⚠️ THE LP-406-4 ACTIVATION PRECONDITION, RESOLVED. It warned that activating OC-1 would
+    """THE LP-406-4 ACTIVATION PRECONDITION, RESOLVED. It warned that activating OC-1 would
     double-surface a "no" file as OC-1 AUTO + OC-2 ratify. On `ratify-pending` OC-1 ratifies too, so the
     double-surface is two ratified prompts and no auto-assertion. Live OC-2 is UNCHANGED."""
     assert ratifies_every_finding("OC-1")

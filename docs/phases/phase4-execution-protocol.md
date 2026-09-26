@@ -167,7 +167,7 @@ except where noted; each is recorded so the reviewer does not re-open it.
 | Question | Build against this | Note |
 |---|---|---|
 | Which mail provider is the pilot customer on? | **Unknown — build Route B (forwarding) only.** Do not build Gmail API or Graph. | LP-816 stays scoped to a mailbox connection interface with no provider implementation |
-| Is `Communication.body` encrypted at rest? | **No, in V1.** Routing and dedup columns must stay plaintext regardless, since `EncryptedString` is non-deterministic. | ⚠️ **Needs the user's explicit sign-off before the pilot touches real borrower NPI.** Raise it in the LP-803 ticket doc and add a backlog ticket for column-level encryption; do not let the run stall on it |
+| Is `Communication.body` encrypted at rest? | **No, in V1.** Routing and dedup columns must stay plaintext regardless, since `EncryptedString` is non-deterministic. | **Needs the user's explicit sign-off before the pilot touches real borrower NPI.** Raise it in the LP-803 ticket doc and add a backlog ticket for column-level encryption; do not let the run stall on it |
 | How long is an inbound `.eml` kept? | **5 years**, matching the Closing Disclosure floor, with the legal-hold flag suppressing every purge path. | Sets the S3 lifecycle rule in INFRA-1 |
 | Can a loan-file token cross `company_id`? | **No.** One company per file. The resolver raises on any other shape. | |
 | Are borrowers told email is not a secure channel? | **Yes.** LP-817's templates carry the line, and LP-815's nudge steers to the upload link. | |

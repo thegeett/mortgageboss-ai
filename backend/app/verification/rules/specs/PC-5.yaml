@@ -3,33 +3,33 @@
 # The earnest money deposit stated on the contract must be traceable to a debit from a verified account.
 # A deposit nobody can trace is an unsourced large sum entering the transaction.
 #
-# ⚠️ CORRECTION (reported finding): the AMOUNT half below is NOT implemented. required_inputs and
+# CORRECTION (reported finding): the AMOUNT half below is NOT implemented. required_inputs and
 # deterministic.load_bearing_tags reference ONLY contract.emd_sourced, and contract.emd_amount could
 # not be read as declared anyway — it is produced on the DOCUMENT subject while PC-5 enumerates
 # per_borrower. So the "the file states no deposit" couldnt_check is never actually evaluated and the
 # rule delegates the whole question to the AI tag. Resolve before PC-5 is activated.
-# ⚠️ GENUINELY MIXED, and that is why it is worth building: `contract.emd_amount` is PARSED (the number
+# GENUINELY MIXED, and that is why it is worth building: `contract.emd_amount` is PARSED (the number
 # on the contract, 4 of the 5 real contracts state one) and `contract.emd_sourced` is an AI judgment (did
 # a matching debit leave a verified account?). Deterministic code reads the amount; the trace is a
 # reading of two documents against each other.
 #
-# ⚠️ THE RARE TESTABLE CROSS-SOURCE RULE. LP-480 found most two-source combinations exist on NO file in
+# THE RARE TESTABLE CROSS-SOURCE RULE. LP-480 found most two-source combinations exist on NO file in
 # the corpus, and CR-1 has exactly one. LF-6T3N carries a purchase agreement AND bank statements, so
 # PC-5's trace can actually be exercised rather than only reasoned about.
 #
-# ⚠️ IT TIES TO AS-2, WHICH IS LIVE — but NOT through shared tags, and the ticket's claim that they share
+# IT TIES TO AS-2, WHICH IS LIVE — but NOT through shared tags, and the ticket's claim that they share
 # both is wrong against the repo. AS-2 reads `txn.has_identified_source` and `txn.apparent_category` on
 # the TRANSACTION subject; PC-5 reads the contract's amount and a borrower-level trace. They answer the
 # same underwriting question from opposite ends, which is why AS-2's snapshot AND verdict are both
 # checked for movement (separately — LP-490a's distinction).
 #
-# ⚠️ A SECOND DEPOSIT IS LOST, and this is a reported input gap rather than a design choice. Doc 183
+# A SECOND DEPOSIT IS LOST, and this is a reported input gap rather than a design choice. Doc 183
 # understated a $204k ADDITIONAL earnest money distinct from the primary figure. `earnest_money_amount`
 # is SINGULAR and NO `additional_earnest_money_amount` field exists in the schema — so a contract with an
 # initial and an additional deposit contributes only the first. The prompt asks the model to SAY when it
 # sees a second, so the finding carries the fact even though the tag cannot. Logged for LP-499.
 #
-# ⚠️ NO "CUSTOMARY FOR THE AREA" THRESHOLD IS ENCODED. B3-4.3-09 says large deposits and deposits
+# NO "CUSTOMARY FOR THE AREA" THRESHOLD IS ENCODED. B3-4.3-09 says large deposits and deposits
 # exceeding what is customary "should be closely evaluated" and gives NO number. Inventing a percentage
 # would fire on ordinary files. This rule surfaces the trace; it does not size the deposit.
 
@@ -57,13 +57,13 @@ reference_values:
   priya_validated: false
   threshold_needs_signoff: false
   values:
-    # ⚠️ PROVENANCE TIER P — VERIFIED against the live page in this session (2026-08-13), not taken from
+    # PROVENANCE TIER P — VERIFIED against the live page in this session (2026-08-13), not taken from
     # the ticket. Fannie Mae Selling Guide B3-4.3-09, "Earnest Money Deposit", page dated 05/04/2022.
     #   "Receipt of the deposit must be verified by either a copy of the borrower's canceled check or a
     #    written statement from the holder of the deposit."
     #   "Large earnest money deposits and deposits that exceed the amount customary for the area should
     #    be closely evaluated."
-    # ⚠️ "CUSTOMARY FOR THE AREA" IS NOT A NUMBER — the guide gives none, and none is invented here. A
+    # "CUSTOMARY FOR THE AREA" IS NOT A NUMBER — the guide gives none, and none is invented here. A
     # rule that compared against a fabricated percentage would fire on ordinary files. Logged for Priya.
     customary_deposit_threshold: "not defined by the guideline — no number is applied"
   guideline_text: >-
@@ -78,7 +78,7 @@ required_inputs:
     snapshot_path: 'tags.by_subject[<borrower_id>]["contract.emd_sourced"]'
     description: >-
       whether the contract's earnest money traces to a debit from a verified account (AI, LP-493):
-      "yes" / "no" / "unknown". ⚠️ UNCALIBRATED.
+      "yes" / "no" / "unknown". UNCALIBRATED.
 
 subject_enumeration: per_borrower
 subject_key_fields: [borrower]
@@ -122,4 +122,4 @@ deterministic:
         statements covering the period, or the statements do not show the account it left
       how_to_fix: >-
         Confirm the contract states an earnest money amount and that the file carries statements covering
-        the contract date. ⚠️ A deposit that cannot be traced is not the same as one that was not paid.
+        the contract date. A deposit that cannot be traced is not the same as one that was not paid.

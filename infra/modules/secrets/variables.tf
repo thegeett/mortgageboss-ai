@@ -59,7 +59,7 @@ variable "kms_create_alias" {
     The alias is CONSOLE READABILITY ONLY — every consumer references the key by
     ARN through this module's outputs, so nothing functional depends on it.
 
-    ⚠️ It is also the one thing that breaks destroy-and-rebuild. `terraform destroy`
+    It is also the one thing that breaks destroy-and-rebuild. `terraform destroy`
     schedules the key for deletion but leaves the ALIAS ORPHANED
     (hashicorp/terraform-provider-aws#35161), so the next apply fails with
     AlreadyExistsException and needs a manual `aws kms delete-alias`.

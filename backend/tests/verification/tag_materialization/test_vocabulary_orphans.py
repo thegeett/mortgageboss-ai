@@ -351,7 +351,7 @@ def test_hardcoded_transaction_producer_tags_are_not_orphans() -> None:
 def test_declared_subjects_are_all_materialized() -> None:
     """Every declared subject must be in the live orchestrator's ``_MATERIALIZED_SUBJECTS`` scope.
 
-    ⚠️ THE GAP THIS CLOSES, and why the orphan guard above could not. LP-483 declared
+    THE GAP THIS CLOSES, and why the orphan guard above could not. LP-483 declared
     ``liab.monthly_payment`` with ``subject: liability`` while ``_MATERIALIZED_SUBJECTS`` was still
     ``{document, loan, borrower}`` — so ``materialize_tags``' ``in_scope()`` skipped it on BOTH live call
     sites and the tag never materialized on a real file. Measured, not argued: the ticket's own fixture
@@ -364,7 +364,7 @@ def test_declared_subjects_are_all_materialized() -> None:
     """
     from app.services.verification_run import _MATERIALIZED_SUBJECTS
 
-    # ⚠️ LP-517: the `transaction` exemption is checked PER TAG, not per subject. Exempting the whole
+    # LP-517: the `transaction` exemption is checked PER TAG, not per subject. Exempting the whole
     # subject is what let LP-516 ship a derived `transaction` tag that materialized in tests and never on
     # a real run — the generic pass skips the subject, and Stage A/B only knows the tags it hardcodes. A
     # NEW transaction-subject declaration is therefore NOT covered by "a dedicated producer writes them".

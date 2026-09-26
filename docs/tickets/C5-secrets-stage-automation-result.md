@@ -24,7 +24,7 @@ Answer two confirmations:
 Everything else is automatic. Total interaction: two keystrokes, neither of them a
 value.
 
-⚠️ The second prompt defaults to **no** because it changes live infrastructure. The
+The second prompt defaults to **no** because it changes live infrastructure. The
 first defaults to **yes** because declining it just means typing the URL yourself.
 
 ---
@@ -76,7 +76,7 @@ state bucket is encrypted, versioned and access-blocked.
 `db_password_from_state` is silent on every failure path and returns 1, so a failure
 degrades to the old behaviour rather than stopping the stage.
 
-### ⚠️ A bug the harness caught, worth recording
+### A bug the harness caught, worth recording
 
 The first implementation piped state into `python3 - <<'PY' … PY`. That is wrong and
 it **can never work**: the heredoc *becomes python's stdin*, so `json.load(sys.stdin)`
@@ -97,7 +97,7 @@ comment in the source says so, to stop it being "tidied" back.
 | terraform wants | cluster has | behaviour |
 |---|---|---|
 | token | **no token** | offer to apply one, then derive the URL — **today's case** |
-| token | **has token** | ⚠️ **never rotates**; falls back to prompting |
+| token | **has token** | **never rotates**; falls back to prompting |
 | no token | no token | derive a credential-less URL, `[Y/n]` |
 | no token | has token | warn, prompt |
 | any | unreadable | warn, prompt — a failed describe must not block the stage |
@@ -127,7 +127,7 @@ comment in the source says so, to stop it being "tidied" back.
    with `{"ReplicationGroupId", "AuthToken", "AuthTokenUpdateStrategy":"ROTATE",
    "ApplyImmediately":true}`. Key names taken from `--generate-cli-skeleton`.
 
-   ⚠️ **`--cli-input-json`, not `--auth-token` on the command line.** A token passed
+   **`--cli-input-json`, not `--auth-token` on the command line.** A token passed
    as an argument is visible in `ps` to every user on the machine for the life of the
    call. This is the whole reason for the JSON file.
 
@@ -142,7 +142,7 @@ comment in the source says so, to stop it being "tidied" back.
    printed, never written to disk outside the 0600 request file, and exists only in
    the process and in Secrets Manager.
 
-### ⚠️ If the poll times out
+### If the poll times out
 
 The token **was** submitted but this run cannot confirm it took effect, so it writes
 nothing and says so. The generated token is then discarded. If the rotation did
@@ -151,7 +151,7 @@ rotation, which the next run will *decline* to do automatically (see below) and 
 ask you to supply the URL for. The message says all of this rather than leaving it to
 be discovered.
 
-### ⚠️ Never rotates an existing token
+### Never rotates an existing token
 
 If `AuthTokenEnabled` is already true, the stage does **not** rotate. The existing
 token is not knowable — ElastiCache never returns it — and rotating to a

@@ -60,7 +60,7 @@ $ aws ecs describe-tasks --cluster mbai-staging --tasks 065b8112... 27ef531a...
 27ef531a...  created 18:05:54.019  pullStart 18:06:08.491  started 18:06:17.145  exit 1
 ```
 
-⚠️ `createdAt 18:05:54` is **after** `AWSCURRENT` was created at `18:05:04.866`. ECS
+`createdAt 18:05:54` is **after** `AWSCURRENT` was created at `18:05:04.866`. ECS
 resolved the secret during provisioning, i.e. against the *new* version. So the
 second task read the corrected secret and still produced the same traceback — which
 is the fact that rules out both "stale log" and "stale secret".
@@ -107,7 +107,7 @@ $ … --version-stage AWSPREVIOUS … | cut -c30-70
 in:SbAjimmzz2YLl(;SScSKUWgW61Phia(Z@mbai-
 ```
 
-⚠️ **Both versions hold the literal `;`.** Not just the current one — the previous one
+**Both versions hold the literal `;`.** Not just the current one — the previous one
 too. Fingerprinted (values never printed):
 
 ```
@@ -147,7 +147,7 @@ terraform state password
 **No `%`.** And its fingerprint is identical to the password inside *both* secret
 versions — `77892c47d94f` in all three places.
 
-⚠️ **Timeline correction.** The `%3B` did **not** come from an earlier manual paste.
+**Timeline correction.** The `%3B` did **not** come from an earlier manual paste.
 Whatever was pasted produced a value byte-identical to Terraform state, and both
 stored versions still match it. No version of this secret has ever contained a `%`.
 
@@ -213,7 +213,7 @@ reads the same key back out — replaced with `create_async_engine`.
 no other `sqlalchemy.*` option, so the ini section contributed only the value
 `env.py` had just injected.
 
-⚠️ Interpolation stays **on** for the rest of the ini, which needs it — `script_location
+Interpolation stays **on** for the rest of the ini, which needs it — `script_location
 = %(here)s/alembic` and `file_template = %%(year)d…`. Disabling it globally would have
 broken those; that is a second reason (b) beats "turn interpolation off".
 
@@ -243,7 +243,7 @@ Before the change this raised `ValueError` at import, before emitting anything.
 | `test_percent_followed_by_hex_is_still_lossy` | the known limit, below |
 | `test_env_py_does_not_route_the_url_through_alembic_config` | source guard: no `set_main_option`, no `async_engine_from_config` |
 
-### ⚠️ A known limit the tests pin, rather than paper over
+### A known limit the tests pin, rather than paper over
 
 The fix removes the *crash*. It does not make every `%` safe, because the corruption
 for one shape happens below Alembic:

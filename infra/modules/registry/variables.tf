@@ -33,7 +33,7 @@ variable "pull_account_ids" {
     different account from the registry MUST appear here, or its ECS tasks fail at
     launch with an authorization error.
 
-    ⚠️ A repository policy alone is not sufficient when images are KMS-encrypted:
+    A repository policy alone is not sufficient when images are KMS-encrypted:
     the pulling account also needs `kms:Decrypt` on the key, which the registry's
     owning state grants separately. A missing KMS grant fails with a message naming
     KMS rather than ECR, which is a confusing way to learn this.

@@ -210,7 +210,7 @@ def _sdk_error(kind: str, status: int) -> Exception:
 
 
 async def test_throttle_tagged_rate_limited_not_failed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """⚠️ A throttled classification must be DISTINGUISHABLE from a judgment — the corrupting bug LP-462
+    """A throttled classification must be DISTINGUISHABLE from a judgment — the corrupting bug LP-462
     fixes. It returns unknown/0.0 like any failure, but infra_failure='rate_limited' marks it re-runnable."""
     _mock_complete(monkeypatch, exc=_client_error(_sdk_error("rate", 429)))
     result = await classify_document(PDF_BYTES, "application/pdf")
@@ -357,7 +357,7 @@ async def test_self_check_log_flag(monkeypatch: pytest.MonkeyPatch) -> None:
         await classify_document(PDF_BYTES, "application/pdf")
     ok = [e for e in logs if e["event"] == "classification_succeeded"]
     assert len(ok) == 1 and ok[0]["type_matches_document"] is False
-    # ⚠️ the free-text document_name (PII-adjacent) is NEVER logged
+    # the free-text document_name (PII-adjacent) is NEVER logged
     assert "wire instructions" not in " ".join(repr(e) for e in logs)
 
 

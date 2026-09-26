@@ -121,7 +121,7 @@ class AiInfraBreaker:
     completion without yielding and no two interleave. Put an ``await`` inside one and this class
     needs a lock.
 
-    ⚠️ SAFE IS NOT THE SAME AS UNCHANGED. A group's own batches still reach this counter in input
+    SAFE IS NOT THE SAME AS UNCHANGED. A group's own batches still reach this counter in input
     order, but the GROUPS now arrive in completion order, so "five consecutive failures" is counted
     over an interleaving that depends on which group finished first. A mix of failing and succeeding
     groups can trip the breaker where the serial order would not have, and vice versa. That is a

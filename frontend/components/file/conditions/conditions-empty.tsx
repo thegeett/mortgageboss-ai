@@ -17,11 +17,11 @@ import { type FileRejection, useDropzone } from "react-dropzone";
  * A COPY of the server's ceiling (`settings.condition_sheet_max_bytes`), and the duplication is
  * stated rather than papered over.
  *
- * ⚠️ AN EARLIER COMMENT HERE SAID "Kept in sync by the sentence", which asserts a mechanism that
+ * AN EARLIER COMMENT HERE SAID "Kept in sync by the sentence", which asserts a mechanism that
  * cannot work: a sentence cannot know how an environment was configured. The server value is a
  * Pydantic Settings field, so it is env-overridable and not fixed at build time.
  *
- * ⚠️ THE DIRECTION MATTERS AND ONLY ONE OF THEM IS SAFE. While this number is LOWER than the
+ * THE DIRECTION MATTERS AND ONLY ONE OF THEM IS SAFE. While this number is LOWER than the
  * server's, an over-limit file is refused here and nothing is lost — visible, not silent. If an
  * environment LOWERS the server's ceiling below this, the direction inverts: the client accepts an
  * 18 MB file, the processor waits through the upload, and the server answers 413 at the end. That is
@@ -35,14 +35,14 @@ const MAX_SHEET_BYTES = 20 * 1024 * 1024;
 /**
  * Refuse a file before a round exists, in the screen’s own words.
  *
- * ⚠️ TWO OF THESE SENTENCES ARE THE DESIGN’S, VERBATIM, AND ONE IS OURS. S1-03 specifies what a
+ * TWO OF THESE SENTENCES ARE THE DESIGN’S, VERBATIM, AND ONE IS OURS. S1-03 specifies what a
  * pre-round refusal says — "That file isn’t a PDF. Upload the lender’s PDF, or paste the
  * conditions." and "This PDF is larger than 20 MB." The empty-file sentence is NOT in the design;
  * it is here because the server refuses zero bytes with a 422 and a processor deserves to know
  * instantly rather than after a round trip. Saying which is which matters: a later reader checking
  * this against the PNG will not find the third one, and should not conclude the screen drifted.
  *
- * ⚠️ THE ONLY COPY, AND IT WAS BRIEFLY NOT. The conditions tab page grew its OWN `refuseSheet`
+ * THE ONLY COPY, AND IT WAS BRIEFLY NOT. The conditions tab page grew its OWN `refuseSheet`
  * rather than importing this one, and the two disagreed three ways inside a single commit — the
  * page let an empty MIME type through, skipped `.toLowerCase()`, and used a different sentence
  * ("Condition sheets must be PDFs.") that no test pinned and no design specifies. Worse, the
@@ -97,7 +97,7 @@ function InboxAddress({ fileId }: { fileId: string }) {
   const address = timeline.data?.inbox_address;
 
   async function copy(value: string) {
-    // ⚠️ A REJECTED CLIPBOARD MUST NOT MAKE THE BUTTON DO NOTHING (LP-855's lesson, one surface
+    // A REJECTED CLIPBOARD MUST NOT MAKE THE BUTTON DO NOTHING (LP-855's lesson, one surface
     // over). `writeText` rejects outright when the permission is denied, and an unhandled rejection
     // leaves a button that appears broken. The address stays on screen either way, so the recovery
     // is to say so and let them select it.
@@ -138,13 +138,13 @@ function InboxAddress({ fileId }: { fileId: string }) {
 /**
  * The Conditions tab with no rounds on the file yet (screen S1-01).
  *
- * ⚠️ NOT `EmptyState`, AND THAT IS DELIBERATE. That primitive renders `children` inside a `<p>`
+ * NOT `EmptyState`, AND THAT IS DELIBERATE. That primitive renders `children` inside a `<p>`
  * capped at `max-w-xs` and documents `action` as "the one action that fills it". This screen is four
  * ways in, laid out 2x2, one of them holding a drop zone — a grid of interactive cards inside a
  * paragraph is invalid markup and fights a width written for a sentence. Bending a one-action
  * component into a four-action screen is the misuse its own docstring warns about.
  *
- * ⚠️ THE UPLOAD IS THE ONLY SELF-CONTAINED ACTION HERE. Paste and add-by-hand open dialogs that are
+ * THE UPLOAD IS THE ONLY SELF-CONTAINED ACTION HERE. Paste and add-by-hand open dialogs that are
  * built in §4, so they are callbacks the parent supplies rather than buttons that do nothing —
  * a dead primary button is how a screen looks finished and is not.
  */

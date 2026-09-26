@@ -4,22 +4,22 @@
 # reserves. Underfunded reserves are the direct cause of the special assessments that turn a performing
 # borrower into a distressed one, which is why Fannie tightened this in 2026.
 #
-# ⚠️ THE FLOOR IS DATE-KEYED — THE FIRST DATE-KEYED THRESHOLD IN THE SYSTEM (ADR-379). It is 10% today
+# THE FLOOR IS DATE-KEYED — THE FIRST DATE-KEYED THRESHOLD IN THE SYSTEM (ADR-379). It is 10% today
 # and 15% for loan applications dated on or after 2027-01-04. The rule therefore keys on the LOAN
 # APPLICATION DATE, never on today's date: an application taken in December 2026 is judged at 10% even if
 # the file is worked in 2027, and one taken in January 2027 is judged at 15%. Both values and the boundary
 # are declared in reference_values below and PINNED to the recipe's constants by test, so the citation and
 # the code cannot drift.
 #
-# ⚠️ AND AN ABSENT APPLICATION DATE ABSTAINS. The date is not an input to the comparison — it SELECTS the
+# AND AN ABSENT APPLICATION DATE ABSTAINS. The date is not an input to the comparison — it SELECTS the
 # comparison. Defaulting it to today would silently apply next year's floor to this year's application and
 # fire on a compliant project.
 #
-# ⚠️ THE CATALOG SAID "budget parse → AI" AND THAT DOCUMENT DOES NOT EXIST. There is no HOA-budget document
+# THE CATALOG SAID "budget parse → AI" AND THAT DOCUMENT DOES NOT EXIST. There is no HOA-budget document
 # type in the classifier catalog, so a budget cannot be classified, extracted, or attached to a loan file.
 # The reserve percentage resolves from EITHER source: the condo questionnaire's
 # `reserve_contribution_percentage` OR the HOA statement's `reserve_percentage` — and on the corpus it
-# is the HOA STATEMENT that resolves (HOA budgets classify as hoa_statement). ⚠️ The latter field had
+# is the HOA STATEMENT that resolves (HOA budgets classify as hoa_statement). The latter field had
 # NO definition in its starter prompt until the LP-494 review; a 'percent funded' figure read into it
 # would satisfy this rule on a project contributing nothing, so the prompt now excludes that measure
 # explicitly. Original note:
@@ -33,14 +33,14 @@
 #     fetched 2026-08-13): "provides for the funding of replacement reserves for capital expenditures and
 #     deferred maintenance that is at least 10% of the budget."
 #   15%, applications on/after 2027-01-04 — Fannie Mae Lender Letter LL-2026-03, issued 2026-03-18.
-#     ⚠️ TIER S, NOT P, AND THE ATTEMPT IS REPORTED: singlefamily.fanniemae.com returns HTTP 403 to this
+#     TIER S, NOT P, AND THE ATTEMPT IS REPORTED: singlefamily.fanniemae.com returns HTTP 403 to this
 #     client for both the landing page and the PDF (/media/44986/display). robots.txt ALLOWS both paths —
 #     the refusal is bot protection, and circumventing it was declined. Confirmed verbatim against two
-#     independent secondary sources. ⚠️ The 08/05/2026 Guide page still states 10% with no sunset, which is
+#     independent secondary sources. The 08/05/2026 Guide page still states 10% with no sunset, which is
 #     consistent: a Lender Letter sits outside the Guide until incorporated. THIS IS WHY THE RULE CARRIES
 #     threshold_needs_signoff — the step-up is the one value not read from a primary.
 #
-# ⚠️ WAS INERT — CO-3 and CO-4 ACTIVATED at the LP-494 revision (61 -> 63). Retained for the reasoning: The tag resolves on no file in the corpus: the two bench condo questionnaires are a
+# WAS INERT — CO-3 and CO-4 ACTIVATED at the LP-494 revision (61 -> 63). Retained for the reasoning: The tag resolves on no file in the corpus: the two bench condo questionnaires are a
 # cancellation notice and a genuinely UNANSWERED standard form, and no loan file carries a questionnaire
 # at all. `input_resolves: false` on the bar says exactly that. Built, not shipped.
 
@@ -73,7 +73,7 @@ reference_values:
   priya_validated: false          # must equal rule_kinds.csv
   threshold_needs_signoff: true   # must equal rule_kinds.csv — the 15% step-up is tier S, not P
   values:
-    # ⚠️ A DATE-KEYED PAIR, NOT A CONSTANT. A test pins all three against the recipe's constants.
+    # A DATE-KEYED PAIR, NOT A CONSTANT. A test pins all three against the recipe's constants.
     min_reserve_pct_before_step_up: "10"
     min_reserve_pct_from_step_up: "15"
     reserve_step_up_application_date: "2027-01-04"
@@ -116,7 +116,7 @@ spec_version: 1
 # The MACHINE-READABLE deterministic body (LP-324). An "unknown" tag coerces through the gate to
 # couldnt_check BEFORE this body runs.
 deterministic:
-  # ⚠️ THE CONDO SCOPING IS AN APPLICABILITY PREDICATE, NOT AN OUTCOME — IH-7's finding (LP-487), applied
+  # THE CONDO SCOPING IS AN APPLICABILITY PREDICATE, NOT AN OUTCOME — IH-7's finding (LP-487), applied
   # unchanged. The applicability layer resolves an ABSENT or "unknown" predicate tag to COULDNT_CHECK and
   # only a DEFINITELY-FALSE one to not_applicable, so a file that simply does not state its property type
   # is surfaced rather than silently skipped. Fail closed on the unknown, out-of-scope only on the known.
@@ -151,7 +151,7 @@ deterministic:
         amount. If neither is available, the project needs a full eligibility review before the loan
         proceeds.
     - verdict: couldnt_check
-      # ⚠️ THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. A `satisfied` default would report a project's reserves
+      # THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. A `satisfied` default would report a project's reserves
       # as adequate on a file whose questionnaire nobody answered.
       default: true
       reasoning: >-

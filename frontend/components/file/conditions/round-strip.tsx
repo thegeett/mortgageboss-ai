@@ -24,11 +24,11 @@ const SOURCE_LABEL: Record<string, string> = {
 /**
  * The round strip above the imported list (S1-05, S1-08).
  *
- * ⚠️ DISCARDED ROUNDS ARE HERE ON PURPOSE. A processor who threw a draft away should see that they
+ * DISCARDED ROUNDS ARE HERE ON PURPOSE. A processor who threw a draft away should see that they
  * did; a round silently vanishing reads as data loss. The dashboard filters them out of "what am I
  * working on", which is a different question from "what has happened to this file".
  *
- * ⚠️ "Attach the lender's PDF" APPEARS ONLY ON A ROUND WITH NO PDF, and that is the whole of LP-907's
+ * "Attach the lender's PDF" APPEARS ONLY ON A ROUND WITH NO PDF, and that is the whole of LP-907's
  * merge surfaced: it fills the letter details into THAT round and creates no second one. Offering it
  * on a round that already has a PDF would promise a merge the server refuses with "this round
  * already has the lender's PDF".
@@ -57,7 +57,7 @@ export function RoundStrip({
         </span>
       </div>
 
-      {/* ⚠️ REVERSED HERE RATHER THAN BY THE CALLER, AND THAT IS THE WHOLE CARE OF THIS FIX (S1-08).
+      {/* REVERSED HERE RATHER THAN BY THE CALLER, AND THAT IS THE WHOLE CARE OF THIS FIX (S1-08).
           The design's strip runs Round 1 → Round 2 left to right; the server sends `created_at DESC`
           and `imported-view.tsx` documents the prop as "Every round on the file, newest first", then
           derives `newest = rounds.find(imported) ?? rounds[0]` from that order. Reversing the ARRAY
@@ -99,7 +99,7 @@ export function RoundStrip({
 
             <span className="text-xs text-muted-foreground">
               {round.condition_count} on sheet
-              {/* ⚠️ SHOWN ONLY WHEN THE SERVER SENT NUMBERS, and the two halves differ on purpose.
+              {/* SHOWN ONLY WHEN THE SERVER SENT NUMBERS, and the two halves differ on purpose.
                   S1-05 reads "11 on sheet · 11 new" — no "seen again" at all, because none was —
                   while S1-08 reads "6 on sheet · 0 new · 6 seen again", where 0 IS the measurement
                   and the whole point of the screen. So `created` shows whenever it exists (0

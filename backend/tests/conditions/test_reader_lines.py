@@ -32,7 +32,7 @@ from tests.conditions.fixture_helpers import (
 
 
 def test_the_soft_hyphen_becomes_a_real_hyphen() -> None:
-    """⚠️ THE ONE THE WHOLE TICKET DEPENDS ON. UWM renders typed hyphens as U+00AD.
+    """THE ONE THE WHOLE TICKET DEPENDS ON. UWM renders typed hyphens as U+00AD.
 
     Left alone: the bucket-heading regex stops matching `UW - Prior To Final Approval (PTD)`, the
     condition text carries an invisible character, and two texts a person would call identical
@@ -50,7 +50,7 @@ def test_the_non_breaking_space_becomes_a_space() -> None:
 
 
 def test_trailing_space_goes_and_leading_space_stays() -> None:
-    """⚠️ LEADING SPACES ARE LOAD-BEARING and a normaliser that stripped them would be wrong.
+    """LEADING SPACES ARE LOAD-BEARING and a normaliser that stripped them would be wrong.
 
     Indentation is what separates a bucket heading (≤ 3 spaces) from a continuation line (≥ 20). A
     `.strip()` here would collapse the column structure the readers exist to read, and every row
@@ -89,7 +89,7 @@ def test_token_offsets_are_character_positions() -> None:
 
 
 def test_blank_lines_are_kept_not_filtered() -> None:
-    """⚠️ The Champions segmenter reasons about "the line above a row's top". A reader that never
+    """The Champions segmenter reasons about "the line above a row's top". A reader that never
     saw the blanks would compute a different line and mis-slice every row in the segment."""
     lines = lines_from_text("first\n\n\nfourth")
 
@@ -119,7 +119,7 @@ def _pdf_with(words: list[tuple[float, float, str]]) -> bytes:
 
 
 def test_words_at_the_same_height_become_one_line() -> None:
-    """⚠️ GROUPED BY VERTICAL CENTRE, NOT BY THE PDF'S OWN BLOCK/LINE INDICES.
+    """GROUPED BY VERTICAL CENTRE, NOT BY THE PDF'S OWN BLOCK/LINE INDICES.
 
     UWM's header is two columns — `Contact Name:` on the left and `Senior UW:` on the right, at the
     same height and in different blocks. Grouping by block would split one visual line in two and the
@@ -147,7 +147,7 @@ def test_tokens_come_back_in_left_to_right_order() -> None:
 
 
 def test_pdf_lines_report_no_indentation_rather_than_zero() -> None:
-    """⚠️ NONE IS NOT ZERO, AND THAT IS THE POINT (section 1 review).
+    """NONE IS NOT ZERO, AND THAT IS THE POINT (section 1 review).
 
     `text` for a PDF line is the tokens joined by single spaces, so it carries no indentation at all.
     An `int` return would hand every reader a confident 0 — and the spec's heading test (<= 3 spaces)
@@ -166,7 +166,7 @@ def test_pdf_lines_report_no_indentation_rather_than_zero() -> None:
 
 
 def test_clustering_does_not_depend_on_word_arrival_order() -> None:
-    """⚠️ THE DEFECT THE REVIEW FOUND BY TRACING RATHER THAN REASONING.
+    """THE DEFECT THE REVIEW FOUND BY TRACING RATHER THAN REASONING.
 
     Clustering greedily in ARRIVAL order made the output depend on whatever `words_for` returned
     first: the same geometry could group into one line or two. A layout reader whose result depends
@@ -203,7 +203,7 @@ def test_every_uwm_fixture_is_detected_as_uwm(fixture: str) -> None:
 
 
 def test_the_uwm_test_is_a_CONTAINS_and_the_champions_test_is_an_EQUALS() -> None:
-    """⚠️ THE TWO TESTS ARE DELIBERATELY DIFFERENT, per the spec.
+    """THE TWO TESTS ARE DELIBERATELY DIFFERENT, per the spec.
 
     UWM's real title line carries the borrower and the loan number after it, so an equality test
     would never match. Champions' is exactly its title — and making THAT a `contains` would classify
@@ -244,7 +244,7 @@ def test_an_empty_input_is_generic_rather_than_an_error() -> None:
 def test_the_placeholder_is_substituted_and_the_count_is_pinned(
     fixture: str, expected_shy: int
 ) -> None:
-    """⚠️ A real U+00AD is INVISIBLE in an editor and in a diff, which is why the committed file
+    """A real U+00AD is INVISIBLE in an editor and in a diff, which is why the committed file
     carries `{SHY}` instead and this asserts the count. A tool that stripped them from the file would
     otherwise change the fixture silently."""
     raw = sheet_text(fixture)

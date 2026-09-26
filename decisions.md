@@ -11861,7 +11861,7 @@ single-holder cells to `no` (n1/n3/n4/n6/n7/p2 — the relayed ticket enumerated
 agreed with cover all 6). After correction, **non_borrower_co_holder scored 11/11** (single `no`, N5/N8 `yes`,
 N9 `no` — the discriminating control).
 
-**⚠️ The coupling finding (a REGRESSION the conservative change surfaced).** `holder_name_variance`'s prompt
+**The coupling finding (a REGRESSION the conservative change surfaced).** `holder_name_variance`'s prompt
 GATES on `owner_matches == "yes"` ("WHEN owner_matches is yes, describe how the name differs"). With
 owner_matches now `unknown`/`no` for the flag cases, the variance tag reports `none` for N1/N2/N7/P2 — the very
 cases whose difference must be surfaced so "the document still counts." Variance re-scored **4/11** (down from
@@ -12548,7 +12548,7 @@ turns on the FAILURE MODE, and the two rules differ decisively:
   wrong SCOPE, VISIBLE as absence — and the borrower's 2-year-history gap is STILL surfaced by IN-11 (live,
   income-type-agnostic), so no finding is lost. The verdict tag (`has_2yr_history`) is Priya-validated at 0.9 /
   measured 100% (inherited from IN-11, the IN-6 same-tag-same-evidence pattern), so the VERDICT is never a false
-  green. ⚠️ Correction (LP-423 review): the gate is NOT purely a deterministic Schedule-C fact — `is_self_employed`
+  green. Correction (LP-423 review): the gate is NOT purely a deterministic Schedule-C fact — `is_self_employed`
   still needs the UNSCORED `income.type` for its "no" → not_applicable determination (a W-2 borrower) and as an
   `income.type == self_employment` secondary "yes" (a 1003-declared self-employment with no surfaced Schedule C).
   So the SCOPE has a bounded FP: an `income.type`-misclassified wage earner (no Schedule C) makes IN-12 apply and
@@ -12746,7 +12746,7 @@ on a `needs_review` row a human already inspects. Folding its 5/11 in would conf
 (yes, 11/11) with "is the explanation always perfectly worded" (no, 5/11) and would BLOCK a rule whose routing is
 provably correct.
 
-**⚠️ CORRECTION (LP-429 review): `holder_name_variance` is NOT purely reason-only — it is AS-6's couldnt_check
+**CORRECTION (LP-429 review): `holder_name_variance` is NOT purely reason-only — it is AS-6's couldnt_check
 GATE.** AS-6's spec has `gated_tags: [stmt.holder_name_variance]`: at runtime `holder_name_variance == unknown` →
 AS-6 `couldnt_check` (the name could not be compared), and only a non-unknown value lets AS-6 proceed to the
 routing. So it IS verdict-affecting — via the couldnt_check gate, not the fired/satisfied routing. The 5/11 is
@@ -13108,7 +13108,7 @@ Option (a) is preferred and cheap — it makes them generatable and matches the 
 
 **The four leading-digit renames (ADR-345, applied).** `1040_/1065_/1120_/4506_t_…` → `form_1040_…/form_1065_…/form_1120_…/form_4506t_…` (the `form_1099` precedent), so they form valid Python identifiers and generate (86 → 90 modules). They are not in the catalog, so they remain uncataloged (Tier-3) pending a catalog decision.
 
-**⚠️ The vocabulary reconciliation (a NEW GAP this surfaced).** The schema `document_type` vocabulary diverged from the catalog/classifier vocabulary: only 26 of 108 spec types were in the catalog. The classifier emits catalog keys; the generated extractors are keyed by spec type — so an unreconciled type is never reached (the exact silent-routing failure the merge exists to think about). This ticket reconciled the UNAMBIGUOUS cases: 10 spec `document_type`s were renamed to their exact catalog key (`application_1003` → `uniform_residential_loan_application`, `form_1099` → `1099`, …), which also made those catalog types promotable. **72 spec types remain uncataloged** — recorded in `docs/schema-specs/_VOCABULARY_MAPPING.md` as UNSURE-with-candidate (21) or NO MATCH (the rest). Per Geet, **no mapping was guessed** — a wrong rename silently breaks routing. Reconciling the 72 (add a catalog entry + a classifier indicator, or confirm the UNSURE candidates) is the follow-up that makes the remaining generated extractors reachable.
+**The vocabulary reconciliation (a NEW GAP this surfaced).** The schema `document_type` vocabulary diverged from the catalog/classifier vocabulary: only 26 of 108 spec types were in the catalog. The classifier emits catalog keys; the generated extractors are keyed by spec type — so an unreconciled type is never reached (the exact silent-routing failure the merge exists to think about). This ticket reconciled the UNAMBIGUOUS cases: 10 spec `document_type`s were renamed to their exact catalog key (`application_1003` → `uniform_residential_loan_application`, `form_1099` → `1099`, …), which also made those catalog types promotable. **72 spec types remain uncataloged** — recorded in `docs/schema-specs/_VOCABULARY_MAPPING.md` as UNSURE-with-candidate (21) or NO MATCH (the rest). Per Geet, **no mapping was guessed** — a wrong rename silently breaks routing. Reconciling the 72 (add a catalog entry + a classifier indicator, or confirm the UNSURE candidates) is the follow-up that makes the remaining generated extractors reachable.
 
 **Cross-refs.** ADR-345 (the leading-digit rename), `app/tasks/document_processing.py::_route_by_tier` (the D3 gate), `tests/documents/test_catalog.py` (the replacement invariant), `docs/schema-specs/_VOCABULARY_MAPPING.md` (the 82-type map), LP-440/`_REGISTRATION_SNIPPETS.md` (what step 7 applies).
 
@@ -13587,7 +13587,7 @@ network-class failure) and retried. Pacing is likewise per attempt, because **a 
 against the quota** — retry-after-throttle spends allowance to learn nothing. Spacing, not a token bucket: a
 bucket permits a burst and then stalls, which is exactly the shape that trips a per-minute server-side quota.
 
-⚠️ **The limiter is PROCESS-LOCAL, and this is the part most likely to be misread as a bug.** N worker tasks
+**The limiter is PROCESS-LOCAL, and this is the part most likely to be misread as a bug.** N worker tasks
 pace at N × the setting. The deployed value must be *the account quota divided by task count*, never the quota
 itself — two tasks each pacing at 8 against a 10 RPM account still throttle, and it looks like a broken
 limiter. A shared limiter would need Redis coordination on the hot path of every model call; that is a heavier
@@ -13621,7 +13621,7 @@ findings).
 
 ---
 
-## ⚠️ ADR NUMBERING COLLISION — 362 onwards is allocated TWICE
+## ADR NUMBERING COLLISION — 362 onwards is allocated TWICE
 
 Two lines of work appended to this log independently and both continued from 361:
 the **C-series** (C0–C6: the AWS/Bedrock deployment line, ADR-362…ADR-377) and the
@@ -13629,7 +13629,7 @@ the **C-series** (C0–C6: the AWS/Bedrock deployment line, ADR-362…ADR-377) a
 `bedrock_integration_with_rules_staging`; both blocks are kept below, in full and
 unrenumbered.
 
-⚠️ **They are deliberately NOT renumbered.** Both sets are cited from code and from
+**They are deliberately NOT renumbered.** Both sets are cited from code and from
 other docs — `ADR-377` alone has 12 references, `ADR-362` has 7 — so renumbering
 either side would silently invalidate comments that point at a decision by number.
 A number alone is therefore ambiguous in this file from 362 to 377: cite the
@@ -14058,7 +14058,7 @@ worked around rather than solved:
 to `[]`. Production may genuinely need it, and at that point it would serve two accounts rather than
 one. Deleting working code that will be wanted again is worse than leaving it inert.
 
-**⚠️ The accepted trade-off, stated rather than pre-solved.** With one registry per account, promoting
+**The accepted trade-off, stated rather than pre-solved.** With one registry per account, promoting
 a staging-validated image to production later means either a cross-account pull (re-introducing this
 complexity where it would finally earn its keep) or rebuilding in production (a different digest from
 the artifact that was validated). **That decision belongs to when production exists, with real
@@ -14092,7 +14092,7 @@ nothing.
 It also removes a resource from the critical path: locking no longer depends on a second AWS service
 being present and reachable before any plan can run.
 
-**⚠️ NOT VERIFIED, and recorded as such.** Confirming that v1.15.8 accepts `use_lockfile` requires
+**NOT VERIFIED, and recorded as such.** Confirming that v1.15.8 accepts `use_lockfile` requires
 `terraform init`, which was out of scope for the ticket that made this change. **It is the first thing
 to check on the initial init.** If it is rejected, the fallback is mechanical and fully specified:
 restore `dynamodb_table` in the backends and an `aws_dynamodb_table` resource in bootstrap. That
@@ -14147,7 +14147,7 @@ with an environment half-created and a 10-15 minute RDS create already spent. Th
 that to **plan time**, before anything is touched, with an error message that names the limit and its
 per-rule scope so the reader does not have to find this ADR to understand it.
 
-⚠️ **`terraform validate` does not catch it** — variable validations are evaluated when values are
+**`terraform validate` does not catch it** — variable validations are evaluated when values are
 resolved, which is plan and apply, not `validate`. Verified: a scratch module with six entries as the
 default passes `terraform validate` cleanly. "Plan time" is the guarantee; "validate time" is not.
 
@@ -14187,7 +14187,7 @@ from the account it lives in. That is genuinely odd, and it is the point: the od
 manual step that has no other representation. The variable's description and the tfvars comment both
 name the reason as *member account*, not preference, so nobody "tidies it up" by setting it true.
 
-⚠️ **Up to 24 hours** after activation before the tag begins reporting. The budget alarm is inert for
+**Up to 24 hours** after activation before the tag begins reporting. The budget alarm is inert for
 that window — which includes the period immediately after the first apply, when a misconfiguration is
 most likely to be running up cost.
 
@@ -14342,7 +14342,7 @@ the two are genuinely distinct and both belong. Had the schemas overlapped, the 
 opposite — **not** adding the type, because splitting the same documents across two schemas means no rule knows
 which to read. A redundant type is worse than a missing one.
 
-**⚠️ Record the correction when a claimed rule tie is wrong.** The plan and the ticket both justified the ACORD
+**Record the correction when a claimed rule tie is wrong.** The plan and the ticket both justified the ACORD
 25 by CO-3 (a condo project's master policy + fidelity bond). **That tie is wrong, and it is recorded loudly so
 no one acts on it.** CO-3's inputs are master-PROPERTY coverage and a FIDELITY/crime bond, which arrive on an
 **ACORD 27/28** (Evidence of Property Insurance) + a crime certificate — a *different* form. An ACORD 25 is a
@@ -14446,7 +14446,7 @@ the headline is what a processor checks at this stage, and the itemization has n
 the three CD-only fields on the LE would have created three permanently-null fields on every Loan Estimate.
 Caught by reading a real LE (258) in Phase A, before writing the spec rather than after.
 
-**⚠️ What would change this decision — write it down so the boundary is revisited deliberately.** The headline
+**What would change this decision — write it down so the boundary is revisited deliberately.** The headline
 is a scoping choice contingent on the pre-submission rule set, not a claim that the rest of the CD is
 worthless. If **the pre-submission scope boundary moves**, or **DC-4 (fee tolerance 0%/10%) or DC-5 (APR
 change threshold) are confirmed in scope**, the CD becomes rule-bearing: DC-4 needs the full A–J cost
@@ -14510,7 +14510,7 @@ genuinely-empty FAILED extraction. The output lands in the marked-untyped snapsh
 `include_untyped`), **never by a deterministic rule** (LP-463's constraint, inherited unchanged: no rule reads
 `untyped_extraction`). A missed type now costs untyped data, not nothing.
 
-**⚠️ This deliberately reduces the pressure to re-tune the classifier — and that is the point.** The v2 run
+**This deliberately reduces the pressure to re-tune the classifier — and that is the point.** The v2 run
 showed how a type gets missed: `passport` was on the build list, the diagnostic split it, LP-468 fixed the
 misclassification, and the remaining passport step was skipped without anyone deciding to skip it —
 `warranty_deed`, `certificate_of_deposit`, `money_market_statement` are in the same position. A fallback means
@@ -14590,7 +14590,7 @@ the moment a rule reads `document_number` or `category_code`, consolidating the 
 rule. Doing it now — while the fields are processor-visibility only — is deliberately the cheap time to do it.
 Passport-only (leaving three drifting schemas) was rejected: it is half a fix and guarantees a second ticket.
 
-**⚠️ A limit on the no-zero-data principle (ADR-368): a typed extractor can make a bad scan WORSE.** ADR-368
+**A limit on the no-zero-data principle (ADR-368): a typed extractor can make a bad scan WORSE.** ADR-368
 established that a missing extractor costs *typed* data, not *all* data, because a no-extractor type falls back
 to Tier-3 free extraction. Promoting `passport` (and giving the family a typed extractor) REMOVES these types
 from that fallback path — they now go through typed extraction. But the LP-471 fallback only fires on `FAILED`
@@ -14739,7 +14739,7 @@ the boundary so the next builder owns it.
 - **253 / 104 / 146 / 294 / 293:** out of reach of self-consistency (no internal contradiction) or another
   ticket (image gap ADR-365/371; value-content).
 
-**⚠️ This layer should run BEFORE tags are written at scale.** A tag on a wrong value is worse than a tag on a
+**This layer should run BEFORE tags are written at scale.** A tag on a wrong value is worse than a tag on a
 missing one — the wrong tag propagates a confident falsehood into every rule that reads it. The consistency
 flag belongs upstream of tag materialization so a flagged value is visible before it feeds a verdict.
 
@@ -14757,7 +14757,7 @@ classifier abstain on ~14 documents whose specialised type exists and whose extr
 counted the force-fits removed; we did not count the correct classifications lost. **A guard's benefit and its
 cost are two different measurements, and shipping on one of them is how a fix becomes a regression.**
 
-**⚠️ The remedy was NOT to loosen declining.** The obvious response — lower the confidence threshold, weaken
+**The remedy was NOT to loosen declining.** The obvious response — lower the confidence threshold, weaken
 `type_matches_document`, make abstention generally harder — would have traded this regression for the strictly
 worse one. A force-fit produces **confident wrong typed data** that flows into deterministic rules; an
 over-decline produces **untyped data** that no rule reads. The two failures are not symmetric, so a general
@@ -14779,7 +14779,7 @@ declines, the payment-portal screenshot still declines, the compensation stateme
 2. that extractor is **proven on a sibling document in the same corpus** (not merely registered);
 3. the document is **genuinely that type** — not a multi-document package, not an addendum, not a near-miss.
 
-**⚠️ "Correctly conservative" is the expected verdict for most of them.** Of 10 candidates, **3 qualified**
+**"Correctly conservative" is the expected verdict for most of them.** Of 10 candidates, **3 qualified**
 (202, 208, 209). The 7 that did not, and why the honest answer is to leave them declining: **packages** (204's
 73-page URLA bundle, 196's CPA tax package) are the **splitter's** job — classification cannot name a document
 that is five documents; **addenda** (177/178, AZ REALTORS® lease renewal/extension) are genuinely **not** the
@@ -14808,7 +14808,7 @@ sources relate had to be decided before the first of those rules is written.
 `liability.source` marker (`mismo_stated` / `credit_report_reported`). Nothing is matched, nothing is merged.
 A debt appearing in both sources is deliberately present **twice, once per source**.
 
-**⚠️ Why — the signal is the difference.** An undisclosed tradeline is *precisely* a debt present in one source
+**Why — the signal is the difference.** An undisclosed tradeline is *precisely* a debt present in one source
 and absent from the other. **CR-4 exists to detect exactly that.** Any merge — however careful — destroys the
 evidence CR-4 is built to read, and it destroys it silently: the merged list looks complete. Preserving both
 lists intact and labelled is what keeps that comparison possible at all.
@@ -14830,7 +14830,7 @@ double-counting, but it **destroys CR-4's signal outright** — you cannot detec
 having discarded the declared list — and it makes a file's debts depend on which documents happen to be
 present. A rule would silently see a different world before and after a credit report is uploaded.
 
-**⚠️ The cost this accepts, stated so it is not discovered later.** A naive rule that sums `monthly_payment`
+**The cost this accepts, stated so it is not discovered later.** A naive rule that sums `monthly_payment`
 across every liability subject **will double-count** a debt present in both sources. That is why the
 `liability.source` marker is on **every** subject and not only the ambiguous ones: **a summing rule must filter
 by source.** DT-1 (back-end DTI) is the rule that will care most. This is a real sharp edge, chosen knowingly
@@ -14838,7 +14838,7 @@ over destroying CR-4.
 
 **The identity scheme, and the trap it avoids.** A tradeline subject uses its LP-479 `row_id` (a content hash
 over the whole row); a MISMO liability gets a content-derived id over its four available fields — **never the
-positional `liability.{n}` index**, so the id survives a reordering. ⚠️ **The `_per_account` composite
+positional `liability.{n}` index**, so the id survives a reordering. **The `_per_account` composite
 `(institution, masked-number)` was measured and rejected for this shape:** the LP-443 redact backstop scrubs
 unmasked account numbers, leaving **9 of 35** real tradelines a bare `[redacted]` and collapsing **two distinct
 SETOYOTA FIN DBA OF WO tradelines onto one key** — a guess-merge on real data, in the one place this design
@@ -14846,7 +14846,7 @@ exists to prevent it. A liability that cannot be identified at all (a stated lia
 still gets its own subject plus a `liability.unresolved` marker — the `_per_account` fail-closed rule,
 inherited: never dropped, never merged into an equally-anonymous neighbour.
 
-**⚠️ CORRECTED BY LP-483 — this claim was wrong, in two ways.** It read: *"the two sources never co-occur
+**CORRECTED BY LP-483 — this claim was wrong, in two ways.** It read: *"the two sources never co-occur
 anywhere in the repo."* **They do co-occur: LF-96SV carries 5 stated liabilities AND a credit report with 18
 tradelines on one real loan file.**
 
@@ -14860,7 +14860,7 @@ a correct search of the fixtures would have concluded liabilities were absent fr
 lesson is not merely "search wider" — it is that **an in-code fixture is not evidence about the data**, and a
 claim about what the corpus contains must be checked against the corpus, not its stand-in.
 
-⚠️ **The evidence was already cited inside this repository when the claim was written:**
+**The evidence was already cited inside this repository when the claim was written:**
 `tag_materialization/derived.py`'s own `_credit_tradeline_count` preamble names LF-96SV's 18 stored rows, and
 LP-453 recorded its payment total. The ADR asserted absence while a neighbouring module documented presence —
 a cross-check of the repo's own prose would have caught it.
@@ -14888,7 +14888,7 @@ ADR-332 (a judgment cannot be calibrated on a fixture you authored).
 degraded run by asking *"did this enumeration yield zero subjects?"*. `per_liability` was missing from
 `_DOCUMENT_DERIVED_ENUMERATIONS` entirely — so once LP-481 lands a CR rule, a degraded run would have
 retired every prior tradeline finding as "no longer applies", the exact false-close that set prevents.
-⚠️ **And adding the key is not sufficient**, because this is the first MIXED-SOURCE enumeration: a file with
+**And adding the key is not sufficient**, because this is the first MIXED-SOURCE enumeration: a file with
 stated MISMO liabilities returns a non-empty union even when the credit report failed to build, so the union
 looks healthy while the whole document-derived half is missing. Resolved by adding the key **and** a
 `_MIXED_SOURCE_DEGRADATION` predicate map, whose `per_liability` entry
@@ -14938,14 +14938,14 @@ producing `liab.in_application` per liability. `credit.undisclosed_tradeline` is
 borrower tag is `yes`. One AI judgment, one comparison, and **CR-1 and CR-4 cannot disagree by construction** —
 the borrower answer is a pure function of the per-liability answers.
 
-**⚠️ Why the atomic judgment is the right calibration unit.** *"Is this tradeline on the application?"* is a
+**Why the atomic judgment is the right calibration unit.** *"Is this tradeline on the application?"* is a
 question Priya can answer per row, against the two lists in front of her, and score. *"Does this borrower have
 any undisclosed debt?"* is a **rollup**: one wrong row flips the whole answer, a right answer can be right for
 the wrong reason (two errors cancelling), and a wrong answer **tells you nothing about which row was wrong** —
 so a failed label produces no actionable correction. Scoring the rollup measures the aggregation as much as the
 perception. **Calibrate the smallest judgment the model actually makes, and derive everything above it.**
 
-**⚠️ The failure direction is NOT one-sided, and whoever sets the bar with Priya must have this.** The
+**The failure direction is NOT one-sided, and whoever sets the bar with Priya must have this.** The
 instinct is that a false MATCH is the dangerous one — it marks an undisclosed debt as disclosed and hides
 exactly what this rule exists to catch. That is true, and it argues for over-flagging. **But the opposite
 error is also expensive:** on a clean file — LF-96SV, where all five stated liabilities correspond 1:1 to the
@@ -14988,7 +14988,7 @@ obvious way — `is_disputed == "Y"` — the rule is three lines.
 `ACCOUNT IN FORBEARANCE` · `ACCOUNT CLOSED BY CREDIT GRANTOR` ·
 `ACCOUNT PREVIOUSLY IN DISPUTE-NOW RESOLVED-REPORTED BY SUBSCRIBER`. **One field, two encodings, both real.**
 
-⚠️ **The obvious rule fails silently on the second format.** `"ACCOUNT PREVIOUSLY IN DISPUTE…" != "Y"`, so
+**The obvious rule fails silently on the second format.** `"ACCOUNT PREVIOUSLY IN DISPUTE…" != "Y"`, so
 every tradeline on that report reads **not disputed** — a false negative on a fraud-adjacent rule, with no
 error, no log line, and every test green. And CR-12 **ships `auto`** (forced by kind), so there is no human
 in the loop to notice.
@@ -14998,7 +14998,7 @@ collapse whitespace, nothing more) and matches against two explicit lists — th
 account-status remarks that are *not* disputes. A value in neither list returns `unknown`, which the gate
 turns into `couldnt_check`. **It never stems, never fuzzy-matches, never infers.**
 
-**⚠️ The case that defines the pattern.** `PREVIOUSLY IN DISPUTE — NOW RESOLVED` is deliberately in
+**The case that defines the pattern.** `PREVIOUSLY IN DISPUTE — NOW RESOLVED` is deliberately in
 **neither** list. It is tempting to read it as "not disputed" — the text nearly says so. But that is an
 *inference about what the bureau meant*, and the whole failure mode here is inferring from unfamiliar text.
 It abstains. A processor reads the remark and decides; the rule does not guess on their behalf.
@@ -15012,7 +15012,7 @@ domain expert, and tested. What it cannot do is quietly extend itself to text no
 not code. The producer mirrors it, and a test pins the two identical, so the list Priya reviews and the list
 that runs cannot drift apart silently.
 
-**⚠️ The asymmetry that sets the default.** A false "not disputed" hides a real dispute and the file closes on
+**The asymmetry that sets the default.** A false "not disputed" hides a real dispute and the file closes on
 suppressed bureau data. A `couldnt_check` costs a processor ten seconds of reading a remark. **The catch-all
 branch is therefore `couldnt_check`, not `satisfied`** — belt and braces with the gate, because a `satisfied`
 default would convert any future third encoding into a silent all-clear.
@@ -15033,7 +15033,7 @@ vocabulary is listed there for confirmation).
 a required tag **absent** → `couldnt_check`; a value of **`"unknown"`** → `couldnt_check`; a
 **contradiction** → `needs_review`; the **minimum load-bearing confidence** below the floor → `needs_review`.
 
-**⚠️ A confidently-wrong parsed value defeats all four by construction.** It is present, it is not
+**A confidently-wrong parsed value defeats all four by construction.** It is present, it is not
 `"unknown"`, nothing contradicts it — and the parsed producer sets `confidence=None` ("a deterministic
 passthrough, not a judgment", `parsed.py:46`), which the confidence minimum **filters out**:
 
@@ -15055,12 +15055,12 @@ check, ordered after absent/`"unknown"` and before contradiction: a load-bearing
 listed → `needs_review` with **`ratification_pending=True`** and a processor-facing reason. The finding still
 reaches the processor, marked; it is never suppressed and never fired.
 
-**⚠️ Distrusted is a FIFTH STATE, not a fourth.** It is not absent (the value is there), not empty, not
+**Distrusted is a FIFTH STATE, not a fourth.** It is not absent (the value is there), not empty, not
 `"unknown"` (the extractor was confident), and not low-confidence (there is no confidence to read). Collapsing
 it into any of the four would lose the one thing it says: *this value looks certain and should not be
 trusted.*
 
-**⚠️ WHAT THIS DOES NOT COVER — the boundary, stated so it is not rediscovered.** LP-474's per-extraction
+**WHAT THIS DOES NOT COVER — the boundary, stated so it is not rediscovered.** LP-474's per-extraction
 `must_differ` checks cover **3 of the 9** accuracy-ledger items (088, 049, 096 — each with 0 false
 positives). This list covers a different 4 (104, the two hallucinated licence fields, and the single-source
 dates). **Neither covers doc 253** — a gift read as $224,307.94 instead of $24,307.94. LP-474 recorded why: a
@@ -15069,14 +15069,14 @@ field-level list cannot help either unless every gift amount on every file is di
 needs a source-magnitude check — a different layer that does not exist.** Nor is 244 covered (it needs a
 Box-10 field that was never extracted) or 293 (a plausible-but-wrong date).
 
-**⚠️ THE DIVISION OF LABOUR, learned by measurement.** The seed list included `txn.amount` for doc 049.
+**THE DIVISION OF LABOUR, learned by measurement.** The seed list included `txn.amount` for doc 049.
 `txn.amount` is load-bearing on **AS-1**, the flagship live rule, so listing it degraded **every deposit on
 every file** — 39 tests moved — to protect a case LP-474 already catches **exactly**. It was removed. The
 rule that came out of it: **LP-474 handles a wrong value with an INTERNAL SIGNATURE; the distrust list
 handles one with NONE.** Using the crude tool where the precise one already works costs a whole lane and buys
 nothing.
 
-**⚠️ THE COST, stated honestly and larger than forecast.** The list keys on the FIELD, not on whether a given
+**THE COST, stated honestly and larger than forecast.** The list keys on the FIELD, not on whether a given
 extraction was wrong — so **every** file's value degrades. For IH-1 that is not "rarely auto-asserts": its
 only gated tag is distrusted, so it **never** auto-asserts. Every IH-1 finding is now
 `needs_review` + ratification-pending until the extractor improves and the entry is pruned. That is the trade,
@@ -15113,7 +15113,7 @@ tag has **no measured accuracy at all**, on the strength of a **self-consistency
 `calibratable-now` still requires `measured_accuracy` — a consistency number can never open the
 calibrated door.
 
-**2. ⚠️ `self_consistency_rate` IS NOT EVIDENCE OF CORRECTNESS, and the field is named for what it
+**2. `self_consistency_rate` IS NOT EVIDENCE OF CORRECTNESS, and the field is named for what it
 measures.** It is the rate at which **two independent derivations** of the same tag, from the same source
 data in **fresh contexts** (the second never shown the first's answer), agreed with each other.
 
@@ -15128,7 +15128,7 @@ data in **fresh contexts** (the second never shown the first's answer), agreed w
   the branch requires `measured_accuracy is None`: measured-and-failing is not unmeasured, and a
   consistency rate must never override a measurement that already failed.
 
-**⚠️ The naming was load-bearing on the very first run.** CR-8's tags scored **1.0000 over 35 cases** —
+**The naming was load-bearing on the very first run.** CR-8's tags scored **1.0000 over 35 cases** —
 and every value was `unknown`, because the PII backstop redacts `payment_history_24mo` (a long digit run)
 before the model sees it. The model was answering correctly about a destroyed input. Had the field been
 called `self_assessed_accuracy`, a 1.0 would have activated a rule that **cannot function**.
@@ -15202,7 +15202,7 @@ sourced short of a primary, is precisely what that flag is for.**
 **Consequences.** A second date-keyed threshold is now cheap to express and will look like this one. If a
 third arrives, promote it: a typed date `reference` operand plus a list-valued `when_compare` would let the
 rule body carry the branch, and the recipe layer would stop being the only place a threshold can vary.
-⚠️ **The transition is real and near.** From 2027-01-04 every condo file in flight is judged by a different
+**The transition is real and near.** From 2027-01-04 every condo file in flight is judged by a different
 number, and nothing in the system reminds anyone. Logged in `priya-open-questions.md`.
 
 **Related:** ADR-361 (threshold provenance — cited, never recalled), ADR-354 (schema presence ≠ data
@@ -15271,7 +15271,7 @@ clothes. Where the two are mixed, report them separately.
 - **Fields are not aliased across types to manufacture coverage.** `letter_date` (when the letter was
   written) is not `referenced_date` (the date of the event explained); `borrower_certification` (a prose
   attestation) is not `borrower_signature_present` (a signature on the page).
-- ⚠️ **This is the third form of one recurring error in two tickets.** LP-494/CO-3 trusted "IH-7 covers
+- **This is the third form of one recurring error in two tickets.** LP-494/CO-3 trusted "IH-7 covers
   it" without reading IH-7's exclusions; LP-495a Phase A trusted "four independent searches" without
   noticing none queried the stated side; this trusted a fill rate without asking what it ranged over. In
   each case the stated fact was TRUE and the inference drawn from it was not. The check is the same every
@@ -15309,7 +15309,7 @@ say so in those words — it is a stability check wearing a calibration's clothe
 - **Structural abstains are not degraded ones and must be distinguished.** 9 of OC-1's 19 files state an
   occupancy with no second declaration to compare against; `unknown` is the CORRECT answer there, not a
   failure. `input_resolves` is judged on the 10 that can resolve.
-- ⚠️ **Temperature 0 makes a byte-identical re-prompt a determinism check, not a consistency check.**
+- **Temperature 0 makes a byte-identical re-prompt a determinism check, not a consistency check.**
   OC-1's second derivation re-serialises the same facts with its top-level keys reversed — same source
   data, a genuinely fresh rendering. Any future rate must declare what it varied, or admit it measured
   determinism.

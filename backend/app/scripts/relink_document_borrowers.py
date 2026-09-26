@@ -21,11 +21,11 @@ over many rows, not DDL.
 IDEMPOTENT. The linker opens with an unconditional DELETE for the document and rewrites — a re-match
 is authoritative, which is the service's existing contract. Running twice produces the same rows.
 
-⚠️ IT CAN REMOVE LINKS, and that is correct: a document whose links the OLD matcher created wrongly
+IT CAN REMOVE LINKS, and that is correct: a document whose links the OLD matcher created wrongly
 should lose them. The report names every change in both directions so the write is a decision rather
 than a surprise.
 
-⚠️ SKIPS A DOCUMENT WHOSE EXTRACTION FAILED — the same guard `process_document` applies, and for the
+SKIPS A DOCUMENT WHOSE EXTRACTION FAILED — the same guard `process_document` applies, and for the
 same reason (LP-569): the linker's DELETE runs before it looks for names, so a call that succeeds
 while finding nothing commits the wipe. A failed extraction is an ABSENCE OF DATA, not a
 determination that the document names nobody, and a correctly-linked document must not lose its link

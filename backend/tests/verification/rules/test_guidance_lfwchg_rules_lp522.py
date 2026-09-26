@@ -37,7 +37,7 @@ def test_every_verdict_has_an_action(rule_id: str) -> None:
 
 @pytest.mark.parametrize("rule_id", _RULES)
 def test_every_action_is_an_instruction_not_a_verdict(rule_id: str) -> None:
-    """⚠️ THE WHOLE POINT. The old text opened with "the AI judged…", which states a conclusion and not
+    """THE WHOLE POINT. The old text opened with "the AI judged…", which states a conclusion and not
     a task. Every action must read as something a processor DOES."""
     judgment = load_rule_spec(rule_id).judgment
     assert judgment is not None and judgment.guidance is not None
@@ -61,7 +61,7 @@ def test_every_case_carries_both_a_why_and_a_fix(rule_id: str) -> None:
 
 
 def test_cr8_keys_its_distinction_on_the_verdict_not_on_a_tag() -> None:
-    """⚠️ THE CASE THAT MADE `explain_by` OPTIONAL — and NOT for want of tags. CR-8 reasons over four.
+    """THE CASE THAT MADE `explain_by` OPTIONAL — and NOT for want of tags. CR-8 reasons over four.
     Its evidence axis IS the verdict: six values naming the exact distinction (`one_30_day_late`,
     `excessive_60_plus`, `not_interpretable`, …), where `liab.payment_status` would be a weaker proxy
     for what the verdict states outright. So the actions carry the difference and `default` carries the
@@ -99,7 +99,7 @@ def test_cases_without_an_explanatory_tag_are_rejected_at_load() -> None:
 
 
 def test_dt7_never_asserts_an_ability_to_repay_determination() -> None:
-    """⚠️ A COMPLIANCE BOUNDARY, not a wording preference. Ability-to-repay is a CREDITOR obligation
+    """A COMPLIANCE BOUNDARY, not a wording preference. Ability-to-repay is a CREDITOR obligation
     under Regulation Z, assessed at underwriting. A processor assembling a file is not the party making
     it, and text telling them to "confirm the borrower can repay" would put a compliance conclusion in
     the wrong queue. DT-7 asks only what the file CARRIES — the spec's own header says the rule's NAME

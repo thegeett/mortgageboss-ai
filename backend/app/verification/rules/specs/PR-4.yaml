@@ -3,15 +3,15 @@
 # Is the appraisal a FINAL report, or is it made "subject to" repairs, alterations or completion? A
 # subject-to appraisal is not a final value: the loan cannot close on it until the work is verified.
 #
-# ⚠️ THE TICKET DESCRIBED PR-4 AS "subject to repairs"; the catalog says "Appraisal completeness
+# THE TICKET DESCRIBED PR-4 AS "subject to repairs"; the catalog says "Appraisal completeness
 # (Required sections/fields present + match)". Those are close but not identical, and the catalog is the
 # gate of record. Built as completeness WITH the subject-to condition as its principal signal — which is
 # what `appraisal_completion_condition` (2/2 on the real appraisals) actually states.
 #
-# ⚠️ BOTH REAL APPRAISALS READ "As is" / "as is" — case varies, which is why the judgment normalises
+# BOTH REAL APPRAISALS READ "As is" / "as is" — case varies, which is why the judgment normalises
 # rather than comparing. The subject-to path has never been observed in our corpus.
 #
-# ⚠️ NO NUMERIC THRESHOLD. None applies: this is a report-structure question.
+# NO NUMERIC THRESHOLD. None applies: this is a report-structure question.
 
 rule_id: PR-4
 name: Appraisal completeness

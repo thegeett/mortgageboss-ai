@@ -1,6 +1,6 @@
 """The Champions reader against the §7.4 synthetic PDF (LP-906 section 3).
 
-⚠️ WHAT THESE ASSERTIONS ARE WORTH, STATED HONESTLY. §7.4 supplies full prose for only rows 71 and
+WHAT THESE ASSERTIONS ARE WORTH, STATED HONESTLY. §7.4 supplies full prose for only rows 71 and
 268 (they appear in the §6 centre-rule example); the other 26 texts are authored in
 `champions_fixture.py`. So an assertion comparing a row's text to the fixture's text compares
 authored prose with itself and proves only that the centre rule reassembled SOMETHING.
@@ -71,7 +71,7 @@ def test_the_bucket_kind_comes_from_the_stage(sheet) -> None:  # type: ignore[no
 
 
 def test_the_single_line_sections_survive(sheet) -> None:  # type: ignore[no-untyped-def]
-    """⚠️ REGRESSION GUARD — THESE TWO ROWS WERE SILENTLY DELETED.
+    """REGRESSION GUARD — THESE TWO ROWS WERE SILENTLY DELETED.
 
     133 and 286 are each the only row in their section AND wrap to one line, so the number's centre
     falls on that line's own baseline and the two MERGE into a single line. The body-text column was
@@ -88,7 +88,7 @@ def test_the_single_line_sections_survive(sheet) -> None:  # type: ignore[no-unt
 
 
 def test_row_206_is_reassembled_across_the_page_break(sheet) -> None:  # type: ignore[no-untyped-def]
-    """⚠️ THE CASE THE WHOLE CENTRE RULE EXISTS FOR (§7.4 requires it).
+    """THE CASE THE WHOLE CENTRE RULE EXISTS FOR (§7.4 requires it).
 
     206's text begins on one page and ends on the next. The tail arrives as a run of lines at the top
     of a segment that does NOT open with a heading — which is rule 5's signal that those lines belong
@@ -128,7 +128,7 @@ def test_nothing_is_left_unassigned(sheet) -> None:  # type: ignore[no-untyped-d
 
 
 def test_171_is_not_read_as_an_underwriter_note(sheet) -> None:  # type: ignore[no-untyped-def]
-    """⚠️ §7.4 calls this out explicitly. Row 171 starts `**AM to pull SSN Verification.` — two
+    """§7.4 calls this out explicitly. Row 171 starts `**AM to pull SSN Verification.` — two
     asterisks, the exact marker the note regex looks for. It survives only because the regex requires
     a DATE after them, which is the distinction pinned directly on the regex in the UWM tests."""
     row = next(r for r in sheet.rows if r.lender_code == "171")
@@ -149,7 +149,7 @@ def test_the_expiry_table(sheet) -> None:  # type: ignore[no-untyped-def]
 
 
 def test_the_three_contacts(sheet) -> None:  # type: ignore[no-untyped-def]
-    """Rule 2. ⚠️ Each value must stop where the next label begins: PDF text joins columns with a
+    """Rule 2. Each value must stop where the next label begins: PDF text joins columns with a
     SINGLE space, so a pair rule ending a value at two spaces never fires and `Name` came back as
     `'Omar Example Phone: (555) 010-0144'` — the next column swallowed whole."""
     team = {entry["role"]: entry for entry in sheet.header["lender_team"]}

@@ -1,6 +1,6 @@
 """How "is this the same condition?" is answered (LP-907, spec §LP-904's `text_fingerprint`).
 
-⚠️ THE COLUMN EXISTED WITH NOTHING TO FILL IT. LP-904 created `conditions.text_fingerprint` NOT NULL
+THE COLUMN EXISTED WITH NOTHING TO FILL IT. LP-904 created `conditions.text_fingerprint` NOT NULL
 and indexed it `(loan_file_id, text_fingerprint)`, `uwm.py` recorded that "the stored
 `text_fingerprint` is computed at import", and no code computed one — the only value anywhere was a
 test helper's `uuid4().hex * 2`. This is that function, written by the first caller that genuinely
@@ -22,7 +22,7 @@ amount are DIFFERENT conditions, and the page-break fixture proves the case — 
 times with three different amounts, and collapsing them would silently drop two of the lender's
 demands.
 
-⚠️ NOT NPI (ADR-405). A sha256 is one-way, which is exactly why it is the field the readonly views
+NOT NPI (ADR-405). A sha256 is one-way, which is exactly why it is the field the readonly views
 keep when they drop `verbatim_text`: "did this condition come back?" stays answerable in analytics
 without reproducing a word the lender wrote.
 """
@@ -40,7 +40,7 @@ FINGERPRINT_LENGTH = 64
 def fingerprint(text: str) -> str:
     """The stable identity of one condition's wording, as stored in `conditions.text_fingerprint`.
 
-    ⚠️ THE SAME NORMALISATION THE UWM READER USES FOR DEDUPLICATION, imported rather than reimplemented.
+    THE SAME NORMALISATION THE UWM READER USES FOR DEDUPLICATION, imported rather than reimplemented.
     Rule 6 drops a page-overlap duplicate when the code, the note-stripped text and the notes all
     match; this decides whether a condition on a new sheet is one we already have. Two answers to
     "is this the same wording?" that could disagree would mean a row deduplicated within a sheet and

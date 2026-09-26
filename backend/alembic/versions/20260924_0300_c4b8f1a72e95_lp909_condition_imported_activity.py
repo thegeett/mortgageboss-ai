@@ -5,12 +5,12 @@ M seen again". Adding it means rewriting the `activity_type` CHECK, because `str
 stores these as VARCHAR + CHECK rather than as a native enum — so the enum member alone changes what
 the CODE writes and nothing about what the database accepts.
 
-⚠️ THE SWAP LISTS ALL 34 VALUES, NOT JUST THE NEW ONE, AND THAT IS THE WHOLE DANGER OF THIS FILE.
+THE SWAP LISTS ALL 34 VALUES, NOT JUST THE NEW ONE, AND THAT IS THE WHOLE DANGER OF THIS FILE.
 Each swap DROPS the constraint and recreates it from its own tuple, so whatever this tuple omits is
 revoked even though an earlier migration added it. `tests/test_activity_type_migrations.py` exists
 because LP-UI-033 shipped a swap that silently revoked four live values.
 
-⚠️ AND THE LIST CAME FROM THE ENUM AT RUNTIME, NOT FROM A GREP — LP-905's swap records that grepping
+AND THE LIST CAME FROM THE ENUM AT RUNTIME, NOT FROM A GREP — LP-905's swap records that grepping
 `^\\s+[A-Z_]+ = "` over `activity_log.py` returns 31 of 32 members (it misses `document_replaced`),
 and that grepping the constraint name with an underscore matches none of the swaps because the real
 name has none. Both mistakes were made while writing that file. These 33 came from
@@ -93,7 +93,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Back to the 33.
 
-    ⚠️ ROWS CARRYING THE REVOKED VALUE ARE DELETED FIRST, or the ADD CONSTRAINT fails against them
+    ROWS CARRYING THE REVOKED VALUE ARE DELETED FIRST, or the ADD CONSTRAINT fails against them
     and the downgrade cannot complete. An activity-log row is an audit entry, so this is a real loss
     — the honest consequence of removing a value the application has already written, and the reason
     a downgrade past this point is not a routine operation.

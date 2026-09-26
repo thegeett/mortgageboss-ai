@@ -6,7 +6,7 @@ byte-identical; **the case this covers is the one that endpoint does not** — a
 document's type or uploads one more, and the file re-pays for all 44 documents' worth of AI work to
 answer 43 questions it has already answered.
 
-⚠️ ALL I/O HAPPENS OUTSIDE `run_verification`, AND THAT IS A CORRECTNESS CONSTRAINT, NOT A STYLE
+ALL I/O HAPPENS OUTSIDE `run_verification`, AND THAT IS A CORRECTNESS CONSTRAINT, NOT A STYLE
 CHOICE. The LP-644 §2 review established that `ai_cache` is now written by four concurrent groups and
 is safe only because each group gets a disjoint sub-dict AND every write happens in an apply loop
 containing no ``await``. The same await-free property is what lets the breaker count failures without
@@ -20,7 +20,7 @@ fresh call would have produced. Nothing here decides anything; it only avoids re
 outcomes the producers already marked cacheable in memory are ever written, so a failed, truncated or
 malformed judgment still retries next run rather than being frozen into the file.
 
-⚠️ "SAME INPUT, SAME ANSWER" IS ONLY TRUE IF THE QUESTION IS ALSO THE SAME, and a fingerprint does
+"SAME INPUT, SAME ANSWER" IS ONLY TRUE IF THE QUESTION IS ALSO THE SAME, and a fingerprint does
 not know about the question. `content_fingerprint` hashes the SUBJECT — the four raw transaction
 Fields, the deposit-plus-candidates context, the AI group's subject context — and nothing about the
 prompt, the tag set or the model that will be asked about it. In memory that gap could not be

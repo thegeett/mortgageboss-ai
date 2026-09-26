@@ -4,7 +4,7 @@ Of LP-451's ~16 needs-parsed-tag candidates, only two are populated with clean v
 extractions: credit.report_date (CR-13, a date) and contract.emd_amount (PC-5, a number). The rest are either
 LP-446-added fields absent from the pre-LP-446 stored data (unmeasurable without re-extraction — no budget) or on
 document types absent from all three files (appraisal/title/AUS/condo/master policy) — so they were NOT declared
-(ADR-354: schema presence ≠ populated data). ⚠️ Neither of these two FINISHES its rule (CR-13 also needs a Priya
+(ADR-354: schema presence ≠ populated data). Neither of these two FINISHES its rule (CR-13 also needs a Priya
 window + a date recipe; PC-5 also needs the emd_sourced AI match) — they are honest scaffolding, not unblocks.
 
 These pin: each tag materialises verbatim from its document field; an absent field → an absent tag (fail closed);

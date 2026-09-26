@@ -5,26 +5,26 @@ means rewriting the `condition_events.kind` CHECK, because `str_enum` (ADR-037) 
 VARCHAR + CHECK rather than as a native enum — so the enum member alone changes what the CODE writes
 and nothing about what the database accepts.
 
-⚠️ NO TEST WOULD HAVE DEMANDED THIS FILE, AND THAT IS WHY IT IS EASY TO SKIP. `tests/conftest.py`
+NO TEST WOULD HAVE DEMANDED THIS FILE, AND THAT IS WHY IT IS EASY TO SKIP. `tests/conftest.py`
 builds the schema with `Base.metadata.create_all`, which regenerates the CHECK from the very enum
 being changed — so the suite is green against a database that would reject the value on the first
 real write. That is precisely the LP-637 defect: `document_reprocessed` was added with no migration,
 the suite was fully green throughout, and the first click on the endpoint would have raised
 `IntegrityError` on commit.
 
-⚠️ AND THE GUARD THAT CATCHES THAT FOR `activity_type` COULD NOT SEE THIS CONSTRAINT.
+AND THE GUARD THAT CATCHES THAT FOR `activity_type` COULD NOT SEE THIS CONSTRAINT.
 `tests/test_activity_type_migrations.py` hardcoded `ck_activity_logs_activitytype`, and its swap
 detector requires a call whose function name contains "swap" — while `ck_condition_events_conditioneventkind`
 had no swap at all, only the inline `sa.CheckConstraint` inside LP-904's `create_table`. The same
 failure was therefore available one enum over, in a corner the guard could not reach. That guard is
 widened in this commit to cover both constraints and to count a create-table ORIGIN as a definition.
 
-⚠️ THE SWAP LISTS ALL ELEVEN VALUES, NOT JUST THE NEW ONE. Each swap DROPS the constraint and
+THE SWAP LISTS ALL ELEVEN VALUES, NOT JUST THE NEW ONE. Each swap DROPS the constraint and
 recreates it from its own tuple, so whatever this tuple omits is REVOKED even though an earlier
 definition permitted it — the defect LP-UI-033 shipped for `activity_type`, where four live values
 were silently revoked.
 
-⚠️ AND THE LIST CAME FROM THE ENUM AT RUNTIME, NOT FROM A GREP, for the reason LP-905's swap
+AND THE LIST CAME FROM THE ENUM AT RUNTIME, NOT FROM A GREP, for the reason LP-905's swap
 records: grepping member declarations misses any that do not match the assumed shape, and the ten
 below were taken from `[m.value for m in ConditionEventKind]` before `round_reparse_requested` was
 added to the enum.
@@ -82,7 +82,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Back to the ten.
 
-    ⚠️ ROWS CARRYING THE REVOKED VALUE ARE DELETED FIRST, or the ADD CONSTRAINT fails against them
+    ROWS CARRYING THE REVOKED VALUE ARE DELETED FIRST, or the ADD CONSTRAINT fails against them
     and the downgrade cannot complete. `condition_events` is APPEND-ONLY and is what screen S1-09
     renders as a round's history, so this is a real loss of audit trail — the honest consequence of
     removing a value the application has already written, and the reason a downgrade past this point

@@ -56,7 +56,7 @@ async def _run(db: AsyncSession, loan_file: LoanFile, *, age_seconds: int, statu
 
 
 async def test_a_young_running_run_is_never_superseded(db_session: AsyncSession) -> None:
-    """⚠️ THE SAFETY PROPERTY. A run inside the threshold may still be working — six minutes of AI
+    """THE SAFETY PROPERTY. A run inside the threshold may still be working — six minutes of AI
     calls look identical to a wedge from the outside. Killing it would destroy real work and real
     spend, so this refuses and says how long is left."""
     loan_file = await _loan_file(db_session)
@@ -135,7 +135,7 @@ async def test_a_file_with_no_prior_run_proceeds(db_session: AsyncSession) -> No
     [(None, True), ("", True), ("0", False), ("false", False), ("no", False), ("1", True)],
 )
 def test_force_defaults_to_on(raw: str | None, expected: bool) -> None:
-    """⚠️ FORCING IS THE DEFAULT, and that is the design. The API caches on an INPUT fingerprint —
+    """FORCING IS THE DEFAULT, and that is the design. The API caches on an INPUT fingerprint —
     correct for a user, wrong here, because this loop changes CODE, not inputs. With the cache honoured
     a deploy would hand back the previous run's findings and look like it did nothing."""
     assert _truthy(raw, default=True) is expected

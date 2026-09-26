@@ -6,13 +6,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 /**
  * The three Conditions screens that exist before a round is reviewed (LP-909 §3).
  *
- * ⚠️ WHAT THESE PIN IS THE DECISIONS, NOT THE MARKUP. Every assertion below corresponds to a choice
+ * WHAT THESE PIN IS THE DECISIONS, NOT THE MARKUP. Every assertion below corresponds to a choice
  * that could be silently undone: the refusal sentences are the design's exact words rather than
  * paraphrases, the failure line shows only provenance the API actually records, a stranded round
  * offers a way out instead of a spinner with no exit, and a button that cannot work is absent rather
  * than present-and-dead. Asserting "it renders" would survive all four being reversed.
  *
- * ⚠️ `isStranded` IS THE REAL ONE. The module is partially mocked — only the hooks that would hit
+ * `isStranded` IS THE REAL ONE. The module is partially mocked — only the hooks that would hit
  * the network are replaced — because the stranded bound is the behaviour under test in two of these
  * cases. Mocking it would leave the tests asserting against a constant I wrote in the same file.
  */
@@ -98,7 +98,7 @@ function round(overrides: Partial<ConditionRound> = {}): ConditionRound {
 
 describe("a file refused before a round exists", () => {
   it("uses the design's exact sentence for a non-PDF", () => {
-    // ⚠️ THE WORDING IS THE ASSERTION. S1-03 specifies what a refusal says, and a paraphrase would
+    // THE WORDING IS THE ASSERTION. S1-03 specifies what a refusal says, and a paraphrase would
     // pass any test that merely checked "something was returned".
     const problem = refuseSheet(new File(["x"], "invoice.png", { type: "image/png" }));
     expect(problem).toBe(
@@ -116,7 +116,7 @@ describe("a file refused before a round exists", () => {
     expect(refuseSheet(new File(["x"], "sheet.pdf", { type: "application/pdf" }))).toBeNull();
   });
 
-  it("⚠️ refuses an empty PDF as empty, not as oversized", () => {
+  it("refuses an empty PDF as empty, not as oversized", () => {
     // Not a design sentence — the server 422s zero bytes and this is the instant version of that.
     // Ordered BEFORE the ceiling on purpose: "larger than 20 MB" about a 0-byte file would send a
     // processor hunting for a smaller copy of a file that has no contents.
@@ -125,7 +125,7 @@ describe("a file refused before a round exists", () => {
     );
   });
 
-  it("⚠️ refuses a PDF whose MIME type is upper-case, and one with no type at all", () => {
+  it("refuses a PDF whose MIME type is upper-case, and one with no type at all", () => {
     // Both were live differences between this function and a duplicate the conditions page grew:
     // it skipped `.toLowerCase()` and short-circuited on an empty `file.type`, so a browser that
     // reported no type for an unrecognised extension got past it. Neither shape is theoretical.
@@ -151,7 +151,7 @@ describe("the Conditions tab with no rounds (S1-01)", () => {
 
   it("offers all four ways in, with upload recommended", () => {
     renderEmpty();
-    // ⚠️ BY ROLE, NOT BY TEXT. "Paste conditions" is BOTH a card heading and the button inside it —
+    // BY ROLE, NOT BY TEXT. "Paste conditions" is BOTH a card heading and the button inside it —
     // straight from the design — so `getByText` matches two nodes and throws. Asking for the heading
     // is unambiguous and is the stronger claim anyway: it pins that these titles are headings.
     for (const title of [
@@ -174,7 +174,7 @@ describe("the Conditions tab with no rounds (S1-01)", () => {
   });
 
   it("says the address is still loading rather than rendering an empty one", () => {
-    // ⚠️ AN EMPTY ADDRESS IS NOT A STATE TO SHOW. A Copy button beside nothing copies nothing, and a
+    // AN EMPTY ADDRESS IS NOT A STATE TO SHOW. A Copy button beside nothing copies nothing, and a
     // blank line reads as "this file has no address", which is never true.
     renderEmpty(null);
     expect(screen.getByText("Loading this file’s address…")).toBeDefined();
@@ -212,7 +212,7 @@ describe("a round being read (S1-02)", () => {
   });
 
   it("offers a way out once the round is stranded", () => {
-    // ⚠️ THE CASE THE DESIGN DOES NOT DRAW. A round is committed `parsing` before its task is
+    // THE CASE THE DESIGN DOES NOT DRAW. A round is committed `parsing` before its task is
     // enqueued, so a broker that is down strands it forever. Without this the card polls and spins
     // with no exit — S1-02's "poll until DRAFT or PARSE_FAILED" does not contemplate never.
     const old = new Date(Date.now() - 10 * 60 * 1000).toISOString();
@@ -252,7 +252,7 @@ describe("a round that could not be read (S1-03)", () => {
   });
 
   it("omits the reader clause when no reader ran", () => {
-    // ⚠️ THE FAILURE PATH WRITES `reader: None`. Printing "reader null" — or inventing the
+    // THE FAILURE PATH WRITES `reader: None`. Printing "reader null" — or inventing the
     // readers-tried list the mockup shows — would be fabricating provenance, which is worse than
     // showing less.
     render(
@@ -280,7 +280,7 @@ describe("a round that could not be read (S1-03)", () => {
     expect(screen.getByText("reason: parse_failed · reader uwm v1")).toBeDefined();
   });
 
-  it("⚠️ shows Try again only when a caller supplies it, and this test used to prove nothing", () => {
+  it("shows Try again only when a caller supplies it, and this test used to prove nothing", () => {
     // THE OLD VERSION WAS TAUTOLOGICAL AND READ AS MEANINGFUL. It rendered `round()` — an upload,
     // not a paste — asserted no Try again, and explained the absence as "a pasted round has no
     // stored PDF to re-read". The fixture had no such property: the button was missing purely

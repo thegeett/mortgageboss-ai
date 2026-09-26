@@ -22,7 +22,7 @@ internet, and the safety flags dev deliberately left off.
 
 ---
 
-## ⚠️ Read this first: a Stop-and-report condition was hit
+## Read this first: a Stop-and-report condition was hit
 
 **Task 2's outbound audit found a dependency the endpoint set does not cover, and
 it hangs rather than failing.** The ticket lists this as Stop-and-report. It is
@@ -135,9 +135,9 @@ infra/modules/network/variables.tf:3:  # NOTHING environment-specific has a defa
 infra/modules/compute/variables.tf:4:  # name, no `mbai-*` string. ...
 infra/modules/registry/variables.tf:44:    is precisely a long-lived staging or production tag; ...
 infra/modules/registry/variables.tf:66:    workflow. Set false for staging and production, ...
-infra/modules/data/variables.tf:70:  description = "... ⚠️ MUST BE true FOR STAGING AND PRODUCTION."
-infra/modules/data/variables.tf:75:  description = "... ⚠️ MUST BE true FOR STAGING AND PRODUCTION."
-infra/modules/data/variables.tf:80:  description = "... ⚠️ MUST BE false FOR STAGING AND PRODUCTION."
+infra/modules/data/variables.tf:70:  description = "... MUST BE true FOR STAGING AND PRODUCTION."
+infra/modules/data/variables.tf:75:  description = "... MUST BE true FOR STAGING AND PRODUCTION."
+infra/modules/data/variables.tf:80:  description = "... MUST BE false FOR STAGING AND PRODUCTION."
 ```
 
 **Nine hits, all in `#` comments or `description` strings — "comments only", which
@@ -272,7 +272,7 @@ private subnets, all AWS service traffic on the AWS network.
 **What is given up:** AZ redundancy — acceptable only because there is none to lose
 (`desired_count = 1`, single-AZ RDS).
 
-⚠️ **Tasks and endpoints move together.** `envs/staging` pins the ECS tasks to the
+**Tasks and endpoints move together.** `envs/staging` pins the ECS tasks to the
 same AZ list via `module.network.private_subnet_ids_by_az`. A task in an AZ without
 a local endpoint still *works* — private DNS resolves VPC-wide — but every call
 crosses an AZ boundary, adding transfer cost and giving back the AZ independence
@@ -311,13 +311,13 @@ Block Public Access, versioning, a TLS-only bucket policy, and `prevent_destroy`
 the bucket holds the only copy of every uploaded document, and the database stores
 keys rather than content.
 
-⚠️ **No lifecycle expiry rule, deliberately.** A disposal obligation exists in
+**No lifecycle expiry rule, deliberately.** A disposal obligation exists in
 principle, but the retention period is an unresolved **policy** decision, not a
 technical default. A number invented here would silently become the answer, and a
 lifecycle rule deletes borrower records on a schedule nobody agreed to. **This is an
 open decision** — see Open items.
 
-⚠️ **Staging starts empty.** No document sync from dev and no database seed — dev
+**Staging starts empty.** No document sync from dev and no database seed — dev
 documents are development artifacts and have no place in an environment holding
 borrower NPI. The schema comes from the migration task against an empty RDS
 instance.
@@ -397,7 +397,7 @@ Container Insights is **off**; enabling it adds roughly $9/month per task.
 
 ## Open items and what is still needed before handover (C5)
 
-1. **⚠️ Document retention is an unresolved policy decision.** No lifecycle rule
+1. **Document retention is an unresolved policy decision.** No lifecycle rule
    exists on the documents bucket, deliberately. Someone must decide the period
    before the disposal obligation has an answer.
 2. **The RDS CA bundle** (C3 finding, still open): the image contains none and

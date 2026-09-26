@@ -22,7 +22,7 @@ afterEach(cleanup);
 /**
  * How long to let a real ProseMirror editor mount in jsdom before calling it a failure.
  *
- * ⚠️ `vi.waitFor` DEFAULTS TO 1000ms, AND THAT IS THE ARBITRARY PART. Measured on a Raspberry Pi,
+ * `vi.waitFor` DEFAULTS TO 1000ms, AND THAT IS THE ARBITRARY PART. Measured on a Raspberry Pi,
  * the mount cases in this file run 834ms and 930ms IDLE — 83% and 93% of the default budget with no
  * load at all. The sibling `message-dialog.test.tsx` already lost that coin flip under the full
  * suite's parallel workers (LP-909 §5). Waiting longer for an async mount is what `waitFor` is for.
@@ -43,7 +43,7 @@ describe("MessageEditor", () => {
 
     // THE REPORTED REQUIREMENT: "user should not see html tag or markdown."
     //
-    // ⚠️ THE WAIT USED TO POLL A SNAPSHOT, WHICH MEANS IT NEVER WAITED FOR ANYTHING. `text` was read
+    // THE WAIT USED TO POLL A SNAPSHOT, WHICH MEANS IT NEVER WAITED FOR ANYTHING. `text` was read
     // into a const BEFORE the `waitFor`, and the callback then asserted on that frozen string — so it
     // could only pass on the first tick or spin the full timeout and fail. A `waitFor` over a value
     // captured outside it cannot observe the change it is waiting for, and every assertion below ran

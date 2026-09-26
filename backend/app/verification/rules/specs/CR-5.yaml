@@ -1,12 +1,12 @@
-# CR-5 — Credit inquiry LOE — AI structural rule SPEC (LP-490). ⚠️ BUILDS INERT.
+# CR-5 — Credit inquiry LOE — AI structural rule SPEC (LP-490). BUILDS INERT.
 #
 # A recent credit inquiry can mean the borrower took on NEW DEBT the report does not yet show. Each
 # inquiry needs either a tradeline that plausibly resulted from it, or a letter of explanation.
 #
-# ⚠️ INERT. Gates on `credit.inquiry_explained`, an AI tag with no measured accuracy →
+# INERT. Gates on `credit.inquiry_explained`, an AI tag with no measured accuracy →
 # `not-calibratable-yet` → `is_eligible()` False (LP-484). NOT in ACTIVE_RULE_IDS.
 #
-# ⚠️ n≈0 — THE HARD CAVEAT ON THIS RULE. Across all THREE real credit reports there is exactly ONE
+# n≈0 — THE HARD CAVEAT ON THIS RULE. Across all THREE real credit reports there is exactly ONE
 # inquiry row. This rule is built against the schema (`inquiries[]` carries inquiry_date, creditor_name,
 # inquiry_type) and against the guideline, NOT against observed behaviour. Calibrating it needs files
 # with real inquiry activity, which the corpus does not contain.
@@ -35,7 +35,7 @@ reference_values:
   priya_validated: false          # must equal rule_kinds.csv
   threshold_needs_signoff: false  # must equal rule_kinds.csv
   values:
-    # ⚠️ TIER S — the 120-day lookback is the customary agency window for inquiry review and matches the
+    # TIER S — the 120-day lookback is the customary agency window for inquiry review and matches the
     # credit-document validity horizon, but no page was read for it this pass. It is applied INSIDE the
     # prompt (the model is told "the last 120 days"), so it is recorded here as the reviewable place it
     # lives, and logged for Priya. It is not a computed threshold this rule compares against.
@@ -51,7 +51,7 @@ required_inputs:
     snapshot_path: 'tags.by_subject[<borrower_id>]["credit.inquiry_explained"]'
     description: >-
       whether every recent inquiry on this borrower's report is matched to a tradeline, covered by a
-      letter of explanation, or a soft pull (AI, LP-490): "yes" / "no" / "unknown". ⚠️ UNCALIBRATED.
+      letter of explanation, or a soft pull (AI, LP-490): "yes" / "no" / "unknown". UNCALIBRATED.
 
 subject_enumeration: per_borrower
 subject_key_fields: [borrower]
@@ -88,7 +88,7 @@ deterministic:
         new debt resulted. If debt did result, add it to the application and re-check the debt-to-income
         ratio; a new account may also need its own verification.
     - verdict: couldnt_check
-      # ⚠️ ABSTAIN, NOT A PASS. A `satisfied` default would clear the inquiry review on a file whose
+      # ABSTAIN, NOT A PASS. A `satisfied` default would clear the inquiry review on a file whose
       # report states no inquiry dates at all.
       default: true
       reasoning: >-

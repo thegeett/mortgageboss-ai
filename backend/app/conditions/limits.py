@@ -1,6 +1,6 @@
 """How long reading a condition sheet may take, and when a round counts as abandoned.
 
-⚠️ THESE LIVE IN A MODULE OF THEIR OWN BECAUSE THREE LAYERS NEED THEM AND THEY CANNOT SHARE THEM
+THESE LIVE IN A MODULE OF THEIR OWN BECAUSE THREE LAYERS NEED THEM AND THEY CANNOT SHARE THEM
 ANYWHERE ELSE. The Celery task sets its time limits from them; the reparse SERVICE refuses a round
 that is still legitimately being read; and `tests/test_condition_type_mirror.py` pins the frontend's
 copy against them. `app/schemas/` importing from `app/tasks/` would invert the one direction this
@@ -20,14 +20,14 @@ PARSE_HARD_LIMIT_SECONDS = 360
 #: How long past the HARD limit a round must sit in `PARSING` before a processor may ask for it to
 #: be read again.
 #:
-#: ⚠️ DERIVED, NOT A LITERAL, AND THE LITERAL WAS THE FIRST VERSION (LP-909 review). Written as
+#: DERIVED, NOT A LITERAL, AND THE LITERAL WAS THE FIRST VERSION (LP-909 review). Written as
 #: `600` its justification lived in a comment saying "clear of 360" — so moving
 #: `PARSE_HARD_LIMIT_SECONDS` would leave the window where it was and quietly make that sentence
 #: false. Stating it as the timeout plus a grace makes the relationship the code's rather than the
 #: comment's: the window follows the limit it exists to exceed.
 _REPARSE_GRACE_SECONDS = 240
 
-#: ⚠️ THE SERVER OWNS THIS NUMBER, AND THE CLIENT'S OWN GUESS WAS WRONG IN THE DANGEROUS DIRECTION.
+#: THE SERVER OWNS THIS NUMBER, AND THE CLIENT'S OWN GUESS WAS WRONG IN THE DANGEROUS DIRECTION.
 #: `frontend/lib/api/conditions.ts` had `STRANDED_AFTER_MS = 5 * 60 * 1000`, justified by S1-02's
 #: "usually under 30 seconds" — a sentence about the healthy case, which is not what a bound is for.
 #: It consulted neither limit above.

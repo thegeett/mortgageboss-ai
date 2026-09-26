@@ -19,7 +19,7 @@ and GATES when they do not. It does not estimate, annualise a partial figure, or
 for gross. On LF-ABRS both inputs are missing, so the honest output is a gate naming them — which is a
 change from reporting 44.8% computed by a method that does not apply to the loan.
 
-⚠️ NET IS NOT GROSS. The application states `rental_income_net` of $3,000 and no gross. The 75% factor
+NET IS NOT GROSS. The application states `rental_income_net` of $3,000 and no gross. The 75% factor
 applies to GROSS (IN-14's cited primary, verbatim: "multiplying the gross monthly rent(s) by 75%"), so
 running the net figure through it would haircut an already-haircut number and understate the obligation
 — the failure mode that ships a bad loan. Absent gross gates; it never falls back.

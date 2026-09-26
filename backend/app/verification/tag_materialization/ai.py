@@ -520,7 +520,7 @@ def dump_ai_group_entry(entry: _Resolved) -> dict[str, object]:
 def load_ai_group_entry(raw: dict[str, object]) -> _Resolved | None:
     """An AI-group cache value from JSON, or None if the row cannot be trusted.
 
-    ⚠️ Rejects any entry carrying a None judgment, matching the in-memory write rule: this producer
+    Rejects any entry carrying a None judgment, matching the in-memory write rule: this producer
     caches only when EVERY tag in the group resolved (``if all(entry.tags.get(s) is not None ...)``).
     A row with a hole is either a shape change or a partial that should never have been stored, and
     serving it would pin an "unknown" onto a subject forever — the tag layer's worst failure, because

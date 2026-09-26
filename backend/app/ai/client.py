@@ -259,7 +259,7 @@ def get_anthropic_client() -> AsyncAnthropic | AsyncAnthropicBedrock:
     cache is keyed on nothing, so a stale client would otherwise survive the flip.
     """
     if settings.ai_provider == "bedrock":
-        # ⚠️ PASS THE PROFILE EXPLICITLY (LP-491). The SDK otherwise resolves credentials from the
+        # PASS THE PROFILE EXPLICITLY (LP-491). The SDK otherwise resolves credentials from the
         # default chain, which reads AWS_PROFILE from the ENVIRONMENT — it does not know about
         # `settings.aws_profile`. Until now only the bench engine exported it (dev/bench/engine.py), so
         # EVERY OTHER ENTRY POINT — a script, a Celery task, a self-consistency harness — got
@@ -268,7 +268,7 @@ def get_anthropic_client() -> AsyncAnthropic | AsyncAnthropicBedrock:
         # confidently-abstaining one look identical downstream, and it cost LP-490a four derivation runs
         # that scored a perfect 1.0000 while calling nothing at all.
         #
-        # ⚠️ PASSED AS AN ARGUMENT, NOT EXPORTED TO os.environ — the first fix did the latter and broke
+        # PASSED AS AN ARGUMENT, NOT EXPORTED TO os.environ — the first fix did the latter and broke
         # 22 tests: a process-wide AWS_PROFILE leaks into every other boto3 client (S3 storage included)
         # and persists across tests. Scope the credential to the client that needs it.
         return AsyncAnthropicBedrock(
@@ -504,7 +504,7 @@ TRUNCATED_STOP_REASON = "max_tokens"
 #: place an SDK response becomes an :class:`AICompletion` — keeps provider knowledge out
 #: of ``model_call.py`` and out of all 13 callers.
 #:
-#: ⚠️ PENDING EMPIRICAL CONFIRMATION (B1 task 5). The Anthropic SDK's Bedrock client
+#: PENDING EMPIRICAL CONFIRMATION (B1 task 5). The Anthropic SDK's Bedrock client
 #: returns the Messages API shape, so ``stop_reason`` is EXPECTED to be identical
 #: ("max_tokens" / "end_turn" / "stop_sequence" / "tool_use"). That expectation is not
 #: yet verified against a live call — ``scripts/verify-bedrock.py`` step 2 forces a

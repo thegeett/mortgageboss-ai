@@ -7,7 +7,7 @@ import { Copy } from "lucide-react";
 /**
  * The lender team's roles, in the order the letter prints them (`_TEAM_LABELS` in `readers/uwm.py`).
  *
- * ⚠️ THE READER RETURNS A LIST, NOT A MAP, AND THAT IS LOAD-BEARING. `_split_header` appends
+ * THE READER RETURNS A LIST, NOT A MAP, AND THAT IS LOAD-BEARING. `_split_header` appends
  * `{role, name, phone_ext}` in printed order and deliberately keeps a role whose value is EMPTY:
  * "`Closer:` with nothing after it is the lender asserting the role exists and is unfilled".
  * Rendering from the list rather than from a fixed key list preserves both facts — the order the
@@ -23,7 +23,7 @@ interface TeamMember {
 /**
  * The seven figures S1-04 shows, keyed by the lender's OWN printed label.
  *
- * ⚠️ NOT SNAKE_CASE, AND NOT OURS. `_split_loan_facts` stores whatever label it matched from its
+ * NOT SNAKE_CASE, AND NOT OURS. `_split_loan_facts` stores whatever label it matched from its
  * closed set — "Note Rate", "Housing / Debt Ratios" — so these strings are the lender's vocabulary
  * and must match character for character. The display label beside each is the design's wording.
  */
@@ -40,7 +40,7 @@ const FIGURES: [key: string, label: string][] = [
 /**
  * The twelve expiry rows, in the lender's own table order (`_EXPIRY_KEYS` in `readers/uwm.py`).
  *
- * ⚠️ ALL TWELVE ALWAYS, INCLUDING THE EMPTY ONES. S1-04 requires "all 12 keys in the lender's order,
+ * ALL TWELVE ALWAYS, INCLUDING THE EMPTY ONES. S1-04 requires "all 12 keys in the lender's order,
  * '—' where empty" — because a missing row and an empty row mean different things on a lender's
  * table, and collapsing the absent ones would quietly redraw the lender's own document.
  *
@@ -99,11 +99,11 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
 /**
  * "Also read from the letter" — the side panel of the review screen (S1-04).
  *
- * ⚠️ A PASTE HAS NO LETTER, AND SAYS SO RATHER THAN SHOWING EMPTY FIELDS (S1-07). `header` is null
+ * A PASTE HAS NO LETTER, AND SAYS SO RATHER THAN SHOWING EMPTY FIELDS (S1-07). `header` is null
  * for a pasted round, and eleven rows of "—" would read as a letter we failed to parse instead of a
  * source that never had one.
  *
- * ⚠️ THE MORTGAGEE CLAUSE IS SENT, AND THIS COMMENT USED TO SAY IT WAS NOT. It described the gap
+ * THE MORTGAGEE CLAUSE IS SENT, AND THIS COMMENT USED TO SAY IT WAS NOT. It described the gap
  * accurately — the reader stored the clause on the SHEET and neither writer folded it into `header`
  * — and then the very commit carrying this file CLOSED that gap: `header_with_clause` folds it in at
  * `tasks/conditions.py` and `condition_enrich.py`, both call sites, fill-never-replace intact. So
@@ -111,7 +111,7 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
  * reader trusting it would conclude the Copy button below is dead code and delete it. Caught in
  * review; the fifth instance of this shape in the stage.
  *
- * ⚠️ THE BLOCK IS STILL CONDITIONAL, FOR A DIFFERENT AND PERMANENT REASON. Not "until the backend
+ * THE BLOCK IS STILL CONDITIONAL, FOR A DIFFERENT AND PERMANENT REASON. Not "until the backend
  * starts sending it" — it does — but because a PASTED round genuinely has no clause until its PDF is
  * attached. `header?.mortgagee_clause` absent means this round has no letter to take one from, which
  * is a true statement about the round rather than a gap in the pipeline.
@@ -128,7 +128,7 @@ export function ReviewSidePanel({ round }: { round: ConditionRound }) {
 /**
  * The letter's details themselves, without a container.
  *
- * ⚠️ EXTRACTED SO S1-09 RENDERS THE SAME BLOCKS RATHER THAN A SECOND COPY OF THEM. The round-details
+ * EXTRACTED SO S1-09 RENDERS THE SAME BLOCKS RATHER THAN A SECOND COPY OF THEM. The round-details
  * sheet shows the identical lender team, loan figures, expiry table and mortgagee clause — and
  * writing them again there is precisely the duplication this ticket has been corrected for twice
  * already (a second `refuseSheet`, a second broker handler). Two copies of the twelve expiry keys
@@ -157,7 +157,7 @@ export function LetterDetails({ round }: { round: ConditionRound }) {
             {team.length === 0 ? (
               <Row label="Not found on this sheet." value={null} />
             ) : (
-              // ⚠️ KEYED BY POSITION AS WELL AS ROLE. A role is not unique on a real letter — two
+              // KEYED BY POSITION AS WELL AS ROLE. A role is not unique on a real letter — two
               // closers, or two UW IIs, is a thing a lender can print — and a role-only key raised a
               // React duplicate-key error the first time this panel was opened in a browser
               // (LP-909 §5), on a reader bug that emitted `Closer` twice. The reader is fixed; a
@@ -190,7 +190,7 @@ export function LetterDetails({ round }: { round: ConditionRound }) {
         </>
       )}
 
-      {/* ⚠️ SHOWN ONLY WHEN THE LENDER'S TABLE ACTUALLY HELD SOMETHING, AND THE TWO SCREENS THAT
+      {/* SHOWN ONLY WHEN THE LENDER'S TABLE ACTUALLY HELD SOMETHING, AND THE TWO SCREENS THAT
           DISAGREE ARE WHY (LP-909 §5 visual check). S1-11 — a sheet whose header the reader could not
           find — REQUIRES the expiry dates to still show, because they live in their own column and
           survive a missing letterhead. S1-07 — a paste — requires only the "no letter" message and

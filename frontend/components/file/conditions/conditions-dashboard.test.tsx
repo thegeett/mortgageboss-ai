@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 /**
  * Which screen the Conditions tab shows, and why (LP-909 §3).
  *
- * ⚠️ EACH TEST NAMES THE SENTENCE IT EXPECTS, never merely that "a notice rendered" — the screens
+ * EACH TEST NAMES THE SENTENCE IT EXPECTS, never merely that "a notice rendered" — the screens
  * tell a processor different things to do, and an assertion that survives them being swapped is not
  * an assertion about which screen showed.
  *
@@ -29,7 +29,7 @@ const useConditionRounds = vi.fn();
 vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/conditions")>()),
   useConditionRounds: (...args: unknown[]) => useConditionRounds(...args),
-  // ⚠️ THE EMPTY-STATE BRANCH MOUNTS A REAL `useMutation` OTHERWISE. `ConditionsEmpty` owns the
+  // THE EMPTY-STATE BRANCH MOUNTS A REAL `useMutation` OTHERWISE. `ConditionsEmpty` owns the
   // upload, so rendering it here without this fails with "No QueryClient set" — which is a fact
   // about the child's data layer, not about which branch this component chose.
   //
@@ -37,7 +37,7 @@ vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   // renders, the child has its own tests for the upload, and a provider here would let a real
   // mutation reach for the network to prove something neither file is asking.
   useUploadConditionSheet: () => ({ mutate: vi.fn(), isPending: false }),
-  // ⚠️ THE DRAFT BRANCH IS A REAL SCREEN NOW, AND IT MOUNTS TWO MUTATIONS. It used to be an inert
+  // THE DRAFT BRANCH IS A REAL SCREEN NOW, AND IT MOUNTS TWO MUTATIONS. It used to be an inert
   // interim card; `RoundReview` calls `useUpdateDraft` and `useImportRound`, so an explicit mock
   // object without them resolves both to `undefined` and every render of that branch throws before
   // reaching a single assertion. Same failure the inbound-message-card mock had, one export at a
@@ -121,7 +121,7 @@ function round(
 /**
  * Draft rows for a round.
  *
- * ⚠️ THESE USED TO BE `{ sequence }` STUBS CAST `as never`, and the comment said "a draft row is
+ * THESE USED TO BE `{ sequence }` STUBS CAST `as never`, and the comment said "a draft row is
  * only ever counted here, so a stub with the right shape is enough". That was true while the draft
  * branch rendered an interim card that counted them; it stopped being true the moment that branch
  * became the review screen, which reads `underwriter_notes.length`, `confidence` and
@@ -171,7 +171,7 @@ describe("which screen the Conditions tab shows", () => {
     expect(screen.getByRole("heading", { name: "Upload the approval letter" })).toBeDefined();
   });
 
-  it("⚠️ treats a file whose only round was DISCARDED as having none", () => {
+  it("treats a file whose only round was DISCARDED as having none", () => {
     // Discarded rounds stay in the list on purpose — a processor who threw a draft away should see
     // that they did. So "is there anything to work on" has to exclude them rather than take the
     // newest row, or the tab shows a thrown-away draft as the current work.
@@ -195,7 +195,7 @@ describe("which screen the Conditions tab shows", () => {
     expect(screen.getByText("Password-protected.")).toBeDefined();
   });
 
-  it("⚠️ offers Try again on a failed round, and hands back the round id", () => {
+  it("offers Try again on a failed round, and hands back the round id", () => {
     // This test asserted the OPPOSITE and was correct at the time: no route re-read an existing
     // round, so passing a callback would have meant a button that could not work.
     // `POST /condition-rounds/{id}/reparse` is that route. The id matters — the dashboard knows
@@ -208,7 +208,7 @@ describe("which screen the Conditions tab shows", () => {
     expect(handlers.onRetry).toHaveBeenCalledWith("r1");
   });
 
-  it("⚠️ shows a round waiting for the AI split as being read, at every door", () => {
+  it("shows a round waiting for the AI split as being read, at every door", () => {
     // This file used to assert the opposite, and the assertion was correct when written:
     // `split_condition_round.delay()` was reachable only from `paste_conditions`, so an uploaded
     // sheet whose reader asked for the AI waited forever, and the dashboard said so.
@@ -221,7 +221,7 @@ describe("which screen the Conditions tab shows", () => {
     expect(screen.getByText("Reading the condition sheet…")).toBeDefined();
   });
 
-  it("⚠️ and a split that genuinely failed is a failure, not a limbo", () => {
+  it("and a split that genuinely failed is a failure, not a limbo", () => {
     // The case the deleted notice was sometimes right about. `split_round` settles PARSE_FAILED with
     // `ai_unavailable` when the model is unreachable, so it lands on the failure screen with the
     // server's own sentence — which is where a processor can act on it.
@@ -245,7 +245,7 @@ describe("which screen the Conditions tab shows", () => {
     expect(screen.getByText("We read this sheet and found no conditions in it")).toBeDefined();
   });
 
-  it("⚠️ treats a split that ran and found nothing as an empty sheet, not as pending AI", () => {
+  it("treats a split that ran and found nothing as an empty sheet, not as pending AI", () => {
     // The pair (needs_ai, ai_used) is what distinguishes "waiting for the AI" from "the AI has run".
     // A round carrying both with zero rows has finished, so it must read as an empty sheet rather
     // than as work still in flight.
@@ -253,7 +253,7 @@ describe("which screen the Conditions tab shows", () => {
     expect(screen.getByText("We read this sheet and found no conditions in it")).toBeDefined();
   });
 
-  it("⚠️ hands an IMPORTED round to the imported view, never to the review screen", () => {
+  it("hands an IMPORTED round to the imported view, never to the review screen", () => {
     // THE DEFECT THIS BRANCH CLOSES. An imported round used to fall through `parsing` /
     // `parse_failed` / empty-draft straight into `RoundReview` — and `draft_rows` is CLEARED on
     // import, so a processor who imported a sheet landed on a review screen with nothing to review

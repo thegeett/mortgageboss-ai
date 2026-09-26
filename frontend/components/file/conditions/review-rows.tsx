@@ -23,7 +23,7 @@ function noteDate(value: string | null): string | null {
 /**
  * A dated note the underwriter appended inside the condition's text.
  *
- * ⚠️ A CHIP, NEVER MERGED INTO THE WORDING (design rule 5). The lender wrote one string and the
+ * A CHIP, NEVER MERGED INTO THE WORDING (design rule 5). The lender wrote one string and the
  * reader carried the note out of it as structure; putting it back into the serif block would make
  * the underwriter's aside indistinguishable from the condition itself.
  */
@@ -40,7 +40,7 @@ function NoteChip({ note }: { note: UnderwriterNote }) {
 /**
  * One draft row, editable in place (S1-04, S1-10).
  *
- * ⚠️ THE EDITED TEXT IS WHAT IMPORTS, which is why editing happens here rather than in a dialog.
+ * THE EDITED TEXT IS WHAT IMPORTS, which is why editing happens here rather than in a dialog.
  * The fingerprint is taken of what a processor leaves behind, so an edited row may match a different
  * condition or none — correct rather than unfortunate, and the spec's own frontend test is "editing
  * a row and importing sends the edited text".
@@ -73,7 +73,7 @@ function Row({
       <div className="flex min-w-0 flex-col gap-1.5">
         {editing ? (
           <>
-            {/* ⚠️ THE FULL STORED TEXT, NOTE INCLUDED, AND NO FONT SIZE. The note is cut from the
+            {/* THE FULL STORED TEXT, NOTE INCLUDED, AND NO FONT SIZE. The note is cut from the
                 read-only render below but must never be cut from what a processor edits: this box's
                 contents are what imports, so hiding the note here would let an untouched Save
                 delete it. The size override is gone for the iOS-zoom reason in
@@ -171,12 +171,12 @@ function Row({
 /**
  * The draft rows, grouped by the lender's own heading (S1-04).
  *
- * ⚠️ GROUPED BY `bucket_heading`, IN SHEET ORDER, AND THE HEADING IS THE LENDER'S STRING. Not by
+ * GROUPED BY `bucket_heading`, IN SHEET ORDER, AND THE HEADING IS THE LENDER'S STRING. Not by
  * `bucket_kind`: the kind is WHEN a condition is due, the heading is WHAT THE LENDER PRINTED, and
  * grouping by the kind would silently merge two differently-worded lender sections that happen to
  * mean the same timing — redrawing the lender's own document.
  *
- * ⚠️ ROWS UNDER 0.80 COME FIRST WITHIN THEIR GROUP (S1-10), which is a sort the processor's
+ * ROWS UNDER 0.80 COME FIRST WITHIN THEIR GROUP (S1-10), which is a sort the processor's
  * attention needs rather than one the sheet has. The sheet order survives everywhere else, and
  * within a group the sequence still decides ties, so the reordering is bounded and reversible.
  */
@@ -205,7 +205,7 @@ export function ReviewRows({
   return (
     <div className="flex flex-col gap-2">
       {groups.map((group, index) => {
-        // ⚠️ THE CHIP VOCABULARY, NOT THE SELECT'S. `BUCKET_KIND_LABEL.master` is "Master (applies
+        // THE CHIP VOCABULARY, NOT THE SELECT'S. `BUCKET_KIND_LABEL.master` is "Master (applies
         // to the whole file)", which never equals a heading of "Master" — so the comparison below
         // could not fire and S1-11 drew a chip the design omits. The chip form is what a heading can
         // actually match.

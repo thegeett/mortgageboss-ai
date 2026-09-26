@@ -185,7 +185,7 @@ def test_reasons_are_plain_language_no_dotted_tag_ids() -> None:
 
 
 def test_oc1_is_activated_on_a_rate_not_a_measurement() -> None:
-    # ⚠️ LP-495a — OC-1 WAS held (not-calibratable-yet) and is now ACTIVE on `ratify-pending` (ADR-378).
+    # LP-495a — OC-1 WAS held (not-calibratable-yet) and is now ACTIVE on `ratify-pending` (ADR-378).
     # The premise of the old assertion is UNCHANGED and is what this now pins directly: the tag is STILL
     # UNSCORED. A self-consistency rate is NOT a measurement — it says two independent derivations agreed,
     # not that either was right — so `measured_accuracy` stays None and RATIFICATION is the safety

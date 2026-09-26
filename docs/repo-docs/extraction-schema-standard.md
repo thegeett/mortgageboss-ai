@@ -144,7 +144,7 @@ A missing field is `null`. A missing list is `[]`. A missing nested object is `n
 - `pre_masked=False` — stored **raw** in `extracted_data`; the **snapshot** masks it and adds a
   per-file salted match-hash
 
-⚠️ **The catch-all is not protected.** Any PII the model files into `additional_sections` is stored
+**The catch-all is not protected.** Any PII the model files into `additional_sections` is stored
 unmasked. **Every PII element must be a named typed field registered in `_PII_FIELDS`**, or a nested
 record with its own redactor (the transaction-description pattern).
 
@@ -193,7 +193,7 @@ record with its own redactor (the transaction-description pattern).
 | `nsf_fee_count` | int | **AS-7** (currently blocked — no producer) |
 | `nsf_fee_total` | Decimal | AS-7 |
 
-⚠️ **`declared_page_count` is absent from the v2 catalog's 53 fields.** AS-9 would be dead on arrival.
+**`declared_page_count` is absent from the v2 catalog's 53 fields.** AS-9 would be dead on arrival.
 **This is precisely why the rule floor comes first.**
 
 ### Multi-party handling

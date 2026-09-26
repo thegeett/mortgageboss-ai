@@ -25,13 +25,13 @@ function usDate(value: string | null): string {
 /**
  * What attaching the lender's PDF actually did, in the round's own numbers (S1-09).
  *
- * ⚠️ BUILT FROM THE RESULT, NEVER A FIXED SENTENCE. The design shows "Filled the letter details, the
+ * BUILT FROM THE RESULT, NEVER A FIXED SENTENCE. The design shows "Filled the letter details, the
  * expiry dates and the codes on the 6 pasted conditions" — but an enrich can fill some of those and
  * not others, so a hardcoded sentence would claim work that did not happen. `ConditionEnrichResult`
  * carries `filled_header`, `filled_expiry`, `filled_date_printed` and `matched` precisely so the
  * screen can say what was true this time.
  *
- * ⚠️ AND THE LAST CLAUSE IS THE ONE THAT MATTERS MOST. "No new conditions, no second round" is the
+ * AND THE LAST CLAUSE IS THE ONE THAT MATTERS MOST. "No new conditions, no second round" is the
  * whole promise of LP-907's merge: a processor forwarding the PDF of a round they already pasted
  * needs to know it did not duplicate their work. It is stated unconditionally because the merge
  * path cannot create either — `added` is asserted zero by the endpoint's own tests.
@@ -42,7 +42,7 @@ function enrichSummary(result: ConditionEnrichResult): string {
   if (result.filled_expiry) filled.push("the expiry dates");
   if (result.filled_date_printed) filled.push("the date printed");
 
-  // ⚠️ `matched` IS NOT SOMETHING FILLED, AND IT WAS IN THE FILLED LIST (LP-909 review). It counts
+  // `matched` IS NOT SOMETHING FILLED, AND IT WAS IN THE FILLED LIST (LP-909 review). It counts
   // the pasted rows the PDF recognised — `_merge_conditions` increments it when a row MATCHES, and
   // separately fills fields on it. So a PDF that matched six conditions and filled no letter details
   // read "Filled the codes on the 6 pasted conditions", claiming work the result does not report.
@@ -64,19 +64,19 @@ function enrichSummary(result: ConditionEnrichResult): string {
 /**
  * The round-details sheet (S1-09) — "Letter details →" from the round strip.
  *
- * ⚠️ ITS CHIPS ARE THE ROUND'S SOURCES IN ORDER, WHICH IS HOW A MERGE SHOWS ITSELF. A round pasted
+ * ITS CHIPS ARE THE ROUND'S SOURCES IN ORDER, WHICH IS HOW A MERGE SHOWS ITSELF. A round pasted
  * and later enriched reads `Pasted` then `PDF upload`, because `sources` is a LIST and the enrich
  * appends rather than replaces. That ordering is the visible evidence that one round gained a
  * second arrival instead of a second round being created.
  *
- * ⚠️ THE HISTORY SECTION EXISTS NOW, AND THIS COMMENT USED TO EXPLAIN WHY IT COULD NOT. It said
+ * THE HISTORY SECTION EXISTS NOW, AND THIS COMMENT USED TO EXPLAIN WHY IT COULD NOT. It said
  * there was no endpoint — true when written: `ConditionEvent` appeared nowhere in the API or the
  * schemas, and no service read events for a round, while LP-904 had built
  * `ix_condition_events_round_occurred` FOR this screen and paid a write on every event insert to
  * serve a query nobody made. `GET /condition-rounds/{id}/events` is that query, and the index
  * finally has its first reader.
  *
- * ⚠️ EVERY LINE IS COMPOSED FROM NAMED SCALARS, NEVER FROM `detail`. That column is NPI-classified —
+ * EVERY LINE IS COMPOSED FROM NAMED SCALARS, NEVER FROM `detail`. That column is NPI-classified —
  * "what changed, which is the lender's text" — and the readonly layer drops it whole, so the server
  * projects an allow-list and the sentences are built here from counts and identifiers. A history
  * panel is not a reason to open a door the readonly layer deliberately closed.
@@ -105,7 +105,7 @@ export function RoundDetailsSheet({
           </SheetTitle>
         </SheetHeader>
 
-        {/* ⚠️ THE BODY CARRIES ITS OWN GUTTER. `SheetContent` has no padding and `SheetHeader` brings
+        {/* THE BODY CARRIES ITS OWN GUTTER. `SheetContent` has no padding and `SheetHeader` brings
             its own `px-4`, so without this the chips, the letter and the history sat flush against
             the sheet's edge while the title above them was inset (LP-909 §5, S1-09). */}
         <div className="px-4 pb-6">
@@ -157,12 +157,12 @@ function historyStamp(iso: string): string {
 /**
  * One history line, in the processor's words (S1-09).
  *
- * ⚠️ COMPOSED FROM SCALARS, WHICH IS WHY EACH KIND GETS ITS OWN SENTENCE RATHER THAN A LABEL MAP. The
+ * COMPOSED FROM SCALARS, WHICH IS WHY EACH KIND GETS ITS OWN SENTENCE RATHER THAN A LABEL MAP. The
  * design's lines carry the numbers — "Imported: 0 new, 6 seen again", "Pasted (just some) · 6
  * conditions read" — and those come from `created`/`seen_again` and `source_kind`/`rows`. A map of
  * kind → string could not say them.
  *
- * ⚠️ EVERY FIELD IS OPTIONAL AND THE FALLBACK IS THE BARE EVENT, NOT A GUESS. The server projects
+ * EVERY FIELD IS OPTIONAL AND THE FALLBACK IS THE BARE EVENT, NOT A GUESS. The server projects
  * only what a writer actually stored, and `_as_int` returns null rather than coercing — so a count
  * can legitimately be absent, and the line says what happened without inventing a number for it.
  */
@@ -171,12 +171,12 @@ function historyLine(event: ConditionEvent): string {
 
   switch (kind) {
     case "round_received":
-      // ⚠️ FOUR SOURCES, AND "a sheet was received" IS FALSE FOR TWO OF THEM (LP-909 review). A
+      // FOUR SOURCES, AND "a sheet was received" IS FALSE FOR TWO OF THEM (LP-909 review). A
       // MANUAL round is a condition somebody typed; nothing arrived. A paste is text, not a sheet.
       // The old version said "Condition sheet received" for both, which is the class of statement
       // this stage keeps deleting.
       //
-      // ⚠️ AND NO ROW COUNT HERE. The paste writer stores `{source_kind, bytes}` — never `rows` — so
+      // AND NO ROW COUNT HERE. The paste writer stores `{source_kind, bytes}` — never `rows` — so
       // the old `rows === null ? "" : …` arm was dead code that could not run, and the design's
       // "6 conditions read" comes from the following `ROUND_PARSED`.
       switch (event.source_kind) {
@@ -208,7 +208,7 @@ function historyLine(event: ConditionEvent): string {
     case "round_discarded":
       return "Discarded";
     case "round_enriched": {
-      // ⚠️ IT USED TO CLAIM "letter details filled" UNCONDITIONALLY (LP-909 review). An enrich fills
+      // IT USED TO CLAIM "letter details filled" UNCONDITIONALLY (LP-909 review). An enrich fills
       // only what the round was missing — `if header and not round_.header` — so attaching a PDF to a
       // paste that already carried its own letterhead fills nothing, and the line asserted otherwise.
       // The same defect as `enrichSummary` counting a match as a fill, one panel over.
@@ -233,7 +233,7 @@ function historyLine(event: ConditionEvent): string {
     case "condition_edited":
       return "A condition was edited";
     default:
-      // ⚠️ A KIND THIS BUNDLE HAS NOT HEARD OF DEGRADES TO SOMETHING HONEST rather than rendering
+      // A KIND THIS BUNDLE HAS NOT HEARD OF DEGRADES TO SOMETHING HONEST rather than rendering
       // `undefined`. The enum mirror guard makes drift unlikely in CI; it cannot guard a browser tab
       // running against a backend one deploy ahead.
       return "Something happened to this round";
@@ -243,7 +243,7 @@ function historyLine(event: ConditionEvent): string {
 /**
  * The round's history (S1-09).
  *
- * ⚠️ AN EMPTY LIST AND A FAILED FETCH SAY DIFFERENT THINGS, AND NEITHER IS SILENCE. A round always
+ * AN EMPTY LIST AND A FAILED FETCH SAY DIFFERENT THINGS, AND NEITHER IS SILENCE. A round always
  * has at least its `ROUND_RECEIVED` event, so "no history" is not a real state — if the list comes
  * back empty something is wrong, and saying nothing would make a broken endpoint look like a quiet
  * round.

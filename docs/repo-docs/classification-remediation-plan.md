@@ -31,13 +31,13 @@ before it got one.
 ## PHASE 1 — Infrastructure _(8 documents, no judgment involved)_
 
 **Four `BadRequestError` — oversized payloads.** 060 (141pp / 3.3MB), 066 (148pp), 069 (118pp / 2.58MB),
-075 (177pp / 10.85MB Declaration of Condominium). ⚠️ **Bedrock rejected these, not our code.**
+075 (177pp / 10.85MB Declaration of Condominium). **Bedrock rejected these, not our code.**
 
 **Fix:** send only the first N pages for **classification**. A Declaration of Condominium is identifiable
 from page one — 177 pages are not needed to name it. *(Extraction is a separate question and may need more.)*
 
 **Four `RateLimitError` — four consecutive documents.** 273 (condo appraisal), 274 + 275 (1120-S packages),
-276 (CD statement). ⚠️ **All four are types the catalog handles correctly if the call completes.**
+276 (CD statement). **All four are types the catalog handles correctly if the call completes.**
 
 **Fix:** catch the rate-limit error and **retry with exponential backoff**. The existing limiter paces steady
 throughput; it does not recover from a rejection.
@@ -69,7 +69,7 @@ Both a label and a free-text explanation are produced today, and **nothing compa
 
 **When the explanation names a type different from the label → flag for review, do not apply the label.**
 
-⚠️ **Why this matters more than it looks.** These three were relatively harmless *because the mislabelled
+**Why this matters more than it looks.** These three were relatively harmless *because the mislabelled
 types have no extractor* — nothing was force-populated. **But the same mechanism produced the T4 case in an
 earlier batch: a Canadian T4 labelled `w2`, with the US W-2 schema applied, while the reasoning said "this is
 a T4."** That produces plausible American tax numbers from a Canadian form — and nothing downstream would
@@ -82,21 +82,21 @@ elsewhere in the corpus.
 Generic analysis goes. A document with no matching type gets **free extraction**: the model reads it and
 returns what it finds, untyped.
 
-⚠️ **The standing constraint:** free-extraction output is **model-labelled and uncoerced**, so **no
+**The standing constraint:** free-extraction output is **model-labelled and uncoerced**, so **no
 deterministic rule may depend on it** — the same reason the catch-all cannot be trusted. It is for the
 processor to see, and for an AI reasoner to weigh. **Not a rule input.**
 
-### ⚠️ GEET'S DECISIONS — settled
+### GEET'S DECISIONS — settled
 
 **Tier 3 KEEPS ITS NAME; its behaviour changes.** It is no longer generic analysis — it becomes **free
 extraction scoped to mortgage-relevant data only.** The model reads the document and returns what matters to
 a loan file (parties, amounts, dates, account and property identifiers, obligations), **ignoring boilerplate,
-legal disclaimers and page furniture.** ⚠️ **Not "extract everything"** — that is what fills a W-2 with 35
+legal disclaimers and page furniture.** **Not "extract everything"** — that is what fills a W-2 with 35
 fields of IRS notice text.
 
 **Output goes to a MARKED-UNTYPED SNAPSHOT SECTION.** Visible to a processor, and — the point of the design —
 **available to AI cross-source verification**, which can weigh it against typed data from other documents.
-⚠️ **No deterministic rule may depend on it**: the labels are model-chosen and the values uncoerced, the same
+**No deterministic rule may depend on it**: the labels are model-chosen and the values uncoerced, the same
 reason the catch-all cannot back a rule.
 
 **"Flag for review" means classification did not succeed.** The UI shows a yellow *needs review* marker, and
@@ -107,9 +107,9 @@ the document **still routes to Tier 3 for free extraction**. It is not a dead en
 
 ---
 
-## PHASE 3 — The genuinely confusable pairs · ⚠️ DEFERRED, re-measure first
+## PHASE 3 — The genuinely confusable pairs · DEFERRED, re-measure first
 
-⚠️ **Geet's caution, and it is the right one:** hard-coded distinguishing cues are brittle and do not scale to
+**Geet's caution, and it is the right one:** hard-coded distinguishing cues are brittle and do not scale to
 108 types. **Do not write cues for every pair.**
 
 **DECISION: do Phases 1 and 2, then re-run a sample and see whether the confusion persists.**

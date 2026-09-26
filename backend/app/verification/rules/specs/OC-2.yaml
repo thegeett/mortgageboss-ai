@@ -81,7 +81,7 @@ judgment:
           occupancy is wrong. Occupancy changes pricing, the LTV limit and the reserves required, so a
           misstatement is not a paperwork error. If the stated occupancy is right, document why the
           signals differ — a pending move, a recently purchased home, an employment relocation.
-      # ⚠️ EVIDENCE ONLY, no clause about why this is listed. `explain` is keyed on the TAG, so this
+      # EVIDENCE ONLY, no clause about why this is listed. `explain` is keyed on the TAG, so this
       # same sentence renders under an `unknown` verdict too — a "nothing to worry about here" ending
       # would then contradict the action above it, which is asking the processor to establish something.
       # The why says what the file shows; the action says what to do about it.

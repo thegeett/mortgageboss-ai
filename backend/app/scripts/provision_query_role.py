@@ -22,7 +22,7 @@ deliberately runs this.
 In an environment where this has never run, ``readonly.*`` exists and nothing can select
 from it. That is the intended resting state for production.
 
-⚠️ The role has NO PASSWORD, in any environment. On RDS it authenticates with a
+The role has NO PASSWORD, in any environment. On RDS it authenticates with a
 15-minute IAM token, which requires ``rds-db:connect`` on its dbuser ARN — a permission
 Terraform grants only where ``db_instance_resource_id`` is wired. Two independent gates,
 neither of which is this script.

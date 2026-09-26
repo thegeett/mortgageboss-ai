@@ -63,7 +63,7 @@ def _pin_ai_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     this fixture and wins within the test body, with both unwound cleanly at teardown.
     """
     monkeypatch.setattr(settings, "ai_provider", "anthropic")
-    # ⚠️ AND NEUTER THE KEY (LP-491). Pinning the provider makes the suite deterministic, but it also
+    # AND NEUTER THE KEY (LP-491). Pinning the provider makes the suite deterministic, but it also
     # means any test that reaches a REAL reasoner bills the direct Anthropic API with the developer's
     # own key. That is not hypothetical: LP-490 shipped a test whose reasoner seam covered ONE ai group
     # while every other group fell through to the live model — roughly 40-60 real calls before the
@@ -72,7 +72,7 @@ def _pin_ai_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         settings, "anthropic_api_key", "sk-ant-test-not-a-real-key"
     )  # pragma: allowlist secret
-    # ⚠️ TWO REPORTED FOOTGUNS IN THE LINE ABOVE, closed here.
+    # TWO REPORTED FOOTGUNS IN THE LINE ABOVE, closed here.
     #  1. A dummy key is WEAKER than no key. With the key unset, client.py fails immediately with
     #     AIClientError("ANTHROPIC_API_KEY is not configured") — offline, instant. With a dummy key it
     #     BUILDS a real AsyncAnthropic and issues an HTTPS request that fails on auth, which in a

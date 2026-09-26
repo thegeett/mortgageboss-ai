@@ -104,7 +104,7 @@ class BankStatementExtraction(BaseModel):
     statement_period_start: TypedField[datetime.date] = Field(default_factory=TypedField)
     statement_period_end: TypedField[datetime.date] = Field(default_factory=TypedField)
     beginning_balance: TypedField[Decimal] = Field(default_factory=TypedField)
-    # ⚠️ LP-461: on a COMBINED statement (>1 deposit account) this ending_balance is only the FIRST
+    # LP-461: on a COMBINED statement (>1 deposit account) this ending_balance is only the FIRST
     # account's — see the additional_accounts note below. A future rule reading it as "the statement
     # balance" would understate a multi-account holder. The proper fix is the accounts[] restructure
     # (LP-461 ADR / future ticket), not this field.
@@ -133,7 +133,7 @@ class BankStatementExtraction(BaseModel):
     fee_waiver_options: TypedField[str] = Field(default_factory=TypedField)
 
     # --- Transactions (the structurally-new part, ADR-061) ------------------ #
-    # ⚠️ LP-461: these are the FIRST account's transactions only. On a combined statement the additional
+    # LP-461: these are the FIRST account's transactions only. On a combined statement the additional
     # accounts' rows are NOT captured (additional_accounts carries balances, not rows) — so AS-8's chaining
     # and AS-1's deposit sweep see only account 1. The accounts[] restructure (future ticket) is the fix.
     transactions: list[Transaction] = Field(default_factory=list)

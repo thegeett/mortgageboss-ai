@@ -1,6 +1,6 @@
 """Turning a reviewed draft round into conditions (LP-909 section 2, spec §LP-909).
 
-⚠️ THIS IS THE MOMENT A PARSE BECOMES THE FILE'S RECORD. Before it, `draft_rows` is a reading of a
+THIS IS THE MOMENT A PARSE BECOMES THE FILE'S RECORD. Before it, `draft_rows` is a reading of a
 sheet that a processor may edit or throw away; after it, each row is a `Condition` the rest of the
 product reasons about. LP-904 kept the two apart for exactly this reason: "an unreviewed parse must
 not be indistinguishable from the lender's confirmed list".
@@ -16,7 +16,7 @@ THE TWO-PASS MATCH IS THE ORDER LP-904 INDEXED FOR. `(loan_file_id, lender_id, l
 in the order it does them". Code first because a lender's code is the strongest identity it gives us;
 fingerprint second because a re-worded row keeps its code while a re-coded row keeps its words.
 
-⚠️ EVERY WRITER OF A `Condition` EMITS `CONDITION_CREATED`. That rule is stated here because this is
+EVERY WRITER OF A `Condition` EMITS `CONDITION_CREATED`. That rule is stated here because this is
 one of the three writers, and because breaking it is not hypothetical: `condition_enrich.py` created
 conditions and emitted nothing, so those conditions had no round chips while their own NOT NULL
 `first_round_id` pointed straight at the round that made them. A read side deriving a fact from
@@ -54,7 +54,7 @@ from app.services.activity_log import log_activity
 
 logger = structlog.get_logger(__name__)
 
-#: ⚠️ A BOUND, NOT "UNTIL IT WORKS". `max + 1` recomputed under contention can lose twice, so a
+#: A BOUND, NOT "UNTIL IT WORKS". `max + 1` recomputed under contention can lose twice, so a
 #: bare loop is unbounded in principle — and it would be holding a Redis lock that auto-expires at
 #: 30 seconds anyway, so "keep trying" is a promise the surrounding machinery cannot keep. Three
 #: attempts, then a typed failure a processor can act on.
@@ -92,7 +92,7 @@ class ImportOutcome:
 async def _next_round_number(db: AsyncSession, *, loan_file_id: UUID) -> int:
     """One past the highest number this file has used.
 
-    ⚠️ READS ACROSS SOFT-DELETED AND DISCARDED ROUNDS ALIKE, deliberately, because the unique index
+    READS ACROSS SOFT-DELETED AND DISCARDED ROUNDS ALIKE, deliberately, because the unique index
     does not: it is `WHERE round_number IS NOT NULL AND deleted_at IS NULL`. Taking `max` over only
     the rows the index constrains would hand back a number a soft-deleted round still displays in
     an append-only `ROUND_IMPORTED` event — two different sheets both recorded as "round 2", which
@@ -114,7 +114,7 @@ def _row_fingerprint(row: dict[str, Any]) -> str:
 async def _existing_conditions(db: AsyncSession, *, loan_file_id: UUID) -> list[Condition]:
     """Every live condition on the file, oldest first.
 
-    ⚠️ THE ORDER IS LOAD-BEARING AND THERE WAS NONE. Two conditions can legitimately share
+    THE ORDER IS LOAD-BEARING AND THERE WAS NONE. Two conditions can legitimately share
     `(lender_id, lender_code)` — that is exactly what `possible_match` exists for, since a
     same-code/different-wording row creates a second condition under the same code. The lookup below
     keeps the FIRST of them, so without an `ORDER BY` "which one" was whatever the planner happened
@@ -132,7 +132,7 @@ async def _existing_conditions(db: AsyncSession, *, loan_file_id: UUID) -> list[
 def _lender_compatible(condition: Condition, lender_id: UUID | None) -> bool:
     """Whether this condition and this round could belong to the same lender.
 
-    ⚠️ `None` MEANS "NOT KNOWN YET", NEVER "A DIFFERENT LENDER", and collapsing those two is what
+    `None` MEANS "NOT KNOWN YET", NEVER "A DIFFERENT LENDER", and collapsing those two is what
     made the wording pass wrong. `loan_file.lender_id` is nullable and mutable, and a round takes the
     FILE's lender, so a file legitimately accumulates conditions under `None` and later gains one.
     Refusing to match across `None` would duplicate the same demand the moment the lender was set —
@@ -163,7 +163,7 @@ def _match(
 ) -> tuple[Condition | None, Condition | None]:
     """The spec's two passes. Returns `(match, possible_match)`.
 
-    ⚠️ BOTH PASSES ARE LENDER-SCOPED, AND THE SECOND ONE WAS NOT. `by_code` is keyed
+    BOTH PASSES ARE LENDER-SCOPED, AND THE SECOND ONE WAS NOT. `by_code` is keyed
     `(lender_id, code)` so pass 1 was scoped by construction; `by_text` was keyed on the fingerprint
     alone, so a condition belonging to lender A matched a sheet from lender B whenever the wording
     was identical — silently, with no warning, recording lender A's condition as having appeared on
@@ -173,7 +173,7 @@ def _match(
     as a brand-new OBSERVED_UNMAPPED entry in the very transaction where this pass declared the
     condition identical. Pass 1 lender-specific, code map lender-specific, pass 2 lender-agnostic.
 
-    ⚠️ `possible_match` IS AN ID FOR STAGE 2, NOT A DECISION HERE. A condition with the SAME code and
+    `possible_match` IS AN ID FOR STAGE 2, NOT A DECISION HERE. A condition with the SAME code and
     a DIFFERENT fingerprint is either a re-worded demand or a different demand the lender happened to
     file under one template — and Stage 1 cannot tell which. Recording the id in the event detail
     lets Stage 2's comparison decide "reworded"; guessing now would either merge two real conditions
@@ -267,7 +267,7 @@ async def _record_codes(
 ) -> list[str]:
     """Bump what we know about each code this sheet carried. Returns the ones with no meaning.
 
-    ⚠️ "BUMP THE COUNTERS, NEVER RESET THE MEANING". `status` goes through `resolved_status`, which
+    "BUMP THE COUNTERS, NEVER RESET THE MEANING". `status` goes through `resolved_status`, which
     is the single statement of "raised, never lowered" — shared with `seed_lender_codes.py` rather
     than restated here, because two independently shaped versions of one rule is how they drift. A
     sheet mentioning a code a person has already MAPPED must not demote it.
@@ -278,7 +278,7 @@ async def _record_codes(
     for code in codes:
         existing = code_map.get(code)
         if existing is None:
-            # ⚠️ THE LABEL IS THE CODE ITSELF, AND THAT IS A DECISION THE SPEC DOES NOT MAKE.
+            # THE LABEL IS THE CODE ITSELF, AND THAT IS A DECISION THE SPEC DOES NOT MAKE.
             # `label` is NOT NULL (spec lists it without the `?` that marks the optional columns),
             # but an unknown code has no meaning by definition — that is what OBSERVED_UNMAPPED
             # says. The alternatives were worse: the row's `lender_category` is the lender's
@@ -319,13 +319,13 @@ def _apply_code_defaults(
 ) -> tuple[OwnerHint, OwnerHintSource, bool, str | None]:
     """The code map's contribution to a NEW condition (spec step 4).
 
-    ⚠️ THE OWNER HINT IS APPLIED ONLY WHERE THE SHEET GAVE NONE. The spec's wording is "apply the
+    THE OWNER HINT IS APPLIED ONLY WHERE THE SHEET GAVE NONE. The spec's wording is "apply the
     owner hint when no prefix/bucket hint was found", and the reason is in `OwnerHintSource`'s own
     docstring: the hints are not equally good. A `TC:` the lender typed is far stronger evidence
     than a default looked up from the map, and overwriting the first with the second would destroy
     the better answer while leaving the field looking just as populated.
 
-    ⚠️ `default_bucket_kind` IS DELIBERATELY NOT APPLIED. Spec step 4 lists three things — info_only,
+    `default_bucket_kind` IS DELIBERATELY NOT APPLIED. Spec step 4 lists three things — info_only,
     canonical_type_id and the owner hint — and the bucket is not among them. The heading printed on
     the sheet is the lender's own statement of when this condition is due; a default from the code
     map would override the specific with the general.
@@ -382,7 +382,7 @@ def _create_condition(
         lender_category=row.get("lender_category") or None,
         bucket_heading=str(row.get("bucket_heading") or ""),
         bucket_kind=_enum_from(row, "bucket_kind", BucketKind, BucketKind.UNKNOWN),
-        # ⚠️ THE LENDER'S WORDS, UNTOUCHED — and this is the last place they could be tidied. What
+        # THE LENDER'S WORDS, UNTOUCHED — and this is the last place they could be tidied. What
         # the processor edited on the review screen is what imports (spec §8), so the fingerprint is
         # of what is IMPORTED, not of what was read.
         verbatim_text=str(row.get("verbatim_text") or ""),
@@ -392,7 +392,7 @@ def _create_condition(
         owner_hint_source=owner_hint_source,
         info_only=info_only,
         canonical_type_id=canonical_type_id,
-        # ⚠️ THE CALLER NAMES THE DOOR, AND THERE IS ONLY ONE CONSTRUCTOR ON PURPOSE. Import passes
+        # THE CALLER NAMES THE DOOR, AND THERE IS ONLY ONE CONSTRUCTOR ON PURPOSE. Import passes
         # SHEET; the manual door passes MANUAL. This module's docstring states the rule every writer
         # of a `Condition` must honour — emit `CONDITION_CREATED` — and a second constructor is
         # precisely how a third writer comes to stop honouring it, which is what happened in
@@ -408,7 +408,7 @@ def _update_seen_again(
 ) -> dict[str, Any]:
     """Update a condition the sheet carried again. Returns what changed, for the event detail.
 
-    ⚠️ NOTHING HERE TOUCHES `prep_status`, `lender_status`, `verbatim_text` OR `first_round_id`.
+    NOTHING HERE TOUCHES `prep_status`, `lender_status`, `verbatim_text` OR `first_round_id`.
     The first two are ADR-404. The wording is not re-written because the condition already holds the
     lender's words for this demand and a later sheet re-printing them is not a correction — and
     `first_round_id` is the historical fact that it was first seen elsewhere.
@@ -417,7 +417,7 @@ def _update_seen_again(
 
     condition.last_seen_round_id = round_.id
 
-    # ⚠️ ONLY A FULL LIST MOVES A CONDITION'S PLACE, THOUGH THE SPEC SAYS "UPDATE `sequence`" PLAINLY.
+    # ONLY A FULL LIST MOVES A CONDITION'S PLACE, THOUGH THE SPEC SAYS "UPDATE `sequence`" PLAINLY.
     # `sequence` is "order on the latest sheet it appeared on" (spec §3), and a PARTIAL round is not
     # a sheet in that sense: it is a fragment, and its row numbers count from the top of what the
     # processor happened to paste. Writing those numbers over a full list's gave round 2's six
@@ -466,7 +466,7 @@ def _update_seen_again(
 def _is_duplicate_round_number(error: IntegrityError) -> bool:
     """Whether this violation is two rounds claiming one number, and not something else.
 
-    ⚠️ THE CONSTRAINT NAME IS NOT WHERE IT LOOKS LIKE IT IS — measured against the database, not
+    THE CONSTRAINT NAME IS NOT WHERE IT LOOKS LIKE IT IS — measured against the database, not
     assumed. `error.orig` is SQLAlchemy's asyncpg `IntegrityError` wrapper and carries NO
     `constraint_name`; the name lives on its `__cause__`, the underlying
     `asyncpg.UniqueViolationError`. Reading the obvious attribute returns `None`, the comparison is
@@ -483,18 +483,18 @@ def _is_duplicate_round_number(error: IntegrityError) -> bool:
 async def _assign_round_number(db: AsyncSession, *, round_: ConditionRound) -> int:
     """Claim the next free number for this file, settling the round as IMPORTED.
 
-    ⚠️ THE LOCK DOES NOT PREVENT THIS RACE; THE INDEX DOES. `loan_file_needs_lock` is advisory — it
+    THE LOCK DOES NOT PREVENT THIS RACE; THE INDEX DOES. `loan_file_needs_lock` is advisory — it
     yields `bool(acquired)`, every existing call site binds nothing and proceeds either way, and its
     `timeout=30` auto-expires a HELD lock, so a long import loses it mid-transaction while still
     working. Two imports can therefore compute the same `max + 1`, and
     `uq_condition_rounds_file_number` is what actually refuses the second.
 
-    ⚠️ THE SAVEPOINT WRAPS ONLY THE WRITE THAT CAN VIOLATE. Everything else is flushed before this
+    THE SAVEPOINT WRAPS ONLY THE WRITE THAT CAN VIOLATE. Everything else is flushed before this
     is called, because a rollback discards whatever was left unsettled inside the window — the
     lesson `verification_rules.py` records as "a savepoint added to protect the commit being the one
     thing that could destroy it".
 
-    ⚠️ AND THE ROLLBACK EXPIRES `round_`, WHICH IS THE HALF THAT BITES. In async SQLAlchemy an
+    AND THE ROLLBACK EXPIRES `round_`, WHICH IS THE HALF THAT BITES. In async SQLAlchemy an
     expired attribute is a lazy sync load, so reading one after the rollback raises `MissingGreenlet`
     rather than reloading — a greenlet error that looks nothing like a unique violation, a line away
     from the code you were thinking about. `await db.refresh()` is the cure, and it is why the
@@ -506,7 +506,7 @@ async def _assign_round_number(db: AsyncSession, *, round_: ConditionRound) -> i
 
     for attempt in range(1, MAX_NUMBER_ATTEMPTS + 1):
         if attempt > 1:
-            # ⚠️ RECOMPUTED AT THE TOP OF A RETRY, NOT AFTER THE FAILURE THAT CAUSED IT. Those look
+            # RECOMPUTED AT THE TOP OF A RETRY, NOT AFTER THE FAILURE THAT CAUSED IT. Those look
             # equivalent and are not: recomputing in the `except` branch meant the LAST failed
             # attempt also issued a query, for a number nobody would ever use, while holding a lock
             # that auto-expires at 30 seconds — the exact resource this bound exists to protect.
@@ -543,7 +543,7 @@ async def _assign_round_number(db: AsyncSession, *, round_: ConditionRound) -> i
         await savepoint.commit()
         return number
 
-    # ⚠️ NEVER A SILENT GIVE-UP AND NEVER AN UNBOUNDED LOOP. `max + 1` recomputed under contention
+    # NEVER A SILENT GIVE-UP AND NEVER AN UNBOUNDED LOOP. `max + 1` recomputed under contention
     # can lose twice, so "retry until it works" is not a bound — and an unbounded retry would
     # outlive the 30-second lock it is holding, which is the very failure it exists to prevent.
     raise RoundNotImportable(
@@ -554,7 +554,7 @@ async def _assign_round_number(db: AsyncSession, *, round_: ConditionRound) -> i
 def _refuse_unless_importable(round_: ConditionRound) -> None:
     """Only a DRAFT may be imported, and the refusal says which state it is actually in.
 
-    ⚠️ THIS IS A GUARD, NOT MUTUAL EXCLUSION. Two concurrent imports can both read DRAFT and both
+    THIS IS A GUARD, NOT MUTUAL EXCLUSION. Two concurrent imports can both read DRAFT and both
     proceed; what stops them producing two numbered rounds is the unique index, and what stops them
     producing duplicate conditions is the match — the second import finds every row already present
     and records them as seen again rather than creating them twice.
@@ -597,7 +597,7 @@ async def import_round(
         raise RoundNotImportable("This round has no rows to import. Discard it instead.")
 
     existing = await _existing_conditions(db, loan_file_id=round_.loan_file_id)
-    # ⚠️ FIRST WINS, NOT LAST, AND BOTH LOOKUPS HOLD EVERY CANDIDATE RATHER THAN ONE. Two conditions
+    # FIRST WINS, NOT LAST, AND BOTH LOOKUPS HOLD EVERY CANDIDATE RATHER THAN ONE. Two conditions
     # can share `(lender_id, lender_code)` by design — a same-code/different-wording row creates a
     # second one, which is what `possible_match` is for. A dict comprehension silently kept whichever
     # came last out of an unordered query; `setdefault` over the oldest-first list keeps the
@@ -610,7 +610,7 @@ async def import_round(
             by_code.setdefault((condition.lender_id, condition.lender_code), condition)
         by_text.setdefault(condition.text_fingerprint, []).append(condition)
 
-    # ⚠️ `lender_id` IS NULLABLE AND A FILE WITH NO LENDER MUST STILL IMPORT. `(lender, code)` is
+    # `lender_id` IS NULLABLE AND A FILE WITH NO LENDER MUST STILL IMPORT. `(lender, code)` is
     # meaningless without the lender (ADR-407), so the code-map step is SKIPPED rather than guessed
     # at — the conditions still land, carrying their codes as printed. LP-905 already treats a
     # lender-less file as a real state rather than an error.
@@ -662,7 +662,7 @@ async def import_round(
 
         changed = _update_seen_again(match, row, round_=round_)
         if match.lender_id is None and round_.lender_id is not None:
-            # ⚠️ ADOPTION, AND WITHOUT IT THE BENIGN CASE QUIETLY DEGRADES. A condition recorded
+            # ADOPTION, AND WITHOUT IT THE BENIGN CASE QUIETLY DEGRADES. A condition recorded
             # before the file had a lender matched this round by wording — but leaving it at `None`
             # means pass 1 can never find it by `(lender, code)` again, so it depends on identical
             # wording forever and drifts apart the first time the lender rephrases. Measured before
@@ -677,7 +677,7 @@ async def import_round(
                 condition_id=match.id,
                 kind=ConditionEventKind.CONDITION_SEEN_AGAIN,
                 actor_user_id=actor_user_id,
-                # ⚠️ WHAT CHANGED, NOT THE WORDING. `ConditionEvent.detail` is classified NPI and
+                # WHAT CHANGED, NOT THE WORDING. `ConditionEvent.detail` is classified NPI and
                 # dropped from the readonly views, so text here would be *permitted* — but the
                 # sibling writer (`condition_enrich.py`) keeps these details to counts, codes and
                 # names, and one table written two ways is how a rule stops being a rule.
@@ -710,7 +710,7 @@ async def import_round(
             db, lender_id=round_.lender_id, codes=codes, code_map=code_map
         )
 
-    # ⚠️ EVERYTHING SETTLED BEFORE THE SAVEPOINT. A rollback inside `_assign_round_number` discards
+    # EVERYTHING SETTLED BEFORE THE SAVEPOINT. A rollback inside `_assign_round_number` discards
     # whatever is still unflushed in its window; the conditions and events above must not be in it.
     await db.flush()
 
@@ -751,7 +751,7 @@ async def import_round(
 
     await db.flush()
 
-    # ⚠️ IDS, COUNTS AND CODES ONLY — never a condition's wording, never a borrower fact (spec §9.5).
+    # IDS, COUNTS AND CODES ONLY — never a condition's wording, never a borrower fact (spec §9.5).
     logger.info(
         "condition_round_imported",
         round_id=str(round_.id),
@@ -803,7 +803,7 @@ async def _manual_round(
 ) -> ConditionRound:
     """Round 1 for a file where a processor typed a condition before any sheet arrived.
 
-    ⚠️ ALWAYS `PARTIAL`, AND THIS IS THE ONE THAT WOULD BITE SILENTLY. ADR-404 lets only a FULL
+    ALWAYS `PARTIAL`, AND THIS IS THE ONE THAT WOULD BITE SILENTLY. ADR-404 lets only a FULL
     round's absences mean anything: a `FULL` round is a claim that the lender's list is complete, and
     Stage 2's comparison is entitled to propose "probably cleared" for anything missing from one. A
     round holding whatever a processor happened to type by hand is not that claim, and marking it
@@ -855,19 +855,19 @@ async def create_manual_condition(
 ) -> Condition:
     """Add one condition by hand. Flushes; the caller commits.
 
-    ⚠️ THE THIRD WRITER OF A `Condition`, AND IT EMITS `CONDITION_CREATED` LIKE THE OTHER TWO. The
+    THE THIRD WRITER OF A `Condition`, AND IT EMITS `CONDITION_CREATED` LIKE THE OTHER TWO. The
     rule is in this module's docstring because breaking it already happened once: `condition_enrich`
     created conditions silently and they carried no round chips. This goes through the SAME
     `_create_condition` as the import rather than constructing a second one — a separate constructor
     is how the next writer comes to forget.
 
-    ⚠️ IT GOES INTO A REAL ROUND, AND THE CHIP IS TRUTHFUL BECAUSE OF THAT. Spec §LP-909 puts a
+    IT GOES INTO A REAL ROUND, AND THE CHIP IS TRUTHFUL BECAUSE OF THAT. Spec §LP-909 puts a
     hand-typed condition into the latest imported round, or creates round 1 with source `MANUAL` if
     the file has none — so the round genuinely is its home and `R1` is not a claim that it was
     printed on a sheet. `origin` carries that distinction: `SHEET` for a row read off a letter,
     `MANUAL` for this. Emitting nothing instead would reproduce the enrich bug exactly.
 
-    ⚠️ THE CODE MAP'S DEFAULTS ARE APPLIED; ITS COUNTERS ARE NOT. `times_seen` is what orders the
+    THE CODE MAP'S DEFAULTS ARE APPLIED; ITS COUNTERS ARE NOT. `times_seen` is what orders the
     unmapped backlog, and it is supposed to answer "how often do lenders actually send this code" —
     a processor typing one is not the lender sending it, so counting it would inflate the queue with
     our own keystrokes. Looking the code up to fill `info_only`, `canonical_type_id` and an owner
@@ -888,7 +888,7 @@ async def create_manual_condition(
         sequence=await _next_sequence(db, loan_file_id=loan_file.id),
         lender_code=payload.lender_code,
         lender_category=payload.lender_category,
-        # ⚠️ NOT AN INVENTED LABEL. The heading is the LENDER's vocabulary — "Prior To Docs (PTD)",
+        # NOT AN INVENTED LABEL. The heading is the LENDER's vocabulary — "Prior To Docs (PTD)",
         # "Underwriter To Obtain And Clear" — and manufacturing one here would put words in their
         # mouth on a row they never wrote. Empty means the processor filed it under no heading, and
         # the list can say so.

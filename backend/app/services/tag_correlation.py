@@ -828,7 +828,7 @@ def dump_stage_b_entry(entry: _Sourced) -> dict[str, object]:
 def load_stage_b_entry(raw: dict[str, object]) -> _Sourced | None:
     """A Stage-B verdict from JSON, or None if the row cannot be trusted.
 
-    ⚠️ `cacheable` is NOT round-tripped, and that is deliberate rather than an omission. It is the
+    `cacheable` is NOT round-tripped, and that is deliberate rather than an omission. It is the
     flag that decided whether this entry was allowed to persist at all, so every row that exists was
     written with ``cacheable=True`` and is reconstructed that way. Storing it would create a row that
     says "do not reuse me" — a value that can only ever be wrong, since an uncacheable verdict should

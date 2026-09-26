@@ -1,13 +1,13 @@
 """Turning condition-sheet bytes into a `ParsedSheet` (LP-907; moved out of the Celery task).
 
-⚠️ IT LIVES HERE BECAUSE TWO CALLERS NOW NEED IT AND THEY CANNOT SHARE IT WHERE IT WAS. The parse
+IT LIVES HERE BECAUSE TWO CALLERS NOW NEED IT AND THEY CANNOT SHARE IT WHERE IT WAS. The parse
 task owned both the typed failures and the read; LP-907's enrich merge is a SERVICE, and
 `tasks → services` is the one direction this repo's imports run — `forward_attachment_as_sheet`'s
 docstring turns down a design for exactly that reason. A service importing from `app.tasks` would
 invert it, so the shared half moves down to `app/conditions/`, which is pure: no session, no Celery,
 no storage.
 
-⚠️ THE HALVES ARE SPLIT BY WHO HAS THE BYTES. The task reads a round whose PDF is in storage, so it
+THE HALVES ARE SPLIT BY WHO HAS THE BYTES. The task reads a round whose PDF is in storage, so it
 fetches first; `attach-pdf` already holds the upload in memory and has nothing to fetch. Keeping one
 function that did both would mean the endpoint writing bytes to storage purely to read them back, or
 passing `None` for a path it does not have. `sheet_from_bytes` is the half they share.
@@ -15,7 +15,7 @@ passing `None` for a path it does not have. `sheet_from_bytes` is the half they 
 NO NPI IN A FAILURE DETAIL (spec §9.5, §9.8): every `detail` below is COMPOSED, never quoted from the
 sheet.
 
-⚠️ AND THE REASON IS NOT THE ONE THIS DOCSTRING USED TO GIVE. It said `parse_report.failure_detail`
+AND THE REASON IS NOT THE ONE THIS DOCSTRING USED TO GIVE. It said `parse_report.failure_detail`
 "reaches the readonly layer, which scrubs identifier SHAPES only". It does not reach it at all:
 `parse_report` is in the EXCLUDED set (`tests/test_readonly_query.py`) and the migration drops it
 whole — the view projects `reader`, `reader_version`, `ai_used`, `duplicates_dropped`,
@@ -41,7 +41,7 @@ from app.conditions.readers.model import ParsedSheet
 class ConditionParseError(Exception):
     """A parse that cannot proceed, carrying a TYPED reason and a sentence for the processor.
 
-    ⚠️ NEVER A BARE `except Exception` (spec §9.8). "The file is no longer in storage", "this PDF
+    NEVER A BARE `except Exception` (spec §9.8). "The file is no longer in storage", "this PDF
     cannot be opened" and "the sheet is empty" lead a processor to three different next actions, and
     collapsing them into one message makes a failed round a dead end. `failure_kind` is what code
     and dashboards read; `detail` is what a person reads.
@@ -72,18 +72,18 @@ def sheet_from_bytes(content: bytes) -> tuple[str, ParsedSheet, str]:
     Raises `SheetUnreadable` rather than letting a library exception escape: an unreadable upload
     must reach the processor as a refusal naming the reason, not as a 500.
 
-    ⚠️ THE THIRD VALUE EXISTS SO A PDF CAN BE AI-SPLIT AT ALL (LP-908 review). `split_round` reads
+    THE THIRD VALUE EXISTS SO A PDF CAN BE AI-SPLIT AT ALL (LP-908 review). `split_round` reads
     `round_.raw_text`, which only the paste door ever wrote — so chaining the split for an uploaded
     or forwarded sheet hit its `if not text:` branch and settled the round `PARSE_FAILED` with a
     sentence telling a processor to paste a letter they had just uploaded. Persisting the text is
     what makes the upload and forward doors splittable.
 
-    ⚠️ IT DOES NOT HELP A PDF THAT HAS NO TEXT TO PERSIST, and that case survived the fix as far as
+    IT DOES NOT HELP A PDF THAT HAS NO TEXT TO PERSIST, and that case survived the fix as far as
     S1-03 (LP-909 §5): a blank page or a scan this server cannot read extracts to nothing and reaches
     that branch honestly. What changed there is the sentence, which is now chosen from whether the
     round has bytes at rest — see `NO_TEXT_IN_SHEET_DETAIL` in `services/condition_rounds.py`.
 
-    ⚠️ IT IS THE LINES THE READER ITSELF SAW, joined, rather than a second extraction. `Line.text`
+    IT IS THE LINES THE READER ITSELF SAW, joined, rather than a second extraction. `Line.text`
     for PDF input is the word-box tokens joined by single spaces (`lines.py`), and those boxes come
     through `page_ocr.words_for`, which decides per PAGE between a text layer and OCR. So a scanned
     sheet yields text here exactly as it does to the readers. A separate `page.get_text()` call would
@@ -91,7 +91,7 @@ def sheet_from_bytes(content: bytes) -> tuple[str, ParsedSheet, str]:
     "AI only splits" enforceable rather than requested, must run against the same string the model
     was given.
 
-    ⚠️ NPI (ADR-405). The returned text is the lender's page verbatim, so it belongs only in
+    NPI (ADR-405). The returned text is the lender's page verbatim, so it belongs only in
     `raw_text` — already classified NPI and dropped whole from the readonly views — and never in a
     log line, an event detail or a failure message.
     """
@@ -110,20 +110,20 @@ def sheet_from_bytes(content: bytes) -> tuple[str, ParsedSheet, str]:
 def header_with_clause(sheet: ParsedSheet) -> dict[str, object] | None:
     """The sheet's header with the mortgagee clause folded in, or None when there is nothing.
 
-    ⚠️ THE CLAUSE WAS PARSED AND THEN DROPPED, AND THE MODEL'S COMMENT SAID OTHERWISE.
+    THE CLAUSE WAS PARSED AND THEN DROPPED, AND THE MODEL'S COMMENT SAID OTHERWISE.
     `condition_round.py` documents `header` as `{loan_facts, lender_team, dates, mortgagee_clause?}`
     — but `_split_header` returns only `{lender_team, broker_contact}`, the reader stores the clause
     as a SIBLING field on `ParsedSheet`, and both writers persisted `sheet.header` alone. So the key
     that comment promises was one nothing wrote, and S1-04's "Mortgagee clause" block — with its
     Copy button — had no data source at all.
 
-    ⚠️ ONE HELPER BECAUSE THERE ARE TWO WRITERS. `parse_round` writes the header on a first read and
+    ONE HELPER BECAUSE THERE ARE TWO WRITERS. `parse_round` writes the header on a first read and
     `enrich_round_with_pdf` writes it when a PDF is attached to a pasted round — and the SECOND is
     where the design actually shows the clause (S1-09, the round-details sheet after attaching).
     Folding it in only one place would have left the screen it was drawn for still empty, and two
     copies of a header assembly is the duplicated-check shape this ticket was already corrected for.
 
-    ⚠️ IT DOES NOT DECIDE WHETHER TO WRITE. The enrich path's rule is FILL, NEVER REPLACE — a round
+    IT DOES NOT DECIDE WHETHER TO WRITE. The enrich path's rule is FILL, NEVER REPLACE — a round
     that already has a letterhead keeps it — so this returns a value and leaves that judgement to
     the caller, which is where it belongs.
 

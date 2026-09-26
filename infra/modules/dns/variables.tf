@@ -22,7 +22,7 @@ variable "enable_tls" {
   description = <<-EOT
     Create the ACM certificate and its DNS validation records.
 
-    ⚠️ PHASE GATE. false for the first apply, which creates only the zone and emits
+    PHASE GATE. false for the first apply, which creates only the zone and emits
     its nameservers; true for the second, after those nameservers have been entered
     at the registrar and propagated.
 

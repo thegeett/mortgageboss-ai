@@ -14,11 +14,11 @@ infra/
     dns/              Route 53 zone + ACM
     documents/        the documents bucket
   envs/
-    dev/              ⚠️ REFERENCE TEMPLATE — never applied (see below)
+    dev/              REFERENCE TEMPLATE — never applied (see below)
     staging/          the ONLY deployed environment
 ```
 
-> ### ⚠️ `envs/dev/` is a template, not a deployed environment
+> ### `envs/dev/` is a template, not a deployed environment
 >
 > Nothing in `envs/dev/` has ever been applied, and nothing is missing as a result.
 > Local development runs against Docker Compose and calls Bedrock from the laptop,
@@ -29,7 +29,7 @@ infra/
 > — that described a state file which would never exist — and its `terraform.tfvars`
 > carries placeholder account values.
 >
-> ⚠️ **Do not repoint it at staging's backend.** An accidental `apply` there would
+> **Do not repoint it at staging's backend.** An accidental `apply` there would
 > then write to staging's state.
 >
 > **`envs/staging/` is the real environment.**
@@ -99,7 +99,7 @@ aws ecs describe-tasks --cluster <cluster> --tasks <task-arn> \
 curl https://staging.mortgageboss.ai/health/live
 ```
 
-### ⚠️ MANUAL, from the MANAGEMENT account — activate the `Environment` cost allocation tag
+### MANUAL, from the MANAGEMENT account — activate the `Environment` cost allocation tag
 
 **Once, ever. Not a Terraform step, and it cannot become one from here.**
 
@@ -113,12 +113,12 @@ on it from the member account with `AccessDeniedException: Failed to update Cost
 Allocation Tag: Linked account doesn't have access to cost allocation tags`. That is
 an organizational boundary — no permission grant inside `058190633983` changes it.
 
-⚠️ **The `$300` budget does nothing until this is done.** Its `cost_filter` is
+**The `$300` budget does nothing until this is done.** Its `cost_filter` is
 `user:Environment$staging`, and AWS Budgets matches **nothing** against an inactive
 tag: it reports **$0 forever and never fires**, while looking correctly configured in
 the console. Nothing surfaces this — no error, no warning, no empty state in the UI.
 
-⚠️ **Up to 24 hours** before it begins reporting after activation. The budget alarm
+**Up to 24 hours** before it begins reporting after activation. The budget alarm
 is **inert** for that whole window, which includes the period right after the first
 apply, when a misconfiguration is most likely to be running up cost.
 
@@ -130,11 +130,11 @@ Do this at step 2, not at the end. It is also on the pre-handover checklist.
 `terraform init` in step 2 is a **first** init, not a migration: nothing was ever
 applied under the previous layout, so there is no state to move.
 
-⚠️ **Work through the pre-deploy checklist below BEFORE step 2.** Several of its
+**Work through the pre-deploy checklist below BEFORE step 2.** Several of its
 items cause failures that produce no useful log line — an empty secret, a missing
 image tag, or an architecture mismatch.
 
-⚠️ **On the first `terraform init`, confirm `use_lockfile` is accepted.** It was not
+**On the first `terraform init`, confirm `use_lockfile` is accepted.** It was not
 verified against the pinned Terraform (v1.15.8). If init rejects it, see the C4b
 result doc for the `dynamodb_table` fallback.
 
@@ -198,7 +198,7 @@ hatch; the phase boundary is a real property of the deployment.
 
 ---
 
-## ⚠️ Pre-handover security checklist
+## Pre-handover security checklist
 
 Work through this before handing the environment to anyone. Every item is
 something that is safe during build-out and **not** safe once real borrower files
@@ -232,7 +232,7 @@ are in it.
 
 ---
 
-## ⚠️ Pre-deploy checklist
+## Pre-deploy checklist
 
 Every item here has caused, or would cause, a failure that is hard to diagnose from
 CloudWatch alone. Work through it **before** applying the environment.
@@ -251,7 +251,7 @@ A task whose secret is **empty** fails to start, and the ECS event says only tha
 the essential container exited. Length, not existence, is the check — the container
 is created by Terraform with no value at all.
 
-Populate them per the section below. ⚠️ `encryption-key` is generate-once: rotating
+Populate them per the section below. `encryption-key` is generate-once: rotating
 it permanently destroys every stored borrower SSN.
 
 ### 2. Images pushed, with the tag the task definitions reference
@@ -265,7 +265,7 @@ aws ecr describe-images --repository-name mbai/frontend --image-ids imageTag=<ta
 A missing tag fails at launch with `CannotPullContainerError`, visible only in the
 service events.
 
-⚠️ **The images must be `arm64`.** The task definitions pin
+**The images must be `arm64`.** The task definitions pin
 `cpu_architecture = "ARM64"` to match what C1 actually built. An amd64 image fails
 with `exec format error`, which appears **only in the CloudWatch log stream** — not
 in the ECS console. Check with:
@@ -274,7 +274,7 @@ in the ECS console. Check with:
 docker image inspect <image> --format '{{.Architecture}}'   # expect: arm64
 ```
 
-### 3. ⚠️ Do NOT sync documents from anywhere
+### 3. Do NOT sync documents from anywhere
 
 **Staging starts empty, deliberately.** There is no document sync and no database
 seed: development documents are development artifacts and have no place in an
@@ -293,7 +293,7 @@ Run it and check `exitCode` is `0`. Alembic deliberately does **not** run at
 container start: three tasks starting at once would race on the same migration, and
 a failure would crash-loop the service instead of failing one visible job.
 
-⚠️ C2's `scripts/check-stack.sh` guard is **local-only** and does not protect this
+C2's `scripts/check-stack.sh` guard is **local-only** and does not protect this
 path. Nothing stops the migration task running against the wrong environment except
 reading the cluster name in the command.
 
@@ -306,7 +306,7 @@ the count at creation and is ignored by every apply after that — scaling is
 `./scripts/deploy <env> up` / `down`, or `aws ecs update-service` by hand. See
 [`modules/compute/README.md`](modules/compute/README.md).
 
-⚠️ **Raising the worker's count requires dividing `AI_REQUESTS_PER_MINUTE_BEDROCK`
+**Raising the worker's count requires dividing `AI_REQUESTS_PER_MINUTE_BEDROCK`
 by the new count.** That limiter is per-process: N tasks pace at N × the value,
 against an account quota of 10 RPM.
 
@@ -318,7 +318,7 @@ Terraform creates **empty containers**. It never writes a value — a value writ
 by Terraform lives in state, appears in plan diffs, and can be replaced by a
 provider upgrade.
 
-### 1. `encryption-key` — ⚠️ read this before generating anything
+### 1. `encryption-key` — read this before generating anything
 
 Generate **once**, and never regenerate while a database holding data survives:
 
@@ -372,7 +372,7 @@ aws secretsmanager put-secret-value \
   --secret-string 'postgresql+asyncpg://mbai_admin:PASSWORD@HOST:5432/mortgageboss?ssl=require'  # pragma: allowlist secret
 ```
 
-⚠️ **`?ssl=require`, never `?sslmode=require`.** The database enforces TLS
+**`?ssl=require`, never `?sslmode=require`.** The database enforces TLS
 (`rds.force_ssl = 1`), and SQLAlchemy's asyncpg dialect does not translate libpq
 parameter names — it forwards unknown query parameters as raw kwargs to
 `asyncpg.connect()`, which has no `sslmode` parameter and no `**kwargs`. The
@@ -391,7 +391,7 @@ the URL carries no credential, so it belongs in the task definition's
 rediss://HOST:6379/0?ssl_cert_reqs=required
 ```
 
-⚠️ **Both parts matter.** Transit encryption is unconditional, so `redis://`
+**Both parts matter.** Transit encryption is unconditional, so `redis://`
 cannot connect. And the two Redis clients this application uses disagree on the
 default certificate policy for `rediss://`:
 
@@ -436,7 +436,7 @@ Also: **the migration task needs `DATABASE_URL`** — the same secret as the app
 a separate one. Alembic reads it from the settings singleton
 (`backend/alembic/env.py:25`).
 
-⚠️ Certificate verification for the database is **not** a Terraform concern.
+Certificate verification for the database is **not** a Terraform concern.
 Reaching `verify-full` needs the `PGSSLROOTCERT` environment variable pointing at
 an RDS CA bundle baked into the image; asyncpg reads that variable directly and it
 cannot be expressed in the URL. **That is a C3 image and task-definition
@@ -447,7 +447,7 @@ certificate or hostname.
 
 ## The destroy-and-rebuild workflow
 
-⚠️ **Staging is NOT a destroy-and-rebuild environment.** The flags that made the
+**Staging is NOT a destroy-and-rebuild environment.** The flags that made the
 `envs/dev` template disposable are all inverted here — `rds_deletion_protection =
 true`, `rds_skip_final_snapshot = false`, `secret_recovery_window_days = 30`,
 `ecr_force_delete = false`. A `terraform destroy` will refuse on the database, and
@@ -495,7 +495,7 @@ a full rebuild is roughly **10–15 minutes**, plus secret population and re-see
 
 ---
 
-## ⚠️ Before staging
+## Before staging
 
 Staging is a copy of `envs/dev/*.tf` with `envs/staging/terraform.tfvars.example`
 filled in — no module edit. See `envs/staging/README.md`. The settings that

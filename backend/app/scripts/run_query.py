@@ -9,7 +9,7 @@ Environment variables:
     QUERY_SQL         REQUIRED. A single SELECT or WITH statement.
     QUERY_MAX_ROWS    optional, default 100. Caps printed rows.
 
-⚠️ **SQL arrives by ENVIRONMENT, never argv.** A task's argv is readable from
+**SQL arrives by ENVIRONMENT, never argv.** A task's argv is readable from
 ``ecs describe-tasks`` for about an hour after it stops, and the whole
 ``RunTask`` call is recorded in the CloudTrail event. The same reasoning as
 ``add_user``'s password hash.
@@ -49,7 +49,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 # and whitespace are stripped. Leading comments are stripped rather than rejected so a
 # documented .sql file still runs.
 #
-# ⚠️ ANCHORED, and the repetition is INSIDE the pattern. Without the `^` this matches
+# ANCHORED, and the repetition is INSIDE the pattern. Without the `^` this matches
 # whitespace anywhere, and stripping it repeatedly collapses `select status` into
 # `selectstatus` — which then fails the `\b` below and refuses a perfectly good query.
 # That is not hypothetical: it is the bug this comment replaced.

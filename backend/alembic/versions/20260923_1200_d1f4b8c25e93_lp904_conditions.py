@@ -21,7 +21,7 @@ on, and it has its own index.
 funds to close at UWM and means nothing at Champions, so a global table would be wrong on its first
 row and the error would be invisible.
 
-⚠️ CODES ARE `String(16)`, NOT INTEGERS, and `conditions.lender_code` likewise. UWM prints `0006`.
+CODES ARE `String(16)`, NOT INTEGERS, and `conditions.lender_code` likewise. UWM prints `0006`.
 The leading zeros are part of an identifier printed on a document; normalising it to 6 is a silent
 loss that resurfaces months later as a failed match.
 
@@ -42,7 +42,7 @@ in the view.
 from **C7's `_VIEWS` upgrade-side entry**, which is the shape the database has — LP-806 lost three
 columns by copying from a DOWNGRADE block, and the drift guard is what caught it.
 
-⚠️ THE DOWNGRADE'S VIEW SQL IS INLINE, NEVER A MODULE CONSTANT. `_later_view_redefinitions()` reads
+THE DOWNGRADE'S VIEW SQL IS INLINE, NEVER A MODULE CONSTANT. `_later_view_redefinitions()` reads
 every `CREATE VIEW readonly.X` **above** the line `def downgrade(` as the live definition, so a
 hoisted rollback definition wins and the guard then checks a shape the database does not have. That
 cost LP-1000's first migration 24 failures in `tests/test_readonly_query.py`, and LP-813 hit the same
@@ -140,7 +140,7 @@ _ROUNDS_VIEW = """
 # across rounds?" without reproducing any of it. The note COUNT is exposed for the same reason —
 # "how often do conditions come back" is the analytic question, and the count carries no text.
 #
-# ⚠️ `verbatim_text` IS NOT NAMED HERE AT ALL, not even inside a `length()`. It is in the test
+# `verbatim_text` IS NOT NAMED HERE AT ALL, not even inside a `length()`. It is in the test
 # suite's NEVER_EXPOSED list, which searches the select-list TEXT of every view, so a derived scalar
 # over it would trip that guard — and the guard is worth more than the metric. `style_profiles` made
 # the identical trade for `cardinality(exemplars)` and its migration says so. `underwriter_notes`
@@ -259,7 +259,7 @@ def upgrade() -> None:
     # ONE ROUND NUMBER PER FILE, for the life of the row. Partial because drafts have no number at
     # all — it is assigned on import — so they neither need the constraint nor conflict under it.
     #
-    # ⚠️ `status = 'imported'` WAS IN THIS PREDICATE AND WAS WRONG, found in review. DISCARDED is a
+    # `status = 'imported'` WAS IN THIS PREDICATE AND WAS WRONG, found in review. DISCARDED is a
     # live status, not a deletion: an imported round that is later discarded keeps its number but
     # would drop out of the index, freeing that number for reuse. `condition_events` is append-only,
     # so the discarded round's ROUND_IMPORTED event survives forever — leaving two different sheets

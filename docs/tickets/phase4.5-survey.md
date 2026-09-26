@@ -22,7 +22,7 @@
 | Spec + 13 PNGs + 13 HTMLs present on the branch | yes — added by `ce05b79f "Supporting documents"` |
 | Working tree clean before starting | yes — nothing to commit, so the spec's "commit them first" step was a no-op |
 
-⚠️ **`phase4-with-ui` does not contain the LP-1000 line of work.** The merge commit `fdbaa3a1`
+**`phase4-with-ui` does not contain the LP-1000 line of work.** The merge commit `fdbaa3a1`
 (raspberrypi-work → phase4-with-ui) was made locally on 2026-09-13 and never pushed; origin has moved
 twice since and the local branch was fast-forwarded past it. So **32 commits** — LP-1000 (document
 content digest, the partial unique index, the upload race), bug-024…027 and LP-1001 — exist only on
@@ -120,7 +120,7 @@ class FindingEvent(Base, UUIDMixin):          # ← no TimestampMixin, no SoftDe
 Its own docstring states the rule: *"Append-only: insert-only, no `updated_at` and no soft-delete (a
 `TimestampMixin` would add `updated_at`; a `SoftDeleteMixin` would allow a mutating delete)."*
 
-⚠️ **The spec says to copy "`models/finding_event.py` **and its tests**". There are no such tests.**
+**The spec says to copy "`models/finding_event.py` **and its tests**". There are no such tests.**
 Every hit for `FindingEvent` under `tests/` only *reads* event rows to assert a lifecycle sequence —
 `tests/services/test_finding_reconcile_runs.py:86` (`_events`) and
 `tests/services/test_unidentified_document_lifecycle_lp640.py:103` (`_event_types`). Nothing asserts
@@ -202,7 +202,7 @@ company, not globally** (ADR-045). Fields: `name`, `slug`, `contact_email`, `por
 **How Stage 1 uses it:** LP-904 adds `mortgagee_clause`, `condition_upload_cutoff` and
 `condition_handling_notes` to `lenders`. `lender_condition_codes` is scoped the way `lenders` is —
 i.e. reached through a company-scoped lender, so a `(lender_id, code)` unique constraint is already
-per-company by construction. ⚠️ **The company-scoping of `lenders` is what makes LP-910's seeding a
+per-company by construction. **The company-scoping of `lenders` is what makes LP-910's seeding a
 STOP AND ASK — see §15.**
 
 ---
@@ -232,7 +232,7 @@ async def create_document(db, *, loan_file, document_id, filename, mime_type, si
                           upload_source: UploadSource = UploadSource.USER_UPLOAD) -> Document
 ```
 
-It creates a `PENDING` row, `flush()`es, and calls `mark_verification_stale`. ⚠️ **There is no
+It creates a `PENDING` row, `flush()`es, and calls `mark_verification_stale`. **There is no
 `content` parameter and no duplicate check** — `content_sha256`, `content_digest` and `find_duplicate`
 do not exist here (they are LP-1000, absent per §0).
 
@@ -250,7 +250,7 @@ invalid file in a batch persists nothing:
 2. `storage.save(...)` → `create_document(...)` → one `log_activity(...)` → `db.commit()` → per-document
    fire-and-forget `_enqueue_processing()` **after** the commit.
 
-⚠️ `MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024` is a **module constant** in `services/documents.py:56`,
+`MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024` is a **module constant** in `services/documents.py:56`,
 not a setting. The spec asks for "size limit from settings (default 20 MB)" — see §14.
 
 **How Stage 1 uses it:** LP-905 stores the sheet with `storage.save_at()` under a
@@ -344,7 +344,7 @@ message is unrouted.
   inside the current loop**, `NullPool`, disposed at the end. The app's module-level engine must not
   be reused across task loops.
 
-`app/tasks/celery_app.py` — ⚠️ **`_TASK_MODULES` (:25-31) is an explicit list**, and its comment says
+`app/tasks/celery_app.py` — **`_TASK_MODULES` (:25-31) is an explicit list**, and its comment says
 *"EVERY module under `app/tasks/` that defines a `@celery_app.task` MUST be listed here, or the worker
 never imports it and the task is unregistered — enqueued messages are silently [dropped]"*. **LP-905
 must add `"app.tasks.conditions"`.**
@@ -404,7 +404,7 @@ class AICompletion:
 - **Rate limiting:** `get_rate_limiter()` (`app/ai/rate_limit.py:120`) — applied per attempt inside
   `complete()`, so callers do nothing.
 
-⚠️ The spec names `ai/prompts/conditions/split_v1.md`; the repo convention is `.txt` (§14).
+The spec names `ai/prompts/conditions/split_v1.md`; the repo convention is `.txt` (§14).
 
 ---
 
@@ -423,7 +423,7 @@ await log_activity(db, *, loan_file_id, activity_type, summary,
 `Decimal`) and `field_changes(before, after)`. `list_recent_activity(db, *, loan_file_id, limit=20)`
 feeds the file rail's "Recent activity" that S1-02 and S1-05 show.
 
-⚠️ **Adding an `ActivityType` value requires a constraint-swap migration, and three tests enforce how**
+**Adding an `ActivityType` value requires a constraint-swap migration, and three tests enforce how**
 (`tests/test_activity_type_migrations.py`, 317 lines — see §13).
 
 **Timeline** (`app/services/timeline.py`, 606 lines): `build_timeline` (:482) assembles
@@ -545,7 +545,7 @@ These are the differences that change what gets written.
 | §6 LP-905 — "STOP AND ASK if the only way to store it would send it through classify → extract → needs" | **No stop.** `storage.save_at()` exists precisely for bytes that are not a document (§6), so the sheet is stored without a `Document` row. |
 | §6 LP-905 — "STOP AND ASK if `CORRESPONDENCE` does not keep the file retrievable" | **No stop.** `_attachment_bytes` re-derives the bytes from the stored `.eml` and matches by sha256 (§8). Two typed failure modes must be handled, not assumed away. |
 
-⚠️ **15.1 — Raised, and it will block LP-910.** The spec says to seed the UWM and Champions code maps
+**15.1 — Raised, and it will block LP-910.** The spec says to seed the UWM and Champions code maps
 by "match[ing] by lender name/slug; **STOP AND ASK** if there is no reliable way to identify UWM and
 Champions". **There is no reliable way.** `lenders` is company-scoped with a slug unique only *per
 company* (ADR-045, `uq_lenders_company_id_slug`), chosen by each processing company — so "UWM" may be
@@ -594,7 +594,7 @@ ticket that changes what a screen looks like is not done on green CI. Either a b
 runs, or a person looks."* Under this answer, **a person looks** — the product owner, when the three
 screens land — and the tickets say so plainly instead of implying CI covered it.
 
-⚠️ **And "built to its PNG and walked through the Must-match list" is itself a claim someone will
+**And "built to its PNG and walked through the Must-match list" is itself a claim someone will
 read as verification, so what the walk-through CANNOT catch is named here rather than left implied.**
 Reading a Must-match list against the code confirms that an element exists, carries the right words,
 uses the right token and sits in the right order. It cannot see:

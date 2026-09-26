@@ -79,7 +79,7 @@ def test_the_derivation_survives_a_label() -> None:
 
 
 def test_a_partial_label_map_is_rejected_at_load() -> None:
-    """⚠️ THE DECISIVE VALIDATION. A map missing one value falls back to the raw verdict for exactly
+    """THE DECISIVE VALIDATION. A map missing one value falls back to the raw verdict for exactly
     that value — the defect this field exists to remove, reappearing on the rarest answer, where nobody
     would notice it. Total or absent; never partial."""
     with pytest.raises(ValidationError, match=r"verdict_labels is missing value\(s\)"):
@@ -97,7 +97,7 @@ def test_no_labels_is_valid_and_means_not_adopted_yet() -> None:
 
 
 def test_the_exempt_override_domain_check_still_runs_on_an_unlabelled_rule() -> None:
-    """⚠️ REGRESSION GUARD. Adding `verdict_labels` orphaned LP-516's
+    """REGRESSION GUARD. Adding `verdict_labels` orphaned LP-516's
     `exempt_unless_judgment_in`-outside-`value_domain` check behind the new validator's early return,
     so it silently stopped running for every rule without labels — the exact class of silent-disable
     this ticket's own validation is written to prevent. Asserted on an UNLABELLED rule specifically,

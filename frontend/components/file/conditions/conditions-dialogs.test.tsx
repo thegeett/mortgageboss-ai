@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 /**
  * The two ways conditions arrive without a PDF: pasting them (S1-06) and typing one (S1-12).
  *
- * ⚠️ THE DEFAULT ON THE PASTE DIALOG IS A SAFETY PROPERTY, NOT A PREFERENCE, and it is the first
+ * THE DEFAULT ON THE PASTE DIALOG IS A SAFETY PROPERTY, NOT A PREFERENCE, and it is the first
  * thing asserted here. "Just some conditions" is the answer that can never remove anything; "the
  * lender's full list" is the one that lets Stage 2 later propose conditions as "probably cleared".
  * The API refuses to guess — `completeness` is required with no server default (ADR-404) — so the
@@ -90,7 +90,7 @@ describe("pasting conditions (S1-06)", () => {
     render(<PasteConditionsDialog fileId="f1" open onOpenChange={vi.fn()} />);
   }
 
-  it("⚠️ defaults to the answer that can never remove anything", () => {
+  it("defaults to the answer that can never remove anything", () => {
     show();
     const justSome = screen.getByRole("radio", { name: /Just some conditions/ });
     const fullList = screen.getByRole("radio", { name: /The lender's full list/ });
@@ -99,7 +99,7 @@ describe("pasting conditions (S1-06)", () => {
     expect((fullList as HTMLInputElement).checked).toBe(false);
   });
 
-  it("⚠️ and says what the full list means later, without promising an automatic clear", () => {
+  it("and says what the full list means later, without promising an automatic clear", () => {
     // The distinction ADR-404 turns on. Softening this would have Stage 1 implying a clear the
     // system must never perform on its own.
     show();
@@ -114,7 +114,7 @@ describe("pasting conditions (S1-06)", () => {
     expect(screen.getByText(/3 lines · 13 characters/)).toBeDefined();
   });
 
-  it("⚠️ refuses only when genuinely over the server's limit, not near it", () => {
+  it("refuses only when genuinely over the server's limit, not near it", () => {
     // The ceiling is `MAX_PASTE_CHARS`, mirrored from the backend and pinned by
     // `test_condition_type_mirror.py`. Refusing at 99% would invent a limit the server does not
     // have — the failure the 20 MB upload ceiling still carries in the other direction.
@@ -122,7 +122,7 @@ describe("pasting conditions (S1-06)", () => {
     const textarea = screen.getByPlaceholderText(/Paste the lender/);
 
     fireEvent.change(textarea, { target: { value: "x".repeat(100_000) } });
-    // ⚠️ `.disabled).toBe(false)`, NOT `not.toHaveProperty("disabled", true)`. The negative form
+    // `.disabled).toBe(false)`, NOT `not.toHaveProperty("disabled", true)`. The negative form
     // passes when the property is absent, undefined, or false — so it would hold for a button that
     // does not exist and for one whose disabled state was never wired. Exactly at the limit is the
     // boundary this test is about, so the assertion has to be able to fail on the wrong side of it.
@@ -178,7 +178,7 @@ describe("adding a condition by hand (S1-12)", () => {
     ).toBeDefined();
   });
 
-  it("⚠️ says it STARTS a round when none has been imported, rather than naming a blank one", () => {
+  it("says it STARTS a round when none has been imported, rather than naming a blank one", () => {
     // `round_number` is null until import, so a file whose only round is still a draft has no
     // number to name. Rendering the first sentence with a gap would describe a round that does not
     // exist; the backend opens one, and the sentence says so.
@@ -198,7 +198,7 @@ describe("adding a condition by hand (S1-12)", () => {
     ).toBe(true);
   });
 
-  it("⚠️ renders the wording field in serif, because it is the lender's words", () => {
+  it("renders the wording field in serif, because it is the lender's words", () => {
     // Design rule 2: text quoted from a document is IBM Plex Serif. It is the one visual property
     // here that carries meaning rather than taste — it marks whose sentence a processor is reading.
     show([round()]);
@@ -226,7 +226,7 @@ describe("adding a condition by hand (S1-12)", () => {
     });
   });
 
-  it("⚠️ never sends a bucket_heading, because that column is the LENDER's words", () => {
+  it("never sends a bucket_heading, because that column is the LENDER's words", () => {
     // THIS TEST USED TO ASSERT THE OPPOSITE AND PINNED A DEFECT. It expected
     // `bucket_heading: "Prior to closing"` — our label for a bucket KIND — written into the column
     // that holds what the lender actually printed. `create_manual_condition` declines to invent one
@@ -245,7 +245,7 @@ describe("adding a condition by hand (S1-12)", () => {
 
     const sent = addMutate.mock.calls[0]?.[0];
     expect(sent.bucket_kind).toBe("unknown");
-    // ⚠️ THE WORST CASE, NAMED: `BUCKET_KIND_LABEL.unknown` is "No heading given". Sending it would
+    // THE WORST CASE, NAMED: `BUCKET_KIND_LABEL.unknown` is "No heading given". Sending it would
     // write that sentence into a column whose EMPTY value already means it.
     //
     // `null` rather than absent, matching `lender_code` and `lender_category` beside it — the

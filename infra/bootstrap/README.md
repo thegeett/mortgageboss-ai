@@ -20,7 +20,7 @@ path of every plan.
 Nothing was ever applied under the old design, so there is no table to migrate away
 from.
 
-⚠️ `use_lockfile` has **not** been verified against the pinned Terraform (v1.15.8) —
+`use_lockfile` has **not** been verified against the pinned Terraform (v1.15.8) —
 confirming it requires `terraform init`, which was out of scope when this was
 written. **It is the first thing to check on the initial init.** If it is rejected,
 the fallback is `dynamodb_table` plus restoring an `aws_dynamodb_table` resource

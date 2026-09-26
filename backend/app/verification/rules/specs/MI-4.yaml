@@ -3,18 +3,18 @@
 # Every FHA loan carries an upfront mortgage insurance premium. This checks the premium actually financed
 # into the note against the rate HUD publishes.
 #
-# ⚠️ THE PROGRAM AXIS, FHA SIDE. MI-4 is FHA-only and MI-1 is conventional-only; both scope with an
+# THE PROGRAM AXIS, FHA SIDE. MI-4 is FHA-only and MI-1 is conventional-only; both scope with an
 # APPLICABILITY PREDICATE, never an outcome, because the applicability layer resolves absent/"unknown" to
 # COULDNT_CHECK and only definitely-false to not_applicable. A conventional file is not_applicable here;
 # a file that states no program is surfaced, not skipped.
 #
-# ⚠️ WHY THIS IS NOT VACUOUS (ADR-330). The two operands are two DIFFERENT MISMO elements:
+# WHY THIS IS NOT VACUOUS (ADR-330). The two operands are two DIFFERENT MISMO elements:
 # TERMS_OF_LOAN/BaseLoanAmount (the base loan amount) and TERMS_OF_LOAN/NoteAmount (what the borrower
 # signs for). On an FHA loan the difference between them IS the financed upfront MIP. On the three
 # conventional MISMO fixtures in the repo the two are equal — exactly right, and the reason MI-4 must not
 # run on a conventional file.
 #
-# ⚠️ THE ANNUAL MIP LEG IS NOT BUILT, and this is a scope limit, not an oversight. The catalog rationale
+# THE ANNUAL MIP LEG IS NOT BUILT, and this is a scope limit, not an oversight. The catalog rationale
 # reads "UFMIP financed + monthly MIP at factor". NO document type in the system carries a monthly MIP
 # figure for this loan — the only mortgage-insurance field in all 121 schema specs is
 # `form_1098.mortgage_insurance_premiums`, a PRIOR-YEAR total for an EXISTING mortgage. Building the
@@ -22,7 +22,7 @@
 # ML 2023-05's per-cell rates (by LTV x term x base loan amount) were NOT obtained, and none is written
 # into this spec. Logged in docs/domain/priya-open-questions.md.
 #
-# ⚠️ TWO EXEMPTIONS WE CANNOT DETECT, recorded rather than silently mishandled. ML 2023-05 states that
+# TWO EXEMPTIONS WE CANNOT DETECT, recorded rather than silently mishandled. ML 2023-05 states that
 # Section 248 mortgages (Indian Lands) require NO upfront MIP, and Section 247 (Hawaiian Home Lands)
 # require no annual MIP. No field in the system identifies either program, so a Section 248 loan would
 # reach the "no upfront premium was financed" outcome — which is needs_review, asking a processor to
@@ -53,17 +53,17 @@ reference_values:
   priya_validated: false          # must equal rule_kinds.csv
   threshold_needs_signoff: true   # must equal rule_kinds.csv
   values:
-    # ⚠️ PROVENANCE TIER P — the publisher's own document, read this pass.
+    # PROVENANCE TIER P — the publisher's own document, read this pass.
     #   value:     UFMIP 175 bps (1.75%) of the base loan amount, all Title II forward mortgages
     #   source:    HUD Mortgagee Letter 2023-05
     #   published: 2023-02-22
     #   url:       hud.gov/sites/dfiles/OCHCO/documents/2023-05hsgml.pdf
     #   effective: case numbers assigned on or after 2023-03-20
-    # ⚠️ The ANNUAL MIP rate (0.55% for most Title II forward mortgages, also tier P) is deliberately NOT
+    # The ANNUAL MIP rate (0.55% for most Title II forward mortgages, also tier P) is deliberately NOT
     # recorded here: MI-4 does not evaluate the annual premium, because no document carries one. Writing
     # an unused threshold into a spec invites a later reader to build against it.
     fha_ufmip_percent: "1.75"
-    # ⚠️ A ROUNDING ALLOWANCE, NOT A DOMAIN THRESHOLD (the AS-3 / CL-1 precedent — nobody signs this off).
+    # A ROUNDING ALLOWANCE, NOT A DOMAIN THRESHOLD (the AS-3 / CL-1 precedent — nobody signs this off).
     # UFMIP is computed to the cent and commonly rounded to whole dollars on the note, so an exact rate
     # equality would fire on correct files. +/- 0.01 percentage points is ~$34 on a $340,000 base — wider
     # than any rounding, narrower than a wrong rate (the next rate down, 1.00%, is 75 points away).
@@ -106,10 +106,10 @@ requires_documents:
 
 spec_version: 1
 
-# The MACHINE-READABLE deterministic body (LP-324). ⚠️ ORDERED, FIRST-MATCH-WINS, with a mandatory
+# The MACHINE-READABLE deterministic body (LP-324). ORDERED, FIRST-MATCH-WINS, with a mandatory
 # terminal row. An "unknown" tag coerces through the gate to couldnt_check BEFORE this body runs.
 deterministic:
-  # ⚠️ THE PROGRAM PREDICATE — see the header. Absent/"unknown" → couldnt_check; conventional →
+  # THE PROGRAM PREDICATE — see the header. Absent/"unknown" → couldnt_check; conventional →
   # not_applicable.
   applicability:
     tag: program.type
@@ -137,7 +137,7 @@ deterministic:
         Recompute the upfront MIP as {required}% of the base loan amount and have the lender correct the
         note amount. If the note deliberately finances something else alongside the premium, that belongs
         in the base loan amount, not on top of it.
-    # 2 — NOTHING financed. ⚠️ needs_review, NOT fired: the premium may have been paid in cash at
+    # 2 — NOTHING financed. needs_review, NOT fired: the premium may have been paid in cash at
     # closing, and a Section 248 (Indian Lands) mortgage is exempt entirely. Neither is detectable from
     # any field in the system, so this asks rather than asserts. This row also catches a NEGATIVE value
     # (a note below the base loan amount), which is a file inconsistency a processor should see.

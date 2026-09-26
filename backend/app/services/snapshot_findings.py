@@ -110,7 +110,7 @@ async def refresh_snapshot_findings(
     # above is a genuine cache hit: on an unchanged file this stage makes no call at all, and timing
     # it from outside would report that as a fast call rather than as no call.
     #
-    # ⚠️ TOKENS ARE NOT AVAILABLE HERE and are deliberately left at zero. This `Reasoner` returns
+    # TOKENS ARE NOT AVAILABLE HERE and are deliberately left at zero. This `Reasoner` returns
     # drafts, not a result carrying counts (unlike every other stage's), so recording them would mean
     # changing that contract and every stub implementing it — more churn than §1's "an hour or so, no
     # behaviour change" budget allows. The consequence is narrow and worth stating: this stage's

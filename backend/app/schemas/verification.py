@@ -42,7 +42,7 @@ def _rule_spec(rule_id: str) -> RuleSpec | None:
     """The rule's SPEC — the gate of record for its guideline + category — or None for a retired/legacy
     rule_id with no spec file.
 
-    ⚠️ ``RuleSpecError`` IS THE ONE THAT ACTUALLY FIRES. ``load_rule_spec`` raises
+    ``RuleSpecError`` IS THE ONE THAT ACTUALLY FIRES. ``load_rule_spec`` raises
     :class:`RuleSpecNotFound` — a subclass of ``Exception``, NOT of ``OSError``/``KeyError``/
     ``ValueError`` — so the tolerance this function's own docstring promised did not exist: a finding
     whose rule has no spec file raised straight out of ``RuleFindingPublic.from_model`` and 500'd the

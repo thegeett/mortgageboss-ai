@@ -6,7 +6,7 @@ dropped before the rule ever sees it. So IH-1 could say "the binder does not sta
 loss-settlement basis" and could not say which binder, what Coverage A was, or which endorsements were
 on it, even though all of that sits in the same snapshot one step away.
 
-⚠️ WORDING ONLY. A declared subject fact is never gated, never compared, never load-bearing, and no
+WORDING ONLY. A declared subject fact is never gated, never compared, never load-bearing, and no
 verdict may turn on it. A value a rule DECIDES on must be a tag, with the fail-closed gate and the
 distrust layer behind it — this channel has neither, by design, because it exists to explain a verdict
 rather than to reach one.
@@ -61,7 +61,7 @@ def test_a_scalar_field_resolves() -> None:
 
 
 def test_a_quoted_amount_keeps_the_precision_the_document_stated() -> None:
-    """⚠️ DELIBERATELY UNLIKE LP-520's always-cents rule for AS-12's materiality floor, and the reason
+    """DELIBERATELY UNLIKE LP-520's always-cents rule for AS-12's materiality floor, and the reason
     is the purpose. A floor is a COMPUTED comparison a processor judges, so "$2,000" has to be
     distinguishable from a rounded "$1,999.87". This is a QUOTE: a binder printing Coverage A of
     $577,000 should read back as $577,000, not as a more precise figure than it stated."""
@@ -94,7 +94,7 @@ def test_a_long_list_is_capped_and_says_so() -> None:
     ids=["field-absent", "no-fields-at-all"],
 )
 def test_an_unresolved_fact_reads_as_not_stated_never_as_a_hole(entry: DocumentEntry) -> None:
-    """⚠️ A sentence with a blank in it reads as a bug. "Coverage A of not stated" reads as what it
+    """A sentence with a blank in it reads as a bug. "Coverage A of not stated" reads as what it
     actually is — a document that does not say — which is the same honesty the verdicts carry."""
     resolved = _subject_facts({"coverage_a": SubjectFact(field="coverage_amount")}, entry)
 
@@ -174,7 +174,7 @@ def test_ih1_names_the_coverage_and_the_endorsements_it_looked_at() -> None:
 
 
 def test_ih1s_facts_are_not_inputs() -> None:
-    """⚠️ THE BOUNDARY. `coverage_amount` is quoted in the wording and must never reach the verdict:
+    """THE BOUNDARY. `coverage_amount` is quoted in the wording and must never reach the verdict:
     not gated, not load-bearing, not compared. IH-1's decision still rests on one tag."""
     spec = load_rule_spec("IH-1")
     assert spec.deterministic is not None

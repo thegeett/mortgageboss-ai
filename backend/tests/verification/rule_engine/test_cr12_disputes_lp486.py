@@ -1,6 +1,6 @@
 """LP-486 / ADR-376 — CR-12 (disputed accounts) and the CLOSED-VOCABULARY ABSTAIN pattern.
 
-⚠️ THE FINDING THIS RULE IS BUILT AROUND. The credit report's ``is_disputed`` field carries a clean ``Y``/
+THE FINDING THIS RULE IS BUILT AROUND. The credit report's ``is_disputed`` field carries a clean ``Y``/
 ``N`` on the two bench reports (34 N, 1 Y across 35 rows) and FREE TEXT on LF-96SV — a different bureau
 format — where the same field holds ``ACCOUNT IN FORBEARANCE``, ``ACCOUNT CLOSED BY CREDIT GRANTOR`` and
 ``ACCOUNT PREVIOUSLY IN DISPUTE-NOW RESOLVED-REPORTED BY SUBSCRIBER``. **ONE FIELD, TWO ENCODINGS.**
@@ -9,7 +9,7 @@ A rule written as ``is_disputed == "Y"`` would read the free-text report as NOT 
 negative on a fraud-adjacent rule that ships ``auto``. So the producer recognises a CLOSED vocabulary and
 ABSTAINS on anything else; the gate turns that into ``couldnt_check``.
 
-⚠️ ``PREVIOUSLY IN DISPUTE - NOW RESOLVED`` is in NEITHER list on purpose. It must abstain, not resolve to
+``PREVIOUSLY IN DISPUTE - NOW RESOLVED`` is in NEITHER list on purpose. It must abstain, not resolve to
 "no": reading a resolution the bureau did not state is an inference, and this rule does not infer.
 """
 
@@ -64,12 +64,12 @@ def test_the_bench_reports_clean_flag(value: str, expected: str) -> None:
     [
         ("ACCOUNT IN FORBEARANCE", "no"),
         ("ACCOUNT CLOSED BY CREDIT GRANTOR", "no"),
-        # ⚠️ THE CASE THIS RULE EXISTS FOR — verbatim from LF-96SV. Unrecognised → ABSTAIN.
+        # THE CASE THIS RULE EXISTS FOR — verbatim from LF-96SV. Unrecognised → ABSTAIN.
         ("ACCOUNT PREVIOUSLY IN DISPUTE-NOW RESOLVED-REPORTED BY SUBSCRIBER", _UNKNOWN),
     ],
 )
 def test_lf96sv_free_text_format(value: str, expected: str) -> None:
-    """⚠️ THE MOST IMPORTANT TEST IN THE TICKET. Real values from LF-96SV's bureau format. The resolved-
+    """THE MOST IMPORTANT TEST IN THE TICKET. Real values from LF-96SV's bureau format. The resolved-
     dispute wording must abstain — never `no`, which would be an inference the report did not state."""
     assert _status(value) == expected
 
@@ -116,7 +116,7 @@ def test_every_account_status_remark_is_not_a_dispute(phrase: str) -> None:
     ["", "   ", "SOMETHING THE BUREAU INVENTED", "disputed?", "see remarks"],
 )
 def test_anything_unrecognised_abstains(value: str) -> None:
-    """⚠️ Never `no`. An unfamiliar encoding is the case that must not silently clear."""
+    """Never `no`. An unfamiliar encoding is the case that must not silently clear."""
     assert _status(value) == _UNKNOWN
 
 
@@ -140,7 +140,7 @@ def test_normalisation_does_not_stem_or_fuzzy_match() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ Spec ↔ producer: the vocabulary cannot drift
+# Spec ↔ producer: the vocabulary cannot drift
 # --------------------------------------------------------------------------- #
 def test_cr12_vocabulary_matches_the_spec() -> None:
     """The spec's reference_values is where Priya edits; the recipe is what runs. If they ever diverge,
@@ -158,7 +158,7 @@ def test_the_two_vocabularies_do_not_overlap() -> None:
 # The rule body and the gate
 # --------------------------------------------------------------------------- #
 def test_the_catch_all_is_an_abstain_not_a_pass() -> None:
-    """⚠️ CR-12 ships `auto`. A `satisfied` default would turn any future third value into a silent
+    """CR-12 ships `auto`. A `satisfied` default would turn any future third value into a silent
     all-clear with no human in the loop."""
     outcomes = load_rule_spec("CR-12").deterministic.outcomes
     assert [o.verdict for o in outcomes] == ["fired", "satisfied", "couldnt_check"]

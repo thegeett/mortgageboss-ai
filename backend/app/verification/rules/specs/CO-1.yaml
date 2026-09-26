@@ -4,7 +4,7 @@
 # the project review is built on (unit counts, owner-occupancy, delinquency, litigation, the master
 # policy's carrier and limits).
 #
-# ⚠️ PRESENCE ONLY, AND THIS IS A DELIBERATE SCOPE LIMIT. Priya's standing point is that condo rules must
+# PRESENCE ONLY, AND THIS IS A DELIBERATE SCOPE LIMIT. Priya's standing point is that condo rules must
 # distinguish WARRANTABLE from non-warrantable rather than merely confirm a questionnaire exists. That is
 # CO-3/CO-5's job, and it is not buildable today: `property.is_warrantable_condo` has NO source field
 # anywhere in the 121 schema specs (LP-487 established this), because warrantability is a project-review
@@ -12,12 +12,12 @@
 # can answer honestly — is the document there — and the warrantability gap is logged in
 # docs/domain/priya-open-questions.md rather than faked here.
 #
-# ⚠️ A DOCUMENT-TYPE PRESENCE READ (the IN-8/IN-9/IN-16 discipline): the classifier's TYPE LABEL, never
+# A DOCUMENT-TYPE PRESENCE READ (the IN-8/IN-9/IN-16 discipline): the classifier's TYPE LABEL, never
 # extracted fields. A questionnaire that classified correctly but extracted badly still EXISTS, and CO-1
 # is not the rule that judges its contents. This matters here: the one questionnaire in the corpus fills
 # 0 of its unit-count fields, and CO-1 is still correct to say it is present.
 #
-# ⚠️ THE CONDO SCOPING IS AN APPLICABILITY PREDICATE (LP-487's finding). The applicability layer resolves
+# THE CONDO SCOPING IS AN APPLICABILITY PREDICATE (LP-487's finding). The applicability layer resolves
 # an ABSENT or "unknown" predicate tag to COULDNT_CHECK and only a definitely-false one to
 # not_applicable — so a file that does not state its property type is surfaced, not silently skipped.
 
@@ -109,7 +109,7 @@ deterministic:
         company. Confirm it names the subject project, is signed and dated, and states the unit counts,
         owner-occupancy, delinquency, litigation and master-policy details the project review needs.
     - verdict: couldnt_check
-      # ⚠️ THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. A file with no documents yet must not read as
+      # THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. A file with no documents yet must not read as
       # "questionnaire present", and must not read as a confirmed gap either.
       default: true
       reasoning: >-

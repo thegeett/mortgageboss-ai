@@ -71,7 +71,7 @@ logs/
 *.tfplan
 .terraform/
 .terraform.lock.hcl.bak
-# ⚠️ Local state, from `infra/bootstrap` and from any accidental local run. It
+# Local state, from `infra/bootstrap` and from any accidental local run. It
 # records every resource in the environment and, for a bootstrap that generated
 # one, the RDS master password in cleartext.
 *.tfstate

@@ -89,7 +89,7 @@ class ConditionRound(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         # The round strip reads a file's rounds newest-first; the status half serves the poll that
         # waits for PARSING to become DRAFT.
         Index("ix_condition_rounds_file_status", "loan_file_id", "status"),
-        # ⚠️ DECLARED HERE **AND** CREATED BY RAW SQL IN LP-904's MIGRATION (`d1f4b8c25e93`), AND
+        # DECLARED HERE **AND** CREATED BY RAW SQL IN LP-904's MIGRATION (`d1f4b8c25e93`), AND
         # BOTH HALVES ARE LOAD-BEARING. The migration half is what a deployed database has; this
         # half is what `Base.metadata.create_all` builds, and the suite builds from `create_all`
         # rather than from migrations. Until this was added the index existed in production and in
@@ -161,25 +161,25 @@ class ConditionRound(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     #: `date_printed` when known, else the date received. Editable by the processor.
     round_date: Mapped[date] = mapped_column(Date, nullable=False)
 
-    #: ⚠️ NPI — the sheet's full text. Dropped from `readonly.condition_rounds`.
+    #: NPI — the sheet's full text. Dropped from `readonly.condition_rounds`.
     raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    #: ⚠️ NPI — `{loan_facts, lender_team, dates, mortgagee_clause?}`. Names borrowers and the
+    #: NPI — `{loan_facts, lender_team, dates, mortgagee_clause?}`. Names borrowers and the
     #: property, so it is dropped whole rather than scrubbed: a scrub matches identifier SHAPES, and
     #: a name is not digit-shaped.
     header: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     #: NOT NPI. Dates the lender publishes about the loan — close_by, appraisal, asset, credit … —
     #: naming nobody, and the one part of the letter an analyst has a real reason to ask about.
     expiry_dates: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
-    #: ⚠️ NPI — parsed rows awaiting review, each holding the lender's verbatim wording. Cleared on
+    #: NPI — parsed rows awaiting review, each holding the lender's verbatim wording. Cleared on
     #: import, when the rows become `conditions`.
     draft_rows: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
     #: `{reader, reader_version, warnings, unassigned_lines, duplicates_dropped, ai_used}`.
     #:
-    #: ⚠️ NPI AS A WHOLE, because `unassigned_lines` holds lines lifted from the sheet verbatim. The
+    #: NPI AS A WHOLE, because `unassigned_lines` holds lines lifted from the sheet verbatim. The
     #: readonly view therefore exposes derived scalars rather than the column: `reader`,
     #: `reader_version`, `ai_used`, `duplicates_dropped`, `warning_count`, `unassigned_count`.
     #:
-    #: ⚠️ THE TYPED FAILURE REASON IS NOT AMONG THEM, and an earlier version of this comment said it
+    #: THE TYPED FAILURE REASON IS NOT AMONG THEM, and an earlier version of this comment said it
     #: was ("the reader name, the counts, the typed failure reason — is exactly what a staging query
     #: needs"). `failure_kind` and `failure_detail` are not projected by migration `d1f4b8c25e93`, so
     #: they are dropped with the column and never reach a staging query at all.

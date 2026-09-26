@@ -626,7 +626,7 @@ def load_stage_a_entry(raw: dict[str, object]) -> _Judged | None:
     written by an older shape, or corrupted, must cost a re-ask and nothing more. Raising here would
     let a stale cache row fail a verification, which is the one outcome a cache must never cause.
 
-    ⚠️ Only a COMPLETE judgment is accepted, matching the in-memory rule at the write site: Stage A
+    Only a COMPLETE judgment is accepted, matching the in-memory rule at the write site: Stage A
     caches an entry only when both AI tags resolved, so a partial retries next run. Accepting a
     partial here would freeze a degraded answer into the file permanently.
     """

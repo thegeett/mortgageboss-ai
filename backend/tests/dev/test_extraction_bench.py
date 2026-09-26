@@ -310,7 +310,7 @@ def test_finalize_marks_run_failed_when_nothing_succeeds(tmp_path: Path) -> None
     assert out["failed"]["auth_or_other"] == 6
     summary = (tmp_path / "o" / "_SUMMARY.md").read_text(encoding="utf-8")
     assert "captures REAL PII" in summary  # PII warning first, then the FAILED banner
-    assert "# ⚠️ RUN FAILED" in summary  # FAILED banner present (after the one-line PII warning)
+    assert "# RUN FAILED" in summary  # FAILED banner present (after the one-line PII warning)
     assert "NoCredentialsError" in summary  # the real cause is named
 
 

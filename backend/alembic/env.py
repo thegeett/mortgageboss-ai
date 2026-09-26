@@ -22,7 +22,7 @@ config = context.config
 # The database URL from app settings (single source of truth). It already uses
 # the asyncpg driver (postgresql+asyncpg://), which the async engine requires.
 #
-# ⚠️ THIS MUST NOT GO THROUGH config.set_main_option / the alembic.ini section.
+# THIS MUST NOT GO THROUGH config.set_main_option / the alembic.ini section.
 #
 # Alembic keeps main options in a ConfigParser using BasicInterpolation, which
 # treats '%' as an escape character. Any '%' in the URL therefore raises

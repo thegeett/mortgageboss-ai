@@ -5,11 +5,11 @@
 # (positive = future, negative = the closing date has PASSED, "unknown" = no parseable/agreed closing date).
 # PC-7 is now a deterministic rule that compares that NUMBER to a window (the IN-2 number-vs-threshold shape).
 #
-# ⚠️ UNLIKE AS-8 / IN-6, this rule compares a NUMBER to a THRESHOLD (it uses the operand path, not an enum
+# UNLIKE AS-8 / IN-6, this rule compares a NUMBER to a THRESHOLD (it uses the operand path, not an enum
 # branch), and its window is TWO-SIDED with ASYMMETRIC meaning (LP-406-1b D2, ADR-326):
 #   * PAST side  — the closing date is BEHIND the file date. A purchase cannot close in the past, so this is a
 #                  finding at (almost) any magnitude. Fires when days_until_closing < min_days_until_closing
-#                  (default 0 → any strictly-past date fires). ⚠️ SIGNED BOUND, NOT a "grace count": to
+#                  (default 0 → any strictly-past date fires). SIGNED BOUND, NOT a "grace count": to
 #                  TOLERATE a closing up to N days past, LOWER the bound to -N (e.g. -2), never set a positive
 #                  value (a positive bound would fire on realistic NEAR-FUTURE closings, e.g. 0/1 days out).
 #   * FUTURE side — a closing date implausibly far ahead is premature for a file in pre-submission processing.

@@ -98,7 +98,7 @@ resource "aws_s3_bucket_policy" "tls_only" {
   depends_on = [aws_s3_bucket_public_access_block.this]
 }
 
-# ⚠️ THERE IS DELIBERATELY NO LIFECYCLE EXPIRY RULE.
+# THERE IS DELIBERATELY NO LIFECYCLE EXPIRY RULE.
 #
 # A disposal obligation exists in principle, but the retention period is an
 # unresolved policy decision, not a technical default. Inventing a number here

@@ -71,7 +71,7 @@ deterministic:
   # assurance rather than noise: a processor reading "satisfied" is told earnest-money sourcing was
   # verified on a loan with no earnest money.
   #
-  # ⚠️ Refinance scoping is NOT symmetric across the assets family, and the guide is explicit. B3-4.2-02
+  # Refinance scoping is NOT symmetric across the assets family, and the guide is explicit. B3-4.2-02
   # waives large-deposit DOCUMENTATION on a refinance but expressly RETAINS the borrowed-funds duty:
   # "the lender remains responsible for ensuring that any borrowed funds, including any related
   # liability, are considered". So AS-12 (borrowed funds) must NOT be scoped out of refinances — only

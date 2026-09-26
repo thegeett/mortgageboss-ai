@@ -4,7 +4,7 @@ Fifteen of the file's twenty-five attention items are `couldnt_check`, spread ac
 named a missing fact and stopped there, so a processor was told what the engine lacked and never what
 to go and get.
 
-⚠️ THE WORDING IS STATIC PER RULE, and that constrains it. The gate short-circuits at the FIRST missing
+THE WORDING IS STATIC PER RULE, and that constrains it. The gate short-circuits at the FIRST missing
 gated input, and `couldnt_check_fix` cannot see which one that was — so a fix has to hold whichever
 input was absent. IH-3 gates on an insurance effective date AND a closing date; its text therefore
 covers both without asserting which is the problem. Text that assumed one would be confidently wrong
@@ -49,7 +49,7 @@ def test_the_fifteen_abstentions_are_covered() -> None:
 
 @pytest.mark.parametrize("rule_id", sorted(_ABSTAINING))
 def test_every_fix_asks_for_something(rule_id: str) -> None:
-    """⚠️ A fix that describes the problem again is not a fix. Each must open with an instruction — the
+    """A fix that describes the problem again is not a fix. Each must open with an instruction — the
     defect being removed is precisely a finding that states a gap and asks for nothing."""
     fix = _fix(rule_id)
 
@@ -83,7 +83,7 @@ def test_every_fix_names_a_document(rule_id: str) -> None:
 
 
 def test_cr6_refuses_to_read_a_missing_report_as_a_clean_history() -> None:
-    """⚠️ THE ONE THAT MATTERS MOST HERE. LF-WCHG has NO credit report, and the model's own reasoning on
+    """THE ONE THAT MATTERS MOST HERE. LF-WCHG has NO credit report, and the model's own reasoning on
     that run said `liab.derogatory_type = none` was "based on absence of information rather than
     confirmation of clean status". A processor reading four CR-6 abstentions could reasonably assume
     the borrower simply has no derogatory events; the fix says explicitly that the check will not make

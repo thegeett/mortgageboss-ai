@@ -37,7 +37,7 @@ assumed. All three were checked, and **two of them changed the design**.
 | 4 | Bedrock ARN form for cross-region profiles | ✅ **EMPIRICAL** | **Ticket was incomplete** — profiles route to 3 regions, not 1. |
 | 5 | `curl` available for the API health check | ✅ **EMPIRICAL** | **Absent** — used `python3` instead. |
 | 6 | RDS CA bundle in the C1 image | ✅ **EMPIRICAL** | **Not present.** C5 must add it. |
-| 7 | Documents bucket encryption (SSE-S3 vs CMK) | ⚠️ **PENDING** | No permission. Command below. |
+| 7 | Documents bucket encryption (SSE-S3 vs CMK) | **PENDING** | No permission. Command below. |
 
 Everything else in this document that is not marked EMPIRICAL is a design decision
 or an assumption, and is labelled as such.
@@ -181,7 +181,7 @@ which accepts neither.
 to the RDS roots. AWS publishes RDS certificates under its own regional CAs, which
 are not part of the standard `ca-certificates` package.
 
-### 7. Documents bucket encryption — ⚠️ PENDING
+### 7. Documents bucket encryption — PENDING
 
 ```
 $ aws s3api get-bucket-encryption --bucket mbai-dev-documents-591554480818
@@ -214,7 +214,7 @@ module already renders the correct statements for both cases — `api` gets
 | 1 | Three Fargate services: api, worker, frontend | ✅ | `aws_ecs_service.{api,worker,frontend}`, `launch_type = "FARGATE"` |
 | 2 | api + frontend behind the ALB; worker has **no** inbound path | ✅ | worker has no `load_balancer` block, no target group, no `portMappings` |
 | 3 | Per-task IAM matches the matrix exactly | ✅ | negative test below |
-| 4 | Every task reaches steady state and passes its health check | ⚠️ **UNVERIFIABLE** | requires an apply, which is the user's |
+| 4 | Every task reaches steady state and passes its health check | **UNVERIFIABLE** | requires an apply, which is the user's |
 | 5 | Alembic runs as a one-off task, not at container start | ✅ | `aws_ecs_task_definition.migrate`, no service references it |
 | 6 | No secret value in any `.tf`, task definition, or plan output | ✅ | only `valueFrom` ARNs; no `secret_string` anywhere |
 | 7 | `fmt -check` + `validate` pass; §6b grep empty | ✅ | below |
@@ -329,7 +329,7 @@ requests per minute against Bedrock and spends most of its time on I/O, so CPU s
 *low* precisely when the backlog is deepest — CPU-based scaling would scale down
 under load.
 
-⚠️ **`AI_REQUESTS_PER_MINUTE_BEDROCK = 8` assumes `desired_count = 1`.** The limiter
+**`AI_REQUESTS_PER_MINUTE_BEDROCK = 8` assumes `desired_count = 1`.** The limiter
 is process-local: N worker tasks pace at N × the value, against an account quota of
 10 RPM. Raising the worker count **requires** dividing this value by the new count.
 
@@ -446,7 +446,7 @@ Fargate ARM64 (Graviton) rates, `us-east-1`, `desired_count = 1`, 730 h:
 single tester. Container Insights is **off** — enabling it adds roughly $9/month per
 task at this scale. Bedrock inference is usage-driven and excluded.
 
-⚠️ **This lands close to the $150 budget alarm** C2 set: ≈ $134 of ≈ $150, with
+**This lands close to the $150 budget alarm** C2 set: ≈ $134 of ≈ $150, with
 Bedrock inference and any C4 costs still to come. The alarm will fire at 80%
 (≈ $120) almost immediately. **Raise the budget or plan to destroy between uses** —
 which is what this environment is designed for.

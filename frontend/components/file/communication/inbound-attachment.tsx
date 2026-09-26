@@ -102,7 +102,7 @@ export function InboundAttachmentRow({
    * the attachment reads 'Kept as correspondence' and shows a link: 'Used as condition sheet →
    * Round N'").
    *
-   * ⚠️ IT ARRIVES AS A PROP BECAUSE THE ATTACHMENT CANNOT ANSWER IT. `InboundAttachment` carries no
+   * IT ARRIVES AS A PROP BECAUSE THE ATTACHMENT CANNOT ANSWER IT. `InboundAttachment` carries no
    * round reference at all — id, filenames, types, size, safety, disposition, nesting depth — and
    * `UseAsConditionSheetResult` returns a `round_id` only for the attachment just acted on, which is
    * gone on the next page load. The parent derives it by matching `inbound_attachment_id` across the
@@ -115,7 +115,7 @@ export function InboundAttachmentRow({
   const decided = attachment.disposition !== "pending";
   const undecidedAndSafe = attachment.safety_state === "safe" && !decided;
   const canAccept = undecidedAndSafe && Boolean(onAccept);
-  // ⚠️ PDFs ONLY, AND THE GATE IS HERE RATHER THAN IN A REFUSAL. `reject_unless_pdf` turns anything
+  // PDFs ONLY, AND THE GATE IS HERE RATHER THAN IN A REFUSAL. `reject_unless_pdf` turns anything
   // else into a 422 at the door, so offering this on a .docx would be a button that reliably fails
   // — the dead-button pattern S1-03 and S1-02 were both corrected for. A lender's letter that
   // arrived as something other than a PDF has to be dealt with as a document, not as a sheet.
@@ -167,7 +167,7 @@ export function InboundAttachmentRow({
       </div>
       {canAccept || canUseAsSheet ? (
         <div className="flex shrink-0 flex-col gap-1">
-          {/* ⚠️ FIRST AND PRIMARY (S1-13), AND THAT ORDERING IS THE DECISION. A lender's approval
+          {/* FIRST AND PRIMARY (S1-13), AND THAT ORDERING IS THE DECISION. A lender's approval
               letter is the one attachment a processor is most likely to be looking for, and
               "Accept" would file it as a borrower DOCUMENT — classified against a 166-type taxonomy
               with no bucket for it (ADR-403). Putting the right action first is what stops the

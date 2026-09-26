@@ -183,7 +183,7 @@ output "container_image_uris" {
 
 output "route53_name_servers" {
   description = <<-EOT
-    ⚠️ THE FOUR NAMESERVERS TO ENTER AT THE REGISTRAR.
+    THE FOUR NAMESERVERS TO ENTER AT THE REGISTRAR.
 
     The output of phase 1 and the input to the manual delegation step. Read with:
       terraform output -json route53_name_servers

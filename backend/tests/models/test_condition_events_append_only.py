@@ -1,6 +1,6 @@
 """`condition_events` is append-only, and this is the guard `finding_events` never had (LP-904).
 
-⚠️ WHY THIS EXISTS AT ALL. The spec says to copy `models/finding_event.py` **and its tests**. The
+WHY THIS EXISTS AT ALL. The spec says to copy `models/finding_event.py` **and its tests**. The
 model is there; the tests are not. Every test in the suite that touches `FindingEvent` only READS
 event rows to assert a lifecycle sequence — `tests/services/test_finding_reconcile_runs.py` and
 `tests/services/test_unidentified_document_lifecycle_lp640.py`. Nothing anywhere asserts that an
@@ -12,7 +12,7 @@ no `updated_at` to touch and no `deleted_at` to set. A mutation is not refused �
 *inexpressible*, which is the stronger property and the one that cannot be forgotten by a later
 caller.
 
-⚠️ AND WHAT THIS TEST DOES NOT CHECK, stated rather than implied. LP-904's done-when says the guard
+AND WHAT THIS TEST DOES NOT CHECK, stated rather than implied. LP-904's done-when says the guard
 should show the rows cannot be changed "through the service layer". **There is no service layer
 yet** — LP-904 is models, schemas and a migration. So the assertions below are about the mechanism
 that makes a mutating service impossible to write, not about a service refusing one. When LP-909's
@@ -134,7 +134,7 @@ async def test_a_round_event_needs_no_condition_and_the_reverse(db_session: Asyn
 
 
 def test_stage_1_cannot_express_a_clearing_event() -> None:
-    """⚠️ ADR-404, asserted rather than trusted to prose.
+    """ADR-404, asserted rather than trusted to prose.
 
     Stage 1 never clears, removes or merges away a condition. The enum is where that could quietly
     stop being true: a `condition_cleared` member added "for later" would be writable immediately,

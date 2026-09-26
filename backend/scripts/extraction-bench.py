@@ -22,7 +22,7 @@ The run id and output dir are printed BEFORE the first model call, so an interru
 resumable. Records are written per document as they complete — a hard kill loses at most the
 in-flight document.
 
-⚠️ MEASURES COVERAGE, NOT ACCURACY, and captures REAL values — the output folder contains real
+MEASURES COVERAGE, NOT ACCURACY, and captures REAL values — the output folder contains real
 borrower PII and must never be committed, shared, or moved off this machine.
 
 Exit codes: 0 ok · 1 refused (unpaced / preflight / bad path) or the run self-aborted · 130 Ctrl-C.
@@ -102,9 +102,7 @@ def _print_preview(pv: Any, *, plan_to_run: int | None = None) -> None:
         if len(pv.unreadable) > 10:
             print(f"                    … and {len(pv.unreadable) - 10} more")
     print("-" * 72)
-    print(
-        "⚠️  Measures COVERAGE, not accuracy. Captures REAL values — the output contains real PII."
-    )
+    print("Measures COVERAGE, not accuracy. Captures REAL values — the output contains real PII.")
 
 
 def _fmt_duration(seconds: float) -> str:

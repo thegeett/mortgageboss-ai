@@ -4,13 +4,13 @@ WHY THIS EXISTS. The debugging loop for the rule engine is deploy → run verifi
 findings, and the middle step was only reachable by clicking in the UI. Worse, the UI could not do it
 at all while a previous run was stuck RUNNING — which is exactly when you most want to re-run.
 
-⚠️ IT FORCES BY DEFAULT, and that is the point. The API caches on an INPUT fingerprint: if the stated
+IT FORCES BY DEFAULT, and that is the point. The API caches on an INPUT fingerprint: if the stated
 and verified data hash the same as the last completed run, it returns that run's findings without
 re-calling the AI. That is right for a user and wrong here — this loop changes CODE, not inputs, so the
 cache would hand back the old findings and the deploy would look like it did nothing. Set
 `VERIFY_FORCE=0` to respect the cache.
 
-⚠️ IT CLEARS A STUCK RUN, on exactly the API's own terms — a RUNNING run older than
+IT CLEARS A STUCK RUN, on exactly the API's own terms — a RUNNING run older than
 a run past the file-derived watchdog bound is marked failed and superseded; a YOUNGER one is left alone and this
 refuses. Borrowing the API's threshold rather than inventing one keeps a single definition of "stuck",
 and refusing on a young run means this can never kill a pass that is still working.

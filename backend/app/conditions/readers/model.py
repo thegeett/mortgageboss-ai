@@ -79,7 +79,7 @@ class ParsedRow:
 class ParsedSheet:
     """Everything one read produced, including what it could not place.
 
-    ⚠️ `unassigned_lines` IS THE INVARIANT THIS WHOLE TICKET TURNS ON (spec §9.2). Every non-blank
+    `unassigned_lines` IS THE INVARIANT THIS WHOLE TICKET TURNS ON (spec §9.2). Every non-blank
     line inside the conditions block becomes part of a row, a bucket heading, a known artifact, or an
     entry here. Nothing is silently dropped — the review screen shows these, and each gets "Add as a
     condition" or "Ignore this line". A reader that quietly discarded a line it did not understand

@@ -31,7 +31,7 @@ from app.verification.rules.specs import load_rule_spec
 # 1. EVERY couldn't-check PATH CARRIES THE FIX
 # --------------------------------------------------------------------------------------------- #
 def test_every_path_that_can_abstain_routes_through_one_helper() -> None:
-    """⚠️ THE STRUCTURAL GUARD. Three call sites, one helper — so a fourth path is a compile-time
+    """THE STRUCTURAL GUARD. Three call sites, one helper — so a fourth path is a compile-time
     thought rather than a silent omission. Asserted on the SOURCE because the alternative is
     reconstructing three evaluator paths in fixtures, and what actually went wrong was a missing call,
     not a wrong one."""
@@ -78,7 +78,7 @@ def test_a_noun_label_still_gets_its_article() -> None:
 
 
 def test_no_curated_label_can_produce_the_double_article() -> None:
-    """⚠️ THE CLASS, not the instance. Over 8 labels are phrased as questions; CR-6 was simply the one
+    """THE CLASS, not the instance. Over 8 labels are phrased as questions; CR-6 was simply the one
     that reached a real file first. This sweeps every curated label so the next one cannot ship."""
     from app.verification.rule_engine.reasons import _FACT_LABELS
 

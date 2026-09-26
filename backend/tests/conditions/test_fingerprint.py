@@ -1,6 +1,6 @@
 """The condition fingerprint (LP-907, spec §LP-904).
 
-⚠️ EVERY ASSERTION HERE IS A MATCHING OUTCOME, NOT A HASH VALUE. Pinning the hex of a sha256 would
+EVERY ASSERTION HERE IS A MATCHING OUTCOME, NOT A HASH VALUE. Pinning the hex of a sha256 would
 test that sha256 is sha256; what matters is which pairs of lender wording are treated as the same
 condition, because that decides whether round 3 recognises a row or duplicates it.
 """
@@ -26,7 +26,7 @@ def test_it_is_a_sha256_hex_digest() -> None:
 
 
 def test_an_underwriter_note_does_not_change_the_condition() -> None:
-    """⚠️ THE PROPERTY THE WHOLE MATCHER RESTS ON. `**8/28 Not in Upload` means the underwriter
+    """THE PROPERTY THE WHOLE MATCHER RESTS ON. `**8/28 Not in Upload` means the underwriter
     annotated a condition that came back — the condition itself did not change. Including the note
     would make the annotated copy a different condition, so the next round would create a new row
     instead of recognising the one already on the file."""
@@ -46,7 +46,7 @@ def test_spacing_and_case_do_not_change_it() -> None:
 
 
 def test_a_different_amount_is_a_different_condition() -> None:
-    """⚠️ NOT NORMALISED AWAY, AND THE PAGE-BREAK FIXTURE IS WHY. UWM lists `0571` three times with
+    """NOT NORMALISED AWAY, AND THE PAGE-BREAK FIXTURE IS WHY. UWM lists `0571` three times with
     three different amounts; collapsing them would silently drop two of the lender's demands."""
     assert fingerprint("Provide a Change of Circumstance for $450.") != fingerprint(
         "Provide a Change of Circumstance for $650."
@@ -60,7 +60,7 @@ def test_a_different_condition_is_a_different_fingerprint() -> None:
 
 
 def test_the_same_row_read_two_ways_fingerprints_the_same() -> None:
-    """⚠️ THE ACCEPTANCE PROPERTY, EXERCISED END TO END RATHER THAN ASSERTED ON STRINGS.
+    """THE ACCEPTANCE PROPERTY, EXERCISED END TO END RATHER THAN ASSERTED ON STRINGS.
 
     Spec §8 step 3 attaches round 2's PDF to the round pasted in step 2 and expects the conditions to
     MATCH — "still 11 conditions", no second round. That only holds if a row read from the pasted
@@ -75,7 +75,7 @@ def test_the_same_row_read_two_ways_fingerprints_the_same() -> None:
 
 
 def test_the_readers_dedup_key_and_the_stored_fingerprint_cannot_drift() -> None:
-    """⚠️ TWO ANSWERS TO "IS THIS THE SAME WORDING?", AND EACH IS INDIVIDUALLY CORRECT — which is
+    """TWO ANSWERS TO "IS THIS THE SAME WORDING?", AND EACH IS INDIVIDUALLY CORRECT — which is
     exactly why only a test comparing them DIRECTLY can catch them drifting apart.
 
     The reader's rule 6 drops a page-overlap duplicate on `(code, note-stripped text, notes)`; the

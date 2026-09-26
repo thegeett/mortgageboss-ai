@@ -44,7 +44,7 @@ _VERSIONS = Path(__file__).resolve().parent.parent / "alembic" / "versions"
 #: Every VARCHAR + CHECK enum column this guard watches, as (constraint name, the enum that must fit
 #: inside it).
 #:
-#: ⚠️ IT WAS ONE HARDCODED CONSTRAINT UNTIL LP-909, AND THE SAME DEFECT WAS AVAILABLE ONE ENUM OVER.
+#: IT WAS ONE HARDCODED CONSTRAINT UNTIL LP-909, AND THE SAME DEFECT WAS AVAILABLE ONE ENUM OVER.
 #: This file exists because LP-637 added `document_reprocessed` with no migration and the suite was
 #: fully green throughout — conftest builds the schema with `create_all`, which regenerates the CHECK
 #: from the very enum being checked. `ConditionEventKind` is the identical shape, and adding
@@ -153,14 +153,14 @@ def _values_from_in_call(node: ast.AST, env: dict[str, object]) -> object:
 def _definition_values(tree: ast.Module, env: dict[str, object], constraint: str) -> object:
     """The value set `upgrade()` installs for ``constraint``, whichever form it uses.
 
-    ⚠️ TWO FORMS, BECAUSE A CONSTRAINT'S FIRST DEFINITION IS NOT A SWAP. This guard understood only
+    TWO FORMS, BECAUSE A CONSTRAINT'S FIRST DEFINITION IS NOT A SWAP. This guard understood only
     a swap HELPER — a call whose function name contains "swap" — which is how every `activity_type`
     migration writes it. But a constraint is BORN inside `create_table`, as an inline
     `sa.CheckConstraint(_in("kind", _EVENT_KIND), name=...)`, and LP-904 created the condition CHECKs
     that way. Reading only swaps meant the origin contributed nothing, so a constraint with no swap
     yet resolved to no definitions at all and every assertion below passed over it (LP-909 review).
 
-    ⚠️ THE CREATE-TABLE FORM IS MATCHED BY ITS `name=`, NOT BY POSITION. One `create_table` declares
+    THE CREATE-TABLE FORM IS MATCHED BY ITS `name=`, NOT BY POSITION. One `create_table` declares
     many CheckConstraints — LP-904 has eight across three tables — so a positional match would
     happily return `condition_rounds.status`'s values for the events constraint and compare the
     wrong enum against them.
@@ -266,7 +266,7 @@ def test_at_least_one_definition_lists_the_whole_enum(
     Checked as: at least one DEFINITION lists the enum in full. That is the property that makes the
     union above safe to rely on.
 
-    ⚠️ "AT LEAST ONE", NEVER "THE NEWEST", AND THE DIFFERENCE IS NOT COSMETIC (LP-909 review). The
+    "AT LEAST ONE", NEVER "THE NEWEST", AND THE DIFFERENCE IS NOT COSMETIC (LP-909 review). The
     create-table ORIGIN is a definition and satisfies this while a constraint has no swap yet. The
     day a swap is added, the origin becomes legitimately INCOMPLETE — it lists the values that
     existed when the table was created — so a rule phrased as "the newest definition is complete"
@@ -354,7 +354,7 @@ def _definition_revisions(constraint: str) -> dict[str, set[str]]:
 def test_parallel_definitions_permit_identical_value_sets(constraint: str) -> None:
     """Two definitions on lineages that have not merged must permit exactly the same values.
 
-    ⚠️ THE CREATE-TABLE ORIGIN IS SAFE HERE WITHOUT A SPECIAL CASE, and it is worth saying why
+    THE CREATE-TABLE ORIGIN IS SAFE HERE WITHOUT A SPECIAL CASE, and it is worth saying why
     rather than leaving it to luck. The origin is an ANCESTOR of every later definition of its
     constraint, and the ancestor check below skips any such pair — "one precedes the other; a
     lineage may widen as it goes". So the origin being legitimately narrower than a later swap is

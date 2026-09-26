@@ -14,7 +14,7 @@ A value written by Terraform is:
 For `JWT_SECRET_KEY` that would be careless. For `ENCRYPTION_KEY` it is
 catastrophic, for the reason below.
 
-## ⚠️ `ENCRYPTION_KEY` — rotating it destroys data permanently
+## `ENCRYPTION_KEY` — rotating it destroys data permanently
 
 This is the most dangerous value in the entire stack. It has **two** consumers in
 the application:

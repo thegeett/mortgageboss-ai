@@ -4,20 +4,20 @@
 # twice in a short window, or a chain whose grantee is not the next grantor, is the classic flip and
 # straw-buyer signal.
 #
-# ⚠️ NOT AN ADR-330 VACUITY — the Phase A question, answered. A chain gap is grantee[n] against
+# NOT AN ADR-330 VACUITY — the Phase A question, answered. A chain gap is grantee[n] against
 # grantor[n+1]: a continuity check ACROSS ROWS, which is exactly AS-8's shape (a statement's ending
 # balance against the next statement's opening). One field judged against itself would be vacuous;
 # consecutive rows judged against each other is a real comparison.
 #
-# ⚠️ DETERMINISTIC CODE COMPUTES THE FACTS; THE AI JUDGES THEM. The transfer count, the continuity check
+# DETERMINISTIC CODE COMPUTES THE FACTS; THE AI JUDGES THEM. The transfer count, the continuity check
 # and the shortest interval are arithmetic and a name compare, all in `derived.py` — no judgment in any of
 # them. Whether a 40-day resale is a flip or a probate transfer is the judgment, and that is this rule's.
 #
-# ⚠️ THE CORPUS IS THIN, and this is the honest limit. The four real commitments carry 1, 2, 1 and 0 chain
+# THE CORPUS IS THIN, and this is the honest limit. The four real commitments carry 1, 2, 1 and 0 chain
 # rows — so exactly ONE consecutive pair exists anywhere to test continuity against, and the
 # rapid-transfer signal has never been observed at all. Built against the schema and the guideline.
 #
-# ⚠️ A JUDGMENT RULE RATIFIES EVERY VERDICT, so an uncalibrated tag can never auto-assert (OC-2/ADR-336).
+# A JUDGMENT RULE RATIFIES EVERY VERDICT, so an uncalibrated tag can never auto-assert (OC-2/ADR-336).
 
 rule_id: TI-6
 name: Chain of title / rapid transfer
@@ -42,7 +42,7 @@ reference_values:
   priya_validated: false          # must equal rule_kinds.csv
   threshold_needs_signoff: false  # must equal rule_kinds.csv
   values:
-    # ⚠️ PROVENANCE TIER U — NOT OBTAINED, and deliberately NOT written as a threshold this rule compares
+    # PROVENANCE TIER U — NOT OBTAINED, and deliberately NOT written as a threshold this rule compares
     # against. A "rapid transfer" window (90 or 180 days is commonly cited) is an investor-overlay and
     # fraud-review convention, and no page was read for it this pass. So the rule does NOT encode a
     # cutoff: the interval is handed to the judgment as a FACT and the model weighs it with the rest.

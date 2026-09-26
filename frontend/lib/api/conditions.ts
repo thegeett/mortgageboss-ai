@@ -6,7 +6,7 @@
  * round — so the invalidations below name both lists. A processor who imports and then does not see
  * the conditions appear will import again.
  *
- * ⚠️ THE POLL IS ON `status`, NEVER ON THE PRESENCE OF ROWS. A `parsing` round carries the
+ * THE POLL IS ON `status`, NEVER ON THE PRESENCE OF ROWS. A `parsing` round carries the
  * rules-read rows too (see `ConditionRound.draft_rows`), so "has rows" would stop the poll while the
  * AI split was still running and show S1-02's skeletons as though they were reviewable. S1-02's
  * requirement is literally "poll until `DRAFT` or `PARSE_FAILED`".
@@ -43,7 +43,7 @@ const roundPath = (roundId: string) => `${API_V1}/condition-rounds/${roundId}`;
  * How long a round may sit in `parsing` before we stop asking, and before the server will accept a
  * reparse.
  *
- * ⚠️ THIS NUMBER IS THE SERVER'S, AND THE VERSION THIS REPLACED WAS WRONG IN THE DANGEROUS
+ * THIS NUMBER IS THE SERVER'S, AND THE VERSION THIS REPLACED WAS WRONG IN THE DANGEROUS
  * DIRECTION. It was `5 * 60 * 1000`, justified by S1-02's "usually under 30 seconds" — a sentence
  * about the HEALTHY case, which is not what a bound is for. It consulted neither Celery limit.
  *
@@ -69,7 +69,7 @@ export function isBeingRead(round: ConditionRound): boolean {
 /**
  * A round that has been `parsing` for longer than anything could legitimately take.
  *
- * ⚠️ THIS STATE IS REAL AND THE BACKEND DOCUMENTS IT AS UNMITIGATED. A round is committed in
+ * THIS STATE IS REAL AND THE BACKEND DOCUMENTS IT AS UNMITIGATED. A round is committed in
  * `parsing` BEFORE the task is enqueued — correctly, since a worker that picked it up first would
  * find no row — so a broker that is down leaves a round nothing will ever move.
  * `_enqueue_split_or_fail` guards the paste door and says of the upload door, in as many words:
@@ -92,7 +92,7 @@ export function isStranded(round: ConditionRound): boolean {
 /**
  * Whether asking again could still change the answer.
  *
- * ⚠️ BOUNDED ON `created_at`, NOT ON A COUNT OF INTERVALS, and the difference is what makes it a
+ * BOUNDED ON `created_at`, NOT ON A COUNT OF INTERVALS, and the difference is what makes it a
  * bound at all. A counter lives in the query's session: reopening the tab on a round stranded
  * yesterday starts a fresh count and polls forever again — the same defect wearing a ceiling. Asking
  * how old the round is means a stale stranded round is polled ZERO times on a fresh tab.
@@ -104,7 +104,7 @@ export function isWorthPolling(round: ConditionRound): boolean {
 /**
  * Whether any arrival on this round stored bytes.
  *
- * ⚠️ IT ASKS THE SERVER'S OWN QUESTION NOW, AND IT USED TO ASK A PROXY (LP-909 review). The authority
+ * IT ASKS THE SERVER'S OWN QUESTION NOW, AND IT USED TO ASK A PROXY (LP-909 review). The authority
  * is `has_stored_sheet` in `services/condition_rounds.py`, which keys on `storage_path` and says
  * why: "it is the BYTES that make a second attach meaningless. `kind` would need a list of three
  * values kept in step with the enum." This function WAS that list, and could not be anything else
@@ -123,7 +123,7 @@ export function isWorthPolling(round: ConditionRound): boolean {
  * Still read across the LIST, because `sources` is a list: a paste that gained a PDF carries both
  * arrivals, and the question is whether bytes are present anywhere, not how the round began.
  *
- * ⚠️ IT LIVES HERE RATHER THAN IN `round-strip.tsx` BECAUSE A THIRD FEATURE NOW ASKS IT. S1-13's
+ * IT LIVES HERE RATHER THAN IN `round-strip.tsx` BECAUSE A THIRD FEATURE NOW ASKS IT. S1-13's
  * attach-or-new question is raised from the Communication tab, and a communication component
  * reaching into a conditions PRESENTATION module for a predicate is the wrong direction. This file
  * already holds `isBeingRead`, `isStranded` and `isWorthPolling` — the same category of question
@@ -140,7 +140,7 @@ export function hasPdf(round: ConditionRound): boolean {
 /**
  * Whether the server would accept a PDF for this round.
  *
- * ⚠️ THE SERVER REFUSES ON TWO COUNTS AND THE STRIP CHECKED ONE (LP-909 review).
+ * THE SERVER REFUSES ON TWO COUNTS AND THE STRIP CHECKED ONE (LP-909 review).
  * `enrich_round_with_pdf` raises `RoundNotEnrichable` when the status is outside `ENRICHABLE`
  * (`draft` or `imported`) AND when the round already has stored bytes. Gating on the second alone
  * offered "Attach the lender's PDF" on a `discarded` round — which the strip renders deliberately,
@@ -165,12 +165,12 @@ export async function fetchConditionRounds(fileId: string): Promise<ConditionRou
  *
  * Polls while some round is worth polling, and the ceiling is the point.
  *
- * ⚠️ AN EARLIER VERSION OF THIS COMMENT SAID IT "STOPS BY ITSELF: the round settling to `draft` or
+ * AN EARLIER VERSION OF THIS COMMENT SAID IT "STOPS BY ITSELF: the round settling to `draft` or
  * `parse_failed` is what ends it" — which asserts a guarantee this codebase explicitly documents as
  * absent. A stranded round never settles, so that sentence described a loop with no exit while
  * claiming the opposite. See `isStranded`; raised in review.
  *
- * ⚠️ DISCARDED ROUNDS ARE IN THIS LIST, deliberately — a processor who threw a draft away should
+ * DISCARDED ROUNDS ARE IN THIS LIST, deliberately — a processor who threw a draft away should
  * see that they did, and a round silently vanishing reads as data loss. The UI filters on `status`.
  */
 export function useConditionRounds(fileId: string) {
@@ -205,12 +205,12 @@ export async function fetchRoundEvents(roundId: string): Promise<ConditionEvent[
 /**
  * One round's history, oldest first — the History section of the round-details sheet (S1-09).
  *
- * ⚠️ NOT POLLED, AND NOT PART OF THE ROUND. `condition_events` is APPEND-ONLY, so a history cannot
+ * NOT POLLED, AND NOT PART OF THE ROUND. `condition_events` is APPEND-ONLY, so a history cannot
  * change under a reader except by something else on this screen writing — and every such write
  * already invalidates through `invalidateRound`. Polling it would ask a question whose answer only
  * changes when we change it.
  *
- * ⚠️ FETCHED SEPARATELY RATHER THAN EMBEDDED IN THE ROUND, because the round is fetched constantly —
+ * FETCHED SEPARATELY RATHER THAN EMBEDDED IN THE ROUND, because the round is fetched constantly —
  * the strip, the dashboard, every mutation's invalidation — and the history is read only when a
  * processor opens one sheet. Attaching it to `ConditionRoundPublic` would put a second query behind
  * every round read on the tab to serve a panel almost nobody has open.
@@ -304,19 +304,19 @@ export function usePasteConditions(fileId: string) {
 /**
  * Read a stored sheet again — S1-03's "Try again" and S1-02's stranded state (200).
  *
- * ⚠️ THIS HOOK IS WHY TWO SCREENS MAY FINALLY OFFER THE BUTTON THEY ALREADY DESCRIBED. `RoundFailed`
+ * THIS HOOK IS WHY TWO SCREENS MAY FINALLY OFFER THE BUTTON THEY ALREADY DESCRIBED. `RoundFailed`
  * and `RoundReading` both took `onRetry` optionally and the dashboard passed none, because no route
  * re-read an existing round — `parse_condition_round.delay()` was called from creation paths only.
  * The comments saying so were correct when written and are now false; they have been corrected
  * rather than left to mislead.
  *
- * ⚠️ IT CAN LEGITIMATELY 409, AND THE CALLER MUST SHOW THE REASON RATHER THAN SWALLOW IT. The server
+ * IT CAN LEGITIMATELY 409, AND THE CALLER MUST SHOW THE REASON RATHER THAN SWALLOW IT. The server
  * refuses a round it is still reading (inside the stranded window), a draft, an imported round, a
  * discarded one, and a round whose only source was a paste and so has no PDF to re-read. Each
  * carries its own sentence, and "it was pasted, there is nothing stored to read again" tells a
  * processor something entirely different from "it is still being read".
  *
- * ⚠️ NO REQUEST BODY. The endpoint takes no options, so there is nothing to send — and unlike
+ * NO REQUEST BODY. The endpoint takes no options, so there is nothing to send — and unlike
  * `documents.py`'s reprocess it declares no Pydantic body at all, so a body-less POST is what it
  * expects rather than a 422.
  */
@@ -368,7 +368,7 @@ export interface UpdateDraftInput extends DraftUpdateInput {
 /**
  * Replace a draft's rows before import (S1-04's editing).
  *
- * ⚠️ WHAT IS SENT IS WHAT IMPORTS. The fingerprint is taken of the edited text, so an edited row may
+ * WHAT IS SENT IS WHAT IMPORTS. The fingerprint is taken of the edited text, so an edited row may
  * match a different condition or none — correct rather than unfortunate, and the spec's own frontend
  * test is "editing a row and importing sends the edited text".
  */
@@ -388,7 +388,7 @@ export function useUpdateDraft(fileId: string) {
  * none — so its `R1` chip names the round it was filed into rather than a sheet it was printed on.
  * `origin` is what keeps those distinguishable.
  *
- * ⚠️ THE ROUND IT JOINED MUST BE INVALIDATED TOO, and this called `invalidateRound` without an id.
+ * THE ROUND IT JOINED MUST BE INVALIDATED TOO, and this called `invalidateRound` without an id.
  * A hand-typed condition changes that round's `condition_count`, which is exactly what the
  * round-details sheet (S1-09) displays — so with the sheet open, adding a condition left the count
  * stale. `last_seen_round_id` is the round it was filed into and was in the response all along.

@@ -164,7 +164,7 @@ class Settings(BaseSettings):
 
     # Client-side pacing, PER PROVIDER because their ceilings differ by orders of
     # magnitude. None = unlimited (today's behaviour). See `resolve_requests_per_minute`.
-    # ⚠️ PROCESS-LOCAL: N worker tasks pace at N x this value. Deploy the account quota
+    # PROCESS-LOCAL: N worker tasks pace at N x this value. Deploy the account quota
     # DIVIDED BY task count, never the quota itself.
     ai_requests_per_minute_anthropic: int | None = None
     ai_requests_per_minute_bedrock: int | None = None
@@ -230,7 +230,7 @@ class Settings(BaseSettings):
     # with no redeploy; ON by default (the honest-surfacing behavior the live/persisted snapshot is unaffected by).
     pending_checks_enabled: bool = True
     # LP-527 — the finding COMPOSER (a model rewrites each finding's text from a fixed fact summary).
-    # ⚠️ OFF BY DEFAULT, deliberately. It rewrites EVERY finding on a file at once, so a bad prompt
+    # OFF BY DEFAULT, deliberately. It rewrites EVERY finding on a file at once, so a bad prompt
     # degrades the whole queue rather than one rule, and nothing about its output has been read on a
     # real run yet. Everything shipped unmeasured today caused an incident; this one turns on when
     # someone chooses to compare it against the templates, which is one env var.

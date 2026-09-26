@@ -4,20 +4,20 @@
 # A commitment for the wrong parcel insures the wrong property, and the street address is the only
 # human-readable handle on it.
 #
-# ⚠️ STAYS ai_judgment, and unlike TI-1 the catalog is RIGHT. Reading a metes-and-bounds description
+# STAYS ai_judgment, and unlike TI-1 the catalog is RIGHT. Reading a metes-and-bounds description
 # ("thence North 12°14' East 148.60 feet…") or a lot/block recital against a street address is a genuine
 # interpretation, not a string compare — typed extraction hands over two fields that do not resemble each
 # other. This is exactly the distinction LP-487 drew for IH-2: the question is whether the PERCEPTION
 # step is spent, and here it is not.
 #
-# ⚠️ THE CR-8 CHECK WAS RUN BEFORE TRUSTING ANYTHING. `legal_description` is 337-1942 characters on the
+# THE CR-8 CHECK WAS RUN BEFORE TRUSTING ANYTHING. `legal_description` is 337-1942 characters on the
 # four real commitments and contains ZERO 9+ digit runs, so `_scrub_list_value`'s PII scrub does not
 # reduce it to `[redacted]` the way it did `payment_history_24mo`. The input reaches the model.
 #
-# ⚠️ A JUDGMENT RULE RATIFIES EVERY VERDICT (needs_review / couldnt_check only), so an uncalibrated tag
+# A JUDGMENT RULE RATIFIES EVERY VERDICT (needs_review / couldnt_check only), so an uncalibrated tag
 # can never auto-assert here — the OC-2/ADR-336 property.
 #
-# ⚠️ n=4. Four commitments is the whole corpus. This proves wiring and direction, not accuracy.
+# n=4. Four commitments is the whole corpus. This proves wiring and direction, not accuracy.
 
 rule_id: TI-2
 name: Legal description match
@@ -46,7 +46,7 @@ reference_values:
     the street address is the practical check that the description is for the right parcel; a mismatch
     between them is resolved before closing.
 
-# ⚠️ REPORTED GAP, RECORDED NOT CLOSED. Both inputs below are fields of the SAME document, so TI-2
+# REPORTED GAP, RECORDED NOT CLOSED. Both inputs below are fields of the SAME document, so TI-2
 # checks the commitment for INTERNAL consistency — and the failure its own bar names ("a commitment for
 # the WRONG PARCEL reads as matching → the loan closes insured against a property it does not encumber")
 # is precisely the case internal consistency cannot see: a commitment issued for another property has an
@@ -57,7 +57,7 @@ reference_values:
 required_inputs:
   - name: legal_description
     snapshot_path: 'tags.by_subject[<commitment content_id>]["title.legal_description"]'
-    description: the commitment's legal description (parsed, LP-491). ⚠️ UNCALIBRATED consumer.
+    description: the commitment's legal description (parsed, LP-491). UNCALIBRATED consumer.
   - name: property_address
     snapshot_path: 'tags.by_subject[<commitment content_id>]["title.property_address"]'
     description: the street address the commitment states for the same property (parsed, LP-491).

@@ -58,7 +58,7 @@ was neither tagged nor aborted — so it ran to 246.
   throttle-abort; the 246-run would now stop at 5.
 - **A run where nothing succeeded is marked FAILED.** `finalize_output` partitions **all** infrastructure
   failures out of every finding and, if 0 documents succeeded, `_SUMMARY.md` opens with
-  `# ⚠️ RUN FAILED — 0 of N documents produced a result`, naming the cause. It can never again read like
+  `# RUN FAILED — 0 of N documents produced a result`, naming the cause. It can never again read like
   a coverage result (the last one said *"246 documents, types: 1"*). Failure counts (rate-limited /
   auth-or-other / errored, with the top cause) are reported on every run.
 

@@ -17,7 +17,7 @@ space, trailing whitespace stripped. Nothing else. Spec §9.1 is the rule the wh
 the lender's words are stored verbatim, so a normaliser that "tidied" anything would put a
 paraphrase into `verbatim_text` and there would be no way back to what was printed.
 
-⚠️ WHY THE SOFT HYPHEN MATTERS MORE THAN IT LOOKS. UWM's PDFs render ordinary hyphens as U+00AD:
+WHY THE SOFT HYPHEN MATTERS MORE THAN IT LOOKS. UWM's PDFs render ordinary hyphens as U+00AD:
 `non{SHY}ownership`, `K{SHY}1`, `(555) 010{SHY}0175`, and the bucket heading
 `UW {SHY} Prior To Final Approval (PTD)`. Left alone, the heading regex fails to match, the condition
 text carries an invisible character, and two texts that a person would call identical produce
@@ -33,7 +33,7 @@ import pymupdf
 
 from app.services.page_ocr import words_for
 
-# ⚠️ BOTH CONSTANTS ARE `chr()` CALLS, NOT LITERALS, AND NOT `"\\u00ad"` ESCAPES EITHER. Written as
+# BOTH CONSTANTS ARE `chr()` CALLS, NOT LITERALS, AND NOT `"\\u00ad"` ESCAPES EITHER. Written as
 # a literal, each is INVISIBLE in an editor, in a review and in a diff - a soft hyphen renders as
 # nothing and a non-breaking space as an ordinary space. Written as a `\\u` escape they are legible,
 # but an escape can be normalised back into the character by a tool that rewrites the file, which is
@@ -99,7 +99,7 @@ class Line:
     def indent(self) -> int | None:
         """Leading spaces, or None when the line came from a PDF.
 
-        ⚠️ NONE IS NOT ZERO, AND THE TYPE SAYS SO DELIBERATELY (LP-906 section 1 review). `text` for
+        NONE IS NOT ZERO, AND THE TYPE SAYS SO DELIBERATELY (LP-906 section 1 review). `text` for
         a PDF line is `" ".join(tokens)`, which has no leading spaces — so an `int` return would hand
         every reader a confident 0 and the spec's heading test (<= 3 spaces) would match EVERY line
         of every uploaded sheet. That is the worst shape of bug: silently available, always wrong,
@@ -141,7 +141,7 @@ def lines_from_text(raw: str) -> tuple[Line, ...]:
 def lines_from_pdf(content: bytes) -> tuple[Line, ...]:
     """Build lines from a PDF's word boxes, one page at a time.
 
-    ⚠️ THROUGH `page_ocr.words_for`, NOT `page.get_text("words")` DIRECTLY. That function already
+    THROUGH `page_ocr.words_for`, NOT `page.get_text("words")` DIRECTLY. That function already
     answers "where are this page's words" for both a text layer and a scan, returning the same
     `(x0, y0, x1, y1, word)` shape either way and deciding per PAGE rather than per document — six of
     the corpus's documents are mixed. Calling the raw API here would be a second answer to one
@@ -159,7 +159,7 @@ def lines_from_pdf(content: bytes) -> tuple[Line, ...]:
     with pymupdf.open(stream=content, filetype="pdf") as document:  # type: ignore[no-untyped-call]
         for page_number, page in enumerate(document, start=1):
             rows: dict[float, list[tuple[float, float, str]]] = {}
-            # ⚠️ SORTED BY VERTICAL CENTRE FIRST (LP-906 section 1 review). Clustering greedily in
+            # SORTED BY VERTICAL CENTRE FIRST (LP-906 section 1 review). Clustering greedily in
             # ARRIVAL order makes the result depend on what `words_for` happens to return first: the
             # same three centres (100.0, 101.5, 103.5) cluster into 1 group or 2 depending only on
             # ordering. A layout reader whose output depends on word order is untestable in the way

@@ -83,7 +83,7 @@ def resolve_applicabilities(
     PURCHASE. Expressing that needed a bespoke combined tag per rule, which merged two different
     abstentions into one enum and lost the per-predicate reason.
 
-    ⚠️ ORDER OF PRECEDENCE, and it is not "first predicate wins": EVERY predicate is evaluated, then
+    ORDER OF PRECEDENCE, and it is not "first predicate wins": EVERY predicate is evaluated, then
 
       * any predicate DEFINITELY FALSE  -> not_applicable. Scope-false beats data-missing: a money-OUT
         transaction is out of scope for an earnest-money check whether or not the loan purpose is known,
@@ -117,7 +117,7 @@ def undetermined_by_document_type(
     reports it ("identify this file"), which is what makes it safe to consolidate into a single
     processor-facing finding.
 
-    ⚠️ ATTRIBUTED, NOT ASSUMED. A rule's scope is often a conjunction (LP-517), and only ONE of its
+    ATTRIBUTED, NOT ASSUMED. A rule's scope is often a conjunction (LP-517), and only ONE of its
     predicates is the undetermined one — the same precedence :func:`resolve_applicabilities` uses. A
     rule that abstains on ``txn.is_money_in`` while also declaring a document-type predicate is NOT
     consolidatable: its remedy is a different fact, and folding it into "identify these documents"

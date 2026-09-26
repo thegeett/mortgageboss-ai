@@ -131,7 +131,7 @@ export function InboundMessageCard({
   /**
    * The file's rounds, for the two things S1-13 needs that an attachment cannot answer.
    *
-   * ⚠️ `enabled` IS ALREADY `Boolean(fileId)`, so the company-level queue fetches nothing — which is
+   * `enabled` IS ALREADY `Boolean(fileId)`, so the company-level queue fetches nothing — which is
    * also exactly where neither of these may appear: there is no file, so no round to merge into and
    * no round for an attachment to have become.
    */
@@ -141,12 +141,12 @@ export function InboundMessageCard({
   /**
    * The round a forward would merge into, or null to open a new one (S1-13 Must-match).
    *
-   * ⚠️ THE NEWEST ROUND, NOT ANY MERGEABLE ONE. The design's condition is "when the file's NEWEST
+   * THE NEWEST ROUND, NOT ANY MERGEABLE ONE. The design's condition is "when the file's NEWEST
    * round was pasted and has no PDF yet" — a `find` across the list would offer to merge into an
    * older paste while a newer round sat on top of it, which is a different and wrong question.
    * `roundList` is newest-first, as `list_rounds` orders it and `imported-view` documents it.
    *
-   * ⚠️ AND MERGEABILITY IS `canAttachPdf`, NOT "has no bytes". The server refuses on TWO counts —
+   * AND MERGEABILITY IS `canAttachPdf`, NOT "has no bytes". The server refuses on TWO counts —
    * a status outside `draft`/`imported`, and bytes already stored — so asking only the second would
    * offer a merge into a discarded or failed round that answers 409. That predicate is the mirror of
    * the server's rule and already carries the reasoning.
@@ -230,12 +230,12 @@ export function InboundMessageCard({
                     onAcceptAsCorrespondence: () =>
                       accept.mutate({ attachmentId: attachment.id, asCorrespondence: true }),
                     onReject: () => reject.mutate(attachment.id),
-                    // ⚠️ INSIDE THE `fileId` SPREAD, WITH THE OTHERS, AND THAT IS THE POINT OF THE
+                    // INSIDE THE `fileId` SPREAD, WITH THE OTHERS, AND THAT IS THE POINT OF THE
                     // SPREAD. In the company queue there is no file to open a round on — the
                     // server 404s an unrouted attachment rather than letting one company create a
                     // round from a message no company owns yet. Omitting the callback there makes
                     // the button absent rather than present and failing.
-                    // ⚠️ ASKS RATHER THAN ASSUMES (S1-13). Without a merge target this is the
+                    // ASKS RATHER THAN ASSUMES (S1-13). Without a merge target this is the
                     // create path exactly as before; with one, choosing silently opened a SECOND
                     // round on a file whose newest round was still waiting for its letter — which
                     // is the outcome a processor almost never wants, and the server would happily
@@ -253,7 +253,7 @@ export function InboundMessageCard({
         <p className="text-xs text-muted-foreground">No attachments.</p>
       )}
 
-      {/* ⚠️ THE CONFIRM UI IS "May differ" IN THE PACK, BUT THE QUESTION IS NOT. S1-13 requires that
+      {/* THE CONFIRM UI IS "May differ" IN THE PACK, BUT THE QUESTION IS NOT. S1-13 requires that
           choosing the action ASKS when the newest round was pasted and has no PDF yet; only the
           shape of the asking is free, and this repo has `Dialog` and no AlertDialog. */}
       <Dialog open={askingFor !== null} onOpenChange={(open) => !open && setAskingFor(null)}>
@@ -296,7 +296,7 @@ export function InboundMessageCard({
           again.
         </p>
       ) : null}
-      {/* ⚠️ ITS OWN LINE, SHOWING THE SERVER'S SENTENCE, RATHER THAN JOINING THE ONE ABOVE. The
+      {/* ITS OWN LINE, SHOWING THE SERVER'S SENTENCE, RATHER THAN JOINING THE ONE ABOVE. The
           generic copy — "the file may have changed, refresh and try again" — is a guess, and it is
           the wrong guess for every refusal this action actually produces: the attachment has
           already been used as a condition sheet (409, naming the round that exists), the round it

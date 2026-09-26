@@ -138,7 +138,7 @@ async def test_the_lf_wchg_shape_derives_sfr() -> None:
 
 
 async def test_in_project_false_is_what_rules_out_a_condo_not_detached() -> None:
-    """⚠️ The distinction this derivation turns on.
+    """The distinction this derivation turns on.
 
     Fannie Mae recognises DETACHED CONDOMINIUMS, so "AttachmentType: Detached" is NOT evidence that
     a property is not a condo — reading it that way would clear the condo rules on exactly the files

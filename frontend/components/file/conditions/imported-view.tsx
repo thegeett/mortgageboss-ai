@@ -15,13 +15,13 @@ import { RoundStrip } from "./round-strip";
 /**
  * The file's conditions after at least one round has been imported (S1-05, S1-08).
  *
- * ⚠️ THIS BRANCH DID NOT EXIST, AND ITS ABSENCE WAS A REAL DEFECT. An imported round fell through
+ * THIS BRANCH DID NOT EXIST, AND ITS ABSENCE WAS A REAL DEFECT. An imported round fell through
  * the dashboard's `parsing` / `parse_failed` / empty-draft checks straight into `RoundReview` — so
  * importing put a processor back on a review screen, editing and re-importing rows that are no
  * longer drafts at all. `draft_rows` is CLEARED on import, so the screen would have shown nothing to
  * review while offering to import it.
  *
- * ⚠️ THE STRIP SHOWS EVERY ROUND, INCLUDING DISCARDED ONES. The dashboard filters those out of "what
+ * THE STRIP SHOWS EVERY ROUND, INCLUDING DISCARDED ONES. The dashboard filters those out of "what
  * am I working on"; this is a different question — "what has happened to this file" — and a round
  * silently vanishing from the history reads as data loss.
  */
@@ -42,7 +42,7 @@ export function ImportedView({
   const conditions = useConditions(fileId);
   const attach = useAttachPdf(fileId);
 
-  // ⚠️ THE ID, NOT THE ROUND. This held the round OBJECT, captured from `rounds` at the moment it was
+  // THE ID, NOT THE ROUND. This held the round OBJECT, captured from `rounds` at the moment it was
   // opened — and on the one path S1-09 exists for, that moment is an attach's `onSuccess`, BEFORE
   // the invalidation refetches. So the sheet opened on the pre-attach round: chips without
   // `PDF upload`, "A paste has no letter…", every expiry "—", directly under a callout saying the
@@ -105,7 +105,7 @@ export function ImportedView({
         }
       />
 
-      {/* ⚠️ THE SENTENCE IS THE DESIGN'S, VERBATIM, AND IT IS THE WHOLE PROMISE OF STAGE 1. Nothing
+      {/* THE SENTENCE IS THE DESIGN'S, VERBATIM, AND IT IS THE WHOLE PROMISE OF STAGE 1. Nothing
           here is marked cleared or removed, and only the lender clears a condition — which is why
           the imported list has no status control of any kind (design rule 3, ADR-404). */}
       <p className="flex items-start gap-2 rounded-md border border-input bg-muted/40 p-2.5 text-xs text-muted-foreground">
@@ -118,7 +118,7 @@ export function ImportedView({
         // S1-08: a round pasted as "just some" leaves everything it did not mention alone, and the
         // screen says so rather than letting absence read as removal.
         //
-        // ⚠️ AN INFO CALLOUT, NOT A GREY LINE (S1-08 Must-match, LP-909 §5). This is the sentence
+        // AN INFO CALLOUT, NOT A GREY LINE (S1-08 Must-match, LP-909 §5). This is the sentence
         // that stops a reader concluding the lender withdrew everything the round omitted — the same
         // job as the callout eight lines above — and it was drawn as the faintest text on the screen.
         // Matching that sibling's markup rather than inventing a third treatment.

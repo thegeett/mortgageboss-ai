@@ -474,7 +474,7 @@ def _unidentified_note(snapshot: Snapshot) -> str:
     source was the borrower's driver's licence, sitting there untyped. ID-5 got this clause in bug-020;
     this is the same sentence for the consistency side.
 
-    ⚠️ THE MESSAGE ONLY, never `requested_documents`. That string is borrower-facing (its own comment
+    THE MESSAGE ONLY, never `requested_documents`. That string is borrower-facing (its own comment
     records that Phase 4 shows it verbatim) and deliberately names no document type — "identify the
     untyped files" is an instruction to the processor, and the borrower cannot act on it.
     """
@@ -612,7 +612,7 @@ async def evaluate_consistency_rule(
 
         # 4. The generic fail-closed gate over the gathered instances (unknown value → couldnt_check
         #    distinct; a below-floor confidence → needs_review; verdict_confidence = min).
-        # ⚠️ ``distrust_tag_ids`` is REQUIRED here: the map is keyed by document content_id (the gathered
+        # ``distrust_tag_ids`` is REQUIRED here: the map is keyed by document content_id (the gathered
         # instances are the SAME tag across many documents, so tag ids would collide), which meant the
         # gate's distrust check compared a document id against tag ids and never matched. Pass the tag
         # actually gathered — ID-3 gathers ``id.dob``, which IS on the distrust list.

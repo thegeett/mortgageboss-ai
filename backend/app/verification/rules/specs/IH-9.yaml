@@ -11,14 +11,14 @@
 # conclusion behind that same gate on `contract.loan_closing_date` and reproduced the defect. A conclusion that
 # needs no closing date must not be gated on one, so it gets its own rule with its own gate.
 #
-# ⚠️ COMPARED TO THE FILE DATE, not to closing. The tag resolves against the snapshot's own build date, so the
+# COMPARED TO THE FILE DATE, not to closing. The tag resolves against the snapshot's own build date, so the
 # question asked is "is this policy lapsed right now?" — answerable on any file, at any stage of processing.
 #
-# ⚠️ NO binder → COULDNT_CHECK, not not_applicable (the IH-3 D5 reasoning, unchanged): hazard insurance is
+# NO binder → COULDNT_CHECK, not not_applicable (the IH-3 D5 reasoning, unchanged): hazard insurance is
 # required on every mortgage, so a missing or unreadable binder is an honest gap, never scope-false. Binders that
 # DISAGREE on the expiration date also abstain — never a silently-picked date.
 #
-# ⚠️ NO threshold and NO AI. `ins.expiration_date` is parsed from the binder's typed core and the comparison is
+# NO threshold and NO AI. `ins.expiration_date` is parsed from the binder's typed core and the comparison is
 # an exact date test, so there is nothing to calibrate and nothing to sign off — the IH-3 / AS-8
 # no-ai-dependency activation path.
 #

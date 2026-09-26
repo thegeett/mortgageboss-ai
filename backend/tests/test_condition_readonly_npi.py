@@ -92,7 +92,7 @@ def test_the_condition_views_expose_no_npi_column(table: str) -> None:
 
 @pytest.mark.parametrize("table", sorted(REQUIRED_OUTPUTS))
 def test_the_condition_views_still_answer_something(table: str) -> None:
-    """⚠️ THE HALF THAT IS EASY TO LOSE. Excluding a column always passes the exclusion test.
+    """THE HALF THAT IS EASY TO LOSE. Excluding a column always passes the exclusion test.
 
     A view rebuilt later could drop every derived scalar, keep the NPI out, and satisfy every guard
     in `test_readonly_query.py` while making the view answer nothing at all. These are the outputs

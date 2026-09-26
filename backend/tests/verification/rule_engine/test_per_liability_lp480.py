@@ -12,7 +12,7 @@ rows); an unresolvable member surfaced as its OWN subject with a marker rather t
 yielding subjects with only the structural marker so the gate reports ``couldnt_check`` instead of the rule
 vanishing; and the drift guard.
 
-⚠️ The two sources NEVER co-occur anywhere in the repo (LP-480 Phase A), so every CROSS-SOURCE assertion here
+The two sources NEVER co-occur anywhere in the repo (LP-480 Phase A), so every CROSS-SOURCE assertion here
 is against a CONSTRUCTED fixture. The single-source tradeline assertions run on the real stored extractions.
 """
 
@@ -115,7 +115,7 @@ def test_unions_both_sources_and_marks_each_with_its_source() -> None:
 
 
 def test_the_same_debt_in_both_sources_stays_two_subjects() -> None:
-    """⚠️ The union DELIBERATELY double-lists a matched debt: CR-4's signal is the difference between the
+    """The union DELIBERATELY double-lists a matched debt: CR-4's signal is the difference between the
     two lists, so a summing rule must filter on ``liability.source`` (ADR-374), not sum every subject."""
     same = {"creditor_name": "WFBNA AUTO", "monthly_payment": "914", "balance": "25212"}
     subjects = enumerate_subjects(
@@ -213,7 +213,7 @@ def test_tradeline_subject_id_is_the_lp479_row_id() -> None:
 def test_a_tradeline_without_a_row_id_is_not_given_a_positional_one() -> None:
     """``stable_row_id`` off ⇒ no LP-479 id ⇒ a CONTENT-derived id, never one derived from position.
 
-    ⚠️ This assertion CHANGED in the LP-480 review. It originally required no subject at all — the
+    This assertion CHANGED in the LP-480 review. It originally required no subject at all — the
     "never positional" guarantee it exists for is preserved and asserted below, but the silent drop it
     also encoded contradicted the enumerator's own fail-closed contract ("never dropped, never merged"):
     it turned an unreadable tradeline into "nothing found" rather than ``couldnt_check``. See
@@ -282,7 +282,7 @@ def test_an_unregistered_key_raises() -> None:
 # LP-480 review fixes — the retire guard, the idless row, and the recorded limitations
 # --------------------------------------------------------------------------- #
 def test_a_tradeline_without_a_row_id_becomes_its_own_unresolved_subject() -> None:
-    """⚠️ Reported finding: it was ``continue``d away silently, so a CR rule would report "nothing
+    """Reported finding: it was ``continue``d away silently, so a CR rule would report "nothing
     found" instead of ``couldnt_check`` — a false negative, and (with the retire guard) a false close."""
     doc = DocumentEntry(
         content_id="cr1",
@@ -326,7 +326,7 @@ def test_two_idless_rows_with_identical_content_stay_two_subjects() -> None:
 
 
 def test_per_liability_is_document_derived_for_the_retire_guard() -> None:
-    """⚠️ Reported finding: absent from ``_DOCUMENT_DERIVED_ENUMERATIONS``, a degraded run would have
+    """Reported finding: absent from ``_DOCUMENT_DERIVED_ENUMERATIONS``, a degraded run would have
     retired every prior tradeline finding as "no longer applies" — the false-close that set prevents."""
     from app.services.verification_run import _DOCUMENT_DERIVED_ENUMERATIONS
 
@@ -346,7 +346,7 @@ def test_a_file_with_no_credit_report_is_not_degraded() -> None:
 
 
 def test_a_credit_report_that_contributed_no_rows_is_degraded() -> None:
-    """⚠️ THE MIXED-SOURCE HOLE the review found: the union is NON-EMPTY (MISMO supplied a subject), so
+    """THE MIXED-SOURCE HOLE the review found: the union is NON-EMPTY (MISMO supplied a subject), so
     the plain "zero subjects" heuristic passes while the whole credit-report half is missing."""
     empty_report = DocumentEntry(
         content_id="cr1", document_type="credit_report", belongs_to=None, fields={}, lists={}
@@ -366,7 +366,7 @@ def test_a_healthy_credit_report_is_not_degraded() -> None:
 
 
 def test_the_mismo_subject_id_moves_when_a_balance_moves() -> None:
-    """⚠️ RECORDED CONSEQUENCE, not desired behaviour (see ``_per_liability``'s docstring): the id hashes
+    """RECORDED CONSEQUENCE, not desired behaviour (see ``_per_liability``'s docstring): the id hashes
     mutable amounts, so a re-imported 1003 with a moved balance mints a NEW subject — LP-322 retires the
     prior finding and duplicates it, losing any processor resolution. Pinned so the day someone changes
     the identity fields, this test tells them what it fixes."""
@@ -376,7 +376,7 @@ def test_the_mismo_subject_id_moves_when_a_balance_moves() -> None:
 
 
 def test_two_credit_reports_double_list_the_same_debt() -> None:
-    """⚠️ RECORDED LIMITATION: no dedup WITHIN a source. ``liability.source`` does not protect a summing
+    """RECORDED LIMITATION: no dedup WITHIN a source. ``liability.source`` does not protect a summing
     rule here — both subjects are ``credit_report_reported``."""
     row = {"creditor_name": "PENNYMAC", "balance": "582417"}
     subjects = enumerate_subjects(

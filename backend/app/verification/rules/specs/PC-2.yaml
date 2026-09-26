@@ -7,13 +7,13 @@
 # self-source vacuity trap: a processor can enter a 1003 price that differs from the contract, and this catches
 # it. Both tags materialize to 365000 on LF-6T3N post-LP-414 → PC-2 SATISFIES the clean anchor.
 #
-# ⚠️ EXACT compare, NO threshold (LP-407-3 D3): the two prices must be equal (Decimal equality, so a trailing-
+# EXACT compare, NO threshold (LP-407-3 D3): the two prices must be equal (Decimal equality, so a trailing-
 # zero rendering 365000 vs 365000.00 is NOT a mismatch). rule_kinds.csv classifies this exact / no-signoff
 # (threshold_needs_signoff=false), so PC-2 ACTIVATES with no Priya bar (the AS-8 no-AI-dependency path), unlike
 # DT-4 (a tolerance rule) which would be held. PRIYA REFINEMENT (optional, not blocking): should a small
 # rounding tolerance ever be allowed (e.g. ignore a sub-dollar difference)? Today: exact, per the classification.
 #
-# ⚠️ SCOPE (mirrors PC-7 D4): PC-2 is LOAN-WIDE, not applicability-scoped. A REFINANCE (no purchase agreement →
+# SCOPE (mirrors PC-7 D4): PC-2 is LOAN-WIDE, not applicability-scoped. A REFINANCE (no purchase agreement →
 # no contract.sales_price → contract.loan_sales_price == "unknown") resolves to COULDNT_CHECK, not
 # not_applicable — there is no loan.purpose tag to scope it purchase-only (the same reported gap PC-7 carries).
 #

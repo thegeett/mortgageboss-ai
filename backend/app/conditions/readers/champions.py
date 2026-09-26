@@ -1,6 +1,6 @@
 """The Champions certificate reader (LP-906 section 3, spec §6 rules 1-5).
 
-⚠️ THE HARD ONE, AND THE REASON LINES CARRY POSITIONS AT ALL. Champions prints each condition's
+THE HARD ONE, AND THE REASON LINES CARRY POSITIONS AT ALL. Champions prints each condition's
 number VERTICALLY CENTRED on its row, so the number lands on the row's first line, a middle line, or
 a line of its own depending only on how many lines the text wrapped to:
 
@@ -17,7 +17,7 @@ each row's bottom is known (the segment's last line, or the line above the row b
 row's top follows. A reader working top-down cannot do this — it would not know where the first row
 ends until it knew where the second began.
 
-⚠️ THIS READER NEVER TOUCHES `Line.indent`. It is None for PDF input, which is the only input that
+THIS READER NEVER TOUCHES `Line.indent`. It is None for PDF input, which is the only input that
 carries the geometry this algorithm needs. Everything here keys on `x0` in points and on `y` order,
 both of which are real on a PDF and on text alike.
 """
@@ -58,7 +58,7 @@ _STAGE: dict[str, BucketKind] = {
 #: can appear inside a condition.
 _FOOTER = re.compile(r"NMLS #|\d{1,2}:\d{2}:\d{2}\s*[AP]M")
 
-#: ⚠️ THE LOAN LINE IS MATCHED AS `Date: … Loan #:` TOGETHER, NEVER ON `Date:` ALONE. Rule 2's
+#: THE LOAN LINE IS MATCHED AS `Date: … Loan #:` TOGETHER, NEVER ON `Date:` ALONE. Rule 2's
 #: wrapped label puts a bare `Date: 12/15/2026` in the HEADER — the continuation of
 #: `Title Commitment Exp` — and a furniture rule keyed on `Date:` would silently eat it, losing an
 #: expiry date with nothing to show for it.
@@ -79,7 +79,7 @@ _EXPIRY_LABELS: dict[str, str] = {
 #: Rule 2's contact blocks, each introduced by its own title line.
 _CONTACT_TITLES: tuple[str, ...] = ("Account Executive", "Underwriter", "Account Manager")
 
-#: ⚠️ ANCHORED ON THE KNOWN LABELS, BECAUSE PDF TEXT HAS NO DOUBLE SPACES. `Line.text` for a
+#: ANCHORED ON THE KNOWN LABELS, BECAUSE PDF TEXT HAS NO DOUBLE SPACES. `Line.text` for a
 #: PDF-built line is `" ".join(tokens)`, so every run of whitespace is exactly one space — and a
 #: pair regex that ended a value at `\s{2,}` (the shape the UWM header uses on text input) never
 #: fires. Measured before this fix: `Credit Exp Date` came back as
@@ -135,7 +135,7 @@ def _header(lines: Sequence[Line]) -> tuple[dict[str, object], dict[str, date | 
     team: list[dict[str, object]] = []
     facts: dict[str, str] = {}
 
-    # ⚠️ RULE 2'S WRAPPED LABEL, JOINED BEFORE ANYTHING IS PARSED. The spec names the case exactly:
+    # RULE 2'S WRAPPED LABEL, JOINED BEFORE ANYTHING IS PARSED. The spec names the case exactly:
     # `Title Commitment Exp` ends one line and `Date:` begins the next. Joining first means the
     # scan below sees one label it knows, rather than a line with no label and a line whose label
     # (`Date`) is indistinguishable from the furniture header's `Date: … Loan #:`.
@@ -220,7 +220,7 @@ def _segments(lines: Sequence[Line], repeated: frozenset[str]) -> tuple[list[_Se
 def _text_column(lines: Sequence[Line]) -> float:
     """Where body text begins, measured across the WHOLE sheet rather than within one segment.
 
-    ⚠️ MEASURING THIS PER SEGMENT WAS A REAL DEFECT, and it deleted two conditions. A row whose text
+    MEASURING THIS PER SEGMENT WAS A REAL DEFECT, and it deleted two conditions. A row whose text
     wraps to a single line has its number centred on that line's own baseline, so the two merge and
     the line's first token IS the number. In a section holding exactly one such row — §7.4's `133`
     and `286` — the segment's median first-token position was therefore the number's own column, the
@@ -289,7 +289,7 @@ def read_champions(lines: Sequence[Line]) -> ParsedSheet:
     first_page = [line for line in lines if line.page == 1 and not line.is_blank]
     repeated = frozenset(line.text.strip() for line in first_page[:2])
 
-    # ⚠️ WHERE EACH LINE SITS IN THE INPUT, BECAUSE `source_line_numbers` MEANS INDICES AND THIS
+    # WHERE EACH LINE SITS IN THE INPUT, BECAUSE `source_line_numbers` MEANS INDICES AND THIS
     # READER USED TO PUT SOMETHING ELSE THERE. It stored `int(line.y)` — a coordinate in POINTS —
     # while `uwm.py` and `generic.py` store the line's position in the sequence. Three problems, and
     # the field's own docstring ("which input lines produced this row") rules out all three: the
@@ -322,7 +322,7 @@ def read_champions(lines: Sequence[Line]) -> ParsedSheet:
             )
 
         if leftover:
-            # ⚠️ LINES ABOVE THE FIRST ROW OF A SEGMENT THAT DID NOT OPEN WITH A HEADING are the
+            # LINES ABOVE THE FIRST ROW OF A SEGMENT THAT DID NOT OPEN WITH A HEADING are the
             # tail of the PREVIOUS page's last row — a condition split across the page break.
             if not segment.starts_with_heading and sheet.rows:
                 previous = sheet.rows[-1]
@@ -330,7 +330,7 @@ def read_champions(lines: Sequence[Line]) -> ParsedSheet:
                     [previous.verbatim_text, *(line.text.strip() for line in leftover)]
                 )
                 previous.crossed_page = True
-                # ⚠️ THE TAIL'S OWN INDICES, NOT `range(len(leftover))`. That counted the leftover
+                # THE TAIL'S OWN INDICES, NOT `range(len(leftover))`. That counted the leftover
                 # lines from zero and appended those ordinals onto a list already holding y-values —
                 # so ONE row carried two different scales at once, and the tail pointed at the first
                 # lines of the document instead of the ones it came from.

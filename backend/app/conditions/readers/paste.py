@@ -1,6 +1,6 @@
 """Reading a paste (LP-907 section 1, spec §LP-907).
 
-⚠️ `detect_format` ALONE IS WRONG IN BOTH DIRECTIONS ON PASTED TEXT, and each direction was measured
+`detect_format` ALONE IS WRONG IN BOTH DIRECTIONS ON PASTED TEXT, and each direction was measured
 rather than reasoned about. It keys on the first content line, which is the one thing a paste usually
 does not have — and when it does match, it can route to a reader the input cannot support.
 
@@ -91,7 +91,7 @@ def read_pasted_text(raw: str) -> tuple[ConditionSheetFormat, str, ParsedSheet]:
     sheet.sheet_format = ConditionSheetFormat.PASTED_TEXT
 
     if detected is ConditionSheetFormat.CHAMPIONS_CERTIFICATE:
-        # ⚠️ OVERRIDING generic's own verdict, which is the point. It returned `needs_ai=False` for a
+        # OVERRIDING generic's own verdict, which is the point. It returned `needs_ai=False` for a
         # 28-condition certificate it had split into four wrong rows; leaving that alone would
         # present the guess as a rule-read result and never ask LP-908 to do the job properly.
         sheet.needs_ai = True

@@ -1,6 +1,6 @@
 """Reading a stored sheet again — `POST /condition-rounds/{round_id}/reparse` (LP-909 §3).
 
-⚠️ THE ROUTE EXISTS BECAUSE TWO SCREENS ALREADY PROMISED IT. `RoundFailed` offers "Try again" and
+THE ROUTE EXISTS BECAUSE TWO SCREENS ALREADY PROMISED IT. `RoundFailed` offers "Try again" and
 `RoundReading`'s stranded copy says "you can try reading it again" — and until this endpoint there
 was no way to re-read an existing round at all, so both took `onRetry` optionally and the dashboard
 passed none. A paragraph offering a route with no control is a dead button wearing prose.
@@ -71,7 +71,7 @@ async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
 def enqueued(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
     """Capture the parse enqueue instead of reaching for a broker.
 
-    ⚠️ AUTOUSE, BECAUSE EVERY SUCCESSFUL REPARSE ENQUEUES. A test that forgot this would make a real
+    AUTOUSE, BECAUSE EVERY SUCCESSFUL REPARSE ENQUEUES. A test that forgot this would make a real
     `.delay()` call against whatever broker the environment points at — which either hangs or fails
     for a reason that has nothing to do with the assertion being made.
     """
@@ -146,7 +146,7 @@ async def _events(db: AsyncSession, round_id: object) -> list[ConditionEvent]:
 async def _age(db: AsyncSession, round_: ConditionRound, *, seconds: float) -> None:
     """Backdate the row so the stranded window has passed.
 
-    ⚠️ SETTING `updated_at` EXPLICITLY BEATS `onupdate`, which is what makes this work: SQLAlchemy
+    SETTING `updated_at` EXPLICITLY BEATS `onupdate`, which is what makes this work: SQLAlchemy
     applies `onupdate` only when no value is otherwise supplied. The same property is what lets the
     service write the timestamp deliberately.
     """
@@ -170,7 +170,7 @@ async def test_a_failed_round_is_read_again(
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["status"] == ConditionRoundStatus.PARSING.value
-    # ⚠️ THE FAILURE IS CLEARED, NOT LEFT BEHIND. A stale `failure_kind` would render the failure
+    # THE FAILURE IS CLEARED, NOT LEFT BEHIND. A stale `failure_kind` would render the failure
     # banner over a round that is mid-parse — the screen contradicting the status beside it.
     assert body["parse_report"]["failure_kind"] is None
     assert body["parse_report"]["failure_detail"] is None
@@ -180,7 +180,7 @@ async def test_a_failed_round_is_read_again(
 async def test_the_reparse_is_recorded_as_its_own_event(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ `ROUND_REPARSE_REQUESTED`, NOT `ROUND_RECEIVED` REUSED — and the distinction is what the
+    """`ROUND_REPARSE_REQUESTED`, NOT `ROUND_RECEIVED` REUSED — and the distinction is what the
     enum member and its migration were spent on. Screen S1-09 renders this history, and "Condition
     sheet received" for an event where nothing was received is the class of statement this stage
     keeps deleting from comments and screens."""
@@ -220,7 +220,7 @@ async def test_a_stranded_round_can_be_read_again(
 async def test_a_round_still_being_read_is_refused(
     client: AsyncClient, db_session: AsyncSession, enqueued: list[str]
 ) -> None:
-    """⚠️ THE CLIENT USED TO CALL THIS DEAD. `STRANDED_AFTER_MS` was 5 minutes — exactly
+    """THE CLIENT USED TO CALL THIS DEAD. `STRANDED_AFTER_MS` was 5 minutes — exactly
     `PARSE_SOFT_LIMIT_SECONDS` — so the UI offered "Try again" at the instant Celery raises
     `SoftTimeLimitExceeded`, with 60 seconds of hard-limit runway left in which the task could still
     finish or settle `PARSE_FAILED` itself with a real reason. Reparsing then would have raced a
@@ -240,7 +240,7 @@ async def test_a_round_still_being_read_is_refused(
 async def test_a_second_press_inside_the_window_is_refused(
     client: AsyncClient, db_session: AsyncSession, enqueued: list[str]
 ) -> None:
-    """⚠️ WHAT MAKES THIS IDEMPOTENT IN THE SENSE THAT MATTERS: pressing twice cannot produce two
+    """WHAT MAKES THIS IDEMPOTENT IN THE SENSE THAT MATTERS: pressing twice cannot produce two
     readers. The first reparse bumps `updated_at`, so the second lands inside the window and is
     refused WITH A REASON.
 
@@ -264,7 +264,7 @@ async def test_a_second_press_inside_the_window_is_refused(
 async def test_the_reparse_moves_updated_at_even_when_nothing_else_changes(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ THE WRITE THE WHOLE DEBOUNCE RESTS ON, AND THE ONE MOST LIKELY NOT TO HAPPEN (LP-909
+    """THE WRITE THE WHOLE DEBOUNCE RESTS ON, AND THE ONE MOST LIKELY NOT TO HAPPEN (LP-909
     review).
 
     `TimestampMixin.updated_at` has `onupdate=utcnow`, but that is Python-side and fires only when
@@ -303,7 +303,7 @@ async def test_the_reparse_moves_updated_at_even_when_nothing_else_changes(
 async def test_a_pasted_round_is_refused_because_there_is_no_pdf(
     client: AsyncClient, db_session: AsyncSession, enqueued: list[str]
 ) -> None:
-    """⚠️ REFUSED BY NAME RATHER THAN LET THROUGH. `parse_round` reads the sheet from STORAGE, and a
+    """REFUSED BY NAME RATHER THAN LET THROUGH. `parse_round` reads the sheet from STORAGE, and a
     pasted round has no stored bytes — `raw_text` is its source. Letting it through would settle
     `bytes_unavailable` and blame storage for something that was never there, when the true answer
     is "paste them again, or upload the lender's PDF"."""
@@ -328,7 +328,7 @@ async def test_a_pasted_round_is_refused_because_there_is_no_pdf(
 async def test_a_draft_is_refused_and_told_what_to_do_instead(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ `DRAFT` IS DELIBERATELY NOT REPARSABLE. Re-reading in place would silently replace rows a
+    """`DRAFT` IS DELIBERATELY NOT REPARSABLE. Re-reading in place would silently replace rows a
     processor may already have edited — `update_draft` refuses a stale write for exactly that
     reason, and a reparse that ignored it would be the same overwrite through a different door. The
     honest route is discard and upload again: a new round, a new number, the old one still visible.
@@ -369,7 +369,7 @@ async def test_a_discarded_round_is_refused(client: AsyncClient, db_session: Asy
 async def test_a_broker_that_refuses_the_reparse_fails_the_round_rather_than_stranding_it(
     client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """⚠️ THE WORST VERSION OF THE STRANDED ROUND, WHICH IS WHY THIS ENQUEUE IS GUARDED WHERE THE
+    """THE WORST VERSION OF THE STRANDED ROUND, WHICH IS WHY THIS ENQUEUE IS GUARDED WHERE THE
     UPLOAD DOOR'S IS NOT. The round is committed back to `PARSING` BEFORE the enqueue, so a broker
     that is down strands the round the processor just asked to rescue — they pressed "Try again" and
     watched it hang a second time.
@@ -393,7 +393,7 @@ async def test_a_broker_that_refuses_the_reparse_fails_the_round_rather_than_str
     body = response.json()
     assert body["status"] == ConditionRoundStatus.PARSE_FAILED.value
     assert body["parse_report"]["failure_kind"] == "enqueue_failed"
-    # ⚠️ THE SENTENCE MUST NOT BLAME THE LENDER'S PDF, which was read fine or never read at all.
+    # THE SENTENCE MUST NOT BLAME THE LENDER'S PDF, which was read fine or never read at all.
     assert "could not be queued" in body["parse_report"]["failure_detail"]
     assert "broker" not in body["parse_report"]["failure_detail"].lower()
 

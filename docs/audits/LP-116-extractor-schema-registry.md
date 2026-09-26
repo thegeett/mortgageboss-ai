@@ -168,17 +168,17 @@ cross_source_deterministic.py:181-262).
 |---|---|---|---|
 | `ssn_consistency` (`ssns`) | ✅ w2.employee_ssn, 1099.recipient_tin, tax_return.taxpayer_ssn_masked | ✅ Borrower.ssn | **FACT-BUILDER** |
 | `dob_consistency` (`dobs`) | ✅ drivers_license.date_of_birth | ✅ Borrower.date_of_birth | **FACT-BUILDER** |
-| `current_address_consistency` (`current_addresses`) | ✅ drivers_license.address (+ property_address on many docs) | ⚠️ parsed-not-persisted (Borrower address, §3) | **FACT-BUILDER** (doc side) **+ stated persistence gap** |
+| `current_address_consistency` (`current_addresses`) | ✅ drivers_license.address (+ property_address on many docs) | parsed-not-persisted (Borrower address, §3) | **FACT-BUILDER** (doc side) **+ stated persistence gap** |
 | `price_vs_contract` (`stated_/contract_purchase_price`) | ✅ purchase_agreement.sales_price | ✅ Property.purchase_price | **FACT-BUILDER** (both sides exist — fastest win) |
 | `subject_address_consistency` (`subject_addresses_across_docs`) | ✅ property_address on purchase_agreement / homeowners_insurance / mortgage_statement / property_tax_bill / hoa_statement | ✅ Property.address | **FACT-BUILDER** |
 | `income_variance` (`documented_income_monthly`) | ✅-ish pay_stub.ytd_gross/gross_pay, voe.ytd_income/current_income_amount | ✅ StatedIncomeItem.monthly_amount | **FACT-BUILDER + light computation** (YTD/period → monthly) |
 | `large_deposit_unsourced` (`unsourced_large_deposits`) | ✅-raw bank_statement.transactions[] | — | **FACT-BUILDER + logic** (scan transactions) |
 | `stated_asset_missing_doc` (`stated_assets_missing_doc`) | ✅ asset docs exist (bank/investment/retirement) | ✅ StatedAsset | **FACT-BUILDER + matching logic** |
-| `employer_equals_subject` (`employer_addresses`) | ⚠️ employer **address** is catch-all, not typed | n/a (subject persisted) | **EXTRACTOR** (promote employer address to typed core on pay_stub/w2/voe) |
+| `employer_equals_subject` (`employer_addresses`) | employer **address** is catch-all, not typed | n/a (subject persisted) | **EXTRACTOR** (promote employer address to typed core on pay_stub/w2/voe) |
 | `undisclosed_debt` (`credit_report_liabilities`) | ❌ credit_report has no extractor | ✅ StatedLiability | **EXTRACTOR** (blocker: credit report) |
 | `stated_not_on_report` (`credit_report_liabilities`) | ❌ same | ✅ StatedLiability | **EXTRACTOR** (blocker: credit report) |
 | `loan_vs_documented` (`documented_loan_amount`) | ❌ note/closing-disclosure not extracted | ✅ LoanFile.base_loan_amount | **EXTRACTOR** (blocker: CD/note) |
-| `occupancy_vs_evidence` (`stated_/occupancy_evidence`) | ⚠️ stated ✅ (Property.occupancy_type); evidence ❌ (needs appraisal/lease/utility) | ✅ (stated) | **EXTRACTOR** (evidence side — appraisal/lease) |
+| `occupancy_vs_evidence` (`stated_/occupancy_evidence`) | stated ✅ (Property.occupancy_type); evidence ❌ (needs appraisal/lease/utility) | ✅ (stated) | **EXTRACTOR** (evidence side — appraisal/lease) |
 
 **Key takeaway for Epic C:** of the 13 fact-starved rules, **~8 are fact-builder gaps** (the
 data already flows or is a small transform away — `ssn`, `dob`, `current_address`,
@@ -212,7 +212,7 @@ means the required document's schema produces the needed field today.
 | `xsrc.liability.stated_not_on_report` | **credit_report** | ❌ | **BLOCKED (build credit report)** |
 | `xsrc.terms.loan_vs_documented` | **closing_disclosure / note** | ❌ | **BLOCKED (build CD/note)** |
 | `xsrc.property.occupancy_vs_evidence` | **appraisal / lease** (evidence) | ❌ | **BLOCKED (build appraisal)** |
-| `xsrc.address.employer_equals_subject` | pay_stub/w2 employer **address** | ⚠️ catch-all only | **BLOCKED (extend: promote employer address)** |
+| `xsrc.address.employer_equals_subject` | pay_stub/w2 employer **address** | catch-all only | **BLOCKED (extend: promote employer address)** |
 
 Insurance/DTI-adjacent planned rules (phase3_5_1.md:229-233): `MI-1` PMI / `MI-4` FHA MIP are
 calculator-surfaced (LP-115 §7), `IH-1`/`IH-2`/`DT-5` need the insurance schema — **premium +

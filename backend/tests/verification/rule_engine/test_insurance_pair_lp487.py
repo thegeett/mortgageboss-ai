@@ -1,17 +1,17 @@
 """LP-487 — IH-2 (mortgagee clause) and IH-7 (condo master policy).
 
-⚠️ EVERY VERDICT ASSERTION HERE RUNS THROUGH A REAL RULE EVALUATION — materialize_tags() then
+EVERY VERDICT ASSERTION HERE RUNS THROUGH A REAL RULE EVALUATION — materialize_tags() then
 evaluate_rules() — never by calling a recipe or the gate directly. That is the LP-487 standing rule, and
 it exists because LP-508 shipped a guard whose own test called ``evaluate_gate`` with tag ids: the
 mechanism worked, the WIRING did not, and the guard reached 1 of the 5 rules it claimed to protect. A
 green test over an unexercised path is ADR-286/289 at the test layer. The recipe-level tests below are
 additions to the end-to-end ones, never substitutes.
 
-⚠️ IH-2 CARRIES A CATALOG EDIT: rule_kinds.csv moved it from `ai_fuzzy_match` to `deterministic_only`
+IH-2 CARRIES A CATALOG EDIT: rule_kinds.csv moved it from `ai_fuzzy_match` to `deterministic_only`
 (135 rows unchanged). The kind predates typed extraction — the extractor already reads the clause into
 `mortgagee_name` (14/15 bench binders), so the perception step is spent and only a string compare remains.
 
-⚠️ IH-2 CAN NEVER FIRE, BY DESIGN. The corpus's one binder+CD pairing reads "Sistar Mortgage Company"
+IH-2 CAN NEVER FIRE, BY DESIGN. The corpus's one binder+CD pairing reads "Sistar Mortgage Company"
 against "United Wholesale Mortgage": in correspondent deals the CD names the creditor and the clause
 names the investor who will hold the loan, so a firing rule would be wrong on a CORRECT file. A mismatch
 is needs_review — "confirm" — and a test below pins that no outcome in the spec can produce `fired`.
@@ -91,7 +91,7 @@ async def test_ih2_clause_naming_the_lender_is_satisfied() -> None:
 
 
 async def test_ih2_mismatch_is_needs_review_never_fired() -> None:
-    """⚠️ THE DECISION THIS RULE TURNS ON. Sistar (the CD's creditor) against United Wholesale Mortgage
+    """THE DECISION THIS RULE TURNS ON. Sistar (the CD's creditor) against United Wholesale Mortgage
     (the clause's mortgagee) is the correspondent case — BOTH may be correct. Firing here would be wrong
     on a correct file, repeatedly, and would train a processor to dismiss IH-2."""
     verdict = await _one(build_ih2_clause_mismatch_snapshot, "IH-2")
@@ -225,7 +225,7 @@ def test_ih2_vocabulary_matches_the_spec() -> None:
     values = load_rule_spec("IH-2").reference_values.values
     assert tuple(values["clause_truncate_markers"].split("|")) == _CLAUSE_TRUNCATE_MARKERS
     assert set(values["corporate_suffix_tokens"].split("|")) == _CORPORATE_SUFFIX_TOKENS
-    # ⚠️ Pinned against the CONSTANT, not the literal "2" (reported finding): comparing the spec's literal
+    # Pinned against the CONSTANT, not the literal "2" (reported finding): comparing the spec's literal
     # to a literal proved nothing about the code, so a change to `>= 3` kept this green while the spec
     # became a lie. This now fails if the code and the spec diverge, which is what the spec claims.
     assert values["min_prefix_tokens_for_match"] == str(_IH2_MIN_PREFIX_TOKENS)
@@ -235,7 +235,7 @@ def test_ih2_vocabulary_matches_the_spec() -> None:
 # IH-7 — end to end
 # --------------------------------------------------------------------------- #
 async def test_ih7_adequate_master_policy_is_satisfied() -> None:
-    """Replacement-cost basis + $2M liability. ⚠️ The basis string is the corpus's longest REAL form —
+    """Replacement-cost basis + $2M liability. The basis string is the corpus's longest REAL form —
     "REPLACEMENT COST AT AGREED VALUE WITH NO CO-INSURANCE" — which an exact-match vocabulary would
     abstain on."""
     assert await _one(build_ih7_adequate_snapshot, "IH-7") is Verdict.SATISFIED
@@ -258,7 +258,7 @@ async def test_ih7_is_not_applicable_off_condo() -> None:
 
 
 async def test_ih7_unrecognised_basis_couldnt_checks_never_fires() -> None:
-    """⚠️ FAIL CLOSED IN BOTH DIRECTIONS. An unrecognised coverage basis is not adequacy AND not
+    """FAIL CLOSED IN BOTH DIRECTIONS. An unrecognised coverage basis is not adequacy AND not
     inadequacy — firing on unfamiliar carrier wording would be as wrong as passing on it."""
     verdict = await _one(build_ih7_unreadable_basis_snapshot, "IH-7")
     assert verdict is Verdict.COULDNT_CHECK
@@ -266,7 +266,7 @@ async def test_ih7_unrecognised_basis_couldnt_checks_never_fires() -> None:
 
 
 async def test_ih7_condo_scoping_is_an_applicability_predicate() -> None:
-    """⚠️ WHY THIS MATTERS: the applicability layer resolves an ABSENT predicate tag to couldnt_check and
+    """WHY THIS MATTERS: the applicability layer resolves an ABSENT predicate tag to couldnt_check and
     only a DEFINITELY-FALSE one to not_applicable. Had the scoping been an outcome, a file that simply
     does not state its property type would have been skipped silently instead of surfaced."""
     applicability = load_rule_spec("IH-7").deterministic.applicability
@@ -303,7 +303,7 @@ def test_actual_cash_value_is_recognised_as_inadequate() -> None:
 
 
 def test_a_mixed_basis_abstains_whichever_phrase_leads() -> None:
-    """⚠️ ADR-376's protection, kept intact through the widening. A policy stating two bases for two parts
+    """ADR-376's protection, kept intact through the widening. A policy stating two bases for two parts
     of the building has neither as ITS basis; calling it actual_cash_value would fire IH-7 on a policy
     that may well be adequate for the structure."""
     assert _master_policy_basis("ACV roof, replacement cost dwelling") is None
@@ -349,7 +349,7 @@ def test_both_rules_are_live_and_earned_it_through_the_gate() -> None:
 
 
 def test_neither_rule_reads_a_distrusted_field() -> None:
-    """⚠️ THE OVERLAP CHECK, run through the SPECS rather than by eye. IH-1's basis field is distrusted
+    """THE OVERLAP CHECK, run through the SPECS rather than by eye. IH-1's basis field is distrusted
     (LP-508) and lives on the same document type as IH-2's mortgagee — so "it's a homeowners field" is
     not a safe way to reason about this. If a future distrust entry ever covers one of these tags, the
     rule silently starts degrading to needs_review and this test says so."""
@@ -397,7 +397,7 @@ def _condo_doc(content_id: str) -> DocumentEntry:
 
 
 def test_two_closing_disclosures_spelling_the_lender_differently_still_resolve() -> None:
-    """⚠️ THE REPORTED FN. Nearly every file carries an initial AND a final CD. Dedup keyed on the RAW
+    """THE REPORTED FN. Nearly every file carries an initial AND a final CD. Dedup keyed on the RAW
     string, so a comma's difference read as two creditors and IH-2 abstained; the token normaliser that
     collapses them lives in the same module."""
     snap = _snap(
@@ -422,7 +422,7 @@ def test_two_genuinely_different_creditors_still_abstain() -> None:
 
 
 def test_a_superseded_master_policy_does_not_condemn_the_current_one() -> None:
-    """⚠️ THE REPORTED FP. Limits were pooled across ALL master-policy documents and judged by min(), so a
+    """THE REPORTED FP. Limits were pooled across ALL master-policy documents and judged by min(), so a
     live $2,000,000 certificate beside a superseded $500,000 one FIRED present_inadequate."""
     snap = _snap(
         [_condo_doc("m1"), _condo_doc("m2")],
@@ -466,7 +466,7 @@ def test_mixed_bases_across_documents_abstain_rather_than_asserting_acv() -> Non
 
 
 def test_a_present_policy_with_no_readable_number_abstains_never_absent() -> None:
-    """⚠️ THE REPORTED FALSE GAP. Presence keyed on condo.master_policy_number alone, so a certificate ON
+    """THE REPORTED FALSE GAP. Presence keyed on condo.master_policy_number alone, so a certificate ON
     THE FILE whose number failed to extract reported absent and FIRED — telling a processor to request a
     document already in front of them, against this recipe's own abstain-rather-than-infer discipline."""
     snap = _snap([_condo_doc("m1")], loan={"property.type": _tag("condo")})

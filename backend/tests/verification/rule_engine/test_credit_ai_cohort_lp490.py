@@ -1,11 +1,11 @@
-"""LP-490 — CR-5 · CR-6 · CR-8 · CR-10. ⚠️ ALL FOUR BUILD INERT.
+"""LP-490 — CR-5 · CR-6 · CR-8 · CR-10. ALL FOUR BUILD INERT.
 
-⚠️ INERT BY DESIGN. Every rule here reads at least one AI tag with no measured accuracy, so each bar is
+INERT BY DESIGN. Every rule here reads at least one AI tag with no measured accuracy, so each bar is
 `not-calibratable-yet`, for which `is_eligible()` returns False (LP-484). `ACTIVE_RULE_IDS` stays 47. A
 test pins that for the whole cohort, so a later ticket cannot activate one by setting `validated: true`
 without scoring the tag underneath it.
 
-⚠️ THE CORPUS REALITY, stated once and true of every assertion below. THREE credit reports exist. ONE
+THE CORPUS REALITY, stated once and true of every assertion below. THREE credit reports exist. ONE
 inquiry row across all of them (CR-5). ZERO public-record rows and no derogatory events (CR-6). ZERO
 collection or charge-off codes (CR-10). `payment_history_24mo` runs 0-84 chars across 17 formats and
 `worst_delinquency` fills 2/35 in two incompatible formats (CR-8). These rules are built against the
@@ -23,7 +23,7 @@ from app.verification.rules.distrust import distrusted_tag_ids
 from app.verification.rules.specs import load_rule_spec
 from app.verification.tag_materialization.declarations import load_ai_groups, load_declarations
 
-# ⚠️ UPDATED AT LP-490a: CR-1, CR-4 and CR-8 went LIVE on `ratify-pending` (a self-consistency rate plus
+# UPDATED AT LP-490a: CR-1, CR-4 and CR-8 went LIVE on `ratify-pending` (a self-consistency rate plus
 # ratification, ADR-378). The three below stay INERT because their triggers have NO instances in the
 # corpus — one inquiry row, zero derogatory events, zero collection codes — so there was nothing to
 # derive twice, and a rate over zero cases is not a number.
@@ -32,7 +32,7 @@ _ACTIVATED_AT_490A = ("CR-1", "CR-4", "CR-8", "CR-6", "CR-10")
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ THE COHORT IS INERT — the first thing this ticket must prove
+# THE COHORT IS INERT — the first thing this ticket must prove
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("rule_id", _COHORT)
 def test_every_rule_in_the_cohort_is_inert(rule_id: str) -> None:
@@ -46,7 +46,7 @@ def test_every_rule_in_the_cohort_is_inert(rule_id: str) -> None:
 
 
 def test_the_still_inert_rules_are_not_live() -> None:
-    """⚠️ Zero-case rules stay held. LP-490a activated three with real derivations; these three have no
+    """Zero-case rules stay held. LP-490a activated three with real derivations; these three have no
     instances of their trigger anywhere in the corpus."""
     assert not set(_COHORT) & set(ACTIVE_RULE_IDS)
     assert set(_ACTIVATED_AT_490A) <= set(ACTIVE_RULE_IDS)
@@ -65,7 +65,7 @@ def test_every_bar_records_what_calibration_would_require(rule_id: str) -> None:
 # CR-6 — the seasoning matrix
 # --------------------------------------------------------------------------- #
 def test_cr6_never_returns_a_failure() -> None:
-    """⚠️ PRIYA'S RULING. Extenuating-circumstance exceptions exist, so an unseasoned event is
+    """PRIYA'S RULING. Extenuating-circumstance exceptions exist, so an unseasoned event is
     needs_review — "an exception needs underwriting review" — never `fired`. If someone adds a fired
     outcome, this fails."""
     outcomes = load_rule_spec("CR-6").deterministic.outcomes
@@ -73,7 +73,7 @@ def test_cr6_never_returns_a_failure() -> None:
 
 
 def test_cr6_matrix_matches_priyas_ruling() -> None:
-    """The waiting periods, as domain rulings (tier P). ⚠️ Bankruptcy is 48 months, not 24: the
+    """The waiting periods, as domain rulings (tier P). Bankruptcy is 48 months, not 24: the
     Chapter 13 discharged/dismissed split is NOT expressible — liab.derogatory_type has one "bankruptcy"
     value — so the CONSERVATIVE period is applied and the gap is logged for Priya. Applying 24 would
     clear a Chapter 7 two years early."""
@@ -99,7 +99,7 @@ def test_cr6_seasoned_rows_precede_the_unseasoned_rows() -> None:
 
 
 def test_cr6_reads_the_events_own_date_not_the_report_date() -> None:
-    """⚠️ PRIYA WAS EXPLICIT. Seasoning from the credit report's date would let a four-year waiting
+    """PRIYA WAS EXPLICIT. Seasoning from the credit report's date would let a four-year waiting
     period "complete" the moment someone re-pulled credit. The rule gates on the derived elapsed-months
     tag, whose recipe reads liab.derogatory_date and abstains when it is absent — credit.report_date is
     nowhere in the chain."""
@@ -113,7 +113,7 @@ def test_cr6_reads_the_events_own_date_not_the_report_date() -> None:
 # CR-8 — the confidence gate
 # --------------------------------------------------------------------------- #
 def test_cr8_gates_on_history_confidence_before_interpreting() -> None:
-    """⚠️ PRIYA SPECIFIED THIS SHAPE. structured_history_confident must be load-bearing, and the prompt
+    """PRIYA SPECIFIED THIS SHAPE. structured_history_confident must be load-bearing, and the prompt
     must instruct the model to stop on "no" BEFORE attempting to read the history."""
     judgment = load_rule_spec("CR-8").judgment
     assert judgment is not None
@@ -125,7 +125,7 @@ def test_cr8_gates_on_history_confidence_before_interpreting() -> None:
 
 
 def test_cr8_prompt_forbids_position_parsing_the_history_string() -> None:
-    """⚠️ THE ADR-353 TRAP. `payment_history_24mo` is 0-84 chars across 17 formats and is NOT a fixed
+    """THE ADR-353 TRAP. `payment_history_24mo` is 0-84 chars across 17 formats and is NOT a fixed
     one-char-per-month encoding. Converting an ambiguous string into a 60-day late invents a derogatory
     event on a clean borrower."""
     prompt = load_rule_spec("CR-8").judgment.system_prompt  # type: ignore[union-attr]
@@ -134,7 +134,7 @@ def test_cr8_prompt_forbids_position_parsing_the_history_string() -> None:
 
 
 def test_cr8_mortgage_detection_is_not_by_creditor_name() -> None:
-    """⚠️ PRIYA, EXPLICITLY. A servicer's name looks like a bank's."""
+    """PRIYA, EXPLICITLY. A servicer's name looks like a bank's."""
     prompt = load_ai_groups()["credit_mortgage_history"].system_prompt
     assert "NEVER from the creditor's name alone" in prompt
 
@@ -143,7 +143,7 @@ def test_cr8_mortgage_detection_is_not_by_creditor_name() -> None:
 # CR-10 — the matrix, the missing axis, and the permissive cell
 # --------------------------------------------------------------------------- #
 def test_cr10_carries_every_cell_of_the_ruling() -> None:
-    """⚠️ NEVER ONE DOLLAR THRESHOLD ACROSS AGENCIES — the whole reason this is a matrix."""
+    """NEVER ONE DOLLAR THRESHOLD ACROSS AGENCIES — the whole reason this is a matrix."""
     values = load_rule_spec("CR-10").reference_values.values
     assert values["du_two_to_four_unit_or_second_home_aggregate"] == "5000"
     assert values["du_investment_individual"] == "250"
@@ -156,7 +156,7 @@ def test_cr10_carries_every_cell_of_the_ruling() -> None:
 
 
 def test_cr10_abstains_on_manual_underwriting_rather_than_guessing() -> None:
-    """⚠️ THE DU-vs-MANUAL AXIS DOES NOT EXIST AS A FACT (LP-501). No `loan.agency` or
+    """THE DU-vs-MANUAL AXIS DOES NOT EXIST AS A FACT (LP-501). No `loan.agency` or
     `loan.underwriting_method` was invented to fill the gap; the value domain carries an honest
     abstention instead."""
     judgment = load_rule_spec("CR-10").judgment
@@ -171,7 +171,7 @@ def test_cr10_abstains_on_manual_underwriting_rather_than_guessing() -> None:
 
 
 def test_cr10_never_defaults_to_the_permissive_cell() -> None:
-    """⚠️ A one-unit primary requires NO payoff at any amount — the most permissive cell in the matrix.
+    """A one-unit primary requires NO payoff at any amount — the most permissive cell in the matrix.
     An absent occupancy defaulting there would clear every collection on a file that has simply not
     stated its occupancy yet. Occupancy must be load-bearing, and the prompt must say so."""
     judgment = load_rule_spec("CR-10").judgment
@@ -181,7 +181,7 @@ def test_cr10_never_defaults_to_the_permissive_cell() -> None:
 
 
 def test_cr10_keeps_mortgage_charge_offs_out_of_the_dollar_logic() -> None:
-    """⚠️ A charged-off MORTGAGE carries a seasoning requirement (CR-6), not a dollar test."""
+    """A charged-off MORTGAGE carries a seasoning requirement (CR-6), not a dollar test."""
     assert "charged-off MORTGAGE is NOT" in load_rule_spec("CR-10").judgment.system_prompt  # type: ignore[union-attr]
 
 
@@ -207,7 +207,7 @@ def test_no_rule_in_the_cohort_reads_a_distrusted_tag(rule_id: str) -> None:
 
 
 def test_liab_account_type_is_still_unwired() -> None:
-    """⚠️ ITS ENUM DOES NOT MATCH ITS SOURCES. `liab.account_type` is
+    """ITS ENUM DOES NOT MATCH ITS SOURCES. `liab.account_type` is
     revolving/installment/mortgage/heloc while the sources emit REV/AUTO/MTG/INST and
     MortgageLoan/Installment — and a PARSED tag is NOT validated against allowed_values
     (producer.py), so declaring it would ship out-of-domain values silently. CR-8's need for account
@@ -217,7 +217,7 @@ def test_liab_account_type_is_still_unwired() -> None:
 
 
 def test_the_matcher_was_not_duplicated() -> None:
-    """⚠️ ONE COMPARISON, ONE MATCHER. `credit_profile` (LP-483) is the only group producing
+    """ONE COMPARISON, ONE MATCHER. `credit_profile` (LP-483) is the only group producing
     liab.in_application; a second matcher would let CR-1 and CR-4 disagree on one file."""
     groups = load_ai_groups()
     producers = [k for k, g in groups.items() if "liab.in_application" in g.tag_ids]

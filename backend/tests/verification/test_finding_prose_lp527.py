@@ -40,7 +40,7 @@ _SUMMARY = FactSummary(
 # 2. IT CANNOT INTRODUCE A FACT
 # --------------------------------------------------------------------------------------------- #
 def test_an_invented_number_is_caught() -> None:
-    """⚠️ THE CHECK THAT MAKES GENERATION SAFE, and it is DETERMINISTIC. Asking a model whether a model
+    """THE CHECK THAT MAKES GENERATION SAFE, and it is DETERMINISTIC. Asking a model whether a model
     hallucinated has the same failure mode as the thing being checked. A number is either in the source
     or it is not.
 
@@ -95,7 +95,7 @@ def test_a_single_digit_is_not_treated_as_a_fact() -> None:
     ],
 )
 def test_every_malformed_response_is_rejected_whole(response: str) -> None:
-    """⚠️ NEVER A PARTIAL COMPOSITION. Half a rewrite — an action with no why — reads as a truncated
+    """NEVER A PARTIAL COMPOSITION. Half a rewrite — an action with no why — reads as a truncated
     system rather than a finding. Rejection is total, and the template stands."""
     assert _parse(response) is None
 
@@ -180,7 +180,7 @@ def test_the_prompt_forbids_the_two_things_that_would_undo_this() -> None:
 # LP-528 — the two leaks the FIRST REAL COMPOSED RUN exposed
 # --------------------------------------------------------------------------------------------- #
 def test_machinery_talk_is_rejected() -> None:
-    """⚠️ FOUND ON A REAL RUN. The prompt forbids mentioning the software and the model wrote "The
+    """FOUND ON A REAL RUN. The prompt forbids mentioning the software and the model wrote "The
     system cannot verify derogatory seasoning requirements" anyway, four times. A processor does not
     care what the system can do — only what the file is missing. A prompt instruction is a hope; this
     is the guarantee."""
@@ -208,7 +208,7 @@ def test_ordinary_prose_is_not_mistaken_for_machinery_talk() -> None:
 
 
 def test_the_summary_never_carries_a_raw_content_id() -> None:
-    """⚠️ THE OTHER REAL-RUN LEAK. A first version passed `subject_key` — a content-id hash — and the
+    """THE OTHER REAL-RUN LEAK. A first version passed `subject_key` — a content-id hash — and the
     model faithfully wrote it into user-facing text: "the retained property on doc7031677534131285",
     "for liability lia7a033a46ec70cc10". LP-377-B exists to keep that away from a processor, and the
     read path already had `resolve_subject_label`; the composer now uses the same resolver."""

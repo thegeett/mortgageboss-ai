@@ -43,7 +43,7 @@ open connection.
 
 ---
 
-## ⚠️ The requirement that shapes the design
+## The requirement that shapes the design
 
 `borrowers.ssn` is Fernet-encrypted at rest, so a `SELECT` returns ciphertext —
 genuinely protected.
@@ -68,7 +68,7 @@ So: the query role gets **no access to base tables at all.**
 
 A **new Alembic revision**, chained from the current head.
 
-⚠️ This branch has deliberately avoided migrations to keep merges trivial. That
+This branch has deliberately avoided migrations to keep merges trivial. That
 constraint no longer holds — `c9d3f1a6b2e4` merged in from the rules line. Confirm
 there is a single head before writing, and stop if there are two.
 
@@ -99,7 +99,7 @@ ALTER ROLE mbai_readonly SET statement_timeout = '30s';
 ALTER ROLE mbai_readonly CONNECTION LIMIT 2;
 ```
 
-⚠️ **`REVOKE ALL ON SCHEMA public` is the load-bearing line.** Without it the role
+**`REVOKE ALL ON SCHEMA public` is the load-bearing line.** Without it the role
 reaches base tables directly and the views are decoration. Test it explicitly.
 
 `default_transaction_read_only` and `statement_timeout` are belt-and-braces: the
@@ -138,7 +138,7 @@ prints results as a formatted table.
   tasks are pinned to the AZ that has interface endpoints and the subnet list
   includes one that does not.
 - Runs on the existing migrate task definition with `containerOverrides`.
-- Passes SQL via environment, not argv. ⚠️ **argv is visible in `describe-tasks`
+- Passes SQL via environment, not argv. **argv is visible in `describe-tasks`
   for about an hour and recorded in the CloudTrail `RunTask` event.**
 - Polls to completion, prints the CloudWatch logs, exits non-zero on failure.
 - No confirmation prompt. This is read-only and meant to be called repeatedly,
@@ -153,7 +153,7 @@ resource ARN:
 arn:aws:rds-db:us-east-1:058190633983:dbuser:<db-resource-id>/mbai_readonly
 ```
 
-⚠️ **That is the DB *resource id* (`db-XXXX…`), not the instance identifier.** Get
+**That is the DB *resource id* (`db-XXXX…`), not the instance identifier.** Get
 it from `describe-db-instances --query 'DBInstances[0].DbiResourceId'` and take it
 as a Terraform variable or data source. Getting this wrong produces a
 `PAM authentication failed` that says nothing about IAM.

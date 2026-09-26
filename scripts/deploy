@@ -694,7 +694,7 @@ validate_redis_url() {
 # three attempts lost to terminal wrapping and clipboard handling, with the only
 # symptom a validator rejection that could not say why.
 #
-# ⚠️ THE PASSWORD MUST NEVER REACH A TERMINAL, ARGV, OR A LOG.
+# THE PASSWORD MUST NEVER REACH A TERMINAL, ARGV, OR A LOG.
 #   * `terraform state pull` is piped straight into python -- no temp file.
 #   * The extractor is passed with `-c`, which puts the PROGRAM in argv. That is
 #     fine: the program is a fixed string with no secret in it, and the state
@@ -840,7 +840,7 @@ assert_redis_auth_agrees() {
 # --------------------------------------------------------------------------- #
 # Applying a Redis AUTH token
 #
-# ⚠️ THIS MODIFIES A LIVE CLUSTER. It is gated on an explicit confirmation and
+# THIS MODIFIES A LIVE CLUSTER. It is gated on an explicit confirmation and
 # runs only when the cluster has NO token yet.
 # --------------------------------------------------------------------------- #
 
@@ -884,7 +884,7 @@ apply_redis_auth_token() {
       "Nothing was changed."
   fi
 
-  # ⚠️ --cli-input-json, NOT --auth-token on the command line. A token passed as
+  # --cli-input-json, NOT --auth-token on the command line. A token passed as
   # an argument is visible in `ps` to every user on the machine for as long as
   # the call runs. The file is 0600 inside the run's own temp directory and is
   # removed immediately; the exit trap removes the directory even on Ctrl-C.
@@ -933,7 +933,7 @@ apply_redis_auth_token() {
     "know whether it took effect, and it will not write a URL it cannot verify." \
     "Nothing was written to Secrets Manager." \
     "" \
-    "⚠️ The generated token is now DISCARDED. If the rotation did complete, the" \
+    "The generated token is now DISCARDED. If the rotation did complete, the" \
     "cluster holds a token nobody knows, and the only way forward is another" \
     "rotation -- re-run this stage once the cluster is available and it will" \
     "detect the existing token and ask you to supply the URL instead." \
@@ -987,7 +987,7 @@ assert_redis_credential_matches() {
 prompt_with_suggestion() {
   local label="$1" suggestion="$2" value
 
-  # ⚠️ EVERY PROMPT BYTE GOES TO STDERR, and that is load-bearing.
+  # EVERY PROMPT BYTE GOES TO STDERR, and that is load-bearing.
   #
   # The caller reads this function through a command substitution
   # (`url=$(prompt_with_suggestion ...)`), which captures STDOUT. With the prompt
@@ -1070,7 +1070,7 @@ stage_secrets() {
         # Construct one from the generated value before writing it: a length check
         # would accept values Fernet rejects at the first SSN write, inside a
         # request handler.
-        # ⚠️ The key goes in on STDIN, not as an argument. `sys.argv[1]` put the
+        # The key goes in on STDIN, not as an argument. `sys.argv[1]` put the
         # encryption key in the process's command line, where `ps` shows it to
         # every user on the machine for the life of the call. printf is a shell
         # builtin, so the value never becomes a process argument at all.
@@ -1129,7 +1129,7 @@ stage_secrets() {
         local endpoint scheme suggestion rurl needs_auth has_auth
         endpoint=$(out redis_primary_endpoint)
 
-        # ⚠️ The output is the BARE scheme -- `rediss`, not `rediss://`
+        # The output is the BARE scheme -- `rediss`, not `rediss://`
         # (modules/data/outputs.tf). This once concatenated as though the
         # separator were included, producing `rediss:<TOKEN>@host` (no slashes)
         # and, on the no-auth path, `redissmaster.mbai-...` with the scheme fused
@@ -1402,7 +1402,7 @@ stage_migrate() {
 # users router, no password-reset flow. Accounts are made by a deliberate act,
 # and these two stages are it.
 #
-# ⚠️ THE PASSWORD IS HASHED ON THIS MACHINE AND NEVER SENT.
+# THE PASSWORD IS HASHED ON THIS MACHINE AND NEVER SENT.
 #
 # Both stages run a one-off ECS task whose values arrive through
 # `run-task --overrides`. Those are visible in `describe-tasks` for about an
@@ -1411,7 +1411,7 @@ stage_migrate() {
 # plaintext password would be. So scripts/hash-password produces the hash
 # locally, and only the hash leaves the machine.
 #
-# ⚠️ AND THE HASH STILL DOES NOT REACH ARGV. The whole run-task request is built
+# AND THE HASH STILL DOES NOT REACH ARGV. The whole run-task request is built
 # with jq reading from the ENVIRONMENT (`env.NAME`, never `--arg`) into a 0600
 # file, and passed as `--cli-input-json file://…`. `ps` shows a process's full
 # command line to every user on the machine; it does not show its environment.
@@ -1443,12 +1443,12 @@ ask_required() {
   printf '%s' "$value"
 }
 
-# ⚠️ Both provisioning stages refuse without Cognito. An application login that
+# Both provisioning stages refuse without Cognito. An application login that
 # is not behind the ALB's authentication wall is a state worth refusing to
 # create: the account being made is an ADMIN in an environment that holds real
 # borrower files.
 #
-# ⚠️ This reads an APPLIED OUTPUT, not terraform.tfvars. The tfvars value is what
+# This reads an APPLIED OUTPUT, not terraform.tfvars. The tfvars value is what
 # the operator intends to apply, which is not the same question. Editing
 # `enable_cognito = false` -> `true` and running this stage before `phase2` would
 # satisfy a tfvars check while the load balancer still has no authenticate-cognito
@@ -1472,7 +1472,7 @@ require_cognito_enabled() {
     "Run:  ./scripts/deploy $ENV_NAME phase2"
 }
 
-# ⚠️ Where account provisioning is permitted, as a FIXED list -- deliberately not
+# Where account provisioning is permitted, as a FIXED list -- deliberately not
 # "$ENV_NAME". Passing the target back to the container's own allowlist would
 # make the guard tautological: `./scripts/deploy production bootstrap-admin`
 # would set the allowlist to `production` and then pass it. The value below is
@@ -1665,7 +1665,7 @@ stage_bootstrap_admin() {
   confirm "Create this company and admin user?" || die "Aborted. Nothing was run."
 
   request="$SECRET_TMPDIR/bootstrap-admin.$$.json"
-  # ⚠️ jq reads from the ENVIRONMENT, never --arg: an --arg value would be in
+  # jq reads from the ENVIRONMENT, never --arg: an --arg value would be in
   # jq's own command line, which `ps` shows to every user on this machine.
   (
     umask 077
@@ -2038,7 +2038,7 @@ stage_backfill_mismo() {
     relink-borrowers)
       info "  re-links    : document -> borrower, over extractions already on disk (no model call)"
       info "  scope       : ${RELINK_FILE:-every loan file}"
-      info "  ⚠ can also REMOVE a link the old matcher made wrongly -- the report names both directions" ;;
+      info "  can also REMOVE a link the old matcher made wrongly -- the report names both directions" ;;
     *)
       info "  fills       : properties.in_project / is_pud, only where NULL" ;;
   esac
@@ -2284,7 +2284,7 @@ tfvar_list() {
 
 # --- git preflight --------------------------------------------------------- #
 
-# ⚠️ UNTRACKED FILES COUNT AS DIRTY, and that is not pedantry: `docker build`
+# UNTRACKED FILES COUNT AS DIRTY, and that is not pedantry: `docker build`
 # sends the WORKING TREE as its context, not the commit. An untracked file that
 # .dockerignore does not exclude is in the image. A tag naming a commit that does
 # not describe the built bytes is the exact failure this stage exists to remove.
@@ -2472,7 +2472,7 @@ oneoff_task_logs() {
 
 # --- running the migration on the NEW image -------------------------------- #
 
-# ⚠️ Why this registers a task definition instead of reusing the deployed one.
+# Why this registers a task definition instead of reusing the deployed one.
 #
 # The migration must run the NEW code: it is the new image that carries the new
 # revisions. But the deployed migrate task definition still points at the OLD
@@ -2517,7 +2517,7 @@ register_migrate_taskdef_for_image() {
 
 # --- services -------------------------------------------------------------- #
 
-# ⚠️ Does not return while a deployment is still rolling. The circuit breaker can
+# Does not return while a deployment is still rolling. The circuit breaker can
 # still roll it back, so an exit here would report success for something that has
 # not finished failing yet.
 wait_for_services_steady() {
@@ -2598,7 +2598,7 @@ deploy_rollback_hint() {
     printf '    rm -f %s.bak\n' "$TFVARS"
     printf '    ./scripts/deploy %s %s\n' "$ENV_NAME" "$(deploy_apply_stage_name)"
     printf '\n'
-    printf '  ⚠️ That reverts the IMAGE. It does not revert a migration that already\n'
+    printf '  That reverts the IMAGE. It does not revert a migration that already\n'
     printf '     ran: Alembic downgrades are not part of this stage, and the old code\n'
     printf '     may not tolerate the new schema. Check what the migration did before\n'
     printf '     assuming the rollback is complete.\n'

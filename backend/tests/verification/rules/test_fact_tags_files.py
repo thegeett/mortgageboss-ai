@@ -71,7 +71,7 @@ def test_desired_state_shape() -> None:
     # LP-495a +4 (reo.statement_disclosure + reo.statement_payment_coverage — ONE matcher
     # serving RE-1 and DT-6, ADR-375; loe.is_explanation_letter — LO-2's applicability predicate, needed
     # because the applicability DSL has only eq/ne while LO-2's scope is 8 document types; loe.completeness.
-    # ⚠️ property.is_retained_reo and property.retained_pitia are DELIBERATELY still absent from
+    # property.is_retained_reo and property.retained_pitia are DELIBERATELY still absent from
     # tag_production.yaml — 'retained' is an inference no document, field or MISMO fact states, and
     # neither rebuilt rule reads them (pinned by test_reo_reconciliation_lp495a).
     # LP-494 +8 (the condo project lane — see test_projection_db for the roll-call); LP-487 +6 (IH-2/IH-7's parsed inputs: ins.mortgagee_name, loan.lender_name_cd, loan.lender_name_le, condo.master_policy_number, condo.master_policy_basis_raw, condo.master_liability_limit — their two CONCLUSION tags already exist in fact_tags.csv);

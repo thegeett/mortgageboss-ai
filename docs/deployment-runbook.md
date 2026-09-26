@@ -377,7 +377,7 @@ was aborted after the confirmation, `enable_tls`/`enable_cognito` already flippe
   environment reachable over **plain HTTP with no authentication**, so treat it as a
   break-glass step, not a routine one.
 
-⚠️ **`terraform destroy` is not a rollback here.** Staging is not a
+**`terraform destroy` is not a rollback here.** Staging is not a
 destroy-and-rebuild environment: `rds_deletion_protection = true`,
 `rds_skip_final_snapshot = false`, `secret_recovery_window_days = 30`,
 `ecr_force_delete = false`, and the documents bucket carries `prevent_destroy`. A

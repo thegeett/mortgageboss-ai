@@ -243,7 +243,7 @@ function. The remaining **14** do not, and each was traced to its callers:
 rather than a raw id, so authorization happens once at the boundary and cannot be
 re-litigated wrongly downstream.
 
-### ⚠️ The A2 pattern still exists — as dead code
+### The A2 pattern still exists — as dead code
 
 `app/services/document_borrower_links.py:116-117`, `get_document_borrower_links`,
 filters on `document_id` alone with no join back to the loan file. That is the
@@ -327,7 +327,7 @@ to `mb`, and the reader filters on company. **By design.**
 The contradicting outcome flagged before running this — two companies with the users
 split across them — did not occur. There is only one company in the environment.
 
-⚠️ **One honest limit of this check.** With a single company in the database, these
+**One honest limit of this check.** With a single company in the database, these
 rows cannot *demonstrate* the cross-company boundary; there is no company B to be
 excluded from. That boundary rests on the code in §§3, 6 and 7 above, plus the
 integration tests. This check does exactly one job — it confirms the observed

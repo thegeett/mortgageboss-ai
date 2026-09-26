@@ -7,7 +7,7 @@
 # NO threshold, so nothing here awaits a domain number (rule_kinds.csv: threshold_needs_signoff=false).
 # `zero` below is a literal comparison boundary, not a domain threshold — the AS-3 / CR-13 precedent.
 #
-# ⚠️ DAYS, not months. Unlike CR-13 and PR-6 (whose guideline windows are stated in calendar months), a
+# DAYS, not months. Unlike CR-13 and PR-6 (whose guideline windows are stated in calendar months), a
 # lock expires ON a date and the only question is which date comes first — a day count is exact here.
 
 rule_id: CL-1
@@ -96,7 +96,7 @@ deterministic:
     - verdict: fired
       # The lock expires strictly BEFORE closing.
       when_compare: {op: "<", left: days, right: zero}
-      # ⚠️ `days` is SIGNED and is NEGATIVE on this branch (it fires on days < 0), so the sentence must not
+      # `days` is SIGNED and is NEGATIVE on this branch (it fires on days < 0), so the sentence must not
       # also say "before" — "expires -14 day(s) before closing" is a double negative a processor reads as
       # the opposite of the finding. Phrased as a signed margin, which reads correctly negative.
       reasoning: >-

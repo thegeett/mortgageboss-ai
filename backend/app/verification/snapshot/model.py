@@ -322,7 +322,7 @@ class DocumentEntry(BaseModel):
     # boundary that gated IH-1, a known and separate decision (LP-436 step 8 / ADR).
     lists: dict[str, tuple[ListRow, ...]] = PydField(default_factory=dict)
     # LP-463 — the MARKED-UNTYPED section: the Tier 3 scoped free-extraction output (parties/dates/amounts/
-    # findings/summary) for a document with no fitting catalog type. ⚠️ Labels are model-chosen and values
+    # findings/summary) for a document with no fitting catalog type. Labels are model-chosen and values
     # uncoerced — it is available to a PROCESSOR and to AI cross-source reasoning (opt-in, via
     # ``ContextOptions.include_untyped``), but **NO DETERMINISTIC RULE MAY READ IT**: the typed ``read_field``
     # paths every rule uses reach ``fields`` / ``transactions`` / ``schedule_*`` only, never this. Structural

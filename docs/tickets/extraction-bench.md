@@ -62,7 +62,7 @@ This is enforced, not just intended, by `tests/dev/test_extraction_bench.py`:
   capturing what reaches a mocked `complete`) — nothing is appended;
 - both redaction layers are gone: `bench_pii_instruction.txt` and `redact.py` no longer exist.
 
-## ⚠️ No redaction — the output contains REAL PII
+## No redaction — the output contains REAL PII
 
 The bench **captures real values, identity fields included.** Redaction (both a model-side placeholder
 prompt and a regex backstop) was **removed** — it was blanking data the comparison needs: on a real W-2
@@ -132,14 +132,14 @@ run is ~50 min (floor). Four things keep a batch from corrupting its own finding
   rather than processing the whole corpus into `"AI call failed"` records. See
   [`extraction-bench-preflight.md`](extraction-bench-preflight.md).
 - **A run where nothing succeeded is marked FAILED.** If 0 documents produced a result, `_SUMMARY.md`
-  opens with a **`⚠️ RUN FAILED`** banner naming the cause — it can never read like a coverage result.
+  opens with a **`RUN FAILED`** banner naming the cause — it can never read like a coverage result.
 
 **Resume.** Each document's JSON is written **incrementally** as it completes, plus an append to a
 `_records.jsonl` log — so a crash (or an abort, or a cancel) at document 150 of a 50–90 min run loses at
 most the in-flight document. `POST /start` with `resume_run_id` reuses the output dir, skips the
 documents already on disk, and still aggregates the whole corpus into the final findings.
 
-⚠️ **Per-process caveat.** The client limiter is a **process-local** singleton. The bench runs inside the
+**Per-process caveat.** The client limiter is a **process-local** singleton. The bench runs inside the
 dev API process, so its own calls are paced correctly — but if **Celery workers are also processing
 documents** (which hit Bedrock from separate processes) during a bench run, the two limiters do not
 coordinate, and the combined rate can exceed the account's 10/min. Run the bench when nothing else is

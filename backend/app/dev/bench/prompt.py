@@ -1,6 +1,6 @@
 """Bench runtime context — throttle/failure detection, kept SEPARATE from production.
 
-⚠️ **This context does NOT modify the prompt.** The bench used to append a PII-placeholder instruction
+**This context does NOT modify the prompt.** The bench used to append a PII-placeholder instruction
 here so extraction returned ``[NAME]``/``[SSN]``/… — that was **removed** (Geet's decision): the
 redaction was blanking data the comparison needs (employer EINs, business addresses, reference numbers —
 not personal PII). The bench now captures **real values**, so the output contains real borrower PII and

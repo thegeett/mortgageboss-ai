@@ -1,6 +1,6 @@
 """Creating a condition round from an arriving sheet (LP-905, spec §6).
 
-⚠️ A CONDITION SHEET IS NOT A BORROWER DOCUMENT, and everything here follows from that. It never
+A CONDITION SHEET IS NOT A BORROWER DOCUMENT, and everything here follows from that. It never
 becomes a `Document` row, so it never enters classify → extract → needs: it satisfies no need, and a
 166-type borrower taxonomy would either mis-file it or push it to the long tail and then ask a
 processor why the file has an unrecognised document (ADR-403, and the same reasoning that produced
@@ -49,7 +49,7 @@ PDF_CONTENT_TYPE = "application/pdf"
 
 #: What a processor is told when the broker would not take the round.
 #:
-#: ⚠️ IT LIVES HERE BECAUSE TWO CALLERS NEED IT AND THEY CANNOT SHARE IT WHERE IT WAS. It was
+#: IT LIVES HERE BECAUSE TWO CALLERS NEED IT AND THEY CANNOT SHARE IT WHERE IT WAS. It was
 #: private to `app/api/conditions.py`, and `app/tasks/conditions.py` now needs the same sentence
 #: for the same failure — but `tasks → services` is the one direction this repo's imports run, so a
 #: task importing from the API layer would invert it. Copying the string instead would leave two
@@ -64,14 +64,14 @@ ENQUEUE_FAILED_DETAIL = (
 
 #: The two sentences `split_round` chooses between when there is no text to split.
 #:
-#: ⚠️ TWO, BECAUSE ONE BRANCH NOW SERVES TWO DOORS AND ONLY ONE OF THEM CAN PASTE (LP-909 §5 visual
+#: TWO, BECAUSE ONE BRANCH NOW SERVES TWO DOORS AND ONLY ONE OF THEM CAN PASTE (LP-909 §5 visual
 #: check). That branch was written when only the paste door wrote `raw_text`, so its single sentence
 #: said "Paste the conditions again" — correct then. Since LP-908's review persists the lender's page
 #: on EVERY path, the realistic occupant of the branch is the opposite case: a PDF whose extraction
 #: yielded nothing, a blank page or a scan this server could not read. Telling that processor to paste
 #: again asks them to redo work they never did, and S1-03 showed exactly that on a blank upload.
 #:
-#: ⚠️ AND THE PASTE ARM IS NOW THE UNREACHABLE ONE, which is worth stating so nobody deletes the
+#: AND THE PASTE ARM IS NOW THE UNREACHABLE ONE, which is worth stating so nobody deletes the
 #: wrong half. `ConditionPasteRequest.text` is `min_length=1`, so the door refuses an empty body
 #: before a round exists; a pasted round reaches this branch only when a test sets `raw_text` to None
 #: by hand. It is kept because the guard is about `raw_text` being empty, not about which door filled
@@ -86,7 +86,7 @@ NO_TEXT_IN_PASTE_DETAIL = "This round has no text to read. Paste the conditions 
 def has_stored_sheet(round_: ConditionRound) -> bool:
     """Does this round have the lender's PDF at rest?
 
-    ⚠️ KEYED ON `storage_path`, NEVER ON `kind` — and the rule had drifted into three statements
+    KEYED ON `storage_path`, NEVER ON `kind` — and the rule had drifted into three statements
     before this one existed (LP-909 §5). `condition_enrich._has_pdf_source` said it and said why: "it
     is the BYTES that make a second attach meaningless. `kind` would need a list of three values kept
     in step with the enum." Then `reparse_round` inlined the same predicate rather than import it,
@@ -105,7 +105,7 @@ def has_stored_sheet(round_: ConditionRound) -> bool:
 class ConditionSheetRejected(Exception):
     """The bytes cannot be accepted as a condition sheet, with a reason a processor can act on.
 
-    ⚠️ CARRIES THE REAL REASON RATHER THAN A GENERIC FAILURE (spec §9.8). "That is not a PDF",
+    CARRIES THE REAL REASON RATHER THAN A GENERIC FAILURE (spec §9.8). "That is not a PDF",
     "the PDF is password-protected" and "the file could not be read" lead a processor to three
     different next actions, and collapsing them into one message makes the sheet's arrival a
     dead end.
@@ -122,7 +122,7 @@ class SheetBytes:
 
     content: bytes
     source_kind: ConditionSourceKind
-    #: ⚠️ WHAT THE SENDER SAID THIS WAS — the browser's part header on an upload, the MIME header on
+    #: WHAT THE SENDER SAID THIS WAS — the browser's part header on an upload, the MIME header on
     #: an emailed attachment, or None when nothing claimed anything. It belongs to the CALLER
     #: because `assess`'s mismatch message is a claim about the sender: "this is not what it said it
     #: was". Hardcoding `application/pdf` here made that sentence true for an upload and false for a
@@ -134,7 +134,7 @@ class SheetBytes:
 
 
 def _storage_path(*, company_id: UUID, loan_file_id: UUID) -> str:
-    """A server-controlled path. ⚠️ NEVER derived from the upload's filename.
+    """A server-controlled path. NEVER derived from the upload's filename.
 
     `save_at` refuses traversal, but the deeper rule is that a sender's filename is a sender's
     string: a real condition sheet's filename routinely carries the borrower's surname and the loan
@@ -146,7 +146,7 @@ def _storage_path(*, company_id: UUID, loan_file_id: UUID) -> str:
 def reject_unless_pdf(content: bytes, *, declared_content_type: str | None = None) -> None:
     """Refuse anything that is not a readable, unencrypted PDF.
 
-    ⚠️ THE STATE ALONE IS NOT ENOUGH, AND THIS IS THE TRAP. `assess` returns SAFE for an IMAGE too —
+    THE STATE ALONE IS NOT ENOUGH, AND THIS IS THE TRAP. `assess` returns SAFE for an IMAGE too —
     "an image has no executable structure to strip and no pages to render — it IS the raster" — so a
     PNG passes the safety check cleanly. A condition sheet must be a PDF, so the sniffed type is
     checked as well; relying on the state would accept a screenshot of a sheet and then fail deep in
@@ -203,7 +203,7 @@ async def create_round_from_sheet(
         lender_id=loan_file.lender_id,
         completeness=completeness,
         sources=[source],
-        # ⚠️ NOT NULL WITH NO DEFAULT. Until the sheet is read there is no printed date, so the round
+        # NOT NULL WITH NO DEFAULT. Until the sheet is read there is no printed date, so the round
         # is dated by arrival and `date_printed` stays null; the parse task fills it in and a
         # processor may edit it. Omitting it here fails the insert outright — the same shape as the
         # `display_id` defect that hid LP-904's guards.
@@ -243,7 +243,7 @@ async def create_round_from_sheet(
 
 
 def parse_report_for(reader: str, sheet: ParsedSheet) -> dict[str, Any]:
-    """What the reader did. ⚠️ Counts, codes and names — no condition text except
+    """What the reader did. Counts, codes and names — no condition text except
     `unassigned_lines`, which LP-904 classifies as NPI and excludes from the readonly layer.
 
     Lives here rather than in the Celery task because BOTH doors write it now: the task after
@@ -267,7 +267,7 @@ def parse_report_for(reader: str, sheet: ParsedSheet) -> dict[str, Any]:
 def draft_rows_json(sheet: ParsedSheet) -> list[dict[str, Any]]:
     """The parsed rows as JSON, through the SAME schema the API returns.
 
-    ⚠️ NOT `dataclasses.asdict`. `ParsedRow` holds dates, enums and nested dataclasses, none of
+    NOT `dataclasses.asdict`. `ParsedRow` holds dates, enums and nested dataclasses, none of
     which JSONB accepts — and a hand-rolled dict here would be a THIRD representation of a row,
     free to drift from `DraftRowPublic`. Going through the response schema means what is stored is
     exactly what is served, by construction.
@@ -289,12 +289,12 @@ async def create_round_from_paste(
 ) -> ConditionRound:
     """Read conditions pasted from the lender's portal and open a round holding what was found.
 
-    ⚠️ SYNCHRONOUS, UNLIKE EVERY OTHER DOOR, AND THE DIFFERENCE IS REAL RATHER THAN STYLISTIC. An
+    SYNCHRONOUS, UNLIKE EVERY OTHER DOOR, AND THE DIFFERENCE IS REAL RATHER THAN STYLISTIC. An
     upload has bytes to fetch from storage and pages to rasterise; a paste is already text in memory
     and the rules over it are string work. Queuing it would buy nothing and would cost the processor
     a "Reading…" screen for a result that was ready before the response was written.
 
-    ⚠️ `DRAFT` WHEN THE RULES READ IT, `PARSING` WHEN THEY COULD NOT — and the second half of that
+    `DRAFT` WHEN THE RULES READ IT, `PARSING` WHEN THEY COULD NOT — and the second half of that
     is LP-908 arriving. LP-907 shipped this always-DRAFT, as a deliberate departure from spec
     §LP-907's "answer `PARSING` and queue the AI split", for one stated reason: LP-908 did not exist,
     so the branch would have enqueued nothing and left the round in `PARSING` with no worker and no
@@ -305,7 +305,7 @@ async def create_round_from_paste(
     `split_condition_round`, which settles it to `DRAFT` with the AI's rows or to `PARSE_FAILED`
     with a typed reason.
 
-    ⚠️ NO PDF, SO NOTHING IS STORED. There are no bytes — `raw_text` on the row IS the source, which
+    NO PDF, SO NOTHING IS STORED. There are no bytes — `raw_text` on the row IS the source, which
     is why `_storage_path` in the parse task returns None for a pasted round and a re-parse of one
     refuses rather than inventing a file.
     """
@@ -323,13 +323,13 @@ async def create_round_from_paste(
         # The rules' verdict decides: read it, and the round is ready to review; could not, and it
         # is `PARSING` until the split task settles it.
         status=(ConditionRoundStatus.PARSING if sheet.needs_ai else ConditionRoundStatus.DRAFT),
-        # ⚠️ REQUIRED FROM THE CALLER, never defaulted here (ADR-404). "Just some" can only ever add
+        # REQUIRED FROM THE CALLER, never defaulted here (ADR-404). "Just some" can only ever add
         # and update; "the full list" is what lets a later comparison mean anything. A service that
         # guessed would decide the file's history on the processor's behalf.
         completeness=completeness,
         sheet_format=sheet_format,
         sources=[source],
-        # ⚠️ NPI (ADR-405). Stored because it is the SOURCE for a pasted round — LP-908 splits the
+        # NPI (ADR-405). Stored because it is the SOURCE for a pasted round — LP-908 splits the
         # text the processor actually sent, never a reconstruction from rows the rules may have
         # misread, and §9.3 checks every AI row is a substring of this.
         raw_text=text,
@@ -347,7 +347,7 @@ async def create_round_from_paste(
     db.add(round_)
     await db.flush()
 
-    # ⚠️ BOTH EVENTS, BECAUSE BOTH THINGS HAPPENED. An uploaded sheet arrives (ROUND_RECEIVED) and is
+    # BOTH EVENTS, BECAUSE BOTH THINGS HAPPENED. An uploaded sheet arrives (ROUND_RECEIVED) and is
     # read later by the task (ROUND_PARSED); a paste does both inside one request. Emitting only one
     # would leave the round-details history (S1-09) reading differently depending on which door the
     # round came through, for rounds that are otherwise identical.
@@ -358,7 +358,7 @@ async def create_round_from_paste(
             {"source_kind": ConditionSourceKind.PASTE.value, "chars": len(text)},
         )
     ]
-    # ⚠️ `ROUND_PARSED` ONLY IF THE RULES ACTUALLY READ IT. This used to be emitted unconditionally,
+    # `ROUND_PARSED` ONLY IF THE RULES ACTUALLY READ IT. This used to be emitted unconditionally,
     # which was true while a paste always landed DRAFT — and became a lie the moment a `needs_ai`
     # paste started opening `PARSING`: the round's own history would say it was parsed before
     # anything had read it, and then say so AGAIN when the split task settled it. Screen S1-09
@@ -450,7 +450,7 @@ async def discard_round(
 ) -> ConditionRound:
     """Throw away a draft. Flushes; the caller commits.
 
-    ⚠️ AN IMPORTED ROUND IS NOT DISCARDABLE, AND THAT IS A DECISION RATHER THAN AN OMISSION. LP-904's
+    AN IMPORTED ROUND IS NOT DISCARDABLE, AND THAT IS A DECISION RATHER THAN AN OMISSION. LP-904's
     migration guarantees that a round discarded after import KEEPS its number and stays in the unique
     index, and ADR-404 forbids deleting or clearing a condition — so discarding an imported round
     would leave every one of its conditions alive and still chipped to it. "Discarded" would then
@@ -460,13 +460,13 @@ async def discard_round(
     Stage 1 has no use for that state, so it is refused rather than given two meanings. If Stage 2
     needs it, it needs its own verb and its own event.
 
-    ⚠️ `draft_rows` ARE KEPT, NOT CLEARED. The round strip lists discarded rounds on purpose — a
+    `draft_rows` ARE KEPT, NOT CLEARED. The round strip lists discarded rounds on purpose — a
     processor who threw a draft away should see that they did — and `rows_on_sheet` reads a
     non-imported round's count from its rows, so clearing them would render the card as "0 on sheet"
     and lose what was discarded. Import clears them because they became conditions; nothing became
     anything here.
 
-    ⚠️ NO TIMELINE ENTRY. `ActivityType` has no member for this and adding one is a constraint-swap
+    NO TIMELINE ENTRY. `ActivityType` has no member for this and adding one is a constraint-swap
     migration (ADR-037) that spec §LP-909 does not ask for. The `ROUND_DISCARDED` condition event is
     the record, and it is what screen S1-09's history renders.
     """
@@ -498,7 +498,7 @@ async def discard_round(
 
 #: The states a stored sheet may be handed back to the reader from.
 #:
-#: ⚠️ `DRAFT` IS ABSENT, AND THAT IS THE ONE OMISSION WORTH ARGUING. A processor looking at rows they
+#: `DRAFT` IS ABSENT, AND THAT IS THE ONE OMISSION WORTH ARGUING. A processor looking at rows they
 #: dislike has "discard and upload again", which is honest about what happens: a new round, a new
 #: number, the old one visible in the strip. Re-reading in place would silently replace rows they may
 #: already have edited — `update_draft` refuses a stale write for exactly that reason, and a reparse
@@ -517,23 +517,23 @@ async def reparse_round(
 ) -> ConditionRound:
     """Hand a stored sheet back to the reader. Flushes; the caller commits.
 
-    ⚠️ THIS EXISTS BECAUSE TWO SCREENS ALREADY PROMISED IT. `RoundFailed` offers "Try again" and
+    THIS EXISTS BECAUSE TWO SCREENS ALREADY PROMISED IT. `RoundFailed` offers "Try again" and
     `RoundReading`'s stranded copy says "you can try reading it again" — and until now no route
     re-read an existing round at all, so both took `onRetry` optionally and the caller passed none.
     A paragraph offering a route with no control is a dead button wearing prose (LP-909 review).
 
-    ⚠️ A `PARSING` ROUND IS REFUSED UNTIL IT IS GENUINELY ABANDONED, measured from `updated_at`
+    A `PARSING` ROUND IS REFUSED UNTIL IT IS GENUINELY ABANDONED, measured from `updated_at`
     rather than `created_at`. From `created_at` a stranded round stays reparsable forever, so two
     presses queue two parses that race each other's compare-and-set. From `updated_at` the reparse
     bumps the row, so a second press inside the window is REFUSED with a reason — which is what
     makes this idempotent in the sense that matters: pressing twice cannot produce two readers.
 
-    ⚠️ AND THE WINDOW IS THE SERVER'S, NOT THE CLIENT'S. See `app/conditions/limits.py`: the
+    AND THE WINDOW IS THE SERVER'S, NOT THE CLIENT'S. See `app/conditions/limits.py`: the
     client's own guess was exactly `PARSE_SOFT_LIMIT_SECONDS`, so it called a round dead at the
     instant Celery raises `SoftTimeLimitExceeded`, with a minute of hard-limit runway left in which
     the task could still settle `PARSE_FAILED` itself with a real reason.
 
-    ⚠️ ONE NUMBER SERVES BOTH THE "IS IT ABANDONED" TEST AND THE DEBOUNCE, and review asked whether
+    ONE NUMBER SERVES BOTH THE "IS IT ABANDONED" TEST AND THE DEBOUNCE, and review asked whether
     those are two questions wearing one constant. They are the same question. A reparse queues a
     task under the SAME hard limit, so "may I ask again?" is still "could a worker still be alive?"
     — and the answer is bounded by the same timeout. The apparent harshness (refused for ten
@@ -542,12 +542,12 @@ async def reparse_round(
     only bites while a task genuinely could still be running, which is when waiting is the correct
     advice rather than a penalty.
 
-    ⚠️ NO OPEN DRAFT EDITOR CAN BE INVALIDATED BY THE `updated_at` BUMP, because `DRAFT` is not in
+    NO OPEN DRAFT EDITOR CAN BE INVALIDATED BY THE `updated_at` BUMP, because `DRAFT` is not in
     `REPARSABLE`. `update_draft` compares `expected_updated_at` and 409s on a stale one — a real
     hazard for enrich, which touches a DRAFT round — but a reparsable round is `PARSE_FAILED` or
     `PARSING`, and neither has rows a processor could be editing.
 
-    ⚠️ A PASTED ROUND HAS NO PDF AND IS REFUSED BY NAME. `parse_round` reads the sheet from storage,
+    A PASTED ROUND HAS NO PDF AND IS REFUSED BY NAME. `parse_round` reads the sheet from storage,
     so a round whose only source is a paste has nothing to re-read — `raw_text` is its source, and
     feeding that back through the PDF reader is not what this does. Telling the processor to paste
     again is the true answer; letting it through would settle `bytes_unavailable` and blame storage.
@@ -571,7 +571,7 @@ async def reparse_round(
             "upload the sheet again."
         )
 
-    # ⚠️ NOT `_storage_path`, WHICH BUILDS A NEW PATH RATHER THAN FINDING THE STORED ONE — and the
+    # NOT `_storage_path`, WHICH BUILDS A NEW PATH RATHER THAN FINDING THE STORED ONE — and the
     # task module has a DIFFERENT function of the same name that does find it. Asking the round
     # directly avoids depending on either, and `services → tasks` is the inverted direction anyway.
     #
@@ -601,7 +601,7 @@ async def reparse_round(
         "failure_kind": None,
         "failure_detail": None,
     }
-    # ⚠️ WRITTEN DELIBERATELY, NOT LEFT TO `onupdate` (LP-909 review). `TimestampMixin.updated_at`
+    # WRITTEN DELIBERATELY, NOT LEFT TO `onupdate` (LP-909 review). `TimestampMixin.updated_at`
     # has `onupdate=utcnow`, but that is Python-side and only fires when SQLAlchemy actually EMITS
     # an UPDATE — and it emits one only if a value genuinely changed. Re-parsing an already-`PARSING`
     # round assigns `status` the value it already holds, and if its `parse_report` happens to equal
@@ -633,14 +633,14 @@ async def update_draft(
 ) -> ConditionRound:
     """Replace a draft's rows before import. Flushes; the caller commits.
 
-    ⚠️ `DRAFT` ONLY, AND `PARSING` IS THE POINTED EXCLUSION. A `PARSING` round carries rules-read rows
+    `DRAFT` ONLY, AND `PARSING` IS THE POINTED EXCLUSION. A `PARSING` round carries rules-read rows
     too, but nothing is under review while it parses — screen S1-02 renders skeletons and polls — and
     the split task replaces those rows WHOLESALE under a `status = PARSING` compare-and-set. Letting
     an edit land there would make the processor's work vanish when the task settled, with no conflict
     anyone could see. `ConditionRoundPublic.draft_rows` carries the same warning: read `status`,
     never the presence of rows.
 
-    ⚠️ OPTIMISTIC CONCURRENCY ON `updated_at`, WHICH IS EXACT AND THAT IS THE POINT. `TimestampMixin`
+    OPTIMISTIC CONCURRENCY ON `updated_at`, WHICH IS EXACT AND THAT IS THE POINT. `TimestampMixin`
     sets `onupdate=utcnow` in Python, so ANY modification bumps it — an enrich merging a PDF into
     this round, or a re-parse. So a second tab editing stale rows is refused, and so is a tab whose
     rows were changed by something other than a person. Both are the same hazard: overwriting work
@@ -650,7 +650,7 @@ async def update_draft(
     That is deliberate — the spec asks for concurrency control, not for a mandatory token — but the
     UI always sends what it read.
 
-    ⚠️ NO EVENT. `ConditionEventKind` has `CONDITION_EDITED` for a CONDITION and nothing for a draft
+    NO EVENT. `ConditionEventKind` has `CONDITION_EDITED` for a CONDITION and nothing for a draft
     round, and a draft is not yet the file's record: the rows are the record of themselves and
     `updated_at` says when they moved. Inventing a member here would be a kind nothing else writes.
     """

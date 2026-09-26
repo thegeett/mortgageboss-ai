@@ -62,7 +62,7 @@ async def test_an_expired_policy_fires() -> None:
 
 
 async def test_fires_with_no_closing_date_on_the_file() -> None:
-    """⚠️ THE DEFECT, DIRECTLY. The LF-WCHG shape: a lapsed policy, no closing date.
+    """THE DEFECT, DIRECTLY. The LF-WCHG shape: a lapsed policy, no closing date.
 
     IH-3 must abstain — it genuinely cannot compare an effective date to a closing date that is not
     there. IH-9 must fire regardless. If a future change ever routes the expiry conclusion through a

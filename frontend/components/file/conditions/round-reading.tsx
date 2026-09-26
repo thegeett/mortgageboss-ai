@@ -13,7 +13,7 @@ import { CircleCheckBig, CircleDashed } from "lucide-react";
 /**
  * The four steps, in the order the task does them (screen S1-02).
  *
- * ⚠️ TIMED ON THE CLIENT, AND THE DESIGN ALLOWS IT. S1-02's *May differ* says "whether the steps
+ * TIMED ON THE CLIENT, AND THE DESIGN ALLOWS IT. S1-02's *May differ* says "whether the steps
  * come from the server or are timed on the client", and the server sends no progress — a round is
  * `parsing` until it is not. So these are a description of the work, not a report of it, and the
  * screen must never claim a step has FINISHED when it only knows the round is still going.
@@ -26,12 +26,12 @@ const STEPS = ["Stored", "Finding conditions", "Reading the letter details", "Re
 /**
  * How this round arrived — NOT its filename.
  *
- * ⚠️ THIS DOCSTRING SAID "the filename this round arrived as" AND THE FUNCTION NEVER RETURNED ONE
+ * THIS DOCSTRING SAID "the filename this round arrived as" AND THE FUNCTION NEVER RETURNED ONE
  * (LP-909 §5 visual check). It returns "PDF upload" or "Forwarded PDF", and the caller rendered that
  * in `font-mono` — the design's typography for a filename — so the comment and the styling made the
  * same false claim from two directions.
  *
- * ⚠️ AND THE FILENAME IS NOT AVAILABLE TO FIX IT WITH, DELIBERATELY. `create_round_from_sheet` does
+ * AND THE FILENAME IS NOT AVAILABLE TO FIX IT WITH, DELIBERATELY. `create_round_from_sheet` does
  * not store it: a real sheet's filename "routinely carries the borrower's surname and the loan
  * number", so the storage path is server-generated and the sender's string is dropped at the door.
  * S1-02's Must-match asks for the filename and page count; neither exists. Recorded as a deviation in
@@ -46,23 +46,23 @@ function sourceLabel(sources: ConditionSource[]): string | null {
 /**
  * A round the server is still reading (screen S1-02).
  *
- * ⚠️ NO SPINNER OVER THE WHOLE PAGE — the design says so outright, and the reason is that a page
+ * NO SPINNER OVER THE WHOLE PAGE — the design says so outright, and the reason is that a page
  * that blanks cannot tell a processor what it is waiting for. The card names the sheet, the steps
  * name the work, and the skeleton rows show the shape of what is coming.
  *
- * ⚠️ IT ALSO RENDERS THE STATE THE DESIGN HAS NO SCREEN FOR. A round is committed `parsing` BEFORE
+ * IT ALSO RENDERS THE STATE THE DESIGN HAS NO SCREEN FOR. A round is committed `parsing` BEFORE
  * its task is enqueued, so a broker that is down strands it forever — `_enqueue_split_or_fail`
  * documents that the upload and forward doors are deliberately unmitigated. S1-02 says "poll until
  * DRAFT or PARSE_FAILED", which does not contemplate never. Past the stranded window the polling
  * stops (see `isStranded`) and this says so, because a progress card that never resolves is the same
  * dead end as a spinner with no exit.
  *
- * ⚠️ IT NOW OFFERS THE RETRY IT USED TO EXPLAIN AWAY. This paragraph said "there is no route that
+ * IT NOW OFFERS THE RETRY IT USED TO EXPLAIN AWAY. This paragraph said "there is no route that
  * re-reads an existing round — `parse_condition_round.delay()` is called from creation paths only",
  * and that was true when written. `POST /condition-rounds/{id}/reparse` is that route, so the
  * dashboard passes `onRetry` and the button under the stranded copy is live.
  *
- * ⚠️ THE BUTTON APPEARS ONLY IN THE STRANDED BRANCH, WHICH IS NOT MERELY TIDY. The server REFUSES a
+ * THE BUTTON APPEARS ONLY IN THE STRANDED BRANCH, WHICH IS NOT MERELY TIDY. The server REFUSES a
  * reparse on a round it is still reading, so a Try again offered during a healthy parse would 409
  * with "this sheet is still being read". Both sides now use the same bound — `STRANDED_AFTER_MS`
  * here is `STRANDED_AFTER_SECONDS` there, pinned by `test_condition_type_mirror.py` — so what this
@@ -94,7 +94,7 @@ export function RoundReading({
               {stranded ? "This is taking much longer than it should." : "usually under 30 seconds"}
             </p>
           </div>
-          {/* ⚠️ THROUGH `resolveStatus`, NOT A DIRECT INDEX. Indexing is compile-time safe — the map
+          {/* THROUGH `resolveStatus`, NOT A DIRECT INDEX. Indexing is compile-time safe — the map
               is typed to the union, so all five keys are forced — but the case the helper exists for
               is not a compile-time case. A backend one deploy ahead of this bundle sends a sixth
               status, the index returns `undefined`, and `StatusToken` evaluates `GLYPH[meta.tone]`:
@@ -122,7 +122,7 @@ export function RoundReading({
 
         {stranded ? (
           <div className="flex flex-col gap-2">
-            {/* ⚠️ THIS SENTENCE ONCE PROMISED A ROUTE THAT DID NOT EXIST — "you can try reading it
+            {/* THIS SENTENCE ONCE PROMISED A ROUTE THAT DID NOT EXIST — "you can try reading it
                 again", when nothing re-read an existing round. It was rewritten to stop promising
                 it, and is now rewritten again because the route arrived: the reparse endpoint hands
                 the stored PDF back to the reader. A paragraph and a button that finally agree. */}

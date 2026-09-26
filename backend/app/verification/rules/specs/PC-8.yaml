@@ -4,22 +4,22 @@
 # its value does not support the mortgage, and where it is material it is treated as a sales concession
 # and deducted from the price for loan-to-value purposes.
 #
-# ⚠️ THIS RULE SURFACES; IT DOES NOT DECIDE. The catalog rationale says "Surface included personal
+# THIS RULE SURFACES; IT DOES NOT DECIDE. The catalog rationale says "Surface included personal
 # property — judgment", and a judgmental rule has exactly two exits — `needs_review` and `couldnt_check`.
 # There is NO firing path and none was added: PC-8 tells a processor that personal property is in the
 # contract, and a human decides whether it is material enough to affect value. A test pins that no
 # outcome can produce `fired`.
 #
-# ⚠️ IT COMPUTES NO DEDUCTION. Non-realty items are deducted from the sales price for LTV under the sales
+# IT COMPUTES NO DEDUCTION. Non-realty items are deducted from the sales price for LTV under the sales
 # concessions topic (tier S — the IPC page B3-4.1-02, 05/07/2025, which was NOT fetched cell by cell).
 # PC-8 carries no number and applies none; the deduction belongs to the LTV lane if it is ever built.
 #
-# ⚠️ THE FIELD IS FREE TEXT, not the yes/no the vocabulary row implies. The four real contracts that
+# THE FIELD IS FREE TEXT, not the yes/no the vocabulary row implies. The four real contracts that
 # state it read "None", "Gas Logs in fireplace...", "Refrigerator, Washer/Dryer", "Refrigerator,
 # Washer/Dryer" — so this is a READING, and the fixture/personal-property line is the whole judgment.
-# ⚠️ `personal_property_value` fills on 1 of 5 and that one is "0", so no value is available either.
+# `personal_property_value` fills on 1 of 5 and that one is "0", so no value is available either.
 #
-# ⚠️ CONTRACT WORDING VARIES BY STATE FORM far more than a bureau field does — the bench's free-text
+# CONTRACT WORDING VARIES BY STATE FORM far more than a bureau field does — the bench's free-text
 # contract reader once projected Texas TREC fields onto a North Carolina form. Unrecognised wording
 # abstains; an equality against one form's phrasing would be the `is_disputed` mistake at higher risk.
 
@@ -45,7 +45,7 @@ reference_values:
   priya_validated: false
   threshold_needs_signoff: false
   values:
-    # ⚠️ TIER S, AND DELIBERATELY NOT APPLIED. Sales concessions include non-realty items whose value is
+    # TIER S, AND DELIBERATELY NOT APPLIED. Sales concessions include non-realty items whose value is
     # deducted from the sales price for LTV purposes — from Fannie B3-4.1-02 (Interested Party
     # Contributions, page dated 05/07/2025). The per-cell IPC limit table was NOT fetched, and PC-8
     # computes no deduction in any case: it surfaces, a human decides. No number is encoded.
@@ -60,7 +60,7 @@ required_inputs:
     snapshot_path: 'tags.by_subject[<contract content_id>]["contract.personal_property"]'
     description: >-
       whether this contract includes personal property (AI, LP-493): "yes" / "no" / "unknown", read from
-      a FREE-TEXT field. ⚠️ UNCALIBRATED.
+      a FREE-TEXT field. UNCALIBRATED.
 
 subject_enumeration: per_document
 subject_key_fields:
@@ -79,7 +79,7 @@ judgment:
     op: eq
     value: purchase_agreement
   load_bearing_tags: [contract.personal_property]
-  # ⚠️ THE JUDGMENT SEES A YES/NO TAG, NOT THE CONTRACT'S WORDING (reported finding). reasoned_over
+  # THE JUDGMENT SEES A YES/NO TAG, NOT THE CONTRACT'S WORDING (reported finding). reasoned_over
   # carries only `contract.personal_property`, and _build_context passes {value, confidence, reasoning}
   # for it — so `evidence_required` above promises "the included-items wording exactly as the contract
   # states it" that the model never receives, and the `included` vs `fixtures_only` distinction it is

@@ -5,7 +5,7 @@ UNTOUCHED by this module. This ADDS a second, clearly separated path that genera
 REAL DB loan file (``build_snapshot`` + the governed real ``original_filename`` map), so a domain expert labels
 the actual documents she recognizes rather than the de-identified fixture (Jordan/Taylor).
 
-⚠️ THE OUTPUT CARRIES REAL BORROWER PII (names, addresses, masked accounts) and MUST NEVER be committed — the
+THE OUTPUT CARRIES REAL BORROWER PII (names, addresses, masked accounts) and MUST NEVER be committed — the
 LP-210 posture (real-loan artifacts are generated locally for review only, `.gitignore`-d). A guard refuses any
 in-repo, non-gitignored ``out_dir``, fail-closed. This path is DELIBERATE — never invoked by CI or a normal run.
 

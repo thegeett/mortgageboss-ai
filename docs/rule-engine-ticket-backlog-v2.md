@@ -30,7 +30,7 @@ LP-476 is DONE; LP-477 and LP-478 carry forward unchanged in intent but LP-478 i
 | blocked-on-producer-resolution | 1 (AS-3) |
 | **WRITABLE-NOW** | **1** (DT-4, deterministic branch only) |
 
-⚠️ **10 need Priya as their FIRST blocker; 66 of 83 touch Priya eventually** (51 carry an
+**10 need Priya as their FIRST blocker; 66 of 83 touch Priya eventually** (51 carry an
 uncalibrated load-bearing AI tag once produced, 14 need a threshold sign-off). Do not let "only 10"
 become a planning fiction.
 
@@ -38,7 +38,7 @@ become a planning fiction.
 regression check on neighbouring types · report cost before any model call · commit locally, never
 push · write `docs/tickets/LP-XXX.md` on completion.
 
-**Standing method (from LP-476):** ⚠️ **LP-451's field names are shorthand, not literal** — three
+**Standing method (from LP-476):** **LP-451's field names are shorthand, not literal** — three
 resolve to different real keys (`aus_dti`→`aus_dti_ratio`, `aus_ltv`→`aus_ltv_ratio`,
 `repairs_required`→`repairs_required_indicator`). Any ticket generating a field list from LP-451
 **must resolve every name against the real key set first.** The insurance spec also disagrees with
@@ -67,9 +67,9 @@ Six of six extractors exist. 83 rules verified. Phase C correctly refused. See `
 - Must satisfy Priya's ruling: **store all agency rules and select the applicable one; never the
   strictest; a lender's conservative choice is an explicit `LENDER_OVERLAY`; when the agency is
   unselected, return comparative results.**
-- ⚠️ **A memo and an ADR, not an implementation.** Geet chooses the shape.
+- **A memo and an ADR, not an implementation.** Geet chooses the shape.
 
-## LP-478 — The document ask ⚠️ **now the second-largest lever in the plan**
+## LP-478 — The document ask **now the second-largest lever in the plan**
 **Type:** Coordination · **Cost:** $0 · **Blocks:** 26 rules
 
 - **26 rules are blocked on corpus, not code.** This is no longer a Stage-4 side task.
@@ -77,7 +77,7 @@ Six of six extractors exist. 83 rules verified. Phase C correctly refused. See `
   certificate (MI-2/3/5), gift deposits (AS-5's trigger).
 - **n≤2, present but unmeasurable:** credit report **n=2** (10 rules), AUS/DU **n=1** (AU-1/2/3),
   appraisal **n=2** (PR-2/4/5/6), URLA **n=2** (PE-2).
-- ⚠️ **Both credit reports appear to be the same bureau format.** n=2 proves the plumbing, not
+- **Both credit reports appear to be the same bureau format.** n=2 proves the plumbing, not
   generalisation. State this in the ask — the need is for *varied* reports, not merely more.
 - **Batch with the ADR-332 real-file ask** (FR-1/2/3/6, CR-4, OC-1, RE-1, PC-1, TI-1, TI-2, AU-1) —
   same request, same lead time, one conversation.
@@ -100,7 +100,7 @@ The tradelines list is the one whose row fields are **uniformly populated** — 
 - Verify against the two stored reports: 21 and 14 rows, 34/35 carrying `monthly_payment`, zero
   unparseable, correct `_UNKNOWN` abstain when absent.
 - Confirm a file with no credit report yields `couldnt_check` (present-but-unclear), **never 0**.
-- ⚠️ **Frame as "proves the list→tag→rule path on 2 documents of one bureau format."** Not readiness.
+- **Frame as "proves the list→tag→rule path on 2 documents of one bureau format."** Not readiness.
 
 ## LP-480 — The per-liability enumerator
 **Depends on:** LP-479 · **Cost:** $0
@@ -120,9 +120,9 @@ The tradelines list is the one whose row fields are **uniformly populated** — 
 **Depends on:** LP-480 · **Cost:** low
 
 - Ship **CR-1, CR-3, CR-5, CR-6, CR-8, CR-10, CR-12** — seven, not eight.
-- ⚠️ **CR-11 is OUT.** `public_records` has **0 rows across both credit reports**. The list is declared
+- **CR-11 is OUT.** `public_records` has **0 rows across both credit reports**. The list is declared
   and captured; there is no data in it. Moves to LP-478 (documents).
-- ⚠️ **CR-9 is held** — agency-gated on LP-477. Building it here means building it twice.
+- **CR-9 is held** — agency-gated on LP-477. Building it here means building it twice.
 - CR-4 is *fed* by this but stays calibration-gated → Stage 4.
 - Regression check: **AS-1, AS-2, AS-12, IN-12** ride the legacy `transactions`/`schedule_c`
   attributes, which coexist with `lists`. Confirm all four byte-unchanged.
@@ -133,7 +133,7 @@ The tradelines list is the one whose row fields are **uniformly populated** — 
 # THE CORRECTNESS GATE
 
 ## LP-482 — Wire the accuracy layer to the verdict layer
-⚠️ **Blocks: any new rule shipping `auto`** — and Stage 3 roughly doubles the parsed-tag surface.
+**Blocks: any new rule shipping `auto`** — and Stage 3 roughly doubles the parsed-tag surface.
 
 - Four live rules take a **direct operand** from a field with a confirmed wrong value: **IH-1** (auto —
   `replacement_cost_or_coinsurance_basis`, its only gated tag, fills 46.7%, doc 104 wrong) · **AS-2**
@@ -143,15 +143,15 @@ The tradelines list is the one whose row fields are **uniformly populated** — 
   confidence minimum. The gate's armor covers absence, unknown-ness, contradiction and low confidence —
   a confidently-wrong parsed value defeats all four by construction.
 - LP-474's checks run at the **extraction** layer and are not wired to the verdict layer.
-- ⚠️ The census adds a third ledger-exposed rule set: **IH-2, IH-8** also read document-104 fields.
+- The census adds a third ledger-exposed rule set: **IH-2, IH-8** also read document-104 fields.
 - **Phase A — STOPS AND REPORTS:** two options costed. (a) Wire LP-474 so a flagged extraction degrades
   the verdict to `needs_review`. (b) Demote IH-1, AS-2, ID-5 from `auto` to `ratify`. Recommend one.
 
 ---
 
-# STAGE 3 — TAGS ⚠️ **the plan's centre of gravity: 54 of 83**
+# STAGE 3 — TAGS **the plan's centre of gravity: 54 of 83**
 
-Sequenced by leverage. ⚠️ **New tags go in `vocabulary_extra.yaml`** — `fact_tags.csv` is generated
+Sequenced by leverage. **New tags go in `vocabulary_extra.yaml`** — `fact_tags.csv` is generated
 from `docs/snapshot-fact-tags.xlsx` and hand edits are lost on regeneration. Every tag must pass
 `test_parsed_declaration_fields.py` (the LP-450 guard — a pytest, not load-time, deliberately).
 
@@ -159,7 +159,7 @@ from `docs/snapshot-fact-tags.xlsx` and hand edits are lost on regeneration. Eve
 - The census's single WRITABLE-NOW hit. `property_tax_bill.assessed_value` fills **5/5**.
 - **Deterministic branch only** — the new-construction branch is AI and is not in scope here.
 - Smallest possible proof of the parsed-tag path before the larger families.
-- ⚠️ **Replaces the old LP-483.** TI-4 is not a nearest miss — see LP-489.
+- **Replaces the old LP-483.** TI-4 is not a nearest miss — see LP-489.
 
 ## LP-484 — The 7 vocabulary-blocked rules
 - Blocked at hop 1 (tag undeclared) rather than hop 2 — the shortest chain in the census.
@@ -167,32 +167,32 @@ from `docs/snapshot-fact-tags.xlsx` and hand edits are lost on regeneration. Eve
 - FR-3's `purchase_agreement.side_agreements_referenced` fills 2/5; IH-8's wind/hail pair 7/15.
 - Backfill `rule_tags.csv` rows for those with neither spec nor tag rows as they are touched.
 
-## LP-485 — Insurance cohort ⚠️ **the only statistically usable type (n=15)**
+## LP-485 — Insurance cohort **the only statistically usable type (n=15)**
 - **IH-2** (`mortgagee_name` 14/15, `mortgagee_clause_raw` 14/15).
 - Every other cohort in the plan is n≤5. This is the only place a fill rate is a real measurement.
-- ⚠️ Carries accuracy-ledger exposure (doc 104) — sequence after LP-482.
-- ⚠️ **IH-4 is never-write** (RED, dup of DT-5). Do not build it.
+- Carries accuracy-ledger exposure (doc 104) — sequence after LP-482.
+- **IH-4 is never-write** (RED, dup of DT-5). Do not build it.
 
 ## LP-486 — Contract cohort
-- **PC-4** (`seller_credit_amount` 3/5) ⚠️ *agency-gated, held for LP-477* · **PC-5**
+- **PC-4** (`seller_credit_amount` 3/5) *agency-gated, held for LP-477* · **PC-5**
   (`earnest_money_amount` 4/5) · **PC-8** (`personal_property_included` 4/5).
-- ⚠️ **PC-6 and PC-9 are NOT here.** Their lists fill but the row field each needs does not —
+- **PC-6 and PC-9 are NOT here.** Their lists fill but the row field each needs does not —
   `addendum_date` **0/12**, `deadline_date` **6/26**. Both are extractor-prompt work → LP-489.
 
 ## LP-487 — Property/appraisal cohort
 - **PR-2** (`appraised_value` 2/2) · **PR-4** (`appraisal_completion_condition` 2/2) · **PR-5**
   (`condition_rating` 2/2, `repairs_required_indicator` 2/2) · **PR-6** (`appraisal_effective_date` 2/2).
-- ⚠️ **All corpus-thin (n=2).** Ship them, but every one carries a thin-n caveat on its spec until
+- **All corpus-thin (n=2).** Ship them, but every one carries a thin-n caveat on its spec until
   LP-478 delivers more appraisals. `fha_condition_deficiencies` is **0/2** — PR-5's FHA branch is
   LP-489 work, not this ticket.
-- ⚠️ **PR-1 held** — agency-gated.
+- **PR-1 held** — agency-gated.
 
 ## LP-488 — Title cohort (the fields that DO fill)
 - **TI-1** (`vested_owner_name` 4/4) · **TI-2** (`legal_description` 4/4) · **TI-6**
   (`chain_of_title` 3/4 docs).
-- ⚠️ TI-3, TI-4, TI-5's second field are **excluded** → LP-489.
+- TI-3, TI-4, TI-5's second field are **excluded** → LP-489.
 
-## LP-489 — ⚠️ NEW: the extractor-prompt gap _(category (e))_
+## LP-489 — NEW: the extractor-prompt gap _(category (e))_
 **The census's most important new finding.** Field present, extractor present, corpus present — and
 the field never populates. Not a tag problem; a prompt problem.
 
@@ -201,10 +201,10 @@ the field never populates. Not a tag problem; a prompt problem.
 - **PC-6** `addenda[addendum_date]` **0/12** · **PC-9** `contingencies[deadline_date]` **6/26**.
 - **PR-5** `fha_condition_deficiencies` **0/2** · **AU-2** `aus_required_conditions[is_prior_to_close]`
   **2/22** · **TI-3** `schedule_b_items[is_satisfied]` **2/19**.
-- ⚠️ **Prompt changes go in the `.txt`, under that prompt's own naming** — specs and prompts diverge.
+- **Prompt changes go in the `.txt`, under that prompt's own naming** — specs and prompts diverge.
   89 of 109 prompts are untouched STARTER placeholders; the 19 hand-tuned ones are the types that
   performed at parity.
-- ⚠️ **A spec edit does not reach a shipped prompt** — the generator runs diff-mode for shipped extractors.
+- **A spec edit does not reach a shipped prompt** — the generator runs diff-mode for shipped extractors.
 - Each field re-verified against the source PDFs before any prompt change: is the datum on the page at all?
 - **Done when:** each field either fills, or is documented as absent from the document class.
 
@@ -216,16 +216,16 @@ the field never populates. Not a tag problem; a prompt problem.
 
 # STAGE 4 — CALIBRATION
 
-⚠️ **The only stage that costs API credit** — scoring re-runs the reasoner per worksheet. **Batch the
+**The only stage that costs API credit** — scoring re-runs the reasoner per worksheet. **Batch the
 sessions: one beats five.** ~20 min per 30 rows (LP-420).
 
 ## LP-491 — Build the calibration worksheets in advance
 - All worksheets prepared before Priya sits down, so her time is labelling, not waiting.
 - `guard_pii_safe_out_dir` fail-closed guard keeps any real-PII worksheet out of the repo.
-- ⚠️ Scope to **66 rules**, not 10 — 51 need a bar once produced, 14 need a threshold sign-off.
+- Scope to **66 rules**, not 10 — 51 need a bar once produced, 14 need a threshold sign-off.
 
 ## LP-492 — AS-4: the reserve-eligibility ruling
-- ⚠️ **Not a bar-height problem.** `stmt.is_reserve_eligible` measures **0% (0/5)** — the model calls
+- **Not a bar-height problem.** `stmt.is_reserve_eligible` measures **0% (0/5)** — the model calls
   standard checking/savings reserve-eligible where Priya labels "no."
 - Sequence: **ruling → re-prompt → re-score.** A threshold change fixes nothing.
 
@@ -237,7 +237,7 @@ sessions: one beats five.** ~20 min per 30 rows (LP-420).
 
 ## LP-494 — The judgmental lane and AI cross-source
 - ~29 judgmental rules plus the cross-source discovery lane.
-- ⚠️ **Lineage under-states judgmental rules** (LP-476 assumption 4) — PE-4's lineage lists only
+- **Lineage under-states judgmental rules** (LP-476 assumption 4) — PE-4's lineage lists only
   `program.type` while the rule is an `ai_judgment`. Do not size these from `rule_tags.csv`.
 - Every threshold ships as a **grounded starter** at reduced confidence until Priya confirms it.
 
@@ -250,13 +250,13 @@ sessions: one beats five.** ~20 min per 30 rows (LP-420).
 - AS-3 additionally needs closing-cost extraction from the LE/CD; its `_cash_to_close_shortfall`
   recipe is an unconditional-abstain stub today.
 
-## LP-496 — ⚠️ NEW: the tag DAG
+## LP-496 — NEW: the tag DAG
 - `tag_dependencies.csv` **cannot be filled by hand.** It is generated by
   `app/scripts/generate_fact_tags.py` from the vocabulary xlsx, and pinned empty by three tests
   (`test_generated_csvs_are_committed_and_current`, `test_projection_counts_match_files`,
   `test_desired_state_shape`). The empty DAG is deliberate — LP-311 Phase 0.
 - Needs: a `depends_on` column in the xlsx (or a generator change), plus updates to the three tests.
-- ⚠️ **The header is the wrong relation anyway** — `tag_id,depends_on_tag_id` is tag→tag; "which rules
+- **The header is the wrong relation anyway** — `tag_id,depends_on_tag_id` is tag→tag; "which rules
   unblock together" is rule→tag, already in `rule_tags.csv`. Decide what the file is *for* first.
 - **19 tag→tag edges** were extracted by LP-476 as starting data — a lower bound (most recipes read
   extraction fields, not tags).
@@ -268,7 +268,7 @@ sessions: one beats five.** ~20 min per 30 rows (LP-420).
 
 ## LP-498 — MI certificate extractor
 - The only genuinely missing document extractor. No module, no spec, no catalog type.
-- ⚠️ **n=0 in the corpus — it cannot be validated even once built.** Gated on LP-478 delivering
+- **n=0 in the corpus — it cannot be validated even once built.** Gated on LP-478 delivering
   certificates. Unblocks MI-2, MI-3, MI-5.
 
 ## LP-499 — Re-derive the five VAC/RED vacuity proofs
@@ -297,5 +297,5 @@ image preprocessing (ADR-365) · the 89 untuned prompts *(except where LP-489 ne
 `loan_number_masked` storing the unmasked value · PII inside captured list rows (routed by prompt only,
 36 of 119 prompts) · the UI · Phase 4.5 conditions.
 
-⚠️ The last two are **live PII issues on a GLBA-covered platform.** Held for scope discipline, not
+The last two are **live PII issues on a GLBA-covered platform.** Held for scope discipline, not
 because they are safe.

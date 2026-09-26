@@ -54,7 +54,7 @@ Every failure since 20:47 is identical in kind. All `ai_call_failed` /
 | `transient` | **`False`** | Correctly non-transient. Fails fast at attempt 1 of 3 — retrying an expired token achieves nothing. |
 | `latency_ms` | **40, 44, 135, 196, 197** | **Sub-200 ms, three under 140 ms.** The request never left the process. Consistent with failing during credential resolution in `_prepare_request`. |
 | `attempt` | **1** of `max_attempts=3` | No retry, by design. |
-| `model` | `claude-haiku-4-5` | ⚠️ **Misleading — ignore for provider identification.** See § "A misleading log field". |
+| `model` | `claude-haiku-4-5` | **Misleading — ignore for provider identification.** See § "A misleading log field". |
 
 **Zero `ai_rate_limit_wait` lines** — DATA. Consistent: pacing runs *before* the call, and
 the very first acquisition never waits.

@@ -69,7 +69,7 @@ resource "terraform_data" "account_guard" {
   }
 }
 
-# ⚠️ DIFFERENT FROM THE LOWER ENVIRONMENT, deliberately.
+# DIFFERENT FROM THE LOWER ENVIRONMENT, deliberately.
 #
 # There, the documents bucket was hand-made and left unmanaged. Here it is created
 # by Terraform and CMK-encrypted, because it holds real borrower files: the CMK
@@ -245,7 +245,7 @@ resource "aws_budgets_budget" "monthly" {
   # budget would have tracked $0 and never fired, which is worse than no filter at
   # all because it looks configured. Verified: format() yields "user:Environment$dev".
   #
-  # ⚠️ DEPENDS ON AN ACCOUNT-LEVEL ACTIVATION. AWS Budgets can only filter on a
+  # DEPENDS ON AN ACCOUNT-LEVEL ACTIVATION. AWS Budgets can only filter on a
   # user-defined tag once `Environment` is ACTIVATED as a cost allocation tag, which
   # is an account (payer) setting, not a per-environment one — it is applied by
   # `aws_ce_cost_allocation_tag.environment` in THIS root module. Without it this
@@ -288,7 +288,7 @@ resource "aws_budgets_budget" "monthly" {
 # cross-account pull missing the kms:Decrypt grant fails with an authorization
 # error naming KMS, not ECR, which sends you looking in the wrong service.
 #
-# ⚠️ C4 recorded that repository URLs had to be ASSEMBLED from a variable because
+# C4 recorded that repository URLs had to be ASSEMBLED from a variable because
 # `data.aws_ecr_repository` resolves through THIS environment's provider and failed
 # with RepositoryNotFoundException against the other account. THAT CONSTRAINT IS
 # GONE — the registry is in this account and in this state, so a module output is
@@ -335,7 +335,7 @@ locals {
 # --------------------------------------------------------------------------- #
 # Cost allocation
 #
-# ⚠️ MOVED HERE FROM THE DISSOLVED SHARED STATE, and it is load-bearing.
+# MOVED HERE FROM THE DISSOLVED SHARED STATE, and it is load-bearing.
 #
 # The budget below filters on user:Environment$<name>, and AWS Budgets matches
 # NOTHING until that tag is ACTIVATED as a cost allocation tag. Without this the
@@ -346,7 +346,7 @@ locals {
 # the SAME account must not declare it again, or the two states would fight over
 # one account-wide setting.
 #
-# ⚠️ AND IT CANNOT BE APPLIED FROM THIS ACCOUNT AT ALL. C5's phase-1 apply failed
+# AND IT CANNOT BE APPLIED FROM THIS ACCOUNT AT ALL. C5's phase-1 apply failed
 # here with:
 #   AccessDeniedException: Failed to update Cost Allocation Tag: Linked account
 #   doesn't have access to cost allocation tags.
@@ -354,7 +354,7 @@ locals {
 # account in the organization, so no permission grant inside it can make this
 # succeed — it is an organizational boundary, not a policy gap.
 #
-# ⚠️ THE RESOURCE STAYS, count-gated to 0 by
+# THE RESOURCE STAYS, count-gated to 0 by
 # `activate_environment_cost_allocation_tag = false` in terraform.tfvars. Deleting
 # it would delete the only statement in this configuration that the budget below
 # depends on something nobody has done yet. The failure it guards against is
@@ -410,7 +410,7 @@ module "compute" {
   public_subnet_ids     = module.network.public_subnet_ids
   alb_security_group_id = module.network.alb_security_group_id
 
-  # ⚠️ TASKS GO IN THE SAME AZs AS THE ENDPOINTS. A task in an AZ with no local
+  # TASKS GO IN THE SAME AZs AS THE ENDPOINTS. A task in an AZ with no local
   # endpoint still works — private DNS resolves VPC-wide — but every AWS call
   # crosses an AZ boundary, adding transfer cost and giving back the AZ
   # independence the single-AZ placement was meant to buy.
@@ -458,7 +458,7 @@ module "compute" {
     # token could not be signed and the task died before opening a connection.
     AWS_REGION = var.aws_region
 
-    # ⚠️ REQUIRED for a CMK-encrypted bucket. app/storage/s3.py sends
+    # REQUIRED for a CMK-encrypted bucket. app/storage/s3.py sends
     # ServerSideEncryption=aws:kms + SSEKMSKeyId ONLY when this is set; unset, it
     # sends AES256 (SSE-S3) instead, which conflicts with the bucket's KMS default.
     S3_KMS_KEY_ID        = local.documents_kms_key_arn
@@ -514,7 +514,7 @@ module "compute" {
     # back to the template the rule already wrote. It touches `message` and nothing else, so
     # turning it off returns the previous wording with no other effect.
     #
-    # ⚠️ It rewrites EVERY finding on a file at once — a bad prompt degrades the whole queue
+    # It rewrites EVERY finding on a file at once — a bad prompt degrades the whole queue
     # rather than one rule. Enabled here on staging to be READ against the templates before it
     # goes anywhere else.
     FINDING_PROSE_ENABLED = "true"
@@ -534,7 +534,7 @@ module "compute" {
     # once, so it is read against the stored text HERE before it goes anywhere else.
     NEED_PROSE_ENABLED = "true"
 
-    # ⚠️ REDIS_URL IS NOT HERE. redis_auth_enabled is true in this environment, so
+    # REDIS_URL IS NOT HERE. redis_auth_enabled is true in this environment, so
     # the URL carries an AUTH token and is a CREDENTIAL — it is injected from the
     # redis-url secret in secret_arns below.
     #
@@ -546,7 +546,7 @@ module "compute" {
     # It must appear in ONE of the two maps, never both: ECS rejects a container
     # definition that names the same key in `environment` and `secrets`.
     },
-    # With auth OFF the URL is topology only, so it stays config. ⚠️ Both parts of
+    # With auth OFF the URL is topology only, so it stays config. Both parts of
     # this value matter — transit encryption makes rediss:// mandatory, and without
     # ?ssl_cert_reqs=required redis-py verifies the certificate while kombu resolves
     # to CERT_NONE.
@@ -670,7 +670,7 @@ module "scheduler" {
 # --------------------------------------------------------------------------- #
 # INFRA-1 — inbound borrower mail
 # --------------------------------------------------------------------------- #
-# ⚠️ STAGING NEEDS A REGISTRAR STEP NOW, AND DID NOT BEFORE (LP-836). This said the opposite, and
+# STAGING NEEDS A REGISTRAR STEP NOW, AND DID NOT BEFORE (LP-836). This said the opposite, and
 # it was true of the old name: `inbox.staging.mortgageboss.ai` sits inside the
 # `staging.mortgageboss.ai` hosted zone Terraform already owns, so it was one MX record and no
 # human. The confirmed name is `imboxstaging.mortgageboss.ai` — a sibling label directly under the

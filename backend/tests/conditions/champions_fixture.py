@@ -1,6 +1,6 @@
 """The Champions synthetic condition sheet, built as a real PDF (LP-906 section 3, spec §7.4).
 
-⚠️ THIS FIXTURE IS AUTHORED, NOT EXTRACTED — the opposite of §7.1-7.3. Those were cut from the spec
+THIS FIXTURE IS AUTHORED, NOT EXTRACTED — the opposite of §7.1-7.3. Those were cut from the spec
 with `sed` and `diff`-verified, so no transcription error was possible. §7.4 instead gives a TABLE of
 28 section/number pairs with a structural note each ("the long one, ~9 lines", "five numbered items",
 "one line: Subject to Condo Approval."), and full prose for only rows 71 and 268 — which appear in
@@ -12,7 +12,7 @@ that it reassembled it correctly. What genuinely tests the algorithm is structur
 spec's order, the right section per row, 206 reassembled across the page break with `crossed_page`,
 no page furniture in any row, no unassigned lines — and those are the assertions that carry weight.
 
-⚠️ WHY A REAL PDF AND NOT TEXT. Champions prints each condition's number VERTICALLY CENTRED on its
+WHY A REAL PDF AND NOT TEXT. Champions prints each condition's number VERTICALLY CENTRED on its
 row, so the number lands on the first line, a middle line, or a line of its own depending only on how
 many lines the text wrapped to. The reader recovers a row's extent from `2 * number.y - bottom`. Only
 real word boxes carry that geometry, so a text fixture would exercise a different path from the one
@@ -72,7 +72,7 @@ FOOTER_RIGHT = "Mesa AZ 85201 | NMLS #0000001"
 #: Page 1's header. A bare string is a section title on its own line; a 4-tuple is two label/value
 #: pairs side by side, which is how Champions prints them.
 #:
-#: ⚠️ `Title Commitment Exp` / `Date:` IS DELIBERATELY SPLIT ACROSS TWO LINES. Spec rule 2 calls out
+#: `Title Commitment Exp` / `Date:` IS DELIBERATELY SPLIT ACROSS TWO LINES. Spec rule 2 calls out
 #: exactly this wrapped label as something the reader must join, so the fixture has to contain it —
 #: a fixture that printed it on one line would leave that rule asserted by nothing.
 HEADER_BLOCK: tuple[str | tuple[str, str, str, str], ...] = (
@@ -124,7 +124,7 @@ class Section:
     rows: tuple[tuple[str, str], ...]
 
 
-#: ⚠️ 71 AND 268 ARE THE SPEC'S OWN WORDS, copied from the §6 centre-rule example. Every other text
+#: 71 AND 268 ARE THE SPEC'S OWN WORDS, copied from the §6 centre-rule example. Every other text
 #: is authored here to the structural note §7.4 gives for that row.
 SECTIONS: tuple[Section, ...] = (
     Section(
@@ -426,7 +426,7 @@ def build_champions_pdf() -> bytes:
             lines = textwrap.wrap(text, WRAP_AT)
 
             if number == SPLIT_ROW_NUMBER:
-                # ⚠️ THE SPLIT HAPPENS AT THE PAGE BOTTOM, as a real page break does. An earlier
+                # THE SPLIT HAPPENS AT THE PAGE BOTTOM, as a real page break does. An earlier
                 # version broke mid-page, which produced a "page break" with 400pt of blank space
                 # above the footer — the reader would still have coped, but the fixture would have
                 # been testing a shape no renderer emits.

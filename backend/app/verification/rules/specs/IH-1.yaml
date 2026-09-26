@@ -1,6 +1,6 @@
 # IH-1 — Insurance adequacy (the DWELLING loss-settlement basis) — DETERMINISTIC structural rule SPEC (LP-447).
 #
-# ⚠️ PRIYA'S RULING REPLACED THE CATALOGUED RULE (ADR-340, effective 2026-03-18). The catalog planned IH-1 as
+# PRIYA'S RULING REPLACED THE CATALOGUED RULE (ADR-340, effective 2026-03-18). The catalog planned IH-1 as
 # CALCULATIVE — "dwelling coverage vs loan amount / 80%-of-replacement-cost — numeric compare". Priya RETIRED that:
 # Fannie/Freddie dropped the coverage-vs-loan comparison. Her replacement is a BASIS check, no percentage:
 #   replacement cost  -> satisfied ;  actual cash value -> fired (inadequate) ;
@@ -10,29 +10,29 @@
 # `replacement_cost_or_coinsurance_basis`; LP-447 normalises it (ins.dwelling_settlement_basis, the derived recipe)
 # and writes this rule. NO AI tag, NO Priya threshold (a boolean basis check) → no-ai-dependency → it ACTIVATES.
 #
-# ⚠️ THE VALUE VOCABULARY (LP-447 D3). The field is a FREE-FORM STRING (real policies returned "replacement cost"
+# THE VALUE VOCABULARY (LP-447 D3). The field is a FREE-FORM STRING (real policies returned "replacement cost"
 # and "Replacement Cost"). ins.dwelling_settlement_basis normalises it against an EXPLICIT allow-list (casefold +
 # collapsed whitespace, NOT a fuzzy matcher) to replacement_cost / actual_cash_value / unknown. An unrecognised
 # string -> "unknown" -> the gate -> couldnt_check. FAIL CLOSED: an unreadable basis is never `satisfied`.
 #
-# ⚠️ THE ANTI-CONFLATION (LP-447 D4 / ADR-351). The recipe reads ONLY the typed dwelling-basis field, NEVER the
+# THE ANTI-CONFLATION (LP-447 D4 / ADR-351). The recipe reads ONLY the typed dwelling-basis field, NEVER the
 # forms_and_endorsements list — so an ACV-ROOF or personal-property replacement-cost endorsement (a list row) can
 # never be read as the dwelling basis. This is the Occidental case: its dwelling basis stayed null (couldnt_check),
 # the PP endorsement stayed a list row.
 #
-# ⚠️ THE IH-3 BOUNDARY. IH-3 (live) reads the binder's DATES (effective vs closing — a coverage-gap-in-time check);
+# THE IH-3 BOUNDARY. IH-3 (live) reads the binder's DATES (effective vs closing — a coverage-gap-in-time check);
 # IH-1 reads the binder's dwelling SETTLEMENT BASIS (adequacy of the settlement terms). Different input, different
 # reason — they never overlap. IH-7 (condo master policy ≥100% replacement cost) is a DIFFERENT test on a
 # DIFFERENT document (the master policy) — NOT bundled here; IH-1 needs no condo exclusion because it never reads a
 # master policy, and no reliable property.type / condo signal exists to exclude on anyway (ADR-340).
 #
-# ⚠️ no homeowners binder -> NOT_APPLICABLE (Priya's table), NOT couldnt_check. This DIFFERS from IH-3 (which
+# no homeowners binder -> NOT_APPLICABLE (Priya's table), NOT couldnt_check. This DIFFERS from IH-3 (which
 # couldnt_checks a missing binder, treating insurance-existence as its concern). IH-1 judges the adequacy of a
 # policy that EXISTS; if none exists there is nothing to judge — so the applicability predicate scopes IH-1 to
 # homeowners_insurance documents and the rule is deliberately NOT declared "expected" (a missing binder is
 # out-of-scope, not a gap). Whether a policy must exist is IH-3's / another rule's honest gap, not IH-1's.
 #
-# ⚠️ MULTIPLE HOMEOWNERS BINDERS (LP-447 review — an OPEN domain question for Priya). IH-1 is per_document, so a
+# MULTIPLE HOMEOWNERS BINDERS (LP-447 review — an OPEN domain question for Priya). IH-1 is per_document, so a
 # file with more than one current homeowners_insurance binder judges EACH independently: an ACV binder → fired,
 # a replacement-cost binder → satisfied, both on the same file. This is DELIBERATE and fail-closed — the system
 # has no reliable "operative policy" signal, so surfacing every inadequate binder for the processor to reconcile

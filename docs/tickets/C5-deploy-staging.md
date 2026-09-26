@@ -68,7 +68,7 @@ than failing.
 | Cognito hosted UI domain | the login page |
 | Cognito app client | callback from `var.domain_name`, not the ALB DNS name |
 
-⚠️ `encryption-key` has **no generating resource** by design. Rotating it destroys every stored
+`encryption-key` has **no generating resource** by design. Rotating it destroys every stored
 SSN (single-key Fernet, no re-encryption path until B2 lands).
 
 ### Data
@@ -125,7 +125,7 @@ SSN (single-key Fernet, no re-encryption path until B2 lands).
 | Resource | Notes |
 |---|---|
 | Budget `$300` | 80% actual, 100% forecast |
-| Cost allocation tag `Environment` | ⚠️ account-level; without it the budget matches nothing and reports $0 forever |
+| Cost allocation tag `Environment` | account-level; without it the budget matches nothing and reports $0 forever |
 
 ---
 
@@ -138,7 +138,7 @@ cd infra/bootstrap
 AWS_PROFILE=mbai-staging-admin terraform init
 ```
 
-⚠️ **First real test of `use_lockfile`.** It was never verified against Terraform v1.15.8. If
+**First real test of `use_lockfile`.** It was never verified against Terraform v1.15.8. If
 init rejects it, apply the fallback in `C4b-consolidate-staging-result.md`: restore the DynamoDB
 table to bootstrap and swap `use_lockfile` for `dynamodb_table` in `envs/staging/backend.tf`.
 Never set both.
@@ -197,7 +197,7 @@ AWS_PROFILE=mbai-staging-admin aws ecr get-login-password --region us-east-1 \
   | docker login --username AWS --password-stdin $REGISTRY
 ```
 
-⚠️ **`--platform linux/arm64` on both.** C3 verified the C1 images are arm64 and pinned
+**`--platform linux/arm64` on both.** C3 verified the C1 images are arm64 and pinned
 `cpu_architecture = "ARM64"`. An x86 image on an ARM64 task definition dies with
 `exec format error`, visible only in the log stream — not in ECS service events.
 
@@ -212,10 +212,10 @@ docker buildx build --platform linux/arm64 \
 docker push $REGISTRY/mbai/frontend:staging
 ```
 
-⚠️ **The frontend build arg is baked into the JavaScript bundle and is not read at runtime.**
+**The frontend build arg is baked into the JavaScript bundle and is not read at runtime.**
 Build it wrong and the browser calls the wrong host, with **nothing in your server logs**.
 
-⚠️ **Two open items must be in the image before this step:**
+**Two open items must be in the image before this step:**
 - **The RDS CA bundle**, with `PGSSLROOTCERT` pointing at it. Without it `?ssl=require`
   encrypts but verifies neither certificate nor hostname. Open since C3.
 - Confirm **`UV_NO_SYNC=1`** is in the task definitions. Without it `uv run` reaches PyPI at
@@ -236,22 +236,22 @@ python3 -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().d
 # → put-secret-value into mbai/staging/encryption-key
 ```
 
-⚠️ **`encryption-key` must be a valid Fernet key** (44-char urlsafe base64). It is validated for
+**`encryption-key` must be a valid Fernet key** (44-char urlsafe base64). It is validated for
 length but not format at boot, so a malformed value starts cleanly and fails at the first SSN
 write, inside a request handler.
 
-⚠️ **Save it somewhere safe outside AWS.** Until B2 lands there is no rotation path — losing it
+**Save it somewhere safe outside AWS.** Until B2 lands there is no rotation path — losing it
 means losing every stored SSN.
 
 **`database-url`** — from the Terraform output, and:
 
-⚠️ **`?ssl=require`, never `?sslmode=require`.** The latter raises
+**`?ssl=require`, never `?sslmode=require`.** The latter raises
 `TypeError: connect() got an unexpected keyword argument 'sslmode'`. RDS documentation uses the
 wrong spelling for asyncpg.
 
 **`redis-url`** — apply the AUTH token out of band, then:
 
-⚠️ **`rediss://…?ssl_cert_reqs=required`.** Without the query parameter, redis-py verifies the
+**`rediss://…?ssl_cert_reqs=required`.** Without the query parameter, redis-py verifies the
 certificate and kombu resolves to `CERT_NONE` — same URL, opposite posture.
 
 Verify all four are non-empty:

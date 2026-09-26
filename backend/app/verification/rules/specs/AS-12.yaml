@@ -73,7 +73,7 @@ judgment:
   # deposit" and "funds appearing just before closing" — it was given neither the amount nor the date,
   # so it was being asked about signals it could not observe. `_build_context` builds the judgment
   # context from THIS list alone, so adding them here is what puts them in front of the model.
-  # ⚠️ Two of the prompt's three signals, not all three: "proximity to closing" also needs the loan's
+  # Two of the prompt's three signals, not all three: "proximity to closing" also needs the loan's
   # closing date (contract.loan_closing_date), which is loan-level and absent on the file this ticket
   # came from — the same gap that makes IH-3 abstain there.
   # LP-522 +txn.source_strength: the tag that says whether the source is a PAPER TRAIL or a CLAIM. It
@@ -100,7 +100,7 @@ judgment:
           Obtain the statement for the sending account showing the matching withdrawal. If the funds
           came from elsewhere, get a signed explanation with supporting documents. If they were
           borrowed, the loan must be disclosed and its payment counted in the DTI.
-      # ⚠️ THIS MUST NOT CLAIM THE LINE IS BLANK. `source_strength: none` means no source could be
+      # THIS MUST NOT CLAIM THE LINE IS BLANK. `source_strength: none` means no source could be
       # ESTABLISHED — it is about corroboration, not about whether the description has words in it. The
       # first wording here said "nothing in it identifies where the money came from" and rendered, on a
       # real file, directly above a line naming an institution, an account and the borrower. A sentence
@@ -147,7 +147,7 @@ judgment:
   # the model still flags reaches a human. The clearing is done by the deterministic predicate, so this
   # is NOT "auto-clearing a confident no": the model's answer can only ever ADD a review, never remove
   # one. An absent or "unknown" predicate leaves the verdict at needs_review (fail-closed).
-  # ⚠️ Predicates on txn.apparent_category DIRECTLY, not on a derived tag. LP-516 first introduced
+  # Predicates on txn.apparent_category DIRECTLY, not on a derived tag. LP-516 first introduced
   # `txn.readily_identifiable_source` for this and it NEVER MATERIALIZED on a real run: the generic
   # materialization pass is scoped by `_MATERIALIZED_SUBJECTS`, which excludes `transaction` because
   # Stage A/B produces the txn.* tags through its own dedicated producer. A NEW transaction-subject
@@ -170,7 +170,7 @@ judgment:
   # LP-518 — the SIZE floor, sized per loan purpose. Runs AFTER `applicability` and BEFORE the gate and
   # the AI call, so a deposit too small for the borrowed-funds question to mean anything costs nothing.
   #
-  # ⚠️ THIS SCOPES BEFORE ASKING, WHERE `exempt_when` ABOVE DELIBERATELY DOES NOT. The two sit adjacent
+  # THIS SCOPES BEFORE ASKING, WHERE `exempt_when` ABOVE DELIBERATELY DOES NOT. The two sit adjacent
   # and resolve opposite ways, and the difference is the guideline's, not ours: the readily-identifiable
   # exemption is about the deposit's SOURCE and the guide attaches an escape hatch to it ("if the lender
   # still has questions ..."), so the model must be asked. The materiality floor is about the deposit's

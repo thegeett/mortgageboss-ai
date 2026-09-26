@@ -5,17 +5,17 @@
 # servicer actually bills. A 1003 commonly carries principal and interest only while the servicer bills a
 # full PITIA, and the difference is the escrow — so the debt-to-income ratio understates the obligation.
 #
-# ⚠️ THIS RULE CAN NEVER PRODUCE `fired`, AND THAT IS A DESIGN PROPERTY PINNED BY TEST. An understated
+# THIS RULE CAN NEVER PRODUCE `fired`, AND THAT IS A DESIGN PROPERTY PINNED BY TEST. An understated
 # payment is a DISCREPANCY, not a defect: a property under contract, a loan being paid off at closing, or
 # a payment about to change on an escrow re-analysis are all ordinary reasons the two figures differ. The
 # rule SURFACES it as `needs_review`.
 #
-# ⚠️ IT NEVER ASSERTS RETENTION, AND IT DOES NOT READ `property.is_retained_reo` OR
+# IT NEVER ASSERTS RETENTION, AND IT DOES NOT READ `property.is_retained_reo` OR
 # `property.retained_pitia` — those stay vocabulary orphans with no producer (pinned by
 # test_reo_reconciliation_lp495a.py::test_retention_tags_are_not_wired_into_either_rule). Whether the property is being retained is exactly the question
 # this rule hands to the processor rather than answering.
 #
-# ⚠️ THE STATEMENT'S `monthly_payment` IS ALREADY THE PITIA — IT IS NOT ADDED TO `escrow_amount`.
+# THE STATEMENT'S `monthly_payment` IS ALREADY THE PITIA — IT IS NOT ADDED TO `escrow_amount`.
 # This is the rule's single most important correctness point, and it is a MEASURED fact about the
 # extractor, not an assumption. `app/ai/prompts/extraction/mortgage_statement.txt` defines the fields as:
 #     monthly_payment  (number)  the total monthly payment (principal+interest+escrow)
@@ -26,16 +26,16 @@
 # figure is carried into the REASONING instead, because it is usually the EXPLANATION for a real
 # shortfall.
 #
-# ⚠️ ONE MATCHER SERVES RE-1 AND DT-6 (ADR-375) — see RE-1.yaml. DT-6 asks its question ONLY of an
+# ONE MATCHER SERVES RE-1 AND DT-6 (ADR-375) — see RE-1.yaml. DT-6 asks its question ONLY of an
 # obligation RE-1's matcher already matched; an unmatched statement resolves to couldnt_check here rather
 # than being reported a second time under a second rule.
 #
-# ⚠️ NO TOLERANCE BAND, AND THAT IS A CHECKED CONCLUSION (ADR-361), NOT AN OMISSION. No source establishes
+# NO TOLERANCE BAND, AND THAT IS A CHECKED CONCLUSION (ADR-361), NOT AN OMISSION. No source establishes
 # a de-minimis difference between a stated housing payment and a servicer's billed PITIA, so any band here
 # would be INVENTED — the exact ADR-361 failure. The comparison is exact to the cent, and a difference of
 # any size routes to needs_review, which costs a processor one glance and never an automatic finding.
 #
-# ⚠️ THE "OR NET RENTAL" PATH IN THE CATALOG IS UNAVAILABLE AND IS NOT FAKED. The snapshot models
+# THE "OR NET RENTAL" PATH IN THE CATALOG IS UNAVAILABLE AND IS NOT FAKED. The snapshot models
 # `ScheduleEPropertyRecord` (address, rents, expenses, net) but there are ZERO property rows across the 15
 # real tax returns in the corpus (LP-495a Phase A), so B3-3.8-02's 75%-of-gross-rent factor is NOT used
 # and is not cited here. Recorded so the next reader does not go looking for it.
@@ -45,7 +45,7 @@ name: Stated housing payment vs. servicer's billed payment
 category: DTI
 
 kind: structural          # must equal rule_kinds.csv (DT-6 = structural)
-numeric_check: false      # ⚠️ the COMPARISON is numeric, but the rule reads a resolved enum verdict, not a
+numeric_check: false      # the COMPARISON is numeric, but the rule reads a resolved enum verdict, not a
                           # ratio against a threshold — there is no numeric bookend and no threshold
 
 criteria: >-
@@ -81,7 +81,7 @@ required_inputs:
     description: >-
       whether the application's stated monthly payment covers the servicer's billed total for a MATCHED
       obligation (derived, LP-495a): "covered" / "short", and "unknown" when the statement was not matched
-      to exactly one stated liability or either payment figure is missing. ⚠️ The billed total is the
+      to exactly one stated liability or either payment figure is missing. The billed total is the
       statement's `monthly_payment`, which ALREADY includes escrow — escrow is not added to it.
 
 subject_enumeration: per_document
@@ -110,7 +110,7 @@ spec_version: 1
 # The MACHINE-READABLE deterministic body (LP-324). An "unknown" tag coerces through the gate to
 # couldnt_check BEFORE this body runs.
 deterministic:
-  # ⚠️ A DOCUMENT-TYPE APPLICABILITY PREDICATE, NOT AN OUTCOME (LP-487) — identical to RE-1's, because
+  # A DOCUMENT-TYPE APPLICABILITY PREDICATE, NOT AN OUTCOME (LP-487) — identical to RE-1's, because
   # both rules read the same matcher over the same documents.
   # LP-575 — TWO conditions now. The second scopes DT-6 OUT once the liability this statement
   # matches is marked paid off at closing: the remedy below is "raise the stated payment to the full
@@ -124,7 +124,7 @@ deterministic:
   applicability:
     - {tag: document.document_type, op: eq, value: mortgage_statement}
     - {tag: reo.statement_liability_paid_off, op: ne, value: "yes"}
-  # ⚠️ FALSE DELIBERATELY — a missing mortgage statement is not a gap (see RE-1.yaml).
+  # FALSE DELIBERATELY — a missing mortgage statement is not a gap (see RE-1.yaml).
   applicability_expected: false
   load_bearing_tags:
     - reo.statement_payment_coverage
@@ -161,7 +161,7 @@ deterministic:
   # field is unresolvable the resolver drops the whole apply — the correct outcome on a statement
   # that matched nothing, not a gap.
   #
-  # ⚠️ THE VALUE IS THE STATEMENT'S `monthly_payment`, WHICH IS ALREADY THE PITIA. Escrow is a
+  # THE VALUE IS THE STATEMENT'S `monthly_payment`, WHICH IS ALREADY THE PITIA. Escrow is a
   # PORTION of it, never an addend — the header's single most important correctness point. An Apply
   # that summed them would write an inflated payment straight onto the loan and overstate the DTI.
   apply:
@@ -177,7 +177,7 @@ deterministic:
       reasoning: >-
         the monthly payment stated on the application for this obligation is at least the total monthly
         payment the servicer bills
-    # ⚠️ needs_review, NEVER fired. A short stated payment can be entirely correct for a property under
+    # needs_review, NEVER fired. A short stated payment can be entirely correct for a property under
     # contract — see the header.
     - verdict: needs_review
       when_tags:
@@ -192,7 +192,7 @@ deterministic:
         escrowed taxes and insurance and re-check the DTI. If the property is under contract or being paid
         off at closing, document that so the obligation is excluded on the correct basis.
     - verdict: couldnt_check
-      # ⚠️ THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. An unmatched statement, or a missing payment on either
+      # THE CATCH-ALL IS AN ABSTAIN, NOT A PASS. An unmatched statement, or a missing payment on either
       # side, must never read as "the stated payment covers it".
       default: true
       reasoning: >-

@@ -71,7 +71,7 @@ def _snapshot(report_creditors: list[str], liability_creditors: list[str]) -> Sn
         "borrower.1.first_name": _f("Jordan"),
     }
     for i, c in enumerate(liability_creditors, 1):
-        # ⚠️ holder_name, not creditor_name: mismo_section projects liability.{n}.holder_name (LP-483).
+        # holder_name, not creditor_name: mismo_section projects liability.{n}.holder_name (LP-483).
         # The fixture previously used a name MISMO never emits — harmless only because the old stub read
         # the same wrong key. Corrected so the test exercises the production projection.
         mismo[f"liability.{i}.holder_name"] = _f(c)
@@ -89,7 +89,7 @@ async def _comparing_stub(context_json: str) -> AiGroupResult:
     """A deterministic, keyless reasoner that ACTUALLY compares the context — proving the liability
     context feeds the matcher everything it needs (THIS tradeline + the stated liabilities).
 
-    ⚠️ ADR-375 — the judgment is now PER LIABILITY (``liab.in_application``: is THIS tradeline on the
+    ADR-375 — the judgment is now PER LIABILITY (``liab.in_application``: is THIS tradeline on the
     application?), not one borrower-level rollup. The borrower tag is derived from these.
     """
     ctx = json.loads(context_json)

@@ -22,7 +22,7 @@ logger = structlog.get_logger(__name__)
 # cost estimate recorded before this date is overstated threefold. Haiku 4.5 and
 # Sonnet 4.5 were already correct.
 #
-# ⚠️ The Bedrock rows below assume Bedrock's per-token rates equal the direct API's.
+# The Bedrock rows below assume Bedrock's per-token rates equal the direct API's.
 # That is the B1 ticket's stated premise and it is NOT independently confirmed here:
 # Anthropic's own documentation describes Bedrock as partner-operated with separate
 # pricing published by AWS. The rates are therefore a starting estimate — reconcile

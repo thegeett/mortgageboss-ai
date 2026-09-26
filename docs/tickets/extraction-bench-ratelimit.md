@@ -44,7 +44,7 @@ throttle can never masquerade as a coverage finding. Builds on
 The preview now also surfaces pacing (requests/min + estimated duration), so a long or unpaced run is
 visible before Start.
 
-## ⚠️ Per-process caveat (documented, not fixed)
+## Per-process caveat (documented, not fixed)
 
 The client limiter is a **process-local** singleton. The bench paces its own calls correctly, but if
 Celery workers are processing documents (separate processes hitting Bedrock) during a bench run, the

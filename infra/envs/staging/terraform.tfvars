@@ -11,7 +11,7 @@ name_prefix    = "mbai-staging"
 
 # --- Network ----------------------------------------------------------------- #
 
-# ⚠️ MUST differ from the dev template's 10.20.0.0/16 — identical ranges cannot be
+# MUST differ from the dev template's 10.20.0.0/16 — identical ranges cannot be
 # peered, and the two may need to be.
 vpc_cidr           = "10.30.0.0/16"
 availability_zones = ["us-east-1a", "us-east-1b"]
@@ -22,7 +22,7 @@ availability_zones = ["us-east-1a", "us-east-1b"]
 enable_nat_gateway   = false
 enable_vpc_endpoints = true
 
-# ⚠️ ONE AZ. Interface endpoints are ENIs billed per endpoint PER AZ: five across
+# ONE AZ. Interface endpoints are ENIs billed per endpoint PER AZ: five across
 # two AZs is ~$73/month, in one ~$36.50. Acceptable only because there is no
 # redundancy to lose — desired_count is 1 and RDS is single-AZ. The ECS tasks are
 # pinned to this same AZ (see main.tf); tasks and endpoints must move together.
@@ -32,7 +32,7 @@ endpoint_availability_zones = ["us-east-1a"]
 # bedrock-runtime is the endpoint the application actually uses — it calls Bedrock
 # through `us.` inference profiles. com.amazonaws.us-east-1.bedrock-mantle also
 # exists in this region but nothing uses it.
-# ⚠️ With no NAT, anything NOT in this list is unreachable, and a missed dependency
+# With no NAT, anything NOT in this list is unreachable, and a missed dependency
 # HANGS rather than failing. See the outbound audit in the result doc.
 interface_endpoint_services = [
   "ecr.api",
@@ -46,7 +46,7 @@ interface_endpoint_services = [
 
 domain_name = "staging.mortgageboss.ai"
 
-# ⚠️ THE PHASE GATE — false for phase 1, true for phase 2.
+# THE PHASE GATE — false for phase 1, true for phase 2.
 #
 #   phase 1  (false): creates the hosted zone, outputs four nameservers
 #   MANUAL          : enter those NS records at the registrar, wait for propagation
@@ -64,7 +64,7 @@ ssl_policy = "ELBSecurityPolicy-TLS13-1-2-2021-06"
 # environment where an application auth bug would first appear, so an unauthenticated
 # request must never reach a task.
 #
-# ⚠️ THIS FLAG MOVES WITH enable_tls ABOVE — flip BOTH in phase 2, neither in
+# THIS FLAG MOVES WITH enable_tls ABOVE — flip BOTH in phase 2, neither in
 # phase 1. An ALB cannot attach authenticate-cognito to an HTTP listener, so
 # terraform_data.auth_guard (modules/compute/alb.tf) fails the plan on the pair
 # (cognito = true, tls = false) rather than letting the environment come up with no
@@ -73,11 +73,11 @@ ssl_policy = "ELBSecurityPolicy-TLS13-1-2-2021-06"
 # It shipped as `true` alongside `enable_tls = false`, which meant the guard fired
 # on the very first phase-1 plan and NOTHING could be created. The guard was right;
 # the value was wrong.
-enable_cognito        = true # ⚠️ phase 2: set true at the same time as enable_tls
+enable_cognito        = true # phase 2: set true at the same time as enable_tls
 cognito_domain_prefix = "mbai-staging-auth"
 
 # OPTIONAL, not ON: enforcing MFA before any user exists locks out the first
-# admin-created account. ⚠️ Turn ON once users are enrolled — it is on the
+# admin-created account. Turn ON once users are enrolled — it is on the
 # pre-handover checklist.
 cognito_mfa_configuration = "OPTIONAL"
 
@@ -116,7 +116,7 @@ rds_allocated_storage     = 50
 rds_max_allocated_storage = 500
 rds_backup_retention_days = 30
 
-# ⚠️ THE FLAGS DEV DELIBERATELY LEFT OFF. This environment holds real borrower NPI.
+# THE FLAGS DEV DELIBERATELY LEFT OFF. This environment holds real borrower NPI.
 rds_multi_az            = false # revisit for production
 rds_deletion_protection = true
 rds_skip_final_snapshot = false
@@ -161,11 +161,11 @@ ecr_repository_names = {
   frontend = "mbai/frontend"
 }
 
-# ⚠️ The frontend image for THIS tag must be built with
+# The frontend image for THIS tag must be built with
 # NEXT_PUBLIC_API_URL=https://staging.mortgageboss.ai — it is inlined at BUILD time
 # and cannot be set as a task environment variable. See the result doc.
 #
-# ⚠️ OWNED BY `./scripts/deploy staging deploy` from here on. It derives the tag
+# OWNED BY `./scripts/deploy staging deploy` from here on. It derives the tag
 # from git (`staging-<short sha>`), builds those exact bytes, and rewrites this
 # line. Editing it by hand re-opens the failure it closes: a tag bumped without a
 # build, or a build without a bump, both of which produced CannotPullContainerError.
@@ -217,7 +217,7 @@ worker_concurrency   = 4
 
 enable_container_insights = false
 
-# ⚠️ OFF — reconsidered from dev, deliberately. ECS Exec is a shell inside a task
+# OFF — reconsidered from dev, deliberately. ECS Exec is a shell inside a task
 # holding decrypted secrets and borrower NPI, not a debugging convenience. It can
 # be flipped on for a specific session and back off; doing so requires a service
 # update, and that friction is the point. See the result doc.
@@ -295,7 +295,7 @@ budget_notification_email = "budget@mortgageboss.ai"
 
 # --- Frontend ----------------------------------------------------------------- #
 
-# ⚠️ Must be the real origin, and the app parses this as JSON — a bare string
+# Must be the real origin, and the app parses this as JSON — a bare string
 # raises SettingsError and the app refuses to start (verified in C3), so this one
 # fails loudly rather than silently.
 cors_allowed_origins = ["https://staging.mortgageboss.ai"]
@@ -314,7 +314,7 @@ ecr_keep_last_protected_images = 20
 # something a plan should be able to do quietly.
 ecr_force_delete = false
 
-# ⚠️ false BECAUSE IT CANNOT SUCCEED HERE, not because it is unwanted.
+# false BECAUSE IT CANNOT SUCCEED HERE, not because it is unwanted.
 #
 # Cost Explorer tag activation is MANAGEMENT-ACCOUNT ONLY. 058190633983 is a member
 # account in the organization, so the C5 phase-1 apply failed on it with:
@@ -323,7 +323,7 @@ ecr_force_delete = false
 # No permission grant inside this account can fix that — it is an organizational
 # boundary. Leave this false in every member-account environment.
 #
-# ⚠️ THE REQUIREMENT DOES NOT GO AWAY. AWS Budgets matches NOTHING until
+# THE REQUIREMENT DOES NOT GO AWAY. AWS Budgets matches NOTHING until
 # `Environment` is active as a cost allocation tag, so the $300 budget above
 # reports $0 forever and never fires while looking correctly configured in the
 # console. That is a silent failure, and turning this flag off does not fix it —

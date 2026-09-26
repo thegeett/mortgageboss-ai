@@ -15,7 +15,7 @@ name_prefix    = "mbai-staging"
 
 # --- Network --------------------------------------------------------------- #
 
-# ⚠️ MUST differ from dev's 10.20.0.0/16 — identical ranges cannot be peered.
+# MUST differ from dev's 10.20.0.0/16 — identical ranges cannot be peered.
 vpc_cidr           = "10.30.0.0/16"
 availability_zones = ["us-east-1a", "us-east-1b"]
 
@@ -24,7 +24,7 @@ availability_zones = ["us-east-1a", "us-east-1b"]
 # inference was moved to Bedrock. Endpoints cost ~$73/mo against NAT's ~$33/mo;
 # that delta buys the compliance property.
 #
-# ⚠️ Verify com.amazonaws.<region>.bedrock-runtime exists before applying:
+# Verify com.amazonaws.<region>.bedrock-runtime exists before applying:
 #   aws ec2 describe-vpc-endpoint-services \
 #     --query "ServiceNames[?contains(@,'bedrock')]"
 enable_nat_gateway   = false
@@ -102,7 +102,7 @@ log_retention_days = 90
 # --- Budget ---------------------------------------------------------------- #
 
 budget_limit_usd = 400
-# ⚠️ Must be a mailbox that exists — AWS Budgets does not confirm email subscribers,
+# Must be a mailbox that exists — AWS Budgets does not confirm email subscribers,
 # so a bounce leaves the alert silently dead. And the cost_filter matches nothing
 # until `Environment` is activated as a cost allocation tag by ../../shared.
 budget_notification_email = "budget@mortgageboss.ai"

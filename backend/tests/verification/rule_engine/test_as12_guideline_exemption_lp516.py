@@ -147,7 +147,7 @@ async def test_a_payroll_deposit_the_model_clears_is_satisfied_not_ratified() ->
 
 
 async def test_the_guides_escape_hatch_survives_the_exemption() -> None:
-    """⚠️ THE DECISIVE TEST. B3-4.2-02: "if ... the lender still has questions as to whether the funds
+    """THE DECISIVE TEST. B3-4.2-02: "if ... the lender still has questions as to whether the funds
     may have been borrowed, the lender should obtain additional documentation."
 
     A readily-identifiable source the model still flags MUST reach a human. If the exemption scoped the
@@ -162,7 +162,7 @@ async def test_the_guides_escape_hatch_survives_the_exemption() -> None:
 
 
 async def test_an_own_account_transfer_is_not_exempt() -> None:
-    """⚠️ NOT exempt, deliberately — 6 of LF-WCHG's 10 are this category.
+    """NOT exempt, deliberately — 6 of LF-WCHG's 10 are this category.
 
     The guide's exemption is for a transfer between VERIFIED accounts, and nothing in the snapshot can
     establish that (LP-516-A2): `stmt.account_masked` is documented "display only, non-matchable" and a

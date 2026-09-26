@@ -4,7 +4,7 @@
 cite ourselves. Every number below is **live and in force now**; each is recorded here with its source so she
 can confirm or revise it. Nothing waits on her to be built.
 
-⚠️ **ADR-361 still holds: no threshold is ever recalled from memory.** Every value carries a publisher,
+**ADR-361 still holds: no threshold is ever recalled from memory.** Every value carries a publisher,
 section and page date, fetched from the live guide.
 
 ---
@@ -38,7 +38,7 @@ section and page date, fetched from the live guide.
 
 ---
 
-## 2. ⚠️ Note date vs closing date — a substitution we made
+## 2. Note date vs closing date — a substitution we made
 
 Both CR-13 and PR-6 are written by the guideline against the **note date**. The snapshot carries only
 `contract.closing_date`, so **that is what both rules compare against**. Usually the same day; not always.
@@ -64,7 +64,7 @@ field, no tag, and no MISMO key.
 **Question:** where should a millage rate (or an independently-stated escrow tax figure) come from? Until
 one exists, DT-4 has no second operand and cannot be written.
 
-⚠️ **Note for the record:** DT-4 was LP-476's single **"WRITABLE-NOW"** rule. It is not writable. Anyone
+**Note for the record:** DT-4 was LP-476's single **"WRITABLE-NOW"** rule. It is not writable. Anyone
 reading that census will otherwise start here again.
 
 ---
@@ -97,7 +97,7 @@ else** (ADR-376) — it never infers from unfamiliar bureau text:
 *Account-status remarks, NOT disputes:* `N` · `no` · `ACCOUNT IN FORBEARANCE` ·
 `ACCOUNT CLOSED BY CREDIT GRANTOR` · `PAID ACCOUNT` · `TRANSFERRED` · `ACCOUNT CLOSED` · `DEFERRED`
 
-⚠️ **One real value abstains today and we want your call on it:** LF-96SV carries
+**One real value abstains today and we want your call on it:** LF-96SV carries
 `ACCOUNT PREVIOUSLY IN DISPUTE-NOW RESOLVED-REPORTED BY SUBSCRIBER`. We deliberately do **not** read that as
 "not disputed" — that would be inferring a resolution the bureau did not state. **Should a
 resolved-dispute remark be treated as no dispute, or stay a review item?**
@@ -125,12 +125,12 @@ The researched rules for CR-3 are recorded and ready for when the trigger exists
 | A revolving account paid to $0 **need not be closed** to exclude the payment from DTI | — | Fannie Selling Guide **B3-6-07**, *Debts Paid Off At or Prior to Closing* |
 | An installment loan with **≤ 10 remaining monthly payments** may generally be excluded even if not paid off | 10 | Fannie Selling Guide **B3-6-05**, *Monthly Debt Obligations* |
 
-⚠️ **Neither page was fetched in this ticket** — they are carried from the ticket brief and are marked
+**Neither page was fetched in this ticket** — they are carried from the ticket brief and are marked
 **STARTER** until read from the live guide with its page date, per ADR-361.
 
 **The evidence hierarchy (your ruling), for when it is built:** creditor payoff/zero-balance statement →
 creditor transaction history showing $0 → bank statement or transaction record showing the payoff → Closing
-Disclosure when paid through closing. ⚠️ **A screenshot supports the file but is not equivalent to a creditor
+Disclosure when paid through closing. **A screenshot supports the file but is not equivalent to a creditor
 statement** when qualification depends on it.
 
 **Source of funds** — Freddie requires the funds used to pay down debt for qualification to be documented.
@@ -168,7 +168,7 @@ differently.
 the error so it can be deleted once the extractor is fixed — but "fixed" needs a bar. Is one clean re-read of
 the failing document enough, or do you want a sample?
 
-⚠️ **What this does NOT cover, for the record:** doc 253's gift read as $224,307.94 instead of $24,307.94.
+**What this does NOT cover, for the record:** doc 253's gift read as $224,307.94 instead of $24,307.94.
 A lone amount with no sibling to contradict it is invisible to both this layer and LP-474's consistency
 checks. Catching it needs a comparison against the source document — a layer that does not exist yet.
 
@@ -176,7 +176,7 @@ checks. Catching it needs a comparison against the source document — a layer t
 
 ## 9. From LP-487 (insurance: IH-2 mortgagee clause · IH-7 condo master policy)
 
-### 9a. ⚠️ IH-2 cannot fail a file — confirm that is what you want
+### 9a. IH-2 cannot fail a file — confirm that is what you want
 
 A mortgagee clause that does **not** match the lender on the Closing Disclosure returns **`needs_review`
 ("confirm"), never `fired`.** The reason is in your territory rather than ours: the one file in our corpus
@@ -195,12 +195,12 @@ Two names agree when their token lists match or one is a token-prefix of the oth
 tokens**, after stripping ISAOA/ATIMA, "c/o", corporate suffixes and punctuation. This absorbs the real
 corpus variance (`"United Wholesale Mortgage, LLC ISAOA"` vs `"United Wholesale Mortgage, LLC"`).
 
-⚠️ **The known false-satisfied direction, stated rather than discovered later:** a CD naming "First
+**The known false-satisfied direction, stated rather than discovered later:** a CD naming "First
 National" against a clause naming "First National Bank of Chicago" would **agree** under this rule, and
 `satisfied` is the one verdict no human re-reads. Is two tokens enough tolerance, or should a prefix match
 below full equality route to `needs_review` as well?
 
-### 9c. ⚠️ IH-7 does NOT check fidelity/crime coverage — a deliberate omission
+### 9c. IH-7 does NOT check fidelity/crime coverage — a deliberate omission
 
 Fannie **B7-4-02** requires fidelity/crime coverage for projects above a unit-count threshold. We did not
 build it: the unit count lives on the condo questionnaire (`total_units`), which is **empty on the one
@@ -236,7 +236,7 @@ basis in a trailing qualifier we would then miss?
 primary mortgage insurance policy for a conventional first mortgage loan that has an LTV ratio greater
 than 80% at the time it is purchased."* Tier **S → P**; the spec and the bar are updated.
 
-⚠️ **One difference worth your ruling.** The guide states the test **"at the time it is purchased"** — i.e.
+**One difference worth your ruling.** The guide states the test **"at the time it is purchased"** — i.e.
 when Fannie buys the loan. **MI-1 evaluates the LTV on the file before closing**, which is the
 processor-facing question and the earlier of the two moments. They agree on almost every file, but not on
 one where the loan amount changes between closing and delivery.
@@ -244,7 +244,7 @@ one where the loan amount changes between closing and delivery.
 **Question: is the pre-closing LTV the right measurement point for a processor's check**, or should MI-1
 say explicitly that it is checking the closing LTV as a proxy for the delivery test?
 
-### 10b. ⚠️ MI-1 cannot confirm that MI is PRESENT — an input gap, not a design choice
+### 10b. MI-1 cannot confirm that MI is PRESENT — an input gap, not a design choice
 
 MI-1 computes the LTV and reports "MI is required — confirm the file carries it" (`needs_review`). It
 **never fires**, because nothing in the system can see whether mortgage insurance exists:
@@ -259,7 +259,7 @@ MI-1 computes the LTV and reports "MI is required — confirm the file carries i
 schema spec for it would turn MI-1 from an advisory into a real presence check (and would unblock MI-2,
 MI-3 and MI-5 as well).
 
-### 10c. ⚠️ MI-4's annual MIP is NOT evaluated, and its rate matrix was deliberately not written down
+### 10c. MI-4's annual MIP is NOT evaluated, and its rate matrix was deliberately not written down
 
 MI-4 checks the **upfront** premium only — (note amount − base loan amount) against 1.75%. The **annual**
 premium is not checked because **no document carries a monthly MIP figure for this loan**. ML 2023-05's
@@ -270,7 +270,7 @@ later builds against a number we never read.
 **Questions.** (1) Do you want the annual MIP checked at all, and against what document? (2) If yes, we
 need the matrix from ML 2023-05 itself, cell by cell.
 
-### 10d. ⚠️ Two FHA exemptions we cannot detect
+### 10d. Two FHA exemptions we cannot detect
 
 ML 2023-05: **Section 248** mortgages (Indian Lands) require **no upfront MIP**; **Section 247**
 (Hawaiian Home Lands) require **no annual MIP**. No field in the system identifies either. A loan
@@ -278,7 +278,7 @@ financing no upfront premium therefore lands on `needs_review` — "confirm it w
 this loan is exempt" — rather than failing. **Is that the right landing place**, and do your files carry
 anything that would identify a Section 247/248 loan?
 
-### 10e. ⚠️ CO-1 is presence only — warrantability is still unbuildable
+### 10e. CO-1 is presence only — warrantability is still unbuildable
 
 Your standing point is that condo rules must distinguish **warrantable from non-warrantable**, not merely
 confirm a questionnaire exists. CO-1 does the latter, deliberately: **`property.is_warrantable_condo` has
@@ -289,7 +289,7 @@ no source field in any of the 121 schema specs**, because warrantability is a pr
 PERS approval letter, or a judgment a processor makes from the questionnaire's contents? The answer
 decides whether CO-3/CO-5 are extraction work or a genuine judgment rule.
 
-### 10f. ⚠️ AU-3 is calibrated on ONE document — is it worth shipping?
+### 10f. AU-3 is calibrated on ONE document — is it worth shipping?
 
 There is exactly **one `aus_findings` document across 303**, and it is an **LPA** reading `ACCEPT` /
 `ELIGIBLE`. That single file is genuinely valuable — it proved the DU-shaped catalog vocabulary would
@@ -325,10 +325,10 @@ RE-2 needs a different shape entirely.
 
 ## 11. From LP-490 (credit AI: CR-1 · CR-4 · CR-5 · CR-6 · CR-8 · CR-10)
 
-⚠️ **All six are built INERT.** They read AI tags with no measured accuracy, so none is live. What
+**All six are built INERT.** They read AI tags with no measured accuracy, so none is live. What
 follows is what we could not settle without you.
 
-### 11a. ⚠️ The Chapter 13 split is not expressible — and we chose the conservative side
+### 11a. The Chapter 13 split is not expressible — and we chose the conservative side
 
 Your matrix distinguishes a **discharged** Chapter 13 (2 years) from a **dismissed** one (4 years), and
 Chapter 7/11 at 4 years. `liab.derogatory_type` has **one** `bankruptcy` value; nothing on the report
@@ -341,7 +341,7 @@ rather than cleared.
 `bankruptcy_discharge` document carries `bankruptcy_chapter`, `discharge_order_date` and
 `case_status_after_discharge`, so it is buildable) — but only when that document is in the file.
 
-### 11b. ⚠️ Foreclosure, short sale and deed-in-lieu have no completion date
+### 11b. Foreclosure, short sale and deed-in-lieu have no completion date
 
 You were explicit that seasoning must run from the **actual event date**, never the report date, and
 CR-6 abstains rather than substituting. But `public_records[]` carries `discharge_or_satisfied_date`
@@ -359,7 +359,7 @@ Folding it into CR-6's matrix would apply a four-year bar to a single 30-day lat
 
 **Question: does this want its own rule?** If so, is it per-tradeline or a whole-profile judgment?
 
-### 11d. ⚠️ A mortgage charge-off — CR-6 or CR-10?
+### 11d. A mortgage charge-off — CR-6 or CR-10?
 
 We put it in **CR-6** (a 4-year seasoning requirement) and kept it out of CR-10's dollar logic, on your
 note that a mortgage charge-off is not an ordinary collection. But `liab.derogatory_type` has one
@@ -372,13 +372,13 @@ You ruled rental history is **not** equivalent to mortgage delinquency codes and
 them, so CR-8 evaluates mortgages only. **Is rental history in scope at all?** If so it needs its own
 rule and its own source document.
 
-### 11f. ⚠️ CR-8 cannot compute "current at application"
+### 11f. CR-8 cannot compute "current at application"
 
 Your ruling records Fannie's definition — an existing mortgage is current when **no more than 45 days**
 have elapsed since the last paid installment date. **No last-paid-installment date is extracted**, so
 CR-8 records the definition but cannot apply it. **Is that date on your credit reports?**
 
-### 11g. ⚠️ CR-10 abstains on manually underwritten files
+### 11g. CR-10 abstains on manually underwritten files
 
 The **DU-vs-manual axis does not exist as a fact** on any file, and we did not invent one. So a manually
 underwritten loan returns `manual_underwriting_not_supported` rather than a guessed branch — the
@@ -395,7 +395,7 @@ Its enum is `revolving / installment / mortgage / heloc / …`; the sources emit
 so declaring it would ship out-of-domain values silently. It stays unwired, and CR-8's need is met by a
 derived `liab.is_mortgage` with an abstain. **Please confirm the mapping** and we will wire it properly.
 
-### 11i. ⚠️ Are CR-1 and the deposit-obligation check one finding or two?
+### 11i. Are CR-1 and the deposit-obligation check one finding or two?
 
 CR-1 flags a debt on the credit report that the application omits. FR-4/FR-5's
 `txn.implies_obligation` flags a bank-statement transaction implying a debt nobody stated. **Same
@@ -417,7 +417,7 @@ self-authored labels).
 
 ## 12. From LP-491 (title: TI-1 · TI-2 · TI-6)
 
-### 12a. ⚠️ Is a vesting mismatch usually a real defect, or a legitimate difference?
+### 12a. Is a vesting mismatch usually a real defect, or a legitimate difference?
 
 **This decides TI-1's direction, and I chose the cautious side without you.** A mismatch between the
 commitment's vested owner and the file's counterparty currently returns **`needs_review`, never `fired`**,
@@ -428,7 +428,7 @@ estate selling, a name changed on marriage or divorce, a deed that has not yet r
 should fire and I have the direction wrong. If it is usually one of the above, the current behaviour is
 right and the finding is a confirmation step rather than a condition.
 
-### 12b. ⚠️ `vesting_type` holds the ESTATE, not the tenancy, on two of four documents
+### 12b. `vesting_type` holds the ESTATE, not the tenancy, on two of four documents
 
 The four real commitments return `fee simple`, `Fee Simple`, `Joint tenants`, `Fee Simple`. Two of those
 are an **estate** (fee simple vs life estate) and one is a **tenancy** (joint tenants vs tenants in
@@ -437,7 +437,7 @@ common) — different questions in one field. TI-5 would need them separated.
 **Question: should the extractor split these into two fields?** That is LP-499's input, and it is why
 TI-5 is not built.
 
-### 12c. ⚠️ Do TI-3 / TI-4 / TI-5's fields appear on the source PDFs at all?
+### 12c. Do TI-3 / TI-4 / TI-5's fields appear on the source PDFs at all?
 
 `open_liens_indicator` **0/4** · `judgments_indicator` **0/4** · `vesting_marital_recital` **0/4** ·
 `schedule_b_items[is_satisfied]` **2/19 rows**. LP-451 called TI-4 a "nearest miss to write-now" because
@@ -453,13 +453,13 @@ but **all four real commitments carry a plain 2–3 word name**, because the rec
 `vesting_marital_recital` (0/4). **Do your commitments normally print the recital inside the vested-owner
 line?** If so the extractor is splitting it out and the stripping matters; if not, it is dead code.
 
-### 12e. ⚠️ TI-6 applies no rapid-transfer window
+### 12e. TI-6 applies no rapid-transfer window
 
 A "rapid transfer" cutoff (90 or 180 days is commonly cited) is an investor-overlay and fraud-review
 convention, and **no page was read for it** — so TI-6 hands the interval to the judgment as a fact rather
 than comparing it against a number nobody confirmed. **What window do your investors actually use?**
 
-### 12f. ⚠️ Nine judgment rules now ask for a sign-off on every finding, including clean ones
+### 12f. Nine judgment rules now ask for a sign-off on every finding, including clean ones
 
 AS-12, CR-8, CR-10, ID-8, ID-9, IN-7, OC-2 and now TI-2 and TI-6. A judgment rule has no `satisfied`
 path — a clean title chain produces a `needs_review` identically to a broken one, and TI-2 produces one
@@ -473,7 +473,7 @@ should a confident clean answer resolve silently?** The second needs the tag mea
 
 ## 13. From LP-492 (appraisal: PR-2 · PR-3 · PR-4 · PR-5 · PR-7)
 
-### 13a. ⚠️ Should a value shortfall FIRE, or flag?
+### 13a. Should a value shortfall FIRE, or flag?
 
 PR-2 **fires** when the appraisal comes in below the contract price. I chose that over `needs_review`
 (which IH-2 and TI-1 use) because a shortfall is not ambiguous the way a name difference is: the number
@@ -482,7 +482,7 @@ is the number, and it has a definite consequence — cash, a renegotiation, or a
 **Question: is that how a processor wants it?** A low appraisal is extremely common on some files, and
 if it is routine in your work it may belong as a flag rather than a defect.
 
-### 13b. ⚠️ Is an appraisal address mismatch usually a real defect?
+### 13b. Is an appraisal address mismatch usually a real defect?
 
 PR-7 **fires** on a mismatch. PC-3 — the same comparison for the purchase contract — routes ITS mismatch
 to `needs_review`, on the reasoning that the canonicaliser does not resolve every surface form (a unit
@@ -501,7 +501,7 @@ so PR-5 encodes Fannie's standard only.
 **Question: do your files ever go to Freddie?** If so we need a field that says which, or PR-5 will be
 wrong on those loans.
 
-### 13d. ⚠️ The UAD 2.6 → 3.6 cutover (Nov 2026)
+### 13d. The UAD 2.6 → 3.6 cutover (Nov 2026)
 
 Both real appraisals are 2.6-era ("9/2011", "9/2011 (Updated 1/2014)") and spell the condition rating
 "C4" / "C3". The 3.6 layout may spell it differently. PR-5's vocabulary is closed and **abstains** on
@@ -516,7 +516,7 @@ PR-3 carries **no allow-list** — none was obtainable, and inventing one would 
 properties. It surfaces a type it cannot place instead. **Question: what is the real list for your
 programmes**, particularly around manufactured homes, condotels, co-ops and mixed-use?
 
-### 13f. ⚠️ PR-8 was dropped — where would a disaster declaration come from?
+### 13f. PR-8 was dropped — where would a disaster declaration come from?
 
 A disaster-area reinspection needs a FEMA declaration. **No field in any of the 121 schema specs, and
 nothing in MISMO, states one** — it is external data. **Question: how do you learn today that a property
@@ -533,7 +533,7 @@ MI-1 and PR-1 rather than PR-2, and it can move a borderline file across the 80%
 
 ## 14. From LP-493 (purchase contract: PC-5 · PC-8; PC-1 dropped)
 
-### 14a. ⚠️ What is a "customary" earnest money deposit?
+### 14a. What is a "customary" earnest money deposit?
 
 Fannie **B3-4.3-09** (05/04/2022) says large deposits and *"deposits that exceed the amount customary for
 the area should be closely evaluated"* — and gives **no number**. I did not invent one, so PC-5 surfaces
@@ -542,7 +542,7 @@ the trace and never sizes the deposit.
 **Question: is there a working rule of thumb** (1% of price? 2%?) that a processor actually applies, and
 does it vary by market? Without one there is no threshold to encode, and that may be correct.
 
-### 14b. ⚠️ A second earnest money deposit is currently lost
+### 14b. A second earnest money deposit is currently lost
 
 Doc 183 stated a **$204,000 additional** deposit distinct from the primary figure. `earnest_money_amount`
 is **singular** and there is **no `additional_earnest_money_amount` field**, so only the first is
@@ -551,7 +551,7 @@ captured.
 **Question: how common is a second deposit on your files?** If it is routine, this is an extraction
 change (LP-499) rather than an edge case — and today the larger of the two can be the one omitted.
 
-### 14c. ⚠️ Does contract wording need per-state handling?
+### 14c. Does contract wording need per-state handling?
 
 Free-text contracts are the least reliable class in our corpus: of ~8 purchase-agreement claims, **one**
 was real — the reader projected **Texas TREC** fields onto a **North Carolina** form. PC-8's judgment
@@ -567,7 +567,7 @@ second matcher on one comparison is what LP-483 forbade. So the question stands 
 (see §12a): **is a mismatch between title's vested owner and the file's counterparty usually a real
 defect, or a trust/estate/name-change difference?**
 
-### 14e. ⚠️ Where would arm's-length evidence come from?
+### 14e. Where would arm's-length evidence come from?
 
 `contract.arms_length` was **not built**: its only schema field, `parties_relationship_disclosed`, is
 **0 of 5** on the real contracts. FR-2 (fraud lane) is meant to consume this tag later.
@@ -592,7 +592,7 @@ PC-5 (*earnest money traced to a verified account*) is built but held. LP-493a f
 **it was shown neither the deposit nor any transaction** — two context defects, now scoped — and
 separately that no matching debit exists in the fixture we tested on.
 
-⚠️ **Even with those fixed, PC-5 cannot be calibrated on the current corpus**, because LF-6T3N is a
+**Even with those fixed, PC-5 cannot be calibrated on the current corpus**, because LF-6T3N is a
 synthetic fixture: its transactions were authored, not extracted.
 
 **What a file would need, specifically:**
@@ -609,7 +609,7 @@ same file, which LP-480 found is rare in what we hold.
 
 ## 16. The condo lane — a deadline, a blank form, and a document type we cannot classify (LP-494)
 
-### 16a. ⚠️ A HARD DEADLINE: every condo file changes number on 4 January 2027
+### 16a. A HARD DEADLINE: every condo file changes number on 4 January 2027
 
 Fannie **LL-2026-03** raises the minimum budgeted replacement reserves from **10% to 15%** of annual
 budgeted assessment income for **loan applications dated on or after 2027-01-04**. CO-4 keys on the
@@ -625,7 +625,7 @@ date-keyed thresholds generally is a product decision, not an engineering one (A
 Two related LL-2026-03 changes are already in force and are **not** modelled:
 - **The baseline funding method is no longer accepted** for reserve studies (applications on/after
   **2026-08-03**) — a study must adopt its highest recommended funding amount.
-- ⚠️ **Limited Review was retired entirely** (applications on/after **2026-08-03** — ten days ago).
+- **Limited Review was retired entirely** (applications on/after **2026-08-03** — ten days ago).
   **Does this change what a processor collects on a condo file today?** Previously a Limited Review file
   needed no questionnaire at all; if every condo file now needs a full review, the questionnaire moves from
   sometimes-needed to always-needed, and the needs list should say so.
@@ -640,13 +640,13 @@ on the condo questionnaire, and CO-5 is built on those.
 **What warrantability would still need:** Form 1076 / PERS output, or a lender's own project-approval
 record. **Is that something the processor ever sees, or does it live only in the LOS?**
 
-### 16c. ⚠️ The blank questionnaire — the real blocker, and it is not a code problem
+### 16c. The blank questionnaire — the real blocker, and it is not a code problem
 
 Both rules are **built and inert**, and the reason is the corpus:
 - **No loan file carries a condo questionnaire at all** (0 of 28), and `property_type` is null on every
   file that has documents.
 - The bench holds **two** questionnaires: a **cancellation notice**, and a **standard form nobody
-  answered**. ⚠️ Verified at the document — the 450 KB form produced 90 catch-all labels against 1 typed
+  answered**. Verified at the document — the 450 KB form produced 90 catch-all labels against 1 typed
   field, which looks exactly like an extractor defect, but **all 90 carry an empty value**. The form asks
   the questions; the answers are not there.
 
@@ -672,7 +672,7 @@ B7-4-02 (08/05/2026) exempts projects of **20 units or fewer** and sets the requ
 months of assessments on all units**, so both the gate and the amount need a unit count and an assessment
 base that no document on file provides.
 
-⚠️ **A correction found here:** the master policies *do* carry `fidelity_crime_coverage_present` and
+**A correction found here:** the master policies *do* carry `fidelity_crime_coverage_present` and
 `_amount` (8/8 on the bench). **The coverage reads fine; the requirement is what cannot be computed.**
 So the leg is one completed questionnaire away, and it belongs **inside IH-7** — one rule, one verdict on
 the master policy — not as a second rule.
@@ -683,7 +683,7 @@ Two sources gave **>20%** and **10%**. **Neither describes the rule.** B4-2.1-03
 **tiered**: 20% for projects of 21+ units, a maximum of **2 units** for projects of 5–20 units, and **no
 stated limit below 5 units** — where CO-5 abstains rather than inventing one.
 
-⚠️ **One discrepancy against the ticket, reported:** the ticket gave non-incidental business income as
+**One discrepancy against the ticket, reported:** the ticket gave non-incidental business income as
 "may not exceed 15%". The primary makes **more than 10%** ineligible, with 15% permitted only under
 specific exceptions. **Not modelled** (no field carries it), but worth correcting wherever the 15% came
 from.
@@ -926,5 +926,5 @@ large deposits is "not required" on a refinance — not prohibited — so this i
 AS-2 (earnest money factually cannot exist on a refi, now scoped out). Today AS-1 runs, and on LF-WCHG
 it produced 10 `satisfied` findings.
 
-⚠️ Not merely cosmetic: those cleared only because every deposit was below the threshold. Had one
+Not merely cosmetic: those cleared only because every deposit was below the threshold. Had one
 exceeded it, **AS-1 would have FIRED on a refinance**, enforcing a documentation duty the guide waives.

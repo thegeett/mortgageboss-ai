@@ -1,6 +1,6 @@
 # PR-6 — Appraisal validity at closing — DETERMINISTIC calculative rule SPEC (LP-485).
 #
-# ⚠️ THREE BANDS, NOT ONE WINDOW. B4-1.2-04 does not give a single pass/fail age:
+# THREE BANDS, NOT ONE WINDOW. B4-1.2-04 does not give a single pass/fail age:
 #
 #     effective date -> note date      requirement
 #     ------------------------------   ---------------------------------------------
@@ -8,17 +8,17 @@
 #     >  4 months and <= 12 months     an APPRAISAL UPDATE is required (Form 1004D)
 #     >  12 months                     a NEW appraisal is required
 #
-# ⚠️ THE MIDDLE BAND IS A CONDITION, NOT A FAILURE. An appraisal at six months is perfectly usable WITH an
+# THE MIDDLE BAND IS A CONDITION, NOT A FAILURE. An appraisal at six months is perfectly usable WITH an
 # update — reporting it as `fired` would tell a processor the file is broken when it merely needs one more
 # document. It is its own outcome (needs_review), which is what a condition is.
 #
-# ⚠️ ORDERED, FIRST-MATCH-WINS: the >12 band must be tested BEFORE the >4 band, or every stale appraisal
+# ORDERED, FIRST-MATCH-WINS: the >12 band must be tested BEFORE the >4 band, or every stale appraisal
 # would report as "needs an update" and the new-appraisal requirement would never fire.
 #
-# ⚠️ MEASURED FROM THE EFFECTIVE DATE — the date of value — never the report or signature date (B4-1.2-04).
+# MEASURED FROM THE EFFECTIVE DATE — the date of value — never the report or signature date (B4-1.2-04).
 # property.appraisal_date is declared on the appraisal's `appraisal_effective_date` field for that reason.
 #
-# ⚠️ KNOWN GAP (recorded, not silently dropped): B4-1.2-04 also caps a DESKTOP appraisal at four months
+# KNOWN GAP (recorded, not silently dropped): B4-1.2-04 also caps a DESKTOP appraisal at four months
 # (over four months a desktop needs a NEW appraisal, not an update). That band needs an appraisal-TYPE
 # input, and no tag distinguishes desktop from traditional today — classifying the extractor's `form_type`
 # is an open-vocabulary question (the ADR-353 class). Until that tag exists this rule applies the
@@ -51,7 +51,7 @@ reference_values:
   priya_validated: false          # must equal rule_kinds.csv (the CATALOG's column; the bar carries our sign-off)
   threshold_needs_signoff: true   # must equal rule_kinds.csv
   values:
-    # ⚠️ SOURCE for BOTH bounds: Fannie Mae Selling Guide B4-1.2-04, "Appraisal Age and Use Requirements",
+    # SOURCE for BOTH bounds: Fannie Mae Selling Guide B4-1.2-04, "Appraisal Age and Use Requirements",
     # page dated 06/04/2025 — "the property must be appraised within the 12 months prior to the date of the
     # note and mortgage"; an update is required when the effective date is more than four months before the
     # note date. CALENDAR MONTHS, matching the tag.
@@ -123,7 +123,7 @@ deterministic:
         Order a new appraisal. An appraisal update (Form 1004D) does not satisfy the requirement once the
         original effective date is more than twelve months before the note date.
     - verdict: needs_review
-      # BAND 2 — over 4 months but within 12: an UPDATE is required. ⚠️ This is a CONDITION, not a failure:
+      # BAND 2 — over 4 months but within 12: an UPDATE is required. This is a CONDITION, not a failure:
       # the appraisal is usable, it needs one more document. Reporting it `fired` would misstate the file.
       when_compare: {op: ">", left: age_months, right: update_after}
       reasoning: >-

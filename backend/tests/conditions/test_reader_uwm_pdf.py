@@ -1,6 +1,6 @@
 """The UWM reader on PDF input (LP-906 follow-up).
 
-⚠️ THE PROPERTY IS EQUIVALENCE, NOT A SECOND SET OF EXPECTATIONS. Every expected value in
+THE PROPERTY IS EQUIVALENCE, NOT A SECOND SET OF EXPECTATIONS. Every expected value in
 `test_reader_uwm.py` was transcribed from the spec's §7.1-7.3 tables. A PDF rendered from the same
 text fixture must therefore produce the SAME rows — so these tests compare the two readings against
 each other rather than restating the spec, and a drift in either direction fails.
@@ -57,7 +57,7 @@ def test_the_same_codes_in_the_same_order_from_both_inputs(fixture: str) -> None
 
 @pytest.mark.parametrize("fixture", ALL_FIXTURES)
 def test_the_buckets_survive_the_pdf_path(fixture: str) -> None:
-    """⚠️ THE DEFECT THIS EXISTS FOR. When every line answered "not a heading", the row COUNT stayed
+    """THE DEFECT THIS EXISTS FOR. When every line answered "not a heading", the row COUNT stayed
     right and every row was filed under a stale bucket — the failure was invisible in any assertion
     that counted rows. So the headings are compared explicitly."""
     from_pdf = [(r.lender_code, r.bucket_heading, r.bucket_kind) for r in _from_pdf(fixture).rows]
@@ -85,7 +85,7 @@ def test_nothing_is_left_unassigned_on_the_pdf_path(fixture: str) -> None:
 
 @pytest.mark.parametrize("fixture", ALL_FIXTURES)
 def test_the_header_and_its_date_survive_the_pdf_path(fixture: str) -> None:
-    """⚠️ THE FIELDS THE EQUIVALENCE TESTS ORIGINALLY DID NOT COMPARE, WHICH IS HOW A DEFECT HID.
+    """THE FIELDS THE EQUIVALENCE TESTS ORIGINALLY DID NOT COMPARE, WHICH IS HOW A DEFECT HID.
 
     The first version compared codes, order, buckets and verbatim text — and nothing else. So a PDF
     read that produced `date_printed=None` and **16 warnings** against the text path's 0 passed 20
@@ -100,7 +100,7 @@ def test_the_header_and_its_date_survive_the_pdf_path(fixture: str) -> None:
     assert from_pdf.date_printed == from_text.date_printed
     assert from_pdf.header == from_text.header
     assert from_pdf.warnings == from_text.warnings
-    # ⚠️ `expiry_dates` IS THE LAST POSITIONAL FIELD, and it belongs here for the same reason the
+    # `expiry_dates` IS THE LAST POSITIONAL FIELD, and it belongs here for the same reason the
     # other three do: it is derived from column positions, read by different code on each path, and
     # its tolerance was until recently a constant meaning CHARACTERS on text and POINTS on a PDF —
     # which rejected three of round 1's six dates as "19 from the nearest column". Exactly the
@@ -124,7 +124,7 @@ def test_the_underwriter_notes_resolve_identically_from_both_inputs(fixture: str
 
 
 def test_a_block_of_one_line_rows_still_parses_from_a_pdf() -> None:
-    """⚠️ THE DEFECT MY OWN DOCSTRING TALKED ME PAST.
+    """THE DEFECT MY OWN DOCSTRING TALKED ME PAST.
 
     A conditions block whose rows all fit on one line has no continuation column, so
     `_shallow_threshold` returns None — correctly. But `_row_start` also required a threshold, so
@@ -175,7 +175,7 @@ def test_the_pagebreak_sheet_still_drops_its_two_duplicates_from_a_pdf() -> None
 
 
 def test_the_threshold_is_derived_not_hardcoded() -> None:
-    """⚠️ IT MUST FALL IN THE GAP, WHEREVER THE GAP IS. Measured on this fixture, headings and row
+    """IT MUST FALL IN THE GAP, WHEREVER THE GAP IS. Measured on this fixture, headings and row
     starts land at {54.0, 58.8} and continuations at [260.4, 303.6] — but those are Courier-8pt
     metrics, not UWM's. The reader finds the largest gap; this asserts it landed between the two
     observed clusters rather than at any particular number."""
@@ -192,7 +192,7 @@ def test_the_threshold_is_derived_not_hardcoded() -> None:
 
 
 def test_a_block_with_no_continuations_gets_no_threshold() -> None:
-    """⚠️ RETURNING A NUMBER HERE WOULD INVENT A COLUMN BREAK. Every row is a one-liner, so there is
+    """RETURNING A NUMBER HERE WOULD INVENT A COLUMN BREAK. Every row is a one-liner, so there is
     no text column — and a threshold would make the first slightly-indented line a continuation of
     nothing."""
     text = "\n".join(

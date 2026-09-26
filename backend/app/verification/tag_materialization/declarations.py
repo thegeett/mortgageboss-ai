@@ -137,14 +137,14 @@ class AiGroup:
     # LP-493a — the two opt-ins PC-5's investigation showed were missing. Both DEFAULT OFF, so every
     # existing group's context is byte-identical.
     #
-    # ⚠️ `include_unattributed_documents` — a borrower context gathers only documents ATTRIBUTED to that
+    # `include_unattributed_documents` — a borrower context gathers only documents ATTRIBUTED to that
     # borrower (belongs_to), which is right for an income question and WRONG for a cross-source one: a
     # purchase agreement is a PROPERTY document with no belongs_to, so PC-5 was asked about an earnest
     # money deposit while the contract stating it was silently dropped. This adds UNATTRIBUTED documents
     # of the group's declared types — never another BORROWER's, which would be the guessed attribution
     # LP-332/LP-336 forbid.
     include_unattributed_documents: bool = False
-    # ⚠️ `include_transactions` — a document's transactions live in the LEGACY per-document
+    # `include_transactions` — a document's transactions live in the LEGACY per-document
     # `entry.transactions` attribute (what all_transactions() reads and AS-1 rides), NOT in `entry.lists`.
     # A group could declare include_lists, see an empty list, and conclude the data was absent when it was
     # one attribute away. PC-5 was shown five bank statements' account-level fields and zero transactions.
@@ -306,7 +306,7 @@ def load_ai_groups() -> dict[str, AiGroup]:
                 f"ai group {key!r}: `include_unattributed_documents` must be a boolean, got "
                 f"{include_unattributed!r}"
             )
-        # ⚠️ BORROWER-ONLY, and the restriction is the point: it exists to relax borrower ATTRIBUTION.
+        # BORROWER-ONLY, and the restriction is the point: it exists to relax borrower ATTRIBUTION.
         # No other subject filters by belongs_to, so asking for it elsewhere is a declaration error, not
         # a no-op — a document-subject group already sees its own document.
         if include_unattributed and subject != "borrower":
@@ -333,7 +333,7 @@ def load_ai_groups() -> dict[str, AiGroup]:
             raise DeclarationError(
                 f"ai group {key!r}: `include_transactions` must be a boolean, got {include_txns!r}"
             )
-        # ⚠️ BORROWER ONLY (reported finding). The validator used to admit `document` as well, but only
+        # BORROWER ONLY (reported finding). The validator used to admit `document` as well, but only
         # `_borrower_context` reads this opt-in — `_doc_context` ignores it entirely. So a document-subject
         # group could declare it, pass validation, and silently receive account fields with ZERO
         # transactions: the exact silent no-op the sibling checks call "a declaration error, not a silent

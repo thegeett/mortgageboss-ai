@@ -12,11 +12,11 @@ things called directly are the two Celery task bodies and the AI client:
   `.delay` is replaced with a recorder, so the test also asserts the route ENQUEUED the round.
 - `condition_split.complete` is mocked for step 6, as §8 says ("mocked in CI").
 
-⚠️ STEP 8 IS NOT HERE, AND CANNOT BE. "The real-sheet smoke test passes on the product owner's
+STEP 8 IS NOT HERE, AND CANNOT BE. "The real-sheet smoke test passes on the product owner's
 machine" is `tests/conditions/test_real_sheets_local.py`, which skips without the real sheets. A
 green run of this module says nothing about step 8.
 
-⚠️ ASSERTIONS ARE ON WHAT §8 NAMES, NOT A CENSUS. The events test in this directory failed once on a
+ASSERTIONS ARE ON WHAT §8 NAMES, NOT A CENSUS. The events test in this directory failed once on a
 correct implementation because it pinned an exact event list; here each step asserts §8's own
 numbers and relations ("11 `CONDITION_CREATED` events", "one `ROUND_ENRICHED` event") and leaves the
 rest of the history free to grow.
@@ -228,7 +228,7 @@ async def test_the_uwm_file_end_to_end(
 
     conditions = await _conditions(client, auth, loan_file.id)
     assert len(conditions) == 11
-    # ⚠️ THREE BUCKETS MEANS THREE HEADINGS, NOT THREE KINDS. The glossary defines a bucket as "the
+    # THREE BUCKETS MEANS THREE HEADINGS, NOT THREE KINDS. The glossary defines a bucket as "the
     # heading a condition is listed under", and round 1 has three — but two of them carry `(PTD)`, so
     # they share a kind. This line first asserted three `bucket_kind`s and failed on a correct read;
     # S1-05 draws the same thing: three headings under two kind labels.
@@ -271,7 +271,7 @@ async def test_the_uwm_file_end_to_end(
     assert len(conditions) == 11, "step 2: still 11 conditions, nothing removed"
     assert sum(1 for c in conditions if c["round_numbers"] == [1, 2]) == 6
     assert sum(1 for c in conditions if c["round_numbers"] == [1]) == 5
-    # ⚠️ AND STILL IN ROUND 1'S ORDER, ONE RUN PER HEADING. The API serves the list in `sequence`
+    # AND STILL IN ROUND 1'S ORDER, ONE RUN PER HEADING. The API serves the list in `sequence`
     # order and the screen groups consecutive rows by heading, so a partial round that renumbered
     # its six conditions from 1 interleaved two sheets — S1-08 rendered seven fragments of three
     # headings in a browser while every count above stayed green (LP-909 §5).

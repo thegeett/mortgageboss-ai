@@ -1,7 +1,7 @@
 /**
  * Showing the lender's wording without showing the underwriter's note twice.
  *
- * ⚠️ THE NOTE IS KEPT IN `verbatim_text` ON PURPOSE AND MUST STILL NOT RENDER THERE. Spec rule 1 and
+ * THE NOTE IS KEPT IN `verbatim_text` ON PURPOSE AND MUST STILL NOT RENDER THERE. Spec rule 1 and
  * ADR-405 store the lender's string exactly as written — `test_round1_the_verbatim_text_keeps_its_notes`
  * pins that — and the reader ALSO carries the note out as structure so the review screen can show it
  * as a dated chip. Design rule 5 then says a note is "never merged into the lender's wording".
@@ -14,7 +14,7 @@
 /**
  * The note span the UWM reader recognises, mirrored from `_NOTE` in `readers/uwm.py`.
  *
- * ⚠️ THE SAME SPAN AS `note_stripped`, AND DELIBERATELY NOT THE SAME NORMALISATION. That function is
+ * THE SAME SPAN AS `note_stripped`, AND DELIBERATELY NOT THE SAME NORMALISATION. That function is
  * `" ".join(_NOTE.sub(" ", text).lower().split())` because it feeds a fingerprint, and its own
  * docstring warns that two normalisations which could disagree would mean "a row deduplicated within
  * a sheet and then duplicated across rounds — the failure both are meant to prevent".
@@ -45,7 +45,7 @@ export function wordingWithoutNotes(text: string): string {
 /**
  * The wording to SHOW for one row — spans removed, but only when the reader carried notes out of it.
  *
- * ⚠️ THE GATE IS THE POINT, NOT A SHORTCUT. Strip unconditionally and the day this mirror of `_NOTE`
+ * THE GATE IS THE POINT, NOT A SHORTCUT. Strip unconditionally and the day this mirror of `_NOTE`
  * matches a span the Python reader did not, the matched text leaves the screen with no chip standing
  * in for it: the lender's words dropped silently, which is the one thing spec rule 2 forbids. Gated on
  * the count, a divergence shows the span inside the wording — visible, and wrong in the direction a

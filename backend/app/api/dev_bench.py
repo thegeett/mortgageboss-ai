@@ -1,11 +1,11 @@
 """Extraction-bench dev API — DEV-ONLY, gated so it cannot be reached in production.
 
-⚠️ THE GATE (env check, not obscurity): the router is INCLUDED in the app ONLY when
+THE GATE (env check, not obscurity): the router is INCLUDED in the app ONLY when
 ``settings.is_development`` (see ``main.py``), AND every handler also depends on
 :func:`_require_dev`, which 404s under staging/production. Two independent checks — the mount and
 the guard — so a misconfigured mount still cannot serve it in prod.
 
-⚠️ ARBITRARY LOCAL PATH, NO AUTH — bind LOCALHOST only. ``/preview`` and ``/start`` take a
+ARBITRARY LOCAL PATH, NO AUTH — bind LOCALHOST only. ``/preview`` and ``/start`` take a
 caller-supplied ``root`` and walk/read every readable file under it, sending each to the model
 (spending money). That arbitrary-path reach is the tool's PURPOSE (a dev points it at their own
 corpus), so it is intentionally not confined — which means the dev server that mounts it MUST bind
@@ -15,7 +15,7 @@ responsibility here.
 
 It measures COVERAGE, not accuracy. It writes JSON to disk; it persists NOTHING to the database.
 
-⚠️ THIS MODULE IS A SHELL. All of the bench's behaviour — planning, the per-document loop, the abort
+THIS MODULE IS A SHELL. All of the bench's behaviour — planning, the per-document loop, the abort
 rules, the report — lives in ``app/dev/bench/engine.py``, shared with the CLI front door
 (``scripts/extraction-bench.py``). Anything added here that the CLI would also need belongs in the
 engine instead, or the two front doors drift.

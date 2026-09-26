@@ -64,7 +64,7 @@ variable "endpoint_availability_zones" {
   description = <<-EOT
     AZs that receive interface endpoints. Empty means ALL of availability_zones.
 
-    ⚠️ "Empty means all" is THIS module's rule. A caller that maps this list through
+    "Empty means all" is THIS module's rule. A caller that maps this list through
     `private_subnet_ids_by_az` to place tasks gets the opposite — an empty list there
     yields ZERO subnets, and `awsvpc` requires at least one. Either list the AZs
     explicitly on both sides, or read the module's `private_subnet_ids` output, which
@@ -73,7 +73,7 @@ variable "endpoint_availability_zones" {
     Interface endpoints are ENIs billed PER ENDPOINT PER AZ, so this is the main
     lever on their cost — five endpoints in one AZ cost about half of five in two.
 
-    ⚠️ Whatever is listed here, place the TASKS in the same AZs. A task in an AZ
+    Whatever is listed here, place the TASKS in the same AZs. A task in an AZ
     with no local endpoint still works (private DNS is VPC-wide) but every call
     crosses an AZ boundary, adding transfer cost and giving back the AZ
     independence the placement was meant to buy.

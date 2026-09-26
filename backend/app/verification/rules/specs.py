@@ -18,7 +18,7 @@ diverge (e.g. mark a threshold "validated" when the CSV says it is not).
 ``load_rule_spec(rule_id)``; today that reads a YAML file under ``specs/``, but the
 signature does not reveal (or promise) a file. A DB-backed source later is a drop-in.
 
-⚠️ **The spec FORMAT is provisional.** :class:`RuleSpec` was discovered from ONE real
+**The spec FORMAT is provisional.** :class:`RuleSpec` was discovered from ONE real
 rule (AS-1); it is generalized in LP-308. Do not treat the shape as final.
 """
 
@@ -230,7 +230,7 @@ class TagCondition(BaseModel):
     # absent on every transaction and the rule couldnt_checks all of them, which is worse than unscoped.
     tag: str | None = PydField(default=None, min_length=1)
     loan_tag: str | None = PydField(default=None, min_length=1)
-    # eq | ne (string-value equality). ⚠️ Every evaluator spells this `x if op == "eq" else <ne>`, so a
+    # eq | ne (string-value equality). Every evaluator spells this `x if op == "eq" else <ne>`, so a
     # THIRD operator added here without also giving those sites a shared comparator would be silently
     # evaluated as `ne` — wrong, and invisible. Widen the pattern and the four call sites together
     # (consistency.py, deterministic.py, judgment.py, applicability.py).
@@ -556,7 +556,7 @@ class Materiality(BaseModel):
     for the question to be meaningful, with the floor computed (never hard-coded) as
     ``fraction x basis`` — e.g. 50% of monthly qualifying income.
 
-    ⚠️ WHY THIS SCOPES BEFORE ASKING, WHERE ``exempt_when`` DELIBERATELY DOES NOT. The two gates sit
+    WHY THIS SCOPES BEFORE ASKING, WHERE ``exempt_when`` DELIBERATELY DOES NOT. The two gates sit
     adjacent on the same rule and resolve opposite ways, so the distinction is load-bearing:
 
     * ``exempt_when`` is about the deposit's SOURCE. Fannie B3-4.2-02 exempts a readily-identifiable
@@ -635,7 +635,7 @@ class SubjectFact(BaseModel):
     rule DECIDES on, and everything else — the context that makes a finding legible — is dropped.
 
     This is the narrow channel back: a spec names the extra facts it wants for its WORDING, and they
-    reach the template only. ⚠️ They are NOT inputs — no verdict may turn on them. A fact declared here
+    reach the template only. They are NOT inputs — no verdict may turn on them. A fact declared here
     is never gated, never compared, never part of `load_bearing_tags`; if a rule needs to DECIDE on a
     value it must be a tag, with the gate and the distrust layer behind it.
 
@@ -689,14 +689,14 @@ class Guidance(BaseModel):
     * ``how_to_fix`` — the concrete step, keyed the same way. Carried on the finding's own
       ``how_to_fix`` field, which judgment rules previously hard-coded to None.
 
-    ⚠️ WHY `why`/`how_to_fix` ARE KEYED ON A TAG AND NOT ON THE VERDICT. A single template has to assume
+    WHY `why`/`how_to_fix` ARE KEYED ON A TAG AND NOT ON THE VERDICT. A single template has to assume
     a situation, and assumes wrong. "The statement describes it as …, but no matching withdrawal appears
     on file" is right for a self-asserted source and FALSE for a deposit with no description at all.
     Keying on ``explain_by`` (AS-12: `txn.source_strength`, whose four values are derived
     deterministically) gives one correct sentence per situation instead of one sentence that is wrong in
     some of them.
 
-    ⚠️ THIS REVERSES LP-376-B ("the message states the VERDICT"), deliberately and at the product owner's
+    THIS REVERSES LP-376-B ("the message states the VERDICT"), deliberately and at the product owner's
     direction. For a processor the verdict is the least useful part — especially when it reads "no" and
     the item is still in their queue. It is not hidden: it selects the action, so a `yes` and a `no`
     differ in the first six words and in the fix.
@@ -764,7 +764,7 @@ class JudgmentEval(BaseModel):
     # obtain additional documentation". The AI is therefore still ASKED (ask-then-suppress), and only a
     # NEGATIVE answer is suppressed — a positive one still reaches a human.
     #
-    # ⚠️ This is NOT "auto-clear a confident no". The clearing is done by the GUIDELINE predicate, which
+    # This is NOT "auto-clear a confident no". The clearing is done by the GUIDELINE predicate, which
     # is deterministic; the model's answer can only ever ADD a review, never remove one. A rule that
     # declares neither field behaves exactly as before — every verdict ratification-pending.
     # LP-518 — a LIST is ANY-HOLDS (alternatives), deliberately the opposite of `applicability` above,

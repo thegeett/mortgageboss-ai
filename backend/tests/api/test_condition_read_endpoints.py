@@ -1,6 +1,6 @@
 """Reading rounds and conditions (LP-909 section 1, spec §LP-909).
 
-⚠️ THE TWO FIELDS UNDER TEST HERE HAD NO PRODUCER UNTIL THIS SECTION. `condition_count` defaulted to
+THE TWO FIELDS UNDER TEST HERE HAD NO PRODUCER UNTIL THIS SECTION. `condition_count` defaulted to
 0 and `round_numbers` to `[]` from LP-904 onward — declared, documented, indexed for, and filled by
 nothing. A round strip reading "0 on sheet" and `R1 R2` chips that never appeared would have looked
 like a UI bug for as long as anyone cared to look, which is why the assertions below are about the
@@ -80,7 +80,7 @@ async def _user(db: AsyncSession, *, slug: str) -> tuple[Company, str]:
 async def test_a_stored_sheet_serialises_has_bytes_true(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ THE FIELD THIS FILE'S HEADER IS ABOUT, ONE FIELD OVER (LP-909 §4).
+    """THE FIELD THIS FILE'S HEADER IS ABOUT, ONE FIELD OVER (LP-909 §4).
 
     `has_bytes` was declared, derived, and asserted by nothing — the same shape as `condition_count`
     and `round_numbers` before this file existed. And it fails in the quiet direction: the round
@@ -108,7 +108,7 @@ async def test_a_stored_sheet_serialises_has_bytes_true(
     assert len(sources) == 1
     assert sources[0]["kind"] == ConditionSourceKind.PDF_UPLOAD.value
     assert sources[0]["has_bytes"] is True
-    # ⚠️ THE PATH ITSELF MUST NOT TRAVEL. `_storage_path` is server-controlled precisely so a
+    # THE PATH ITSELF MUST NOT TRAVEL. `_storage_path` is server-controlled precisely so a
     # sender's filename never shapes the storage layout, and a real sheet's filename carries the
     # borrower's surname and the loan number. The boolean answers the client's question; the path
     # would export the layout plus a company and file id to answer yes or no.
@@ -186,7 +186,7 @@ async def _imported_round(
 async def test_the_round_strip_counts_the_conditions_on_each_round(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ `condition_count`'s FIRST REAL VALUE. Defaulted to 0 since LP-904 with no producer, so the
+    """`condition_count`'s FIRST REAL VALUE. Defaulted to 0 since LP-904 with no producer, so the
     round card would have said "0 on sheet" for six conditions."""
     loan_file, round_, token = await _imported_round(db_session, slug="read-strip")
 
@@ -204,7 +204,7 @@ async def test_the_round_strip_counts_the_conditions_on_each_round(
 async def test_a_draft_round_counts_the_rows_it_holds(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ THE COUNT COMES FROM A DIFFERENT PLACE BEFORE IMPORT, and conflating them would make every
+    """THE COUNT COMES FROM A DIFFERENT PLACE BEFORE IMPORT, and conflating them would make every
     draft look empty: a draft has rows and no conditions, an imported round the reverse."""
     company, token = await _user(db_session, slug="read-draft")
     loan_file = await create_loan_file(db_session, company_id=company.id)
@@ -228,7 +228,7 @@ async def test_a_draft_round_counts_the_rows_it_holds(
 async def test_each_condition_reports_the_rounds_it_appeared_on(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ `round_numbers`' FIRST REAL VALUE — the `R1 R2` chips, `[]` since LP-904.
+    """`round_numbers`' FIRST REAL VALUE — the `R1 R2` chips, `[]` since LP-904.
 
     Derived from the appearance events rather than from `first_round_id` / `last_seen_round_id`,
     because two columns cannot express "appeared on R1 and R3 but not R2".
@@ -266,7 +266,7 @@ async def test_a_condition_seen_on_two_rounds_carries_both_numbers(
     db_session.add(second)
     await db_session.flush()
 
-    # ⚠️ A PLAIN `select(...)` OF THE COLUMN I WANT. An earlier version used
+    # A PLAIN `select(...)` OF THE COLUMN I WANT. An earlier version used
     # `ConditionEvent.__table__.select()` — a Core select whose rows are positional, so
     # `.condition_id` on the first row came back `None` and the assertion failed with
     # `KeyError: 'None'`. That shape appears nowhere else in this suite; it was my invention, and
@@ -325,7 +325,7 @@ async def test_one_round_comes_back_with_its_parse_report(
 async def test_the_card_counts_conditions_the_pdf_added_after_import(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """⚠️ THE HALF OF THE ENRICH BUG THAT NOTHING DEMONSTRATED (review).
+    """THE HALF OF THE ENRICH BUG THAT NOTHING DEMONSTRATED (review).
 
     The original defect had two halves: enrich-created conditions got no round chips, AND the round
     undercounted itself by exactly the number added. The chips half is covered by composition — the

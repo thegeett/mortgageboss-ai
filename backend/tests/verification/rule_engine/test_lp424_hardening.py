@@ -115,7 +115,7 @@ async def test_loan_purpose_absent_when_no_purpose_stated() -> None:
 
 
 def test_loan_purpose_is_now_consumed_by_pr2() -> None:
-    """⚠️ UPDATED AT LP-492, and the cause is the deferral ending — not a weakened assertion.
+    """UPDATED AT LP-492, and the cause is the deferral ending — not a weakened assertion.
 
     LP-424 built `loan.purpose` but deliberately did NOT wire the PC-2/PC-7 predicate: LF-6T3N carries no
     purpose, so those rules would have regressed to couldnt_check, and no refinance fixture existed. It
@@ -126,7 +126,7 @@ def test_loan_purpose_is_now_consumed_by_pr2() -> None:
     regresses, and all three directions are proven (purchase, refinance, and absent → couldnt_check,
     never a silent skip).
 
-    ⚠️ The orphan check is not dropped, it is INVERTED: the tag must now be read by exactly the rule that
+    The orphan check is not dropped, it is INVERTED: the tag must now be read by exactly the rule that
     claims it. If PR-2 stops reading it, this fails."""
     from tests.verification.tag_materialization.test_vocabulary_orphans import _live_hard_reads
 
@@ -147,7 +147,7 @@ def test_oc2_is_a_base_rule_riding_an_unscored_tag_but_ratifies() -> None:
     assert "OC-2" in _BASE_ACTIVE
     assert kind_for("OC-2").kind is RuleKindName.JUDGMENTAL  # -> ratify, never auto (LP-376-B)
     # OC-1's bar (a candidate) reads the SAME tag and records it is unscored (not-calibratable-yet).
-    # ⚠️ LP-495a — OC-1 moved to `ratify-pending`, but the FACT this assertion rests on is unchanged
+    # LP-495a — OC-1 moved to `ratify-pending`, but the FACT this assertion rests on is unchanged
     # and is now pinned directly: the shared tag is still UNMEASURED. OC-1 activated on a
     # self-consistency rate (agreement between two derivations), which is explicitly NOT a
     # measurement of correctness — so OC-2 still rides an unscored tag, exactly as before.

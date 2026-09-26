@@ -1,6 +1,6 @@
 """The fallback reader for layouts nobody has taught us (LP-906 section 3, spec §6).
 
-⚠️ `needs_ai = True` IS NOT A FAILURE, AND THAT DISTINCTION IS THE WHOLE POINT. It means the RULES
+`needs_ai = True` IS NOT A FAILURE, AND THAT DISTINCTION IS THE WHOLE POINT. It means the RULES
 could not split this text and LP-908 must. A sheet with warnings is still a rule-read sheet; a sheet
 with no structure at all is one the AI splits — and even then the AI only ever SPLITS, never
 interprets, and every row it produces is checked to be a substring of the input (spec §9.3).

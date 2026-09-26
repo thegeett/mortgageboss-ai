@@ -148,7 +148,7 @@ def test_the_surviving_row_keeps_everything_else_it_had() -> None:
 # The opt-in — the guard that makes this safe to run over every statement rule
 # --------------------------------------------------------------------------- #
 def test_a_rule_that_does_not_declare_it_never_merges() -> None:
-    """⚠️ THE GUARD THIS TICKET TURNS ON, and AS-9 is why it exists rather than a rule blacklist.
+    """THE GUARD THIS TICKET TURNS ON, and AS-9 is why it exists rather than a rule blacklist.
 
     Exactly two rules take a bank statement as their subject. AS-6's answer is about the ACCOUNT; AS-9
     ("declares 3 pages, 2 present") is about the STATEMENT. AS-9's page counts are not extracted today,

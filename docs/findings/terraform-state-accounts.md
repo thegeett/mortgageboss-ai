@@ -111,7 +111,7 @@ to this directory.
 | All three backends | **`dynamodb_table = "mbai-tf-locks"`** |
 | `use_lockfile` | **used nowhere** in `infra/` |
 
-**⚠️ Correction worth making: the AWS provider version is not what governs this.**
+**Correction worth making: the AWS provider version is not what governs this.**
 The S3 backend is a **Terraform core** feature, not a provider resource — it is
 initialised before providers load. The `~> 5.0` pin has no bearing on `dynamodb_table`
 or `use_lockfile`.
@@ -158,7 +158,7 @@ arrangement every `envs/*/terraform.tfvars` uses. `bootstrap/main.tf` is clean.
 **The bucket name is NOT hardcoded, so there is no §6b violation to fix.** The
 required changes are smaller than the framing assumed.
 
-**⚠️ But there is a real obstacle the question did not anticipate: `infra/bootstrap`
+**But there is a real obstacle the question did not anticipate: `infra/bootstrap`
 uses LOCAL state and is a SINGLE directory.** Applying it twice with different
 tfvars, in place, would have the second apply **overwrite the first's local state** —
 Terraform would then believe the tooling account's bucket does not exist and try to
@@ -237,8 +237,8 @@ arrangement. It should say which account the bucket is in.
 | # | Question | Result |
 |---|---|---|
 | 5 | `mbai-tfstate-591554480818` exists? | **DATA — NO. `NoSuchBucket` / `404`.** Not empty; absent. |
-| 6 | `mbai-tf-locks` exists and is empty? | ⚠️ **BLOCKED** — `AccessDeniedException` on `dynamodb:DescribeTable` |
-| 7 | State bucket in `058190633983`? | ⚠️ **BLOCKED** — no working credentials for that account |
+| 6 | `mbai-tf-locks` exists and is empty? | **BLOCKED** — `AccessDeniedException` on `dynamodb:DescribeTable` |
+| 7 | State bucket in `058190633983`? | **BLOCKED** — no working credentials for that account |
 
 **On #5 — "if empty, no `envs/dev` state was ever written."** It is not empty, it is
 **non-existent**, which is a stronger version of the same conclusion: no state was
@@ -258,7 +258,7 @@ mbai-staging        -> Token has expired and refresh failed
 mbai-staging-admin  -> Token has expired and refresh failed
 ```
 
-**⚠️ DATA — the profiles use THREE SEPARATE SSO SESSIONS**, so one login does not
+**DATA — the profiles use THREE SEPARATE SSO SESSIONS**, so one login does not
 authenticate the others:
 
 ```
@@ -331,7 +331,7 @@ lock_table_name   = "mbai-tf-locks"
 ```hcl
 # State backend — created by ../../bootstrap APPLIED TO THE STAGING ACCOUNT.
 #
-# ⚠️ This bucket lives in 058190633983, the same account as the resources it
+# This bucket lives in 058190633983, the same account as the resources it
 # describes. It is deliberately NOT the tooling account's bucket: state records
 # every resource, and a workload account's state in another account means an
 # identity there can read the whole shape of this one. `infra/shared` is the
@@ -359,7 +359,7 @@ substitute `dynamodb_table = "mbai-tf-locks"` — the DynamoDB table is created 
 same bootstrap apply either way. **Do not set both**; Terraform treats that as a
 conflict.
 
-⚠️ **INFERENCE, not verified** — I could not run `terraform init` to confirm
+**INFERENCE, not verified** — I could not run `terraform init` to confirm
 `use_lockfile` is accepted at v1.15.8. Verify on the first init of step 4.
 
 ---
@@ -452,7 +452,7 @@ and a wrong `AWS_PROFILE` is caught only by the account guard.
 
 ### Not verified — check before applying
 
-1. **⚠️ Bedrock model access is a per-account, per-region opt-in**, separate from
+1. **Bedrock model access is a per-account, per-region opt-in**, separate from
    quota. The ticket records the staging account's quotas as identical to dev
    (TPM 5,000,000 / RPM 10), which suggests it has been looked at — but quota and
    *model access* are different switches, and a model that is not enabled fails at
@@ -473,7 +473,7 @@ and a wrong `AWS_PROFILE` is caught only by the account guard.
    `staging.mortgageboss.ai` delegation is a manual step at Namecheap and cannot be
    verified until phase 1 has been applied.
 6. **The budget alarm address** must actually receive mail in the new account.
-7. **⚠️ Operational:** the three separate SSO sessions mean a `terraform apply` run
+7. **Operational:** the three separate SSO sessions mean a `terraform apply` run
    with a stale token fails partway rather than at the start. Log in to both sessions
    before beginning, not between steps.
 

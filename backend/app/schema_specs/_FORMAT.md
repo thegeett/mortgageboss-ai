@@ -75,7 +75,7 @@ files. Three optional helper declarations drive the LP-437 mechanism:
 }
 ```
 
-- **`derived`** — a value-map producing a new row field. ⚠️ **An UNMAPPED source value produces an ABSENT
+- **`derived`** — a value-map producing a new row field. **An UNMAPPED source value produces an ABSENT
   field, never a fabricated one** — this is the forged-deposit discipline (`_direction`'s absent-on-unknown):
   a guessed `direction` on an unlabelled row would trip a large-deposit rule on every unclassified withdrawal.
 - **`redact`** — the row fields to scrub with the shared `_DESC_REDACT` (a 9+-digit run → `[redacted]`), so a

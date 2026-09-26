@@ -17,7 +17,7 @@ The same gap swallows utilities, subscriptions and memberships — every recurri
 obligation. These tests pin the distinction the prompt now draws, because the fix is a handful of
 words in a shared prompt and nothing else would notice if they were edited away.
 
-⚠️ SHARED INPUT: `txn.apparent_category` also feeds AS-1, AS-2, AS-5, AS-12 and IN-1. Narrowing
+SHARED INPUT: `txn.apparent_category` also feeds AS-1, AS-2, AS-5, AS-12 and IN-1. Narrowing
 `debt_payment` to BORROWED MONEY is the right direction for all of them, but it is a change to five
 live rules' inputs, not just FR-5's.
 """

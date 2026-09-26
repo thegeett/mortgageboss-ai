@@ -30,13 +30,13 @@ export type BucketKind =
 /**
  * A bucket kind in a processor's words — S1-12's Heading select and the review screen's groups.
  *
- * ⚠️ IT LIVES HERE RATHER THAN IN `lib/status.ts`, WHICH IS WHERE IT LOOKS LIKE IT BELONGS. Every
+ * IT LIVES HERE RATHER THAN IN `lib/status.ts`, WHICH IS WHERE IT LOOKS LIKE IT BELONGS. Every
  * vocabulary in that module is a `Record<K, StatusMeta>` carrying a TONE for `StatusToken`. A
  * heading has no tone — it is not blocking, verified, or in progress, it is where on the sheet the
  * lender put the condition — so giving it one would invent a judgement the data does not make, and
  * put a non-status in a file whose whole contract is status tone.
  *
- * ⚠️ AND IT IS NOT DERIVED BY DE-SNAKING THE VALUE. `prior_to_docs` → "Prior to docs" happens to
+ * AND IT IS NOT DERIVED BY DE-SNAKING THE VALUE. `prior_to_docs` → "Prior to docs" happens to
  * work; `lender_to_clear` → "Lender to clear" reads as an instruction to the processor when it
  * means the LENDER clears it, and `master` → "Master" says nothing at all. The labels are written,
  * so each one can be right.
@@ -55,12 +55,12 @@ export const BUCKET_KIND_LABEL: Record<BucketKind, string> = {
 /**
  * The same kinds as they appear on a CHIP beside a group heading.
  *
- * ⚠️ SHORTER THAN `BUCKET_KIND_LABEL`, AND THAT IS WHY THERE ARE TWO (LP-909 §5 visual check). A
+ * SHORTER THAN `BUCKET_KIND_LABEL`, AND THAT IS WHY THERE ARE TWO (LP-909 §5 visual check). A
  * select needs a label that stands alone — "The lender clears this", "Master (applies to the whole
  * file)" — while a chip sits directly beside the lender's own heading and the design writes it as
  * "Lender clears", "Master", "Prior to docs".
  *
- * ⚠️ AND THE LONG FORM BROKE A MUST-MATCH RULE. S1-04 says there is NO chip when the kind equals the
+ * AND THE LONG FORM BROKE A MUST-MATCH RULE. S1-04 says there is NO chip when the kind equals the
  * heading, which is how "Master" is drawn — but comparing the heading against "Master (applies to the
  * whole file)" never matched, so S1-11 rendered a chip the design omits. The chip vocabulary is what
  * that comparison has to use.
@@ -79,13 +79,13 @@ export const BUCKET_KIND_CHIP: Record<BucketKind, string> = {
 /**
  * Whether a round is the lender's whole list or only part of it, as a CHIP.
  *
- * ⚠️ ONE VOCABULARY, BECAUSE THERE WERE ALREADY FOUR (LP-909 §5). `round-strip.tsx` and
+ * ONE VOCABULARY, BECAUSE THERE WERE ALREADY FOUR (LP-909 §5). `round-strip.tsx` and
  * `round-details-sheet.tsx` each wrote `completeness === "full" ? "Full list" : "Just some"` inline,
  * `round-review.tsx` wrote a prose form of the same fact, and `paste-conditions-dialog.tsx` a third
  * wording for its radio — and S1-07 and S1-10 needed a fifth. This is precisely what
  * `BUCKET_KIND_CHIP` was split out for: a label copied until two copies disagree.
  *
- * ⚠️ AND A TERNARY IS NOT EXHAUSTIVE OVER THE UNION, WHICH IS THE PART THAT WILL BITE. With two
+ * AND A TERNARY IS NOT EXHAUSTIVE OVER THE UNION, WHICH IS THE PART THAT WILL BITE. With two
  * members today, `completeness === "full" ? … : …` is right by accident — a third member would read
  * as "Just some" in four places at once, silently, because the else-branch swallows it. A `Record`
  * keyed on the union makes the compiler demand an answer for the new member.
@@ -101,7 +101,7 @@ export const COMPLETENESS_CHIP: Record<ConditionRoundCompleteness, string> = {
 /**
  * Which layout the reader recognised, in the words S1-04 and S1-10 print.
  *
- * ⚠️ ONE COPY: this was defined identically in `round-review.tsx` and `round-details-sheet.tsx`, and
+ * ONE COPY: this was defined identically in `round-review.tsx` and `round-details-sheet.tsx`, and
  * the two had already drifted in TYPE — one keyed on the union, the other `Record<string, string>`
  * with a `?? round.sheet_format` fallback for a value the union cannot hold. Keyed on the union, the
  * fallback is unnecessary rather than merely unused.
@@ -116,7 +116,7 @@ export const FORMAT_LABEL: Record<ConditionSheetFormat, string> = {
 /**
  * The layout's short name, for a round whose text was PASTED rather than uploaded (S1-07).
  *
- * ⚠️ `sheet_format` ALONE CANNOT TELL THOSE APART. `read_pasted_text` returns
+ * `sheet_format` ALONE CANNOT TELL THOSE APART. `read_pasted_text` returns
  * `UWM_APPROVAL_LETTER` for a paste it recognised — the same value an uploaded letter carries — so
  * S1-07's header read "UWM · Loan Approval Conditions", naming a letter nobody sent us. The design's
  * line is "UWM layout · recognised in the pasted text", which says what was actually recognised and
@@ -198,12 +198,12 @@ export type ConditionEventKind =
 /**
  * One line of a round's history (S1-09).
  *
- * ⚠️ THE SERVER PROJECTS NAMED SCALARS AND NEVER `detail`, so this carries a wide set of optional
+ * THE SERVER PROJECTS NAMED SCALARS AND NEVER `detail`, so this carries a wide set of optional
  * fields rather than a payload. `ConditionEvent.detail` is classified NPI — "what changed, which is
  * the lender's text" — and the readonly layer drops it whole, so the history is composed from counts
  * and identifiers instead.
  *
- * ⚠️ `actor_user_id` IS NULL FOR A SYSTEM EVENT, and that is a fact rather than missing data: a parse
+ * `actor_user_id` IS NULL FOR A SYSTEM EVENT, and that is a fact rather than missing data: a parse
  * task has no actor, and naming the processor who uploaded the sheet would make the trail say
  * something untrue.
  */
@@ -252,7 +252,7 @@ export interface ConditionSource {
   /**
    * Whether this arrival stored bytes — what "can this round still take a PDF" reduces to.
    *
-   * ⚠️ IT EXISTS BECAUSE THE CLIENT COULD NOT ASK THE SERVER'S QUESTION. `_has_pdf_source` keys on
+   * IT EXISTS BECAUSE THE CLIENT COULD NOT ASK THE SERVER'S QUESTION. `_has_pdf_source` keys on
    * `storage_path`, which was not serialised, so the round strip kept a list of `kind` values —
    * exactly the list that function's comment warns against. It held only because every
    * bytes-carrying source happens to be written as `pdf_upload` or `email` today.
@@ -278,7 +278,7 @@ export interface ParseReport {
   duplicates_dropped: number;
   ai_used: boolean;
   /**
-   * ⚠️ NOT THE SAME FACT AS `ai_used`, AND THE PAIR IS READ TOGETHER. `needs_ai` is the READER's
+   * NOT THE SAME FACT AS `ai_used`, AND THE PAIR IS READ TOGETHER. `needs_ai` is the READER's
    * verdict that the rules could not split this text; `ai_used` is whether an AI split actually ran.
    * Both false means the rules read it. `needs_ai` true with `ai_used` false means the round is
    * waiting for the split task — a state that has to be findable.
@@ -350,7 +350,7 @@ export interface ConditionRound {
   round_date: string;
   expiry_dates: Record<string, string | null> | null;
   /**
-   * ⚠️ PRESENT DOES NOT MEAN REVIEWABLE. A `parsing` round awaiting the AI split carries the
+   * PRESENT DOES NOT MEAN REVIEWABLE. A `parsing` round awaiting the AI split carries the
    * rules-read rows too, and S1-02 renders skeletons and polls rather than showing them. Read
    * `status` to decide whether a processor may act on these, never their presence.
    */
@@ -362,7 +362,7 @@ export interface ConditionRound {
   /**
    * What the import recorded, or null when the question does not apply.
    *
-   * ⚠️ NULL IS NOT ZERO. A draft has never been imported, so the server sends null rather than 0 —
+   * NULL IS NOT ZERO. A draft has never been imported, so the server sends null rather than 0 —
    * and "0 new" would describe an import that never happened. On an IMPORTED round 0 is a real
    * measurement: "0 new · 6 seen again" is S1-08's own line, and it is the whole point of that
    * screen that a second round added nothing and removed nothing.
@@ -373,7 +373,7 @@ export interface ConditionRound {
   /**
    * When the row last changed — the value `expected_updated_at` must echo on a draft save.
    *
-   * ⚠️ IT WAS NOT EXPOSED, WHICH MADE THE STALE-WRITE GUARD UNREACHABLE. `ConditionDraftUpdate`
+   * IT WAS NOT EXPOSED, WHICH MADE THE STALE-WRITE GUARD UNREACHABLE. `ConditionDraftUpdate`
    * says "the caller sends the `updated_at` it read", and no caller could read it: the round
    * schema carried only `created_at`. So two tabs on one draft — the case the 409 exists for —
    * would both have sent `null` and the second would have overwritten the first in silence.

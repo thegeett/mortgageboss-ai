@@ -6,17 +6,17 @@
 # LP-417 from the binder's typed-core effective_date) and the loan's closing date (contract.loan_closing_date,
 # already produced). A policy effective AFTER closing leaves the property unprotected in the gap.
 #
-# ⚠️ NATIVE DATE COMPARE (LP-417 D1, verified): the deterministic operand path coerces `type: date` via
+# NATIVE DATE COMPARE (LP-417 D1, verified): the deterministic operand path coerces `type: date` via
 # coerce_date (LP-328; KNOWN_OPERAND_TYPES = {decimal, date}), and ID-5 already compares two date operands
 # (id.borrower_id_expiration vs contract.loan_closing_date). So IH-3 needs NO derived day-count tag — it is the
 # ID-5 shape with the direction flipped (fire when effective > closing, vs ID-5's expiration < closing).
 #
-# ⚠️ NO Priya threshold (LP-417 D6): EXACT — effective ON the closing date is in force at closing (satisfied);
+# NO Priya threshold (LP-417 D6): EXACT — effective ON the closing date is in force at closing (satisfied);
 # only effective AFTER closing fires. So IH-3 clears the no-ai-dependency gate and ACTIVATES (its input resolves
 # on a binder fixture — LP-414's fire_path_scenarios). PRIYA CONFIRMATION (optional, non-blocking): is same-day
 # effective acceptable (today: yes, in force on the day) — the ID-5 == boundary, benign here.
 #
-# ⚠️ NO binder → COULDNT_CHECK, not not_applicable (LP-417 D5): insurance is required on every mortgage, so a
+# NO binder → COULDNT_CHECK, not not_applicable (LP-417 D5): insurance is required on every mortgage, so a
 # missing binder is an honest gap, not scope-false. ins.loan_effective_date resolves "unknown" (no binder) → the
 # operand coerces to None → couldnt_check (the gate catches it). No applicability predicate (never hide the gap),
 # and no live rule flags a missing binder today, so IH-3 does not double-fire. LF-6T3N has no binder (LP-414 A3

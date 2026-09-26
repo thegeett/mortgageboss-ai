@@ -1,17 +1,17 @@
 """LP-488 — MI-1 (conventional MI requirement) and the PROGRAM AXIS's first use.
 
-⚠️ EVERY VERDICT ASSERTION RUNS THROUGH A REAL RULE EVALUATION (LP-487's standing rule):
+EVERY VERDICT ASSERTION RUNS THROUGH A REAL RULE EVALUATION (LP-487's standing rule):
 materialize_tags() then evaluate_rules(), never by calling a recipe or the gate directly. A green test
 over an unexercised path is ADR-286/289 at the test layer.
 
-⚠️ THE PROGRAM AXIS. LP-501 established that conventional-vs-FHA IS expressible (`LoanProgram` is a
+THE PROGRAM AXIS. LP-501 established that conventional-vs-FHA IS expressible (`LoanProgram` is a
 two-value enum reaching the snapshot as `program.type`) while Fannie-vs-Freddie and DU-vs-manual are NOT.
 MI-1 is conventional-only. The scoping is an APPLICABILITY PREDICATE, never an outcome, because the
 applicability layer resolves absent/"unknown" to couldnt_check and only definitely-false to
 not_applicable — as an outcome, a file that states no program would be SILENTLY SKIPPED. Both directions
 are proven below, and so is the absent case.
 
-⚠️ MI-1 CANNOT FIRE. It can prove MI is REQUIRED (LTV > 80) but not that MI is PRESENT: no document type
+MI-1 CANNOT FIRE. It can prove MI is REQUIRED (LTV > 80) but not that MI is PRESENT: no document type
 in the system carries an MI certificate, `mi.certificate_present` is an uncalibrated AI tag (LP-484), and
 `housing.mi_monthly` reaches nothing. So the requirement routes to needs_review — the IH-2 shape.
 """
@@ -85,7 +85,7 @@ async def test_an_appraisal_on_the_file_still_clears_a_low_ltv() -> None:
 
 
 async def test_mi1_cannot_fire_from_any_outcome() -> None:
-    """⚠️ STRUCTURAL, not incidental to the fixtures. MI-1 knows MI is REQUIRED; it cannot know MI is
+    """STRUCTURAL, not incidental to the fixtures. MI-1 knows MI is REQUIRED; it cannot know MI is
     MISSING, and firing would assert the latter. If someone adds a `fired` outcome, this fails."""
     outcomes = load_rule_spec("MI-1").deterministic.outcomes
     assert Verdict.FIRED.value not in [o.verdict for o in outcomes]
@@ -98,7 +98,7 @@ async def test_mi1_cannot_fire_from_any_outcome() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# ⚠️ THE PROGRAM AXIS — both directions, plus absent
+# THE PROGRAM AXIS — both directions, plus absent
 # --------------------------------------------------------------------------- #
 async def test_an_fha_file_is_not_applicable_not_fired() -> None:
     """The SAME 85% LTV that needs_reviews on a conventional file. MI-1 must not reach an FHA loan at
@@ -109,7 +109,7 @@ async def test_an_fha_file_is_not_applicable_not_fired() -> None:
 
 
 async def test_a_file_with_no_stated_program_couldnt_checks() -> None:
-    """⚠️ THE REASON THE SCOPING IS A PREDICATE. The same 85% LTV with no program stated must be
+    """THE REASON THE SCOPING IS A PREDICATE. The same 85% LTV with no program stated must be
     SURFACED, not skipped. As an outcome this file would have produced nothing at all."""
     assert await _one(build_mi1_no_program_snapshot) is Verdict.COULDNT_CHECK
 
@@ -128,7 +128,7 @@ def test_the_program_scoping_is_an_applicability_predicate() -> None:
 # Fail closed
 # --------------------------------------------------------------------------- #
 async def test_no_value_basis_couldnt_checks_never_satisfied() -> None:
-    """A loan amount with no purchase price and no appraisal cannot form an LTV. ⚠️ Never satisfied:
+    """A loan amount with no purchase price and no appraisal cannot form an LTV. Never satisfied:
     clearing the MI requirement because the property value is missing is the costly direction."""
     verdict = await _one(build_mi1_no_value_snapshot)
     assert verdict is Verdict.COULDNT_CHECK
@@ -136,7 +136,7 @@ async def test_no_value_basis_couldnt_checks_never_satisfied() -> None:
 
 
 async def test_two_appraisals_take_the_lowest_value() -> None:
-    """⚠️ A REPORTED DEFECT, of the same shape as the LP-487 review findings: `property.appraised_value`
+    """A REPORTED DEFECT, of the same shape as the LP-487 review findings: `property.appraised_value`
     is PER APPRAISAL DOCUMENT, and the first version of this recipe took whichever subject iterated
     FIRST — an arbitrary LTV denominator on an ordinary file (an original plus a replacement appraisal,
     or a 1004D the classifier cannot tell from a full report).
@@ -175,7 +175,7 @@ async def test_lf6t3n_abstains() -> None:
 # The threshold, the tags, and the gate
 # --------------------------------------------------------------------------- #
 def test_the_threshold_lives_in_the_spec_not_in_a_producer() -> None:
-    """⚠️ TAGS DESCRIBE, RULES JUDGE. `mi.required` exists in fact_tags.csv as "Is MI required (LTV>80
+    """TAGS DESCRIBE, RULES JUDGE. `mi.required` exists in fact_tags.csv as "Is MI required (LTV>80
     conv)" — a conclusion with the threshold baked in. It is deliberately left INERT; materialising it
     would move an 80 that belongs in reviewable reference_values into a producer."""
     assert load_rule_spec("MI-1").reference_values.values["mi_required_above_ltv_percent"] == "80"
@@ -197,7 +197,7 @@ def test_mi1_is_live_and_earned_it_through_the_gate() -> None:
     bars = load_activation_bars()
     assert "MI-1" in ACTIVE_RULE_IDS
     assert is_eligible(bars["MI-1"])
-    # ⚠️ `validated` is NOT read for a no-ai-dependency bar — is_eligible reads input_resolves alone.
+    # `validated` is NOT read for a no-ai-dependency bar — is_eligible reads input_resolves alone.
     # It stays false rather than being set decoratively; the bar's comment records why.
     assert bars["MI-1"].validated is False
 
@@ -208,7 +208,7 @@ def test_mi1_reads_no_distrusted_tag() -> None:
 
 
 def test_the_spec_mi_ltv_trigger_matches_the_calculator_constant() -> None:
-    """⚠️ TWO SOURCES OF TRUTH (reported finding). MI-1's mi_required_above_ltv_percent duplicates
+    """TWO SOURCES OF TRUTH (reported finding). MI-1's mi_required_above_ltv_percent duplicates
     `_PMI_REQUIRED_LTV` in app/verification/mortgage_insurance.py — the constant that decides whether PMI
     is required AND whether it flows into the DTI's PITI line. If Fannie moves the trigger and only one
     is updated, MI-1 and the DTI disagree about the same loan with nothing failing."""
