@@ -14,7 +14,7 @@
  * treats "not FAIL" as verified puts a green tick on exactly that message.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -43,6 +43,32 @@ vi.mock("@/lib/api/inbound", async () => {
     useAttachmentPreview: () => ({ data: null, isPending: false }),
   };
 });
+
+/**
+ * ⚠️ MOCKED BECAUSE THE CARD NOW ASKS THE SERVER A SECOND QUESTION. S1-13's attach-or-new needs the
+ * file's rounds — is the newest one still waiting for its letter? — and without this the real
+ * `useConditionRounds` would fire an unmocked request from every test that renders a routed message.
+ *
+ * `canAttachPdf` is deliberately NOT mocked: it is the client's mirror of the server's refusal rule,
+ * and a stubbed one would leave these tests asserting that a stub returns what it was told to. The
+ * same reasoning the `unclaimed` mock above states.
+ */
+const mockRounds = vi.fn(() => ({ data: [] as unknown[], isPending: false }));
+vi.mock("@/lib/api/conditions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/conditions")>()),
+  useConditionRounds: () => mockRounds(),
+}));
+
+/** A round as the rounds endpoint returns it — only the fields S1-13 reads. */
+function round(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "r1",
+    round_number: 1,
+    status: "imported",
+    sources: [{ kind: "paste", at: null, has_bytes: false, inbound_attachment_id: null }],
+    ...overrides,
+  };
+}
 
 import { InboundMessageCard, SIGNAL_LABEL } from "./inbound-message-card";
 
@@ -177,6 +203,95 @@ describe("a message nobody owns", () => {
     render(<InboundMessageCard message={UNCLAIMED} fileId={null} />, { wrapper });
     expect(screen.getByText(/2 KB/)).toBeDefined();
     expect(screen.getByText("Not matched to a file")).toBeDefined();
+  });
+});
+
+describe("S1-13 — attach to the round already waiting, or start a new one", () => {
+  const pasted = (overrides: Record<string, unknown> = {}) =>
+    round({ sources: [{ kind: "paste", at: null, has_bytes: false }], ...overrides });
+
+  it("⚠️ ASKS when the newest round was pasted and has no PDF yet, and sends nothing meanwhile", () => {
+    // Before this, choosing the action on such a file silently opened a SECOND round — the server
+    // would happily do it, and the processor almost never wants it. The design puts the question
+    // here, on this screen, rather than leaving the merge to S1-09.
+    mockRounds.mockReturnValue({ data: [pasted()], isPending: false });
+    render(<InboundMessageCard message={ROUTED} fileId="file-1" />, { wrapper });
+
+    fireEvent.click(screen.getByRole("button", { name: "Use as condition sheet" }));
+
+    expect(screen.getByText("Attach to this round, or start a new one?")).toBeDefined();
+    // ⚠️ AND NOTHING IS SENT WHILE THE QUESTION IS OPEN. A dialog that appears *after* the request
+    // has gone is decoration over an action already taken.
+    expect(mockUseAsSheet).not.toHaveBeenCalled();
+  });
+
+  it("⚠️ attaching sends the round id — that is what makes it a merge rather than a second round", () => {
+    mockRounds.mockReturnValue({
+      data: [pasted({ id: "r-7", round_number: 2 })],
+      isPending: false,
+    });
+    render(<InboundMessageCard message={ROUTED} fileId="file-1" />, { wrapper });
+
+    fireEvent.click(screen.getByRole("button", { name: "Use as condition sheet" }));
+    fireEvent.click(screen.getByRole("button", { name: "Attach to Round 2" }));
+
+    expect(mockUseAsSheet).toHaveBeenCalledWith({ attachmentId: "att-1", attachToRoundId: "r-7" });
+  });
+
+  it("⚠️ starting a new round sends NO id, because the two answers are two server behaviours", () => {
+    // With an id the server merges and answers 200, having queued nothing; without one it opens a
+    // round and answers 202, which the Conditions tab polls. Sending the id "just in case" would
+    // silently turn every forward into a merge.
+    mockRounds.mockReturnValue({ data: [pasted()], isPending: false });
+    render(<InboundMessageCard message={ROUTED} fileId="file-1" />, { wrapper });
+
+    fireEvent.click(screen.getByRole("button", { name: "Use as condition sheet" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start a new round" }));
+
+    expect(mockUseAsSheet).toHaveBeenCalledWith({ attachmentId: "att-1", attachToRoundId: null });
+  });
+
+  it("⚠️ does NOT ask when the newest round already has its PDF — the server would refuse that merge", () => {
+    mockRounds.mockReturnValue({
+      data: [round({ sources: [{ kind: "pdf_upload", at: null, has_bytes: true }] })],
+      isPending: false,
+    });
+    render(<InboundMessageCard message={ROUTED} fileId="file-1" />, { wrapper });
+
+    fireEvent.click(screen.getByRole("button", { name: "Use as condition sheet" }));
+
+    expect(screen.queryByText("Attach to this round, or start a new one?")).toBeNull();
+    expect(mockUseAsSheet).toHaveBeenCalledWith({ attachmentId: "att-1", attachToRoundId: null });
+  });
+
+  it("⚠️ nor when the newest round is discarded, which is the server's OTHER refusal", () => {
+    // `canAttachPdf` mirrors both halves of `enrich_round_with_pdf`'s rule: a status outside
+    // draft/imported AND bytes already stored. Gating on bytes alone would offer a merge that
+    // answers 409 — the same defect the round strip was corrected for.
+    mockRounds.mockReturnValue({ data: [pasted({ status: "discarded" })], isPending: false });
+    render(<InboundMessageCard message={ROUTED} fileId="file-1" />, { wrapper });
+
+    fireEvent.click(screen.getByRole("button", { name: "Use as condition sheet" }));
+
+    expect(screen.queryByText("Attach to this round, or start a new one?")).toBeNull();
+  });
+
+  it("⚠️ names the round an attachment already became, matched on the id the SOURCE recorded", () => {
+    // The attachment itself carries no round reference at all, and the mutation's result is gone by
+    // the next page load — so this is derived from `sources[].inbound_attachment_id` or not at all.
+    mockRounds.mockReturnValue({
+      data: [
+        round({
+          round_number: 3,
+          sources: [{ kind: "email", at: null, has_bytes: true, inbound_attachment_id: "att-1" }],
+        }),
+      ],
+      isPending: false,
+    });
+    render(<InboundMessageCard message={ROUTED} fileId="file-1" />, { wrapper });
+
+    expect(screen.getByText(/Used as condition sheet →/)).toBeDefined();
+    expect(screen.getByText("Round 3")).toBeDefined();
   });
 });
 

@@ -87,6 +87,7 @@ export function InboundAttachmentRow({
   onAcceptAsCorrespondence,
   onReject,
   onUseAsConditionSheet,
+  usedAsRound,
   busy = false,
 }: {
   fileId: string | null;
@@ -96,6 +97,19 @@ export function InboundAttachmentRow({
   onReject?: () => void;
   /** Turn this attachment into the file's condition sheet (S1-13). PDFs only. */
   onUseAsConditionSheet?: () => void;
+  /**
+   * The round this attachment already became, if it became one (S1-13 Must-match: "Once it is used,
+   * the attachment reads 'Kept as correspondence' and shows a link: 'Used as condition sheet →
+   * Round N'").
+   *
+   * ⚠️ IT ARRIVES AS A PROP BECAUSE THE ATTACHMENT CANNOT ANSWER IT. `InboundAttachment` carries no
+   * round reference at all — id, filenames, types, size, safety, disposition, nesting depth — and
+   * `UseAsConditionSheetResult` returns a `round_id` only for the attachment just acted on, which is
+   * gone on the next page load. The parent derives it by matching `inbound_attachment_id` across the
+   * file's rounds, so the link is absent wherever that query cannot run (the company-level queue has
+   * no file and therefore no rounds), rather than rendered as a promise nothing can honour.
+   */
+  usedAsRound?: { id: string; number: number | null } | null;
   busy?: boolean;
 }) {
   const decided = attachment.disposition !== "pending";
@@ -136,6 +150,18 @@ export function InboundAttachmentRow({
         {decided ? (
           <p className={cn("text-xs font-medium", statusTone(attachment.disposition))}>
             {DISPOSITION_LABEL[attachment.disposition]}
+          </p>
+        ) : null}
+        {usedAsRound ? (
+          // A statement of what happened, not a control: Stage 1 has no navigation target for a
+          // round, so this names it rather than pretending to link somewhere. "Not imported yet" is
+          // what a round with no number is called everywhere else in this feature.
+          <p className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+            <FileText className="h-3 w-3 shrink-0" aria-hidden />
+            Used as condition sheet →{" "}
+            <span className="font-medium text-foreground-2">
+              {usedAsRound.number === null ? "Not imported yet" : `Round ${usedAsRound.number}`}
+            </span>
           </p>
         ) : null}
       </div>

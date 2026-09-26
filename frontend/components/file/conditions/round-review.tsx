@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
-import { useImportRound, useUpdateDraft } from "@/lib/api/conditions";
+import { hasPdf, useImportRound, useUpdateDraft } from "@/lib/api/conditions";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import { COMPLETENESS_CHIP, FORMAT_LABEL, LAYOUT_NAME } from "@/lib/types/conditions";
@@ -12,7 +12,6 @@ import { CircleCheck, Sparkles, TriangleAlert } from "lucide-react";
 import { useId, useState } from "react";
 import { FLAGGED_BELOW, ReviewRows } from "./review-rows";
 import { ReviewSidePanel } from "./review-side-panel";
-import { hasPdf } from "./round-strip";
 
 /**
  * What this round's header says was recognised, and where.

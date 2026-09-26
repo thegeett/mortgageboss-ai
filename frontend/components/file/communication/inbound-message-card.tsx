@@ -2,6 +2,16 @@
 
 import { InboundAttachmentRow } from "@/components/file/communication/inbound-attachment";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { canAttachPdf, useConditionRounds } from "@/lib/api/conditions";
 import {
   unclaimed,
   useAcceptAttachment,
@@ -10,8 +20,10 @@ import {
 } from "@/lib/api/inbound";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { messageTimeShort } from "@/lib/message-time";
+import type { ConditionRound } from "@/lib/types/conditions";
 import type { InboundMessage } from "@/lib/types/inbound";
 import { Mail, MailQuestion, ShieldCheck, ShieldQuestion } from "lucide-react";
+import { useState } from "react";
 
 /**
  * The authentication badge (§2.3).
@@ -116,6 +128,46 @@ export function InboundMessageCard({
   const busy = accept.isPending || reject.isPending || useAsSheet.isPending;
   const hidden = unclaimed(message);
 
+  /**
+   * The file's rounds, for the two things S1-13 needs that an attachment cannot answer.
+   *
+   * ⚠️ `enabled` IS ALREADY `Boolean(fileId)`, so the company-level queue fetches nothing — which is
+   * also exactly where neither of these may appear: there is no file, so no round to merge into and
+   * no round for an attachment to have become.
+   */
+  const rounds = useConditionRounds(fileId ?? "");
+  const roundList = rounds.data ?? [];
+
+  /**
+   * The round a forward would merge into, or null to open a new one (S1-13 Must-match).
+   *
+   * ⚠️ THE NEWEST ROUND, NOT ANY MERGEABLE ONE. The design's condition is "when the file's NEWEST
+   * round was pasted and has no PDF yet" — a `find` across the list would offer to merge into an
+   * older paste while a newer round sat on top of it, which is a different and wrong question.
+   * `roundList` is newest-first, as `list_rounds` orders it and `imported-view` documents it.
+   *
+   * ⚠️ AND MERGEABILITY IS `canAttachPdf`, NOT "has no bytes". The server refuses on TWO counts —
+   * a status outside `draft`/`imported`, and bytes already stored — so asking only the second would
+   * offer a merge into a discarded or failed round that answers 409. That predicate is the mirror of
+   * the server's rule and already carries the reasoning.
+   */
+  const newest = roundList[0] ?? null;
+  const mergeTarget = newest && canAttachPdf(newest) ? newest : null;
+
+  /** Which round an attachment already became, matched on the id the source recorded. */
+  const roundFor = (attachmentId: string): ConditionRound | null =>
+    roundList.find((round) =>
+      round.sources.some((source) => source.inbound_attachment_id === attachmentId),
+    ) ?? null;
+
+  /** The attachment whose attach-or-new question is open, if any. */
+  const [askingFor, setAskingFor] = useState<string | null>(null);
+
+  function useAsSheetNow(attachmentId: string, attachToRoundId: string | null) {
+    setAskingFor(null);
+    useAsSheet.mutate({ attachmentId, attachToRoundId });
+  }
+
   return (
     <article className="flex flex-col gap-3 rounded-lg border border-input bg-card p-4">
       <header className="flex flex-wrap items-start justify-between gap-2">
@@ -168,6 +220,10 @@ export function InboundMessageCard({
               fileId={fileId}
               attachment={attachment}
               busy={busy}
+              usedAsRound={(() => {
+                const round = roundFor(attachment.id);
+                return round ? { id: round.id, number: round.round_number } : null;
+              })()}
               {...(fileId
                 ? {
                     onAccept: () => accept.mutate({ attachmentId: attachment.id }),
@@ -179,7 +235,15 @@ export function InboundMessageCard({
                     // server 404s an unrouted attachment rather than letting one company create a
                     // round from a message no company owns yet. Omitting the callback there makes
                     // the button absent rather than present and failing.
-                    onUseAsConditionSheet: () => useAsSheet.mutate(attachment.id),
+                    // ⚠️ ASKS RATHER THAN ASSUMES (S1-13). Without a merge target this is the
+                    // create path exactly as before; with one, choosing silently opened a SECOND
+                    // round on a file whose newest round was still waiting for its letter — which
+                    // is the outcome a processor almost never wants, and the server would happily
+                    // have done it.
+                    onUseAsConditionSheet: () =>
+                      mergeTarget
+                        ? setAskingFor(attachment.id)
+                        : useAsSheetNow(attachment.id, null),
                   }
                 : {})}
             />
@@ -188,6 +252,43 @@ export function InboundMessageCard({
       ) : (
         <p className="text-xs text-muted-foreground">No attachments.</p>
       )}
+
+      {/* ⚠️ THE CONFIRM UI IS "May differ" IN THE PACK, BUT THE QUESTION IS NOT. S1-13 requires that
+          choosing the action ASKS when the newest round was pasted and has no PDF yet; only the
+          shape of the asking is free, and this repo has `Dialog` and no AlertDialog. */}
+      <Dialog open={askingFor !== null} onOpenChange={(open) => !open && setAskingFor(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Attach to this round, or start a new one?</DialogTitle>
+            <DialogDescription>
+              {mergeTarget
+                ? `The newest round on this file ${
+                    mergeTarget.sources.some((source) => source.kind === "paste")
+                      ? "was pasted"
+                      : "was typed"
+                  } and has no PDF yet. Attaching merges the lender's letter into it — it fills in the letter details and creates no second round.`
+                : null}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => askingFor && useAsSheetNow(askingFor, null)}
+              disabled={busy}
+            >
+              Start a new round
+            </Button>
+            <Button
+              onClick={() => askingFor && mergeTarget && useAsSheetNow(askingFor, mergeTarget.id)}
+              disabled={busy}
+            >
+              {mergeTarget?.round_number === null
+                ? "Attach to the draft round"
+                : `Attach to Round ${mergeTarget?.round_number}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {accept.isError || reject.isError ? (
         <p className="text-sm text-danger">

@@ -164,17 +164,34 @@ export interface UseAsConditionSheetResult {
  * letter and then finds that tab unchanged will forward it again — which the server refuses with a
  * 409 naming the round that already exists, but only after they have been confused by it.
  *
- * `attach_to_round_id` is deliberately not exposed yet: it merges into an existing pasted round and
- * answers 200 instead of 202, which is a different screen's action (S1-09) rather than this one's.
+ * ⚠️ `attach_to_round_id` IS NOW EXPOSED, AND THE REASON IT WAS NOT WAS A GUESS. This said it
+ * "merges into an existing pasted round and answers 200 instead of 202, which is a different
+ * screen's action (S1-09) rather than this one's" — a judgement made without the design pack, which
+ * puts the question on THIS screen: "When the file's newest round was pasted and has no PDF yet,
+ * choosing the action asks whether to attach it to that round or start a new one" (S1-13
+ * Must-match). Withholding it meant choosing the action on such a file silently opened a SECOND
+ * round, which is the outcome a processor almost never wants.
+ *
+ * The two answers really are two outcomes: with an id the server merges and answers **200**, having
+ * queued nothing and created nothing; without one it opens a round and answers **202**, which the
+ * Conditions tab then polls. That is why the caller has to ask rather than pick.
  */
+export interface UseAsConditionSheetInput {
+  attachmentId: string;
+  /** The round to merge into (the LP-907 merge). Omitted to open a new round instead. */
+  attachToRoundId?: string | null;
+}
+
 export function useForwardAttachmentAsSheet(fileId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (attachmentId: string) =>
+    mutationFn: async ({ attachmentId, attachToRoundId }: UseAsConditionSheetInput) =>
       (
         await apiClient.post<UseAsConditionSheetResult>(
           `${inboundPath(fileId)}/attachments/${attachmentId}/condition-round`,
-          {},
+          // Still an object rather than nothing, for the 422 reason above; the key is sent only
+          // when there is a round to merge into, so the create path posts exactly what it did.
+          attachToRoundId ? { attach_to_round_id: attachToRoundId } : {},
         )
       ).data,
     onSuccess: () => {
