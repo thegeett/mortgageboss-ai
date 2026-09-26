@@ -144,7 +144,14 @@ log = structlog.get_logger(__name__)
 
 #: Every reader that can appear in a `ROUND_PARSED` detail. A CLOSED vocabulary, because the field is
 #: exposed and an open string is a hole — see `ConditionEventPublic`.
-_READERS = frozenset({"uwm", "champions", "generic", "paste", "split"})
+#:
+#: ⚠️ `"paste"` WAS IN HERE AND NOTHING WRITES IT (LP-909 review). `reader_for` returns `uwm`,
+#: `champions` or `generic`; `read_pasted_text` returns one of those two; the split task writes
+#: `split`. So the set carried a member no writer produces — added in the very commit that removed
+#: three exposed fields no sentence read. ADR-404's shape in miniature, on a frozenset instead of an
+#: enum: a vocabulary entry nothing writes is an invitation, and it reads as evidence that some path
+#: emits it.
+_READERS = frozenset({"uwm", "champions", "generic", "split"})
 
 
 def _logged_mismatch(kind: object, key: str, expected: str) -> None:
@@ -234,11 +241,23 @@ class ConditionEventPublic(BaseModel):
     once, on `CONDITION_EDITED` (`condition_enrich.py:273`), and `ROUND_ENRICHED` stores no such key,
     so the arm that would have used it could never have seen it.
 
-    What the fifteen `ConditionEvent(...)` constructions across `condition_rounds`, `condition_import`,
-    `condition_enrich` and `tasks/conditions` actually store, of what is exposed: `source_kind` and
-    `bytes` on receipt; `reader` and `rows` on a parse; `round_number`/`rows`/`created`/`seen_again` on
-    import; `from_status` on a reparse; `filled_header`/`filled_expiry`/`filled_date_printed`/`matched`
-    on an enrich; `rows` on a discard.
+    What the FOURTEEN `ConditionEvent(...)` constructions actually store, of what is exposed —
+    `condition_import` 6, `condition_rounds` 4, `condition_enrich` 3, `tasks/conditions` 1:
+
+    * receipt: `source_kind` always, plus `bytes` on an UPLOAD and `chars` on a PASTE (neither of
+      those two is exposed); a MANUAL round stores `source_kind` alone.
+    * parse: `reader`, `rows`.
+    * import: `round_number`, `rows`, `created`, `seen_again`.
+    * reparse: `from_status`.
+    * enrich: `filled_header`, `filled_expiry`, `matched` — and NOT `filled_date_printed`, which is on
+      `ConditionEnrichResult` but not in the event's detail.
+    * discard: `rows`.
+
+    ⚠️ AN EARLIER VERSION OF THIS PARAGRAPH GOT THREE OF THOSE WRONG (LP-909 review): it said fifteen
+    constructions from a grep I never filtered, put `bytes` on every receipt when a paste stores
+    `chars`, and listed `filled_date_printed` as an enrich key while the field comment below correctly
+    said it is not stored. A docstring enumerating writers is worth only as much as the count behind
+    it, and the last one was asserted rather than taken.
 
     ⚠️ `actor_user_id` IS NULL FOR A SYSTEM EVENT, DELIBERATELY. The model says why: "a parse task has
     no actor, and naming the processor who uploaded the sheet as the actor of the parse would make the

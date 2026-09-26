@@ -190,14 +190,22 @@ export function LetterDetails({ round }: { round: ConditionRound }) {
         </>
       )}
 
-      {/* The expiry table is on its own column, so it survives a header the reader could not find —
-          which is exactly S1-11: "the side panel says 'Not found on this sheet.' for the team and
-          the figures, but still shows the expiry dates". */}
-      <Block title="Document expiry (lender’s table)">
-        {EXPIRY.map(([key, label]) => (
-          <Row key={key} label={label} value={usDate(expiry[key])} />
-        ))}
-      </Block>
+      {/* ⚠️ SHOWN ONLY WHEN THE LENDER'S TABLE ACTUALLY HELD SOMETHING, AND THE TWO SCREENS THAT
+          DISAGREE ARE WHY (LP-909 §5 visual check). S1-11 — a sheet whose header the reader could not
+          find — REQUIRES the expiry dates to still show, because they live in their own column and
+          survive a missing letterhead. S1-07 — a paste — requires only the "no letter" message and
+          the attach hint.
+          Both give `header === null`, so the branch above cannot tell them apart. The distinguisher
+          is whether any expiry date was read: S1-11's sheet has them, a paste has none. Rendering
+          twelve dashes under a sentence that says there is no letter to read them from is the panel
+          contradicting itself in the same breath. */}
+      {Object.values(expiry).some((value) => value) ? (
+        <Block title="Document expiry (lender’s table)">
+          {EXPIRY.map(([key, label]) => (
+            <Row key={key} label={label} value={usDate(expiry[key])} />
+          ))}
+        </Block>
+      ) : null}
 
       {clause ? (
         <Block title="Mortgagee clause">

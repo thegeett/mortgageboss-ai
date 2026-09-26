@@ -197,6 +197,47 @@ describe("the imported list (S1-05)", () => {
     }
   });
 
+  it("⚠️ shows the note as a chip and not inside the lender's wording (S1-05)", () => {
+    // The same design rule 5 cut as the review screen, asserted AGAIN here because this list is a
+    // second renderer of the same string. A property demonstrated on one screen and assumed on the
+    // other is the shape this stage has been wrong about repeatedly — and both screens were in fact
+    // printing the note twice, in the wording and in the chip beside it.
+    //
+    // The note sits in `verbatim_text` AND in `underwriter_notes`, which is what the reader emits:
+    // spec rule 1 stores the lender's string exactly as written, so the cut belongs to display.
+    show(
+      [round()],
+      [
+        condition({
+          verbatim_text: "Provide an additional bank statement. **8/28 Not in Upload",
+          underwriter_notes: [
+            { date: "2026-08-28", text: "Not in Upload", first_seen_round_id: null },
+          ],
+        }),
+      ],
+    );
+
+    // Exact match, so merging the note back in changes this text and fails the lookup.
+    const wording = screen.getByText("Provide an additional bank statement.");
+    expect(wording.textContent).not.toContain("Not in Upload");
+    expect(wording.textContent).not.toContain("**");
+
+    // Once, as the chip.
+    expect(screen.getByText("Not in Upload")).toBeDefined();
+    expect(screen.getByText("8/28")).toBeDefined();
+  });
+
+  it("⚠️ shows no kind chip when the lender's heading already says it", () => {
+    // `BUCKET_KIND_LABEL.master` is "Master (applies to the whole file)", which can never equal a
+    // heading of "Master" — so the "the kind adds nothing new" comparison never fired and a chip
+    // appeared that the design omits. The long form's ABSENCE is what fails if the select's map
+    // comes back to this call site.
+    show([round()], [condition({ bucket_heading: "Master", bucket_kind: "master" })]);
+
+    expect(screen.getByText("Master")).toBeDefined();
+    expect(screen.queryByText("Master (applies to the whole file)")).toBeNull();
+  });
+
   it("carries the design's sentence about who clears a condition", () => {
     show([round()]);
     expect(

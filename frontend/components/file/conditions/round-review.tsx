@@ -46,13 +46,29 @@ function usDate(value: string | null): string | null {
  * version is `SPLIT_VERSION`, and the design says "Split by AI (split v1) · rules found no rows" —
  * which names both what ran AND what the rules managed, because a processor reading "split v1"
  * alone cannot tell whether the rules contributed anything.
+ *
+ * ⚠️ AND `SPLIT_VERSION` IS "split_v1", SO THE PLAIN JOIN PRINTED "(split split_v1)" (LP-909 §5).
+ * The version carries the reader's own name because it names the prompt file
+ * (`conditions/split_v1.txt`) — right on the server, doubled on screen. The `<reader>_` prefix comes
+ * off here rather than being renamed there, because the prompt file IS the version. `READER_VERSION`
+ * is a bare "v1", so the rules line never had this and still reads "uwm v1".
+ *
+ * ⚠️ A MISSING VERSION WAS WRONG IN A PLACE `.trim()` COULD NOT REACH. The old AI arm produced
+ * "Split by AI (split ) · …" — the stray space is INSIDE the parens, where trimming the ends never
+ * lands. The rules arm had patched its own copy of that hole with `.replace(" )", ")")` and the fix
+ * was never carried across: two arms, two different half-measures. Deciding the parenthesis content
+ * before formatting removes the hole instead of patching each arm.
  */
 function readerLine(round: ConditionRound): string {
   const { reader, reader_version, ai_used } = round.parse_report;
   if (!reader) return "No reader ran";
-  if (ai_used)
-    return `Split by AI (${reader} ${reader_version ?? ""}) · rules found no rows`.trim();
-  return `Read by rules (${reader} ${reader_version ?? ""}) — no AI`.replace(" )", ")");
+  const version = reader_version?.startsWith(`${reader}_`)
+    ? reader_version.slice(reader.length + 1)
+    : reader_version;
+  const named = version ? `${reader} ${version}` : reader;
+  return ai_used
+    ? `Split by AI (${named}) · rules found no rows`
+    : `Read by rules (${named}) — no AI`;
 }
 
 /**

@@ -281,6 +281,18 @@ async def parse_round(db: AsyncSession, round_id: UUID) -> None:
     values: dict[str, Any] = {
         "sheet_format": sheet.sheet_format,
         "date_printed": sheet.date_printed,
+        # ⚠️ THE UPLOAD DOOR WAS IGNORING THE CONTRACT ITS OWN COLUMN DOCUMENTS (LP-909 §5 visual
+        # check). `round_date` is described on the model as "`date_printed` when known, else the date
+        # received" — and the PASTE door honours that exactly (`round_date or sheet.date_printed or
+        # now.date()`), while this one set `now.date()` at creation and never looked again. So a sheet
+        # printed 08/28 opened a round dated today, on S1-04, S1-05 and S1-12 at once, and the two
+        # doors disagreed about a column with one stated meaning.
+        #
+        # ⚠️ IT CANNOT CLOBBER A PROCESSOR'S EDIT, which is the only reason adopting it here is safe
+        # rather than presumptuous. `update_draft` refuses a round that is not DRAFT, and this write
+        # happens while it is still PARSING — so there is no window in which a person could have set
+        # the date before the reader answers. The processor's own edit still wins afterwards.
+        **({"round_date": sheet.date_printed} if sheet.date_printed else {}),
         # The mortgagee clause is a sibling field on the sheet, not a key inside `header` — see
         # `header_with_clause`, which folds it in for both writers.
         "header": header_with_clause(sheet),

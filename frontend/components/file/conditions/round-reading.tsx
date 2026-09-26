@@ -23,7 +23,21 @@ import { CircleCheckBig, CircleDashed } from "lucide-react";
  */
 const STEPS = ["Stored", "Finding conditions", "Reading the letter details", "Ready to review"];
 
-/** The filename this round arrived as, if any source carried one. */
+/**
+ * How this round arrived — NOT its filename.
+ *
+ * ⚠️ THIS DOCSTRING SAID "the filename this round arrived as" AND THE FUNCTION NEVER RETURNED ONE
+ * (LP-909 §5 visual check). It returns "PDF upload" or "Forwarded PDF", and the caller rendered that
+ * in `font-mono` — the design's typography for a filename — so the comment and the styling made the
+ * same false claim from two directions.
+ *
+ * ⚠️ AND THE FILENAME IS NOT AVAILABLE TO FIX IT WITH, DELIBERATELY. `create_round_from_sheet` does
+ * not store it: a real sheet's filename "routinely carries the borrower's surname and the loan
+ * number", so the storage path is server-generated and the sender's string is dropped at the door.
+ * S1-02's Must-match asks for the filename and page count; neither exists. Recorded as a deviation in
+ * LP-909 rather than worked around, because the alternative is keeping NPI to decorate a progress
+ * card.
+ */
 function sourceLabel(sources: ConditionSource[]): string | null {
   const upload = sources.find((s) => s.kind === "pdf_upload" || s.kind === "email");
   return upload ? (upload.kind === "email" ? "Forwarded PDF" : "PDF upload") : null;
@@ -73,7 +87,9 @@ export function RoundReading({
               {stranded ? "Still reading the condition sheet" : "Reading the condition sheet…"}
             </h2>
             <p className="text-xs text-muted-foreground">
-              {source ? <span className="font-mono">{source}</span> : null}
+              {/* Not `font-mono`: that is the design's typography for a FILENAME, and this is a
+                  source kind. Styling it as one was the second half of the same false claim. */}
+              {source ? <span>{source}</span> : null}
               {source ? " · " : null}
               {stranded ? "This is taking much longer than it should." : "usually under 30 seconds"}
             </p>

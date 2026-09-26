@@ -52,6 +52,30 @@ export const BUCKET_KIND_LABEL: Record<BucketKind, string> = {
   unknown: "No heading given",
 };
 
+/**
+ * The same kinds as they appear on a CHIP beside a group heading.
+ *
+ * ⚠️ SHORTER THAN `BUCKET_KIND_LABEL`, AND THAT IS WHY THERE ARE TWO (LP-909 §5 visual check). A
+ * select needs a label that stands alone — "The lender clears this", "Master (applies to the whole
+ * file)" — while a chip sits directly beside the lender's own heading and the design writes it as
+ * "Lender clears", "Master", "Prior to docs".
+ *
+ * ⚠️ AND THE LONG FORM BROKE A MUST-MATCH RULE. S1-04 says there is NO chip when the kind equals the
+ * heading, which is how "Master" is drawn — but comparing the heading against "Master (applies to the
+ * whole file)" never matched, so S1-11 rendered a chip the design omits. The chip vocabulary is what
+ * that comparison has to use.
+ */
+export const BUCKET_KIND_CHIP: Record<BucketKind, string> = {
+  master: "Master",
+  prior_to_approval: "Prior to approval",
+  prior_to_docs: "Prior to docs",
+  prior_to_closing: "Prior to closing",
+  prior_to_funding: "Prior to funding",
+  lender_to_clear: "Lender clears",
+  trailing: "Trailing",
+  unknown: "No heading",
+};
+
 /** Who probably has to act. A HINT, never a decision — Stage 3 decides. */
 export type OwnerHint =
   | "borrower"

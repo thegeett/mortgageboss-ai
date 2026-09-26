@@ -2,7 +2,8 @@
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { BUCKET_KIND_LABEL } from "@/lib/types/conditions";
+import { displayWording } from "@/lib/conditions/wording";
+import { BUCKET_KIND_CHIP } from "@/lib/types/conditions";
 import type { DraftRow, OwnerHint, OwnerHintSource, UnderwriterNote } from "@/lib/types/conditions";
 import { cn } from "@/lib/utils";
 import { Pencil, Sparkles, X } from "lucide-react";
@@ -102,10 +103,15 @@ function Row({
       <div className="flex min-w-0 flex-col gap-1.5">
         {editing ? (
           <>
+            {/* ⚠️ THE FULL STORED TEXT, NOTE INCLUDED, AND NO FONT SIZE. The note is cut from the
+                read-only render below but must never be cut from what a processor edits: this box's
+                contents are what imports, so hiding the note here would let an untouched Save
+                delete it. The size override is gone for the iOS-zoom reason in
+                `form-control-zoom.test.ts` — `font-serif` is the lender's voice and stays. */}
             <Textarea
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
-              className="min-h-[5rem] font-serif text-sm"
+              className="min-h-[5rem] font-serif"
               aria-label="The lender's wording"
             />
             <p className="text-xs text-muted-foreground">
@@ -134,7 +140,11 @@ function Row({
             </div>
           </>
         ) : (
-          <p className="max-w-prose font-serif text-sm text-foreground">{row.verbatim_text}</p>
+          // The note comes out of the wording and renders as a chip below — design rule 5. It stays
+          // in `verbatim_text`, and in the editor above, because storage keeps the lender's string.
+          <p className="max-w-prose font-serif text-sm text-foreground">
+            {displayWording(row.verbatim_text, row.underwriter_notes.length)}
+          </p>
         )}
 
         {row.underwriter_notes.length > 0 ? (
@@ -233,7 +243,11 @@ export function ReviewRows({
   return (
     <div className="flex flex-col gap-2">
       {groups.map((group, index) => {
-        const label = BUCKET_KIND_LABEL[group.kind];
+        // ⚠️ THE CHIP VOCABULARY, NOT THE SELECT'S. `BUCKET_KIND_LABEL.master` is "Master (applies
+        // to the whole file)", which never equals a heading of "Master" — so the comparison below
+        // could not fire and S1-11 drew a chip the design omits. The chip form is what a heading can
+        // actually match.
+        const label = BUCKET_KIND_CHIP[group.kind];
         // No chip when the kind adds nothing the heading has not already said.
         const showChip = label.toLowerCase() !== group.heading.toLowerCase();
         const ordered = [...group.rows].sort((left, right) => {

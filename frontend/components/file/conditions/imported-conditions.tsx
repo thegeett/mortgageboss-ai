@@ -1,7 +1,8 @@
 "use client";
 
+import { displayWording } from "@/lib/conditions/wording";
 import type { Condition, OwnerHint, OwnerHintSource } from "@/lib/types/conditions";
-import { BUCKET_KIND_LABEL } from "@/lib/types/conditions";
+import { BUCKET_KIND_CHIP } from "@/lib/types/conditions";
 
 /** Who probably has to act — the same vocabulary the review screen uses. */
 const OWNER_LABEL: Record<OwnerHint, string> = {
@@ -57,7 +58,9 @@ export function ImportedConditions({ conditions }: { conditions: Condition[] }) 
   return (
     <div className="flex flex-col gap-2">
       {groups.map((group, index) => {
-        const label = BUCKET_KIND_LABEL[group.kind];
+        // The chip form, for the reason given at the same line of `review-rows.tsx`: the select's
+        // long label can never equal a lender heading, so the "kind adds nothing" test needs this one.
+        const label = BUCKET_KIND_CHIP[group.kind];
         const showChip = label.toLowerCase() !== group.heading.toLowerCase();
         return (
           <div
@@ -95,8 +98,10 @@ export function ImportedConditions({ conditions }: { conditions: Condition[] }) 
                 </div>
 
                 <div className="flex min-w-0 flex-col gap-1.5">
+                  {/* The note renders as a chip below, not inside the wording (design rule 5).
+                      `verbatim_text` still holds it — this cut is display only. */}
                   <p className="max-w-prose font-serif text-sm text-foreground">
-                    {condition.verbatim_text}
+                    {displayWording(condition.verbatim_text, condition.underwriter_notes.length)}
                   </p>
                   {condition.underwriter_notes.length > 0 ? (
                     <div className="flex flex-wrap gap-1.5">

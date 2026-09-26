@@ -210,6 +210,35 @@ describe("what the screen says about the sheet", () => {
     expect(screen.getByText("Read by rules (uwm v1) — no AI")).toBeDefined();
   });
 
+  it("⚠️ names the AI split without doubling the reader into its own version", () => {
+    // `SPLIT_VERSION` is "split_v1" because it names the prompt file, so joining reader and version
+    // printed "(split split_v1)". The design's line is "(split v1)".
+    show({
+      parse_report: {
+        ...round().parse_report,
+        reader: "split",
+        reader_version: "split_v1",
+        ai_used: true,
+      },
+    });
+    expect(screen.getByText("Split by AI (split v1) · rules found no rows")).toBeDefined();
+  });
+
+  it("⚠️ and leaves no gap inside the parens when there is no version at all", () => {
+    // The old AI arm produced "Split by AI (split ) · …". The stray space is INSIDE the parens,
+    // where the `.trim()` it carried could never reach — while the rules arm patched its own copy
+    // with `.replace(" )", ")")` and the fix was never carried across.
+    show({
+      parse_report: {
+        ...round().parse_report,
+        reader: "split",
+        reader_version: null,
+        ai_used: true,
+      },
+    });
+    expect(screen.getByText("Split by AI (split) · rules found no rows")).toBeDefined();
+  });
+
   it("⚠️ omits the Date printed chip when the sheet has none (S1-07, S1-11)", () => {
     // A paste has no letter and the page-break fixture has no header, so the chip would claim a
     // field exists and is blank.
@@ -282,10 +311,16 @@ describe("how the rows are grouped and ordered", () => {
   it("⚠️ renders underwriter notes as chips, never merged into the lender's wording", () => {
     // Design rule 5. The lender wrote one string and the reader carried the note out of it as
     // structure; putting it back would make the underwriter's aside look like the condition.
+    //
+    // ⚠️ THE NOTE IS IN BOTH PLACES, WHICH IS THE READER'S ACTUAL OUTPUT AND WAS THE BUG IN THIS
+    // TEST. It used to set `verbatim_text` to a clean sentence and the note only as structure — so
+    // "never merged into the wording" held over a fixture with nothing to merge, and passed for the
+    // whole period the three screens were in fact rendering the note twice. Spec rule 1 keeps the
+    // lender's string exactly as written, notes included; the cut belongs to display.
     show({
       draft_rows: [
         draftRow({
-          verbatim_text: "Provide an additional bank statement.",
+          verbatim_text: "Provide an additional bank statement. **8/28 Not in Upload",
           underwriter_notes: [
             { date: "2026-08-28", text: "Not in Upload", first_seen_round_id: null },
           ],
@@ -293,9 +328,48 @@ describe("how the rows are grouped and ordered", () => {
       ],
     });
 
-    expect(screen.getByText("Provide an additional bank statement.")).toBeDefined();
+    // An EXACT match, so the note being merged back in changes this text and fails the lookup.
+    const wording = screen.getByText("Provide an additional bank statement.");
+    expect(wording.textContent).not.toContain("Not in Upload");
+    expect(wording.textContent).not.toContain("**");
+
+    // Once, as the chip.
     expect(screen.getByText("Not in Upload")).toBeDefined();
     expect(screen.getByText("8/28")).toBeDefined();
+  });
+
+  it("⚠️ but the EDITOR shows the stored string whole, note included", () => {
+    // The other half of the same rule, and the one that protects the data: what this box holds is
+    // what imports. Strip the note here too and an untouched Save would delete the lender's words —
+    // a display concern quietly becoming a write.
+    show({
+      draft_rows: [
+        draftRow({
+          verbatim_text: "Provide an additional bank statement. **8/28 Not in Upload",
+          underwriter_notes: [
+            { date: "2026-08-28", text: "Not in Upload", first_seen_round_id: null },
+          ],
+        }),
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit the wording" }));
+    expect((screen.getByLabelText("The lender's wording") as HTMLTextAreaElement).value).toBe(
+      "Provide an additional bank statement. **8/28 Not in Upload",
+    );
+  });
+
+  it("⚠️ shows no kind chip when the lender's heading already says it (S1-04)", () => {
+    // The chip vocabulary has to be the SHORT one for this to be reachable at all:
+    // `BUCKET_KIND_LABEL.master` is "Master (applies to the whole file)", which can never equal a
+    // heading of "Master", so the comparison always said "different" and S1-11 drew a chip the
+    // design omits. Asserting the long form's ABSENCE is what fails if the long map comes back.
+    show({
+      draft_rows: [draftRow({ bucket_heading: "Master", bucket_kind: "master" })],
+    });
+
+    expect(screen.getByText("Master")).toBeDefined();
+    expect(screen.queryByText("Master (applies to the whole file)")).toBeNull();
   });
 
   it("shows the owner hint with where it came from, because the hints are not equally good", () => {

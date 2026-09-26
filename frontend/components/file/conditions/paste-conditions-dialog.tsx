@@ -150,13 +150,20 @@ export function PasteConditionsDialog({
               The conditions you copied
             </Label>
             {/* Mono, because what is pasted is a lender's fixed-pitch layout — the columns are how
-                a processor recognises it, and a proportional font destroys them. */}
+                a processor recognises it, and a proportional font destroys them.
+
+                ⚠️ THE FAMILY AND THE HEIGHT, BUT NEVER THE SIZE. This carried `text-xs`, which
+                tailwind-merge resolves as the winner over the primitive's own `text-field
+                md:text-sm` — and a control computing under 16px makes mobile Safari zoom the
+                viewport on focus and never zoom back. On the widest paste box in the app that is
+                the worst place to lose the layout. `form-control-zoom.test.ts` scans every caller
+                in the tree for exactly this; a caller's className is for geometry. */}
             <Textarea
               id={textId}
               value={text}
               onChange={(event) => setText(event.target.value)}
               placeholder="Paste the lender's conditions here…"
-              className="min-h-[14rem] font-mono text-xs"
+              className="min-h-[14rem] font-mono"
             />
             <p className={cn("text-xs", overLimit ? "text-destructive" : "text-muted-foreground")}>
               {lines} {lines === 1 ? "line" : "lines"} · {characters.toLocaleString()}{" "}
