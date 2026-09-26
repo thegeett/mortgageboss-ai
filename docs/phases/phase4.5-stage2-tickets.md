@@ -20,10 +20,11 @@ Stage 2.
   and record the answers there before writing ADR-408.
 - **Verify the facts in §2 against the code** before relying on them. They were read at `e5a481bf`,
   and Stage 1 part 5 may have changed things since. Record any difference in the survey.
-- **Screens:** the Stage 2 reference screens (§8) may not exist yet. LP-911 and LP-912 have no UI and
-  can start. For LP-916, LP-913, LP-915 and LP-917: if `docs/design/phase4.5-conditions/stage2/`
-  does not exist, **STOP AND ASK** before building UI, unless the product owner has said to build
-  from the text in this file.
+- **Screens:** the Stage 2 reference screens are in `docs/design/phase4.5-conditions/stage2/`: 11
+  PNGs, the same screens as HTML, and a README with a *Must match* list per screen. Build LP-916,
+  LP-913, LP-915 and LP-917 to them, and record a "Visual check" in each ticket. LP-911 and LP-912
+  have no UI of their own, but their refusal sentences and event wording must match what the
+  screens show.
 - **Same working rules as Stage 1:** a `docs/tickets/LP-9xx.md` per ticket, one section per commit,
   review between sections, CI green, never `--no-verify`, no real borrower data in the repo, and a
   "Visual check" section in every UI ticket.
@@ -162,6 +163,10 @@ between sections, **STOP AND ASK** where marked, and reference screens checked b
 - A second company gets 404 on every route.
 - The Stage 1 imported list still works unchanged, since its default response shape is kept.
 
+**Screens it feeds** (no UI of its own): the summary numbers in `S2-01` / `S2-02` come from
+`…/summary`, and the row fields from the list endpoint. Check the numbers on those two screens
+against the §7 fixtures.
+
 **Out of scope:** anything that writes.
 
 ---
@@ -275,6 +280,15 @@ This happens on **full and partial** rounds, because a note is a statement by th
 the sheet arrived. **STOP AND ASK** if Stage 1's import cannot tell a new note from an old one
 reliably (for example, the same note pasted twice).
 
+**Reference screens (build to these):** read `docs/design/phase4.5-conditions/stage2/README.md` first, then match each PNG and go
+through its *Must match* list. The HTML of the same name in `docs/design/phase4.5-conditions/stage2/html/` has the exact wording.
+- `docs/design/phase4.5-conditions/stage2/screens/S2-04-record-lender-answer.png` (the lender's answer, single and bulk)
+- `docs/design/phase4.5-conditions/stage2/screens/S2-05-move-back-reason.png` (the reason for a backward move, reused for Reopen)
+- `docs/design/phase4.5-conditions/stage2/screens/S2-08-round3-reworded-cameback.png` (how *Came back* reads once LP-915 shows it)
+The refusal sentences and the verdict wording in these screens are the strings the API returns.
+Record the result under **"Visual check"** in the ticket file, screen by screen. A
+difference that is not on that screen's *May differ* list is fixed, or it is a **STOP AND ASK**.
+
 **Done when**
 - Every allowed and refused move is tested, with its sentence.
 - `cleared` is impossible without a verdict at the API level.
@@ -318,8 +332,13 @@ list. It has **Previous / Next** (and the ↑ ↓ keys) so she can go through th
 **No action buttons for Stage 3 work** (no "email borrower", no "request document"). Leave the space
 empty rather than showing disabled buttons that promise work the app can't do yet.
 
-**Screens:** S2-03 (detail), S2-04 (record the lender's answer dialog), S2-05 (reason for a backward
-move or reopen). To be drawn with Must-match lists like Stage 1's.
+**Reference screens (build to these):** read `docs/design/phase4.5-conditions/stage2/README.md` first, then match each PNG and go
+through its *Must match* list. The HTML of the same name in `docs/design/phase4.5-conditions/stage2/html/` has the exact wording.
+- `docs/design/phase4.5-conditions/stage2/screens/S2-03-condition-detail.png` (the detail sheet)
+- `docs/design/phase4.5-conditions/stage2/screens/S2-04-record-lender-answer.png` (opened from the sheet's *Record lender's answer*)
+- `docs/design/phase4.5-conditions/stage2/screens/S2-05-move-back-reason.png` (opened from a backward move or *Reopen*)
+Record the result under **"Visual check"** in the ticket file, screen by screen. A
+difference that is not on that screen's *May differ* list is fixed, or it is a **STOP AND ASK**.
 
 **Done when**
 - Every event kind has a plain sentence (with a test that fails if a new kind has none).
@@ -363,8 +382,13 @@ move or reopen). To be drawn with Must-match lists like Stage 1's.
   its own, only for a condition with a recorded verdict, and the chip shows where the verdict came
   from on hover.
 
-**Screens:** S2-01 (list, round 1, fresh), S2-02 (list mid-work with filters, bulk bar and
-sections), S2-09 (filtered to nothing).
+**Reference screens (build to these):** read `docs/design/phase4.5-conditions/stage2/README.md` first, then match each PNG and go
+through its *Must match* list. The HTML of the same name in `docs/design/phase4.5-conditions/stage2/html/` has the exact wording.
+- `docs/design/phase4.5-conditions/stage2/screens/S2-01-list-round1.png` (the list after round 1)
+- `docs/design/phase4.5-conditions/stage2/screens/S2-02-list-midwork-bulk.png` (mid-work: statuses, the collapsed Cleared section, the bulk bar)
+- `docs/design/phase4.5-conditions/stage2/screens/S2-09-filtered-empty.png` (filters that match nothing)
+Record the result under **"Visual check"** in the ticket file, screen by screen. A
+difference that is not on that screen's *May differ* list is fixed, or it is a **STOP AND ASK**.
 
 **Done when**
 - The list replaces `ImportedView` for imported rounds (Stage 1's review and empty states stay).
@@ -435,9 +459,14 @@ which belong to Stage 3's work on numbers. Leave it out here, with a note.)*
 - Writes `round_completeness_changed`.
 
 #### Screens
-S2-06 ("What changed in round 2" panel after import), S2-07 (probably-cleared confirmation, with
-one unticked), S2-08 (reworded pair), S2-10 (partial round: nothing suggested), plus the letter
-changes block inside S2-06.
+**Reference screens (build to these):** read `docs/design/phase4.5-conditions/stage2/README.md` first, then match each PNG and go
+through its *Must match* list. The HTML of the same name in `docs/design/phase4.5-conditions/stage2/html/` has the exact wording.
+- `docs/design/phase4.5-conditions/stage2/screens/S2-06-what-changed-round2.png` (the panel after importing a full round 2, with letter changes)
+- `docs/design/phase4.5-conditions/stage2/screens/S2-07-confirm-probably-cleared.png` (the confirm step with one unticked)
+- `docs/design/phase4.5-conditions/stage2/screens/S2-08-round3-reworded-cameback.png` (came back, the reworded pair, new)
+- `docs/design/phase4.5-conditions/stage2/screens/S2-10-partial-round-no-suggestions.png` (a *Just some* round: nothing suggested, *Switch to Full list*)
+Record the result under **"Visual check"** in the ticket file, screen by screen. A
+difference that is not on that screen's *May differ* list is fixed, or it is a **STOP AND ASK**.
 
 **Done when (the Stage 2 acceptance core, on the §7 fixtures)**
 - Round 1 (full, PDF) then round 2 (full, PDF): **Probably cleared = exactly `7086 6132 6637 6178
@@ -468,6 +497,12 @@ anything.
   today, and the section says which round it comes from ("from round 2, printed 09/10").
 - **Plain display only.** No colours for "soon", no alerts, no attention-queue items (Stage 4).
 - If no round has dates: "No dates from the lender yet." It is never blank and never guessed.
+
+**Reference screens (build to these):** read `docs/design/phase4.5-conditions/stage2/README.md` first, then match each PNG and go
+through its *Must match* list. The HTML of the same name in `docs/design/phase4.5-conditions/stage2/html/` has the exact wording.
+- `docs/design/phase4.5-conditions/stage2/screens/S2-11-lender-dates.png` (the Lender dates section in the file rail, and the dates on the round card)
+Record the result under **"Visual check"** in the ticket file, screen by screen. A
+difference that is not on that screen's *May differ* list is fixed, or it is a **STOP AND ASK**.
 
 **Done when**
 - After round 2 the rail shows rate lock expiry 09/30/2026, must not close before 09/30/2026, and the
@@ -506,6 +541,9 @@ On a synthetic copy of the test file (fixtures in §7), through the API and once
    plain words.
 8. The file rail shows the lender dates from round 3, or round 2 if round 3 has no header.
 9. A second company can't read, move, verdict, compare or switch completeness on any of it.
+10. **All 11 reference screens** (`docs/design/phase4.5-conditions/stage2/`) are checked against the
+    built UI at 1600 px, and each result is recorded under "Visual check" in LP-913, LP-915, LP-916 and
+    LP-917. Stage 2 is not done until a person has looked at them, the same rule as Stage 1.
 
 ---
 
@@ -557,10 +595,10 @@ count.
 
 All fixture data is fictional. Real sheets never enter the repo (ADR-405).
 
-## 8. Reference screens to draw (next step)
+## 8. Reference screens
 
-Same format as Stage 1: PNG + HTML + a README with a Must-match list per screen, in
-`docs/design/phase4.5-conditions/stage2/`.
+**Drawn.** They're in `docs/design/phase4.5-conditions/stage2/` (PNG + HTML + README with a
+Must-match list per screen), in the same format as Stage 1.
 
 | # | Screen | Ticket |
 |---|---|---|
@@ -588,7 +626,7 @@ the Today queue (Stage 4) · a Sun West reader · any AI.
 - Stage 1's part 5 (§8 acceptance, the 13 visual checks, `phase4.5-progress.md`, CI on a PR to
   `main`) should be finished first, so Stage 2 builds on a checked base.
 - Confirm or change defaults **A1 to A7** in §1.
-- The Stage 2 screens (§8) are drawn before the UI tickets start, as in Stage 1.
+- The Stage 2 screens (§8) are drawn. Read their README before the first UI ticket.
 
 ---
 
