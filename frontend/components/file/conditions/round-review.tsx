@@ -6,12 +6,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { useImportRound, useUpdateDraft } from "@/lib/api/conditions";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { notifyError, notifySuccess } from "@/lib/toast";
-import {
-  COMPLETENESS_CHIP,
-  COMPLETENESS_PROSE,
-  FORMAT_LABEL,
-  LAYOUT_NAME,
-} from "@/lib/types/conditions";
+import { COMPLETENESS_CHIP, FORMAT_LABEL, LAYOUT_NAME } from "@/lib/types/conditions";
 import type { ConditionRound, ConditionSourceKind, DraftRow } from "@/lib/types/conditions";
 import { CircleCheck, Sparkles, TriangleAlert } from "lucide-react";
 import { useId, useState } from "react";
@@ -113,6 +108,8 @@ export function RoundReview({
   onDiscard: () => void;
 }) {
   const checkboxId = useId();
+  /** The radio group's `name`, so two rounds rendered on one page cannot share a selection. */
+  const completenessName = useId();
   const [rows, setRows] = useState<DraftRow[]>(round.draft_rows ?? []);
   /**
    * ⚠️ THE TOKEN FOR THE ROWS WE ARE HOLDING, CAPTURED FROM THE SAME SNAPSHOT (LP-909 review).
@@ -135,6 +132,18 @@ export function RoundReview({
    * right; together they need this token to be honest.
    */
   const [baseUpdatedAt] = useState(round.updated_at);
+  /**
+   * ⚠️ LOCAL UNTIL IMPORT, LIKE THE ROWS, AND FOR THE SAME PROMISE. The sticky bar says "Nothing is
+   * saved to the file until you import" — a toggle that PUT on every click would break that on the
+   * one screen whose whole contract is it. It travels in the same request as the rows, under the
+   * same `baseUpdatedAt` token, so a stale screen is refused as one unit rather than half-written.
+   *
+   * ⚠️ AND THIS IS THE FIRST CONTROL HERE THAT CHANGES WHAT IMPORT MEANS. `completeness` is what
+   * `import_round` reads to decide whether conditions absent from a later round are left alone or
+   * compared — so getting it wrong does not misdraw a chip, it changes what the file records the
+   * lender as having asked for. The default is the server's answer, never a guess by this screen.
+   */
+  const [completeness, setCompleteness] = useState(round.completeness);
   const [checked, setChecked] = useState(false);
   const save = useUpdateDraft(fileId);
   const importRound = useImportRound(fileId);
@@ -155,6 +164,9 @@ export function RoundReview({
       {
         roundId: round.id,
         draft_rows: rows,
+        // Sent every time, with the rows, because `update_draft` takes the whole draft: omitting it
+        // would leave the toggle purely decorative, which is the failure this control exists to fix.
+        completeness,
         expected_updated_at: baseUpdatedAt,
       },
       {
@@ -207,12 +219,13 @@ export function RoundReview({
                     Date printed {usDate(round.date_printed)}
                   </span>
                 ) : null}
-                {/* ⚠️ ONLY WHEN PARTIAL (S1-07, S1-10). The design asks for a "Just some" chip; a
-                    "Full list" chip would sit inches from a header sentence already saying "the
-                    lender's full list", and two statements of one fact on one screen is how they
-                    come to disagree. The label still comes from the shared vocabulary so it cannot
-                    drift from the strip's. */}
-                {round.completeness === "partial" ? (
+                {/* ⚠️ THE CHIP AND THE TOGGLE BOTH APPEAR, AND BOTH READ THE LOCAL VALUE. I removed
+                    this chip when the toggle landed, reasoning it was the same fact twice — the
+                    mocks say otherwise: every review screen carries the toggle, and S1-07 and S1-10
+                    ALSO carry a "Just some" chip among the source chips (S1-04 and S1-11 are full
+                    and carry none). Reading `round.completeness` here while the toggle reads local
+                    state would make the two disagree the moment a processor clicked it. */}
+                {completeness === "partial" ? (
                   <span className="rounded-md border border-warning/50 px-1.5 py-0.5 text-xs text-warning">
                     {COMPLETENESS_CHIP.partial}
                   </span>
@@ -221,12 +234,43 @@ export function RoundReview({
               </div>
             </div>
             <div className="flex shrink-0 flex-col items-end gap-1 text-xs text-muted-foreground">
-              <span>
-                This sheet is{" "}
-                <span className="font-medium text-foreground-2">
-                  {COMPLETENESS_PROSE[round.completeness]}
+              {/* ⚠️ A CONTROL, NOT A SENTENCE (S1-04 Must-match). This read "This sheet is the
+                  lender's full list" as static text — the screen stating a value the processor is
+                  the only one who can actually know, with no way to correct it. The reader guesses
+                  from the door it came through ("Full list" is the default for a PDF); only the
+                  person holding the letter knows whether the lender sent everything.
+                  The partial CHIP beside the source chips went with it: a chip a few inches from a
+                  toggle showing the same two words is the same fact twice, which is the exact
+                  reason there is no "Full list" chip either. */}
+              {/* ⚠️ NATIVE RADIOS, NOT BUTTONS CARRYING `role="radio"`. The first version claimed
+                  the role and delivered none of it: no arrow-key movement between options, no
+                  grouping, and an `aria-checked` attribute that can disagree with the control it
+                  describes. A real radio group cannot get out of step with itself, which is why
+                  biome's `useSemanticElements` is worth satisfying rather than suppressing.
+                  The inputs are `sr-only` and the visible chip is styled from `peer-checked:`, so
+                  the design's segmented look survives with the semantics underneath it. */}
+              <fieldset className="flex items-center gap-2">
+                <legend className="sr-only">Is this the lender’s full list?</legend>
+                <span>This sheet is</span>
+                <span className="inline-flex overflow-hidden rounded-md border border-input">
+                  {(["full", "partial"] as const).map((value) => (
+                    <label key={value} className="cursor-pointer">
+                      <input
+                        type="radio"
+                        name={completenessName}
+                        value={value}
+                        checked={completeness === value}
+                        onChange={() => setCompleteness(value)}
+                        disabled={busy}
+                        className="peer sr-only"
+                      />
+                      <span className="block px-2.5 py-0.5 text-xs font-medium text-foreground-2 transition-colors hover:bg-muted peer-checked:bg-primary peer-checked:text-primary-foreground peer-disabled:opacity-50">
+                        {COMPLETENESS_CHIP[value]}
+                      </span>
+                    </label>
+                  ))}
                 </span>
-              </span>
+              </fieldset>
               <span>Round date {usDate(round.round_date)}</span>
             </div>
           </div>

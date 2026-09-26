@@ -249,15 +249,87 @@ describe("what the screen says about the sheet", () => {
   });
 
   it("⚠️ marks a partial round with a Just some chip, and a full one with none (S1-07, S1-10)", () => {
+    // ⚠️ THE CHIP IS IDENTIFIED BY WHAT IT IS NOT — THE TOGGLE. Both say "Just some": every review
+    // mock carries the toggle, and S1-07/S1-10 additionally carry a partial chip among the source
+    // chips, so an unscoped query matches two elements on a partial round.
+    //
+    // This scoped by `{ selector: "span" }` until the toggle became a native radio group, whose
+    // visible label is ALSO a span — the discriminator stopped discriminating in the same edit that
+    // made the markup semantic, and the test then failed on correct code. Keying on
+    // `closest("fieldset")` uses the structural difference between them, which is what actually
+    // separates a source chip from a form control rather than a tag they happen to share.
+    const chipsOutsideToggle = (text: string) =>
+      screen.queryAllByText(text).filter((el) => el.closest("fieldset") === null);
+
     show({ completeness: "partial" });
-    expect(screen.getByText("Just some")).toBeDefined();
+    expect(chipsOutsideToggle("Just some")).toHaveLength(1);
 
     cleanup();
     show({ completeness: "full" });
-    // Not merely "Full list is absent": the chip itself must not appear, because a chip beside a
-    // header already saying "the lender's full list" is the same fact twice.
-    expect(screen.queryByText("Just some")).toBeNull();
-    expect(screen.queryByText("Full list")).toBeNull();
+    expect(chipsOutsideToggle("Just some")).toHaveLength(0);
+    expect(chipsOutsideToggle("Full list")).toHaveLength(0);
+  });
+
+  it("⚠️ the toggle starts on the server's answer, never on a guess by this screen", () => {
+    show({ completeness: "partial" });
+
+    // ⚠️ REAL `checked`, NOT AN `aria-checked` MIRROR OF IT. The control is a native radio, so this
+    // asserts the state the browser actually holds; an ARIA attribute that disagrees with its own
+    // control is the failure the semantic element removes the possibility of.
+    expect((screen.getByRole("radio", { name: "Just some" }) as HTMLInputElement).checked).toBe(
+      true,
+    );
+    expect((screen.getByRole("radio", { name: "Full list" }) as HTMLInputElement).checked).toBe(
+      false,
+    );
+  });
+
+  it("⚠️ THE TOGGLE'S ANSWER REACHES THE SERVER, not merely the screen (S1-04)", () => {
+    // The first control on this screen that WRITES. `completeness` is what `import_round` reads to
+    // decide whether conditions absent from a later round are left alone or compared — so a toggle
+    // that changed only local state would be decorative on the one value that decides what import
+    // means. Asserting the payload, not the rendered state, is the whole point.
+    show({ completeness: "full" });
+
+    fireEvent.click(screen.getByRole("radio", { name: "Just some" }));
+    fireEvent.click(screen.getByRole("button", { name: /Import 1 condition/ }));
+
+    const sent = saveMutate.mock.calls[0]?.[0];
+    expect(sent.completeness).toBe("partial");
+    // And it rides the frozen token with the rows, as ONE draft rather than two writes.
+    expect(sent.expected_updated_at).toBe("2026-08-28T10:05:00Z");
+  });
+
+  it("⚠️ draws a named owner as a chip with its glyph, and an unknown one as plain text (S1-04)", () => {
+    // ⚠️ SCOPED WITHIN THE ROW, BECAUSE "Title" IS ALSO AN EXPIRY KEY in the side panel — the same
+    // trap the provenance test below documents.
+    show({
+      draft_rows: [
+        draftRow({ sequence: 1, owner_hint: "title", owner_hint_source: "prefix" }),
+        draftRow({
+          sequence: 2,
+          owner_hint: "unknown",
+          owner_hint_source: "none",
+          verbatim_text: "Nobody obvious owns this one.",
+        }),
+      ],
+    });
+
+    const named = screen
+      .getByText("Final inspection is required.")
+      .closest("div.grid") as HTMLElement;
+    const chip = within(named).getByText("Title");
+    expect(chip.querySelector("svg")).not.toBeNull();
+
+    // ⚠️ THE ABSENCE IS THE DESIGN, NOT A MISSING ICON. "Owner not known" draws as plain muted text
+    // with no chip and no glyph: a chip says "here is who acts", and an absence of evidence does not
+    // belong in the same container as a named party.
+    const anonymous = screen
+      .getByText("Nobody obvious owns this one.")
+      .closest("div.grid") as HTMLElement;
+    const plain = within(anonymous).getByText("Owner not known");
+    expect(plain.querySelector("svg")).toBeNull();
+    expect(plain.className).not.toContain("border");
   });
 
   it("⚠️ names the AI split without doubling the reader into its own version", () => {

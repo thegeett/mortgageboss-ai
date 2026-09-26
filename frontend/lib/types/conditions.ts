@@ -98,12 +98,6 @@ export const COMPLETENESS_CHIP: Record<ConditionRoundCompleteness, string> = {
   partial: "Just some",
 };
 
-/** The same fact as a sentence fragment, for the review screen's header (S1-04). */
-export const COMPLETENESS_PROSE: Record<ConditionRoundCompleteness, string> = {
-  full: "the lender’s full list",
-  partial: "just some conditions",
-};
-
 /**
  * Which layout the reader recognised, in the words S1-04 and S1-10 print.
  *

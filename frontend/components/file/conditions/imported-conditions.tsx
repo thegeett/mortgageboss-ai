@@ -1,26 +1,9 @@
 "use client";
 
 import { displayWording } from "@/lib/conditions/wording";
-import type { Condition, OwnerHint, OwnerHintSource } from "@/lib/types/conditions";
+import type { Condition } from "@/lib/types/conditions";
 import { BUCKET_KIND_CHIP } from "@/lib/types/conditions";
-
-/** Who probably has to act — the same vocabulary the review screen uses. */
-const OWNER_LABEL: Record<OwnerHint, string> = {
-  borrower: "Borrower",
-  title: "Title",
-  insurance: "Insurance",
-  lender: "Lender",
-  broker: "Broker",
-  processor: "Processor",
-  unknown: "Owner not known",
-};
-
-const SOURCE_LABEL: Record<OwnerHintSource, string> = {
-  prefix: "from “TC:” prefix",
-  bucket: "from bucket",
-  code_map: "from code map",
-  none: "",
-};
+import { OwnerCell } from "./owner-cell";
 
 /** `2026-08-28` → `8/28`, the short form the note chips use. */
 function noteDate(value: string | null): string | null {
@@ -124,14 +107,9 @@ export function ImportedConditions({ conditions }: { conditions: Condition[] }) 
                 </div>
 
                 <div className="flex min-w-0 flex-col items-end gap-1">
-                  <span className="text-xs text-foreground-2">
-                    {OWNER_LABEL[condition.owner_hint]}
-                  </span>
-                  {SOURCE_LABEL[condition.owner_hint_source] ? (
-                    <span className="text-xs text-muted-foreground">
-                      {SOURCE_LABEL[condition.owner_hint_source]}
-                    </span>
-                  ) : null}
+                  {/* The design draws owner chips on this screen too — 10 in the S1-05 mock and 10
+                      in S1-08 — so the cell is shared rather than reimplemented here. */}
+                  <OwnerCell hint={condition.owner_hint} source={condition.owner_hint_source} />
                   <div className="flex flex-wrap justify-end gap-1">
                     {condition.round_numbers.map((number) => (
                       <span

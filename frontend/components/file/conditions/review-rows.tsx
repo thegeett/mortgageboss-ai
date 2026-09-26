@@ -4,41 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { displayWording } from "@/lib/conditions/wording";
 import { BUCKET_KIND_CHIP } from "@/lib/types/conditions";
-import type { DraftRow, OwnerHint, OwnerHintSource, UnderwriterNote } from "@/lib/types/conditions";
+import type { DraftRow, UnderwriterNote } from "@/lib/types/conditions";
 import { cn } from "@/lib/utils";
 import { Pencil, Sparkles, X } from "lucide-react";
 import { useState } from "react";
-
-/**
- * Who probably has to act. A HINT, never a decision (Stage 3 decides).
- *
- * ⚠️ `unknown` IS "Owner not known", NOT "Unknown". The chip sits where a name goes, and a bare
- * "Unknown" reads as a party called Unknown rather than as an absence of evidence.
- */
-const OWNER_LABEL: Record<OwnerHint, string> = {
-  borrower: "Borrower",
-  title: "Title",
-  insurance: "Insurance",
-  lender: "Lender",
-  broker: "Broker",
-  processor: "Processor",
-  unknown: "Owner not known",
-};
-
-/**
- * Where the hint came from, in the design's words (S1-04).
- *
- * ⚠️ WRITTEN, NOT DERIVED FROM THE VALUE. De-snaking gives "code map" and "prefix" — and "prefix"
- * alone says nothing, where `from "TC:" prefix` names the evidence the lender actually typed. The
- * whole point of carrying the source is that the hints are not equally good, so the weak one and
- * the strong one must not read alike.
- */
-const SOURCE_LABEL: Record<OwnerHintSource, string> = {
-  prefix: "from “TC:” prefix",
-  bucket: "from bucket",
-  code_map: "from code map",
-  none: "",
-};
+import { OwnerCell } from "./owner-cell";
 
 /** Anything at or above this is a row the rules read; below it needs checking before import. */
 export const FLAGGED_BELOW = 0.8;
@@ -163,18 +133,10 @@ function Row({
         ) : null}
       </div>
 
-      <div className="flex items-start justify-between gap-1">
-        <div className="flex min-w-0 flex-col">
-          <span className="text-xs text-foreground-2">{OWNER_LABEL[row.owner_hint]}</span>
-          {/* ⚠️ THE PROVENANCE, BECAUSE THE HINTS ARE NOT EQUALLY GOOD. A `TC:` the lender typed is
-              far stronger than a default from the code map, and showing them identically would
-              invite trusting the weak one — the reason the column exists at all. */}
-          {SOURCE_LABEL[row.owner_hint_source] ? (
-            <span className="text-xs text-muted-foreground">
-              {SOURCE_LABEL[row.owner_hint_source]}
-            </span>
-          ) : null}
-        </div>
+      {/* The design's `meta` cell is a COLUMN — owner above, the row's controls below it — rather
+          than the two side by side. S1-04's mock draws the pencil and × under the chip. */}
+      <div className="flex flex-col items-end gap-1">
+        <OwnerCell hint={row.owner_hint} source={row.owner_hint_source} />
         {!editing ? (
           <div className="flex shrink-0 gap-0.5">
             <Button
