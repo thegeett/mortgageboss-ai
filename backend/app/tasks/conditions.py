@@ -49,7 +49,10 @@ from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_round import ConditionRound, ConditionRoundStatus
 from app.services.condition_rounds import (
     ENQUEUE_FAILED_DETAIL,
+    NO_TEXT_IN_PASTE_DETAIL,
+    NO_TEXT_IN_SHEET_DETAIL,
     draft_rows_json,
+    has_stored_sheet,
     parse_report_for,
 )
 from app.services.condition_split import (
@@ -260,10 +263,14 @@ async def parse_round(db: AsyncSession, round_id: UUID) -> None:
 
     # ⚠️ `raw_text` IS WRITTEN ON BOTH PATHS, and that is what makes a PDF splittable at all.
     # `split_round` reads it, and before LP-908's review only the paste door ever wrote it — so
-    # handing an uploaded or forwarded sheet to the AI settled it `PARSE_FAILED` with "This round has
-    # no text to read. Paste the conditions again.", telling a processor to paste a letter they had
-    # just uploaded. It is stored on the DRAFT path too, so a reparse after a reader fix has the page
-    # without re-fetching the PDF.
+    # handing an uploaded or forwarded sheet to the AI settled it `PARSE_FAILED` telling a processor
+    # to paste a letter they had just uploaded. It is stored on the DRAFT path too, so a reparse
+    # after a reader fix has the page without re-fetching the PDF.
+    #
+    # ⚠️ THAT FIX CLOSED THE COMMON CASE AND LEFT THE BLANK ONE, which S1-03 then showed (LP-909 §5).
+    # A PDF with no text layer still extracts to nothing, so it reaches the same `if not text:`
+    # branch legitimately — and the branch's one sentence was still the paste one. The sentence is
+    # now chosen by `has_stored_sheet`; see `NO_TEXT_IN_SHEET_DETAIL`.
     #
     # ⚠️ THIS IS A RETENTION CHANGE, NOT AN EXPOSURE ONE, and the distinction is worth stating
     # because the two are easy to conflate (LP-908 review). No NPI reaches anywhere it could not
@@ -378,7 +385,11 @@ async def split_round(db: AsyncSession, round_id: UUID) -> None:
         return
 
     text = round_.raw_text
-    if not text:
+    # ⚠️ `.strip()`, BECAUSE A TRUTHY COLUMN IS NOT THE SAME AS SOMETHING TO SPLIT. `ConditionPasteRequest`
+    # is `min_length=1`, so a paste of three spaces passes the door, reads as `needs_ai` (the generic
+    # reader answers that for empty input), opens `PARSING`, and arrives here with `raw_text == "   "`
+    # — truthy. The old guard let it through and we paid for a model call on whitespace.
+    if not text or not text.strip():
         settled = await _settle(
             db,
             round_id=round_id,
@@ -387,15 +398,27 @@ async def split_round(db: AsyncSession, round_id: UUID) -> None:
                 "parse_report": {
                     **(round_.parse_report or {}),
                     "failure_kind": "no_text",
+                    # ⚠️ THE SENTENCE DEPENDS ON THE DOOR, AND THE ONE IT USED TO HAVE WAS WRONG FOR
+                    # THE ONLY CASE THAT ACTUALLY OCCURS (LP-909 §5, seen on S1-03). Asked of the
+                    # round rather than of `parse_report`, because bytes at rest are what make the
+                    # difference: see `has_stored_sheet`.
                     "failure_detail": (
-                        "This round has no text to read. Paste the conditions again."
+                        NO_TEXT_IN_SHEET_DETAIL
+                        if has_stored_sheet(round_)
+                        else NO_TEXT_IN_PASTE_DETAIL
                     ),
                 },
             },
             kind=ConditionEventKind.ROUND_PARSE_FAILED,
             detail={"failure_kind": "no_text"},
         )
-        logger.warning("condition_split_no_text", round_id=str(round_id), settled=settled)
+        # Ids, counts and codes only (spec §9.5) — `has_bytes` rather than the path or the text.
+        logger.warning(
+            "condition_split_no_text",
+            round_id=str(round_id),
+            settled=settled,
+            has_bytes=has_stored_sheet(round_),
+        )
         return
 
     try:

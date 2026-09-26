@@ -62,6 +62,45 @@ ENQUEUE_FAILED_DETAIL = (
     "These conditions could not be queued for reading. Nothing was lost — try again in a moment."
 )
 
+#: The two sentences `split_round` chooses between when there is no text to split.
+#:
+#: ⚠️ TWO, BECAUSE ONE BRANCH NOW SERVES TWO DOORS AND ONLY ONE OF THEM CAN PASTE (LP-909 §5 visual
+#: check). That branch was written when only the paste door wrote `raw_text`, so its single sentence
+#: said "Paste the conditions again" — correct then. Since LP-908's review persists the lender's page
+#: on EVERY path, the realistic occupant of the branch is the opposite case: a PDF whose extraction
+#: yielded nothing, a blank page or a scan this server could not read. Telling that processor to paste
+#: again asks them to redo work they never did, and S1-03 showed exactly that on a blank upload.
+#:
+#: ⚠️ AND THE PASTE ARM IS NOW THE UNREACHABLE ONE, which is worth stating so nobody deletes the
+#: wrong half. `ConditionPasteRequest.text` is `min_length=1`, so the door refuses an empty body
+#: before a round exists; a pasted round reaches this branch only when a test sets `raw_text` to None
+#: by hand. It is kept because the guard is about `raw_text` being empty, not about which door filled
+#: it, and a future door that stores no text would land here honestly.
+NO_TEXT_IN_SHEET_DETAIL = (
+    "No text could be read from this PDF. It may be a blank page, or a scan this server could not "
+    "read — you can upload a text-based PDF, or paste the conditions instead."
+)
+NO_TEXT_IN_PASTE_DETAIL = "This round has no text to read. Paste the conditions again."
+
+
+def has_stored_sheet(round_: ConditionRound) -> bool:
+    """Does this round have the lender's PDF at rest?
+
+    ⚠️ KEYED ON `storage_path`, NEVER ON `kind` — and the rule had drifted into three statements
+    before this one existed (LP-909 §5). `condition_enrich._has_pdf_source` said it and said why: "it
+    is the BYTES that make a second attach meaningless. `kind` would need a list of three values kept
+    in step with the enum." Then `reparse_round` inlined the same predicate rather than import it,
+    with a comment explaining it did not want to depend on either module, and
+    `ConditionSourcePublic.from_source` mirrors it a third time for the wire. Three statements of one
+    rule is how they come to disagree — `from_source`'s own comment describes that exact drift
+    happening once already — so this is the one they share.
+
+    It lives HERE rather than in `condition_enrich` because that module imports this one, so the
+    reverse would be a cycle. `from_source` still derives it independently: it is handed a single
+    source dict rather than a round, so it has no round to ask.
+    """
+    return any((source or {}).get("storage_path") for source in round_.sources or [])
+
 
 class ConditionSheetRejected(Exception):
     """The bytes cannot be accepted as a condition sheet, with a reason a processor can act on.
@@ -535,7 +574,11 @@ async def reparse_round(
     # ⚠️ NOT `_storage_path`, WHICH BUILDS A NEW PATH RATHER THAN FINDING THE STORED ONE — and the
     # task module has a DIFFERENT function of the same name that does find it. Asking the round
     # directly avoids depending on either, and `services → tasks` is the inverted direction anyway.
-    if not any((source or {}).get("storage_path") for source in round_.sources or []):
+    #
+    # The predicate itself is now `has_stored_sheet` above: this was the second of three inline
+    # copies of one rule, and the comment justifying the inlining was about not importing a MODULE,
+    # which a sibling in this same file does not require.
+    if not has_stored_sheet(round_):
         raise RoundNotReparsable(
             "This round has no stored sheet to read again — its conditions were pasted in. "
             "Paste them again, or upload the lender's PDF."

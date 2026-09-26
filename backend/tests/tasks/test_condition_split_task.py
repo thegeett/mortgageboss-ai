@@ -21,13 +21,21 @@ from app.models.condition_round import (
     ConditionRoundCompleteness,
     ConditionRoundStatus,
     ConditionSheetFormat,
+    ConditionSourceKind,
 )
-from app.services.condition_rounds import create_round_from_paste
+from app.services.condition_rounds import (
+    NO_TEXT_IN_PASTE_DETAIL,
+    NO_TEXT_IN_SHEET_DETAIL,
+    SheetBytes,
+    create_round_from_paste,
+    create_round_from_sheet,
+)
 from app.services.condition_split import ConditionSplitUnavailable, SplitOutcome
 from app.tasks import conditions as task_module
 from app.tasks.conditions import split_round
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.conditions.uwm_pdf_fixture import render_text_pdf
 from tests.models.conftest_helpers import make_company, make_loan_file
 
 PROSE = "Please send whatever you have for this file when you can."
@@ -42,6 +50,24 @@ async def _parsing_round(db: AsyncSession, *, text: str = PROSE) -> ConditionRou
     )
     assert round_.status is ConditionRoundStatus.PARSING
     return round_
+
+
+async def _uploaded_parsing_round(db: AsyncSession) -> ConditionRound:
+    """A round that arrived as a PDF and is `PARSING` with nothing extracted from it — S1-03's state.
+
+    ⚠️ BUILT THROUGH THE REAL DOOR RATHER THAN BY DOCTORING A PASTED ROUND. `has_stored_sheet` answers
+    from stored bytes, so setting `sources` by hand would assert the branch against a shape no writer
+    produces — and a hand-built source dict is exactly how the client's `has_bytes` bug survived
+    (LP-909 review). No parse runs here, so the bytes only need to BE a valid PDF; `raw_text` staying
+    None is the condition under test, and it is what a blank page or an unreadable scan leaves behind.
+    """
+    company = await make_company(db)
+    loan_file = await make_loan_file(db, company=company)
+    return await create_round_from_sheet(
+        db,
+        loan_file=loan_file,
+        sheet=SheetBytes(content=render_text_pdf(" "), source_kind=ConditionSourceKind.PDF_UPLOAD),
+    )
 
 
 def _outcome(*texts: str, rejected: int = 0) -> SplitOutcome:
@@ -150,9 +176,65 @@ async def test_a_round_with_no_text_fails_rather_than_calling_the_model(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`raw_text` IS the source for a pasted round. Without it there is nothing to split, and paying
-    for a model call to discover that would be the wrong shape of honesty."""
+    for a model call to discover that would be the wrong shape of honesty.
+
+    The sentence is the PASTE one, and this is the arm that is now hard to reach on purpose:
+    `ConditionPasteRequest.text` is `min_length=1`, so the door refuses an empty body before a round
+    exists, and only this hand-set `None` gets here. Kept because the guard is about `raw_text` being
+    empty rather than about which door filled it."""
     round_ = await _parsing_round(db_session)
     round_.raw_text = None
+    await db_session.flush()
+    called = AsyncMock()
+    monkeypatch.setattr(task_module, "split_conditions", called)
+
+    await split_round(db_session, round_.id)
+    await db_session.refresh(round_)
+
+    assert round_.status is ConditionRoundStatus.PARSE_FAILED
+    assert round_.parse_report["failure_kind"] == "no_text"
+    assert round_.parse_report["failure_detail"] == NO_TEXT_IN_PASTE_DETAIL
+    called.assert_not_awaited()
+
+
+async def test_a_pdf_with_no_text_is_not_told_to_paste_what_it_never_pasted(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """⚠️ THE SENTENCE S1-03 ACTUALLY SHOWED ON A BLANK UPLOAD (LP-909 §5 visual check).
+
+    `raw_text` is written on every path since LP-908's review, so the realistic occupant of the
+    `if not text:` branch is no longer a paste — it is a PDF that extracted to nothing, a blank page
+    or a scan this server cannot read. That round was being told "Paste the conditions again",
+    instructing a processor to redo work they never did, on the one screen whose whole job is to say
+    what went wrong.
+
+    The two doors getting DIFFERENT sentences is the property: collapse the branch and this fails."""
+    round_ = await _uploaded_parsing_round(db_session)
+    assert round_.raw_text is None, "no parse has run, which is the state a blank PDF settles into"
+    called = AsyncMock()
+    monkeypatch.setattr(task_module, "split_conditions", called)
+
+    await split_round(db_session, round_.id)
+    await db_session.refresh(round_)
+
+    assert round_.status is ConditionRoundStatus.PARSE_FAILED
+    assert round_.parse_report["failure_kind"] == "no_text"
+    assert round_.parse_report["failure_detail"] == NO_TEXT_IN_SHEET_DETAIL
+    assert round_.parse_report["failure_detail"] != NO_TEXT_IN_PASTE_DETAIL
+    called.assert_not_awaited()
+
+
+async def test_a_whitespace_only_paste_does_not_reach_the_model(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """⚠️ A TRUTHY COLUMN IS NOT THE SAME AS SOMETHING TO SPLIT.
+
+    `ConditionPasteRequest.text` is `min_length=1`, so a paste of three spaces passes the door; the
+    generic reader answers `needs_ai` for text with no structure, the round opens `PARSING`, and it
+    arrives here with `raw_text == "   "` — truthy. `if not text:` let that through and we paid for a
+    model call on whitespace, then validated its rows against a blank page."""
+    round_ = await _parsing_round(db_session)
+    round_.raw_text = "   \n\t "
     await db_session.flush()
     called = AsyncMock()
     monkeypatch.setattr(task_module, "split_conditions", called)

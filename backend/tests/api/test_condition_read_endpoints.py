@@ -119,7 +119,7 @@ async def test_a_pasted_round_serialises_has_bytes_false(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
     """The other direction, and the one that makes the flag mean something. A paste stores no bytes —
-    `raw_text` on the row IS its source — so it is still attachable, and `_has_pdf_source` keys on
+    `raw_text` on the row IS its source — so it is still attachable, and `has_stored_sheet` keys on
     exactly this to decide whether a second merge would be meaningless."""
     company, token = await _user(db_session, slug="hasbytes-paste")
     loan_file = await create_loan_file(db_session, company_id=company.id)

@@ -74,10 +74,14 @@ def sheet_from_bytes(content: bytes) -> tuple[str, ParsedSheet, str]:
 
     ⚠️ THE THIRD VALUE EXISTS SO A PDF CAN BE AI-SPLIT AT ALL (LP-908 review). `split_round` reads
     `round_.raw_text`, which only the paste door ever wrote — so chaining the split for an uploaded
-    or forwarded sheet hit its `if not text:` branch and settled the round `PARSE_FAILED` with
-    "This round has no text to read. Paste the conditions again.", telling a processor to paste a
-    letter they had just uploaded. Persisting the text is what makes the upload and forward doors
-    splittable.
+    or forwarded sheet hit its `if not text:` branch and settled the round `PARSE_FAILED` with a
+    sentence telling a processor to paste a letter they had just uploaded. Persisting the text is
+    what makes the upload and forward doors splittable.
+
+    ⚠️ IT DOES NOT HELP A PDF THAT HAS NO TEXT TO PERSIST, and that case survived the fix as far as
+    S1-03 (LP-909 §5): a blank page or a scan this server cannot read extracts to nothing and reaches
+    that branch honestly. What changed there is the sentence, which is now chosen from whether the
+    round has bytes at rest — see `NO_TEXT_IN_SHEET_DETAIL` in `services/condition_rounds.py`.
 
     ⚠️ IT IS THE LINES THE READER ITSELF SAW, joined, rather than a second extraction. `Line.text`
     for PDF input is the word-box tokens joined by single spaces (`lines.py`), and those boxes come

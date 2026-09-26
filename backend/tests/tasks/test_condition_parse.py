@@ -339,8 +339,11 @@ async def test_the_lenders_page_is_persisted_so_the_split_has_something_to_read(
 
     `split_round` reads `round_.raw_text`, which only the paste door ever wrote. So a fix that just
     called `delay()` for an uploaded sheet would hand the task an empty column, hit its `if not
-    text:` branch, and settle the round `PARSE_FAILED` with "This round has no text to read. Paste
-    the conditions again." — telling a processor to paste a letter they had just uploaded.
+    text:` branch, and settle the round `PARSE_FAILED` with the paste-flavoured sentence — telling a
+    processor to paste a letter they had just uploaded.
+
+    (That sentence is no longer the only one: a PDF with no text to persist still reaches the branch,
+    so it now chooses by `has_stored_sheet`. Pinned in `test_condition_split_task.py`.)
 
     Asserting the text is a SUBSTRING of the page rather than equal to it: `Line.text` for PDF input
     is word boxes joined by single spaces, so the rendered page round-trips with its own spacing.

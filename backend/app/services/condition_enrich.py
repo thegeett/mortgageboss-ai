@@ -55,6 +55,7 @@ from app.schemas.condition import DraftRowPublic
 from app.services.condition_rounds import (
     ConditionSheetRejected,
     draft_rows_json,
+    has_stored_sheet,
     parse_report_for,
     reject_unless_pdf,
 )
@@ -97,16 +98,6 @@ class EnrichResult:
             f"{len(self.unmatched_existing)} pasted condition(s) are not on the lender's PDF; "
             f"they were kept, not removed"
         ]
-
-
-def _has_pdf_source(round_: ConditionRound) -> bool:
-    """Has a PDF already been merged into this round?
-
-    Keyed on `storage_path` rather than on `kind`, deliberately: a round created by upload or by
-    forward carries stored bytes, a pasted one does not, and it is the BYTES that make a second
-    attach meaningless. `kind` would need a list of three values kept in step with the enum.
-    """
-    return any(source.get("storage_path") for source in (round_.sources or []))
 
 
 def _match_key(code: str | None, text: str) -> tuple[str | None, str]:
@@ -294,7 +285,7 @@ async def enrich_round_with_pdf(
             f"A round that is {round_.status.value} cannot take a PDF. "
             "Only a draft or an imported round can be enriched."
         )
-    if _has_pdf_source(round_):
+    if has_stored_sheet(round_):
         raise RoundNotEnrichable(
             "This round already has the lender's PDF. Attaching a second one would merge the same "
             "sheet twice."
