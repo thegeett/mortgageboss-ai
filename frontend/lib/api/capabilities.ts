@@ -41,10 +41,22 @@ export interface Capabilities {
  * behind it does not exist; a panel that stays hidden because the request failed is a panel
  * missing, which is what this version looks like anyway.
  */
+/**
+ * ⚠️ UNDER `/api/v1`, LIKE EVERY OTHER ROUTE — AND IT WAS NOT. This asked for `/capabilities`, which
+ * the server does not serve (`main.py` mounts the router under `API_V1_PREFIX`), so every request
+ * 404'd and the fail-closed default above read BOTH switches as off on every deployment. Invisible
+ * while both are off everywhere — which they are — and it would have hidden the inbound panel
+ * (and S1-13 inside it) and polish on the first deployment that turned them on. Found in LP-909 §5's
+ * Visual check, from the browser console.
+ */
+export async function fetchCapabilities(): Promise<Capabilities> {
+  return (await apiClient.get<Capabilities>("/api/v1/capabilities")).data;
+}
+
 export function useCapabilities() {
   return useQuery({
     queryKey: ["capabilities"],
-    queryFn: async () => (await apiClient.get<Capabilities>("/capabilities")).data,
+    queryFn: fetchCapabilities,
     // It changes on redeploy, never within a session.
     staleTime: Number.POSITIVE_INFINITY,
   });
