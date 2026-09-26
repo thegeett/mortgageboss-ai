@@ -74,6 +74,7 @@ function round(overrides: Partial<ConditionRound> = {}): ConditionRound {
         document_id: null,
         inbound_attachment_id: null,
         user_id: null,
+        has_bytes: true,
       },
     ],
     date_printed: null,

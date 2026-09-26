@@ -93,7 +93,15 @@ function round(
     completeness: "full",
     sheet_format: "uwm_approval_letter",
     sources: [
-      { kind: sourceKind, at: null, document_id: null, inbound_attachment_id: null, user_id: null },
+      {
+        kind: sourceKind,
+        at: null,
+        document_id: null,
+        inbound_attachment_id: null,
+        user_id: null,
+        // Not derived from `kind` — see `imported-view.test.tsx`, where the two deliberately differ.
+        has_bytes: true,
+      },
     ],
     date_printed: null,
     round_date: "2026-09-24",

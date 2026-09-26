@@ -88,6 +88,38 @@ class ConditionSourcePublic(BaseModel):
     document_id: UUID | None = None
     inbound_attachment_id: UUID | None = None
     user_id: UUID | None = None
+    #: Whether this arrival stored bytes — the question "can this round still take a PDF" reduces to.
+    #:
+    #: ⚠️ THE CLIENT COULD NOT ASK THE SERVER'S QUESTION, SO IT ASKED A PROXY (LP-909 review).
+    #: `_has_pdf_source` keys on `storage_path` and says why: "it is the BYTES that make a second
+    #: attach meaningless. `kind` would need a list of three values kept in step with the enum."
+    #: `storage_path` was not serialised, so the round strip maintained exactly that list — holding
+    #: only because every bytes-carrying source happens to be written as `pdf_upload` or `email`,
+    #: which is a fact about the current writers rather than a rule binding them. A fourth kind that
+    #: stores bytes, or a bytes-less forward, would split the two answers silently.
+    #:
+    #: ⚠️ A BOOLEAN RATHER THAN THE PATH ITSELF. `_storage_path` is server-controlled precisely so a
+    #: sender's filename never shapes the storage layout — "a real condition sheet's filename
+    #: routinely carries the borrower's surname and the loan number" — and putting it on the wire
+    #: would export that layout plus a company and file id to answer a yes/no question. This is the
+    #: same fact with nothing extra attached.
+    has_bytes: bool = False
+
+    @classmethod
+    def from_source(cls, source: dict[str, Any]) -> "ConditionSourcePublic":
+        """Build from a `sources` entry, deriving `has_bytes` from the stored path.
+
+        Not `model_validate`: the JSONB entry has no `has_bytes` key, and the derivation is the
+        whole point — it mirrors `_has_pdf_source` rather than restating its rule somewhere else.
+        """
+        return cls(
+            kind=ConditionSourceKind(source["kind"]),
+            at=source.get("at"),
+            document_id=source.get("document_id"),
+            inbound_attachment_id=source.get("inbound_attachment_id"),
+            user_id=source.get("user_id"),
+            has_bytes=bool(source.get("storage_path")),
+        )
 
 
 class ParseReportPublic(BaseModel):
@@ -248,7 +280,12 @@ class ConditionRoundPublic(BaseModel):
             status=round_.status,
             completeness=round_.completeness,
             sheet_format=round_.sheet_format,
-            sources=[ConditionSourcePublic.model_validate(s) for s in (round_.sources or [])],
+            # ⚠️ `from_source`, NOT `model_validate`. A `sources` entry is raw JSONB with no
+            # `has_bytes` key, so validating it would silently default the flag to False on every
+            # round — and False is a VALID value, so nothing would fail. The client would then offer
+            # "Attach the lender's PDF" on rounds that already have one, which is the exact defect
+            # the field was added to close.
+            sources=[ConditionSourcePublic.from_source(s) for s in (round_.sources or [])],
             date_printed=round_.date_printed,
             round_date=round_.round_date,
             expiry_dates=round_.expiry_dates,

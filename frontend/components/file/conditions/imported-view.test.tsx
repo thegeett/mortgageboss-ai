@@ -58,9 +58,22 @@ function condition(overrides: Partial<Condition> = {}): Condition {
   };
 }
 
+/**
+ * ⚠️ `has_bytes` IS AN INPUT HERE, NOT DERIVED FROM `kind`, AND THAT IS THE POINT OF THIS FIXTURE.
+ *
+ * The client used to decide "does this round have a PDF" from a list of `kind` values — exactly the
+ * list `_has_pdf_source`'s comment warns against — because `storage_path` was not serialised. It now
+ * reads `has_bytes`. If this helper inferred the flag from the kind, every test below would pass
+ * against a client that still keyed on kind, and the fix would be unguarded by the very tests that
+ * look like they cover it.
+ *
+ * So a source is a `[kind, hasBytes]` pair, and one test deliberately makes them disagree.
+ */
+type SourceSpec = ConditionSourceKind | [kind: ConditionSourceKind, hasBytes: boolean];
+
 function round(
   overrides: Partial<ConditionRound> = {},
-  sourceKinds: ConditionSourceKind[] = ["pdf_upload"],
+  sourceSpecs: SourceSpec[] = ["pdf_upload"],
 ): ConditionRound {
   return {
     id: "r1",
@@ -68,13 +81,21 @@ function round(
     status: "imported",
     completeness: "full",
     sheet_format: "uwm_approval_letter",
-    sources: sourceKinds.map((kind) => ({
-      kind,
-      at: null,
-      document_id: null,
-      inbound_attachment_id: null,
-      user_id: null,
-    })),
+    sources: sourceSpecs.map((spec) => {
+      // A bare kind keeps the ordinary pairing: bytes for an upload or a forward, none for a paste
+      // or a typed round. A tuple overrides it, which is how the divergent case is expressed.
+      const [kind, hasBytes] = Array.isArray(spec)
+        ? spec
+        : [spec, spec === "pdf_upload" || spec === "email"];
+      return {
+        kind,
+        at: null,
+        document_id: null,
+        inbound_attachment_id: null,
+        user_id: null,
+        has_bytes: hasBytes,
+      };
+    }),
     date_printed: "2026-08-28",
     round_date: "2026-08-28",
     expiry_dates: { close_by: "2026-10-30" },
@@ -199,6 +220,26 @@ describe("the round strip (S1-05, S1-08)", () => {
     // One button, on the pasted round — not on the round that arrived as a PDF.
     const buttons = screen.getAllByRole("button", { name: "Attach the lender’s PDF" });
     expect(buttons).toHaveLength(1);
+  });
+
+  it("⚠️ follows the BYTES, not the source kind, when the two disagree", () => {
+    // THE FAILURE MODE `has_bytes` EXISTS TO CLOSE. The old check keyed on a list of `kind` values,
+    // which held only because every bytes-carrying source happens to be written as `pdf_upload` or
+    // `email` — a fact about the current writers, not a rule binding them. A `paste` that stored
+    // bytes would have been offered an attach the server refuses with "this round already has the
+    // lender's PDF".
+    //
+    // Nothing else in this file can catch that: every other fixture pairs kind and bytes the
+    // ordinary way, so a client still keying on kind would pass all of them.
+    show([round({ id: "r2", round_number: 2 }, [["paste", true]])]);
+    expect(screen.queryByRole("button", { name: "Attach the lender’s PDF" })).toBeNull();
+  });
+
+  it("⚠️ and offers it for a bytes-less arrival even on a kind that usually carries them", () => {
+    // The other direction: a forward that stored nothing is still attachable, and a kind-based check
+    // would refuse it.
+    show([round({ id: "r3", round_number: 3 }, [["email", false]])]);
+    expect(screen.getByRole("button", { name: "Attach the lender’s PDF" })).toBeDefined();
   });
 
   it("⚠️ and NOT on a pasted round that has already been enriched", () => {

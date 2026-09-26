@@ -119,6 +119,18 @@ export interface ConditionSource {
   document_id: string | null;
   inbound_attachment_id: string | null;
   user_id: string | null;
+  /**
+   * Whether this arrival stored bytes — what "can this round still take a PDF" reduces to.
+   *
+   * ⚠️ IT EXISTS BECAUSE THE CLIENT COULD NOT ASK THE SERVER'S QUESTION. `_has_pdf_source` keys on
+   * `storage_path`, which was not serialised, so the round strip kept a list of `kind` values —
+   * exactly the list that function's comment warns against. It held only because every
+   * bytes-carrying source happens to be written as `pdf_upload` or `email` today.
+   *
+   * A boolean rather than the path: the path is server-controlled so a sender's filename never
+   * shapes the storage layout, and shipping it would export that layout to answer yes or no.
+   */
+  has_bytes: boolean;
 }
 
 /**

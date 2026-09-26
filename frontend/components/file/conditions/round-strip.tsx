@@ -13,28 +13,29 @@ function usDate(value: string | null): string {
 }
 
 /**
- * Whether this round arrived with a PDF at any point.
+ * Whether any arrival on this round stored bytes.
  *
- * ⚠️ READ FROM `sources`, WHICH IS A LIST BECAUSE A PASTE CAN GAIN A PDF (LP-907). A round pasted and
- * then enriched carries BOTH `paste` and `pdf_upload`, so asking "was it pasted" would keep offering
- * Attach on a round that already has the letter. The question is whether a PDF is present, not how
- * the round began.
+ * ⚠️ IT ASKS THE SERVER'S OWN QUESTION NOW, AND IT USED TO ASK A PROXY (LP-909 review). The authority
+ * is `_has_pdf_source` in `condition_enrich.py`, which keys on `storage_path` and says why: "it is
+ * the BYTES that make a second attach meaningless. `kind` would need a list of three values kept in
+ * step with the enum." This function WAS that list, and could not be anything else while
+ * `ConditionSourcePublic` did not serialise the path — the client was structurally unable to ask the
+ * real question, so it asked the nearest one it could see.
  *
- * ⚠️ THIS IS A PROXY FOR THE SERVER'S RULE, NOT THE RULE (LP-909 review). The authority is
- * `_has_pdf_source` in `condition_enrich.py`, which keys on `storage_path` and says why: "it is the
- * BYTES that make a second attach meaningless. `kind` would need a list of three values kept in step
- * with the enum." This IS that list — and it cannot be anything else, because
- * `ConditionSourcePublic` does not serialise `storage_path`. The client is structurally unable to ask
- * the server's question, so it asks the nearest one it can see.
+ * It held only because every bytes-carrying source happens to be written as `pdf_upload` or `email`.
+ * That is a fact about the current writers rather than a rule binding them: a fourth kind that
+ * stores bytes, or a bytes-less forward, split the two answers apart silently, and the failure was a
+ * button offered for a merge the server refuses.
  *
- * It holds today because every source that carries bytes is written with kind `pdf_upload` or
- * `email`, and a paste or a manual round carries none. That is a fact about the current writers
- * rather than a rule they are bound by: a fourth kind that stores bytes, or a bytes-less forward,
- * splits the two answers apart silently, and the failure is a button offered for a merge the server
- * refuses. Exposing `storage_path` on `ConditionSourcePublic` would retire the proxy.
+ * `has_bytes` is now on every source — a boolean rather than the path itself, because
+ * `_storage_path` is server-controlled precisely so a sender's filename never shapes the storage
+ * layout, and shipping it would export that layout to answer yes or no.
+ *
+ * Still read across the LIST, because `sources` is a list: a paste that gained a PDF carries both
+ * arrivals, and the question is whether bytes are present anywhere, not how the round began.
  */
 export function hasPdf(round: ConditionRound): boolean {
-  return round.sources.some((source) => source.kind === "pdf_upload" || source.kind === "email");
+  return round.sources.some((source) => source.has_bytes);
 }
 
 /**

@@ -25,13 +25,19 @@ from app.models.condition_round import (
     ConditionRound,
     ConditionRoundCompleteness,
     ConditionRoundStatus,
+    ConditionSourceKind,
 )
-from app.services.condition_rounds import create_round_from_paste
+from app.services.condition_rounds import (
+    SheetBytes,
+    create_round_from_paste,
+    create_round_from_sheet,
+)
 from app.services.loan_files import create_loan_file
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from tests.conditions.fixture_helpers import portal_excerpt
+from tests.conditions.fixture_helpers import UWM_ROUND_1, portal_excerpt
+from tests.conditions.uwm_pdf_fixture import render_uwm_pdf
 
 
 @pytest.fixture
@@ -69,6 +75,67 @@ async def _user(db: AsyncSession, *, slug: str) -> tuple[Company, str]:
     db.add(user)
     await db.flush()
     return company, create_access_token(user.id)
+
+
+async def test_a_stored_sheet_serialises_has_bytes_true(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """⚠️ THE FIELD THIS FILE'S HEADER IS ABOUT, ONE FIELD OVER (LP-909 §4).
+
+    `has_bytes` was declared, derived, and asserted by nothing — the same shape as `condition_count`
+    and `round_numbers` before this file existed. And it fails in the quiet direction: the round
+    serialiser first built sources with `model_validate`, and a `sources` entry is raw JSONB with no
+    `has_bytes` key, so every source defaulted to `False`. `False` is a VALID boolean, so nothing
+    broke; the client would simply have offered "Attach the lender's PDF" on rounds that already had
+    one, which is the exact defect the field was added to close.
+
+    So the assertion is on the VALUE, and in both directions — the pasted case is the test below.
+    """
+    company, token = await _user(db_session, slug="hasbytes-pdf")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    round_ = await create_round_from_sheet(
+        db_session,
+        loan_file=loan_file,
+        sheet=SheetBytes(
+            content=render_uwm_pdf(UWM_ROUND_1), source_kind=ConditionSourceKind.PDF_UPLOAD
+        ),
+    )
+
+    response = await client.get(f"/api/v1/condition-rounds/{round_.id}", headers=_auth(token))
+
+    assert response.status_code == 200, response.text
+    sources = response.json()["sources"]
+    assert len(sources) == 1
+    assert sources[0]["kind"] == ConditionSourceKind.PDF_UPLOAD.value
+    assert sources[0]["has_bytes"] is True
+    # ⚠️ THE PATH ITSELF MUST NOT TRAVEL. `_storage_path` is server-controlled precisely so a
+    # sender's filename never shapes the storage layout, and a real sheet's filename carries the
+    # borrower's surname and the loan number. The boolean answers the client's question; the path
+    # would export the layout plus a company and file id to answer yes or no.
+    assert "storage_path" not in sources[0]
+
+
+async def test_a_pasted_round_serialises_has_bytes_false(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """The other direction, and the one that makes the flag mean something. A paste stores no bytes —
+    `raw_text` on the row IS its source — so it is still attachable, and `_has_pdf_source` keys on
+    exactly this to decide whether a second merge would be meaningless."""
+    company, token = await _user(db_session, slug="hasbytes-paste")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+    round_ = await create_round_from_paste(
+        db_session,
+        loan_file=loan_file,
+        text=portal_excerpt(),
+        completeness=ConditionRoundCompleteness.PARTIAL,
+    )
+
+    response = await client.get(f"/api/v1/condition-rounds/{round_.id}", headers=_auth(token))
+
+    assert response.status_code == 200, response.text
+    sources = response.json()["sources"]
+    assert sources[0]["kind"] == ConditionSourceKind.PASTE.value
+    assert sources[0]["has_bytes"] is False
 
 
 async def _imported_round(
