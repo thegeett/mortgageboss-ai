@@ -149,7 +149,7 @@ export type OwnerHint =
  * than a default looked up from the code map, and a UI showing them identically would invite
  * trusting the weak one. S1-04 renders this under the chip ("from code map" / "from “TC:” prefix").
  */
-export type OwnerHintSource = "prefix" | "bucket" | "code_map" | "none";
+export type OwnerHintSource = "prefix" | "bucket" | "code_map" | "none" | "manual";
 
 /** Whether the condition came off a sheet or was typed by a processor. */
 export type ConditionOrigin = "sheet" | "manual";
@@ -218,9 +218,25 @@ export type ConditionSort = "sheet" | "code" | "status" | "owner" | "updated";
 /**
  * What happened to a round — the history on the round-details sheet (S1-09).
  *
- * Stage 1 writes all of these and nothing else. Note what is ABSENT and stays absent until Stage 2:
- * there is no `condition_cleared` and no `round_compared`, because Stage 1 cannot produce them and
- * an enum member nothing writes is an invitation (ADR-404).
+ * The last eight are Stage 2's (LP-912, ADR-408; `round_compared` and `round_completeness_changed`
+ * are LP-915's). The detail sheet composes a plain-words history line from `kind`, so a member the
+ * client cannot type renders as an unrecognised value — which is what the cross-stack mirror guard
+ * exists to prevent.
+ *
+ * `condition_came_back` IS THE ONE EVENT FOR A CAME-BACK and carries both from→to pairs: the lender's
+ * status to `not_cleared` and ours back to `to_do`. `condition_seen_again` still records the
+ * appearance (the `R1 R2` chips derive from it), and `condition_note_added` folds into
+ * `condition_came_back` when the note is what reopened the condition.
+ *
+ * Still absent, as deliberately as in Stage 1: no `condition_cleared` and no `condition_waived` —
+ * clearing is `condition_verdict_recorded`, carrying a verdict that names who said so and where — and
+ * no `condition_removed`, because nothing disappears (ADR-404).
+ *
+ * EVERY COMMENT ABOUT THIS UNION LIVES ABOVE IT, NOT INSIDE IT, and that is mechanical rather than
+ * stylistic. `test_condition_type_mirror.py` parses the union with
+ * `export type (\w+)\s*=\s*([^;]+);` — a body that stops at the first semicolon. Prose between the
+ * members containing a semicolon truncates the body, so the guard silently reads a SHORTER union and
+ * reports the backend as having members the frontend "does not". Measured: it did exactly that.
  */
 export type ConditionEventKind =
   | "round_received"
@@ -233,7 +249,15 @@ export type ConditionEventKind =
   | "condition_created"
   | "condition_seen_again"
   | "condition_note_added"
-  | "condition_edited";
+  | "condition_edited"
+  | "condition_prep_moved"
+  | "condition_verdict_recorded"
+  | "condition_reopened"
+  | "condition_came_back"
+  | "condition_owner_changed"
+  | "condition_superseded"
+  | "round_compared"
+  | "round_completeness_changed";
 
 /**
  * One line of a round's history (S1-09).

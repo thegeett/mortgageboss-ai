@@ -133,34 +133,56 @@ async def test_a_round_event_needs_no_condition_and_the_reverse(db_session: Asyn
     assert event.occurred_at is not None
 
 
-def test_stage_1_cannot_express_a_clearing_event() -> None:
-    """ADR-404, asserted rather than trusted to prose.
+def test_no_event_kind_can_state_a_clearing_on_its_own() -> None:
+    """ADR-404 and ADR-408, asserted rather than trusted to prose.
 
-    Stage 1 never clears, removes or merges away a condition. The enum is where that could quietly
-    stop being true: a `condition_cleared` member added "for later" would be writable immediately,
-    by anything, with no verdict recorded and no UI showing it. Stage 2 adds the member together with
-    the comparison that earns it.
+    NOTHING MAY CLEAR A CONDITION BY EXISTING. A `condition_cleared` member added "for later" would
+    be writable immediately, by anything, with no verdict recorded and no UI showing it — and the
+    whole architecture of the two tracks rests on `cleared` being reachable only through a recorded
+    verdict naming who said so and where. That is why the clearing kinds stay out of this enum
+    *permanently*, not until some later stage earns them: the mechanism that clears is
+    `CONDITION_VERDICT_RECORDED`, whose detail carries the verdict, and a bare
+    `condition_cleared` would be the app asserting the lender's answer without its provenance.
 
-    THE TEST TO APPLY BEFORE ADDING AN EVENT KIND — and it is a question, not a category:
-    **could a reader of this row infer that the lender answered?**
+    THE TEST TO APPLY BEFORE ADDING AN EVENT KIND — a question, not a category:
+    **could a reader of this row infer that the lender answered, from the row alone?**
 
-      * `condition_cleared` / `condition_removed` — yes, it STATES one.
-      * `round_compared` — yes, it MANUFACTURES one. Comparison is the mechanism that produces
-        "this one is gone, so it probably cleared", so the row's existence is evidence the inference
-        ran.
+      * `condition_cleared` / `condition_waived` / `condition_removed` — yes, each STATES one. Always
+        forbidden.
+      * `CONDITION_VERDICT_RECORDED` — no, and this is the distinction that matters. It says a verdict
+        was recorded; WHAT the lender said is in the verdict, with its source and its date. The row is
+        a pointer to evidence rather than a claim standing on its own.
+      * `ROUND_COMPARED` — no longer forbidden, and this test was NARROWED to let it in (LP-912).
+        Stage 1's version of this test forbade it on the argument that comparison "MANUFACTURES" a
+        lender answer, and that was right while nothing could confirm one: the row's existence would
+        have been the only evidence the inference ran. LP-915 adds it with the confirm step that earns
+        it — the comparison PROPOSES and the processor's click is what records a verdict — so the
+        inference is no longer readable off the row, because the row no longer decides anything. Its
+        own docstring anticipated this: "Stage 2 adds the member together with the comparison that
+        earns it."
       * `ROUND_ENRICHED` — no. It says a second arrival merged into a round, and merging provenance
-        cannot be read as the lender speaking. That is why it is legitimately in the enum while
-        nothing in Stage 1 writes it (LP-907 does).
+        cannot be read as the lender speaking.
 
     An earlier version of this reasoning said the forbidden kinds were "verdicts about a condition's
-    fate". That rule fails on its own list: `round_compared` is not a verdict about any condition's
-    fate, which is exactly how it would have slipped in.
+    fate". That rule fails on its own list: `round_compared` was not a verdict about any condition's
+    fate, which is exactly how it would have slipped in under the wrong rule rather than the right one.
     """
     kinds = {kind.value for kind in ConditionEventKind}
 
-    forbidden = {"condition_cleared", "condition_removed", "condition_waived", "round_compared"}
+    # PERMANENTLY FORBIDDEN, unlike `round_compared` above. No stage earns these, because each would
+    # state the lender's answer with nothing attached saying where it came from.
+    forbidden = {"condition_cleared", "condition_removed", "condition_waived"}
     assert not (kinds & forbidden), (
-        f"ConditionEventKind gained {sorted(kinds & forbidden)}. Stage 1 cannot produce these "
-        "(ADR-404) and an enum member nothing writes is an invitation — add it with the Stage 2 "
-        "mechanism that records who cleared what, and where."
+        f"ConditionEventKind gained {sorted(kinds & forbidden)}. Nothing may state a clearing on its "
+        "own (ADR-404, ADR-408): a cleared or waived condition is recorded as "
+        "CONDITION_VERDICT_RECORDED carrying a verdict with its source and date, so that 'cleared' is "
+        "always answerable with 'who said so, and where'."
+    )
+
+    # AND THE MECHANISM THAT REPLACES THEM MUST BE PRESENT, or the paragraph above describes nothing.
+    # Asserting the absence alone would pass just as happily against an enum that cannot record a
+    # verdict either — which would mean the product simply could not express what the lender said.
+    assert "condition_verdict_recorded" in kinds, (
+        "CONDITION_VERDICT_RECORDED is missing, so the clearing kinds are absent with nothing in "
+        "their place. ADR-408 makes the verdict the only way to say the lender cleared something."
     )

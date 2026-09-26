@@ -36,11 +36,23 @@ if TYPE_CHECKING:
 
 
 class ConditionEventKind(StrEnum):
-    """What happened. Stage 1 emits all of these and nothing else.
+    """What happened. The first eleven are Stage 1's; the last eight are Stage 2's (LP-912, LP-915).
 
-    Note what is ABSENT and stays absent until Stage 2: there is no `CONDITION_CLEARED`, no
-    `CONDITION_REMOVED` and no `ROUND_COMPARED`. Stage 1 cannot produce them, and an enum member
-    nothing writes is an invitation (ADR-404).
+    WHAT IS ABSENT IS STILL THE POINT, AND THE LIST CHANGED IN STAGE 2 — so this paragraph is
+    rewritten rather than left describing a file it no longer matches. `ROUND_COMPARED` used to be
+    named here as forbidden, on the argument that a comparison row MANUFACTURES a lender answer: while
+    nothing could confirm one, the row's existence was the only evidence the inference had run. LP-915
+    adds it together with the confirm step that earns it — the comparison PROPOSES and the processor's
+    click is what records a verdict — so the row no longer decides anything.
+
+    **`CONDITION_CLEARED`, `CONDITION_WAIVED` and `CONDITION_REMOVED` stay absent permanently**, not
+    until some later stage earns them. Each would STATE the lender's answer with nothing attached
+    saying where it came from, and `cleared` is reachable only through a recorded verdict naming who
+    said so and on what date (ADR-404, ADR-408). The mechanism in their place is
+    `CONDITION_VERDICT_RECORDED`, whose detail carries that verdict — a pointer to evidence rather
+    than a claim standing on its own. `tests/models/test_condition_events_append_only.py` asserts both
+    halves: the three are absent AND the verdict kind is present, because asserting the absence alone
+    would pass just as well against a product that could not record what the lender said at all.
 
     ADDING A MEMBER HERE IS A MIGRATION, AND NO TEST WILL TELL YOU SO. `kind` is VARCHAR + CHECK
     (ADR-037, via `str_enum`), so a new member changes what the code writes and nothing about what
@@ -70,6 +82,43 @@ class ConditionEventKind(StrEnum):
     CONDITION_SEEN_AGAIN = "condition_seen_again"
     CONDITION_NOTE_ADDED = "condition_note_added"
     CONDITION_EDITED = "condition_edited"
+
+    # --- Stage 2 (LP-912, ADR-408; the last two are LP-915's) --------------------------------- #
+    #
+    # EIGHT MEMBERS, AND THE CONSTRAINT SWAP IS IN THE SAME MIGRATION. The docstring above says
+    # adding a member here is a migration and no test will tell you so — that is still true, and it is
+    # now also watched: `_CASES` in `tests/test_activity_type_migrations.py` covers this constraint,
+    # so an unswapped member fails there rather than on a processor's first click.
+    #
+    # WHAT IS STILL ABSENT IS AS DELIBERATE AS BEFORE. There is no `condition_cleared`: clearing is
+    # `CONDITION_VERDICT_RECORDED` with a verdict naming who said so and where, because a bare
+    # "cleared" event would be the app asserting the lender's answer without its provenance
+    # (ADR-404, ADR-408). And there is still no `condition_removed` — nothing disappears.
+
+    #: Our track moved. Carries `from`/`to`, plus the reason a BACKWARD move requires.
+    CONDITION_PREP_MOVED = "condition_prep_moved"
+    #: The lender's answer was recorded: cleared, waived, or a manual "came back". The verdict itself
+    #: — who said so, where, and on what date — travels in the detail.
+    CONDITION_VERDICT_RECORDED = "condition_verdict_recorded"
+    #: A cleared or waived condition was put back to open, with a reason. The old verdict stays in
+    #: history: this says it was overruled, not that it never happened.
+    CONDITION_REOPENED = "condition_reopened"
+    #: THE ONE EVENT FOR A CAME-BACK (ADR-408, spec §6 rule 4). It carries BOTH from→to pairs — the
+    #: lender status to `not_cleared` and our status back to `to_do` — because that is one statement by
+    #: the lender with one consequence for us. `CONDITION_SEEN_AGAIN` still records the appearance
+    #: (`round_numbers` derives from it, so the `R1 R2` chips would break without it), and
+    #: `CONDITION_NOTE_ADDED` folds into this one when the note is what reopened the condition.
+    CONDITION_CAME_BACK = "condition_came_back"
+    #: Who it is waiting on was changed by hand (A2). The processor's choice outranks every hint.
+    CONDITION_OWNER_CHANGED = "condition_owner_changed"
+    #: A reworded pair was confirmed as one demand: the old condition is Replaced and points at the
+    #: new one. Nothing is deleted.
+    CONDITION_SUPERSEDED = "condition_superseded"
+    #: LP-915. A round was compared against what was open before it, and the result was saved.
+    ROUND_COMPARED = "round_compared"
+    #: LP-915. An imported round was switched between "full list" and "just some" (A7), which is what
+    #: makes a comparison runnable — or withdraws its unconfirmed suggestions.
+    ROUND_COMPLETENESS_CHANGED = "round_completeness_changed"
 
 
 class ConditionEvent(Base, UUIDMixin):

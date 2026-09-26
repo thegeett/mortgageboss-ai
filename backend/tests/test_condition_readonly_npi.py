@@ -21,6 +21,7 @@ upgrade-side only. There is no database here.
 from __future__ import annotations
 
 import importlib.util
+import re
 from pathlib import Path
 from typing import Any
 
@@ -106,6 +107,48 @@ def test_the_condition_views_still_answer_something(table: str) -> None:
         f"readonly.{table} no longer exposes {missing}. The NPI columns were excluded on the "
         "argument that these derived answers replace them; without them the view keeps the "
         "privacy property and loses the point."
+    )
+
+
+def test_the_conditions_view_touches_verdict_only_for_its_provenance() -> None:
+    """`verdict ->> 'note'` IS NPI AND NO OTHER GUARD IN THIS SUITE WOULD STOP IT (LP-912).
+
+    THE HOLE THIS CLOSES, precisely. `verdict` is a JSONB column with a `note` key the processor
+    typed — the same class as `prep_note` — and three keys an analyst legitimately asks about:
+    `source_kind`, `source_date` and the status. The view therefore MUST name the column in order to
+    project the provenance that makes "cleared on the 12th" checkable at all. That rules out the
+    strong guard: `NEVER_EXPOSED` is a `\\bverdict\\b` search of the select list, so listing it there
+    would fail against the very projection ADR-408 requires. `prep_note` can have that protection and
+    does; `verdict` cannot.
+
+    So what is asserted instead is the SHAPE of every reference: each mention of `verdict` in the
+    view is followed by `->> 'source_kind'` or `->> 'source_date'` and nothing else. A later migration
+    adding `verdict ->> 'note'` — or exposing the column whole — passes `EXCLUDED`,
+    `test_no_model_column_drifts` and `NEVER_EXPOSED` alike, and fails here.
+
+    READ FROM THE VIEW'S TEXT, NOT FROM `_output_columns`. The output names are
+    `verdict_source_kind` / `verdict_source_date`, which say nothing about which keys produced them —
+    the whole question is what the expression reaches into.
+    """
+    module = _readonly_module()
+    body = module._view_bodies()["conditions"]
+
+    references = re.findall(r"verdict[^,\n]*", body)
+    assert references, (
+        "readonly.conditions does not mention `verdict` at all. Either the provenance projection was "
+        "dropped — and `verdict_source_kind` / `verdict_source_date` are what make a recorded verdict "
+        "auditable from staging — or this guard is reading the wrong view and is checking nothing."
+    )
+
+    permitted = re.compile(r"^verdict\s*->>\s*'(source_kind|source_date)'")
+    offenders = [ref.strip() for ref in references if not permitted.match(ref.strip())]
+
+    assert not offenders, (
+        "readonly.conditions reaches into `verdict` for something other than its provenance: "
+        f"{offenders}. Only `source_kind` and `source_date` may be exposed — `note` is what a "
+        "processor typed about one borrower's file (ADR-405, spec §6 rule 7), and the column cannot be "
+        "protected by NEVER_EXPOSED because the view has to name it to project the two that are "
+        "allowed."
     )
 
 

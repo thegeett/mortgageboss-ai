@@ -16299,7 +16299,24 @@ yet; recorded here as a follow-up rather than silently left. A fixture that ever
 real one with the names changed" is the failure mode to watch: the synthetic sheets must be built from
 the layout, not from a redacted original.
 
-*Status.* Accepted (LP-903).
+*Amendment (LP-912, Stage 2 review).* **A search term in a URL is NPI in transit, and the rule is one
+rule for the whole app.** The conditions list (LP-913) puts its filters in the URL so a link can be
+shared, and its `q` searches `verbatim_text` — so a shared link can carry a borrower's employer or an
+account ending into someone else's clipboard and browser history. That is not a new exposure: the
+pipeline this pattern is modelled on already writes `search` into the URL
+(`dashboard/page.tsx` → `writePipelineUrl`), and that search matches borrower NAMES
+(`services/loan_files.py`, `ilike` over first and last name), so a shared pipeline link has carried a
+borrower's name since the saved-views work. Recording it here rather than in one ticket is the point:
+conditions and borrowers must not end up with opposite rules.
+
+**The rule: a filter that matches NPI stays out of the shareable URL.** Every other filter — a status,
+an owner, a bucket, a round — is a category and stays in it, so links remain useful. The searches are
+held in component state, or stripped when a link is copied. Server-side the position is unchanged and
+recorded rather than fixed: nothing in the app logs a term (`uvicorn.access` is at WARNING, `errors.py`
+logs the path only), and ALB access logs are off, so if they are ever enabled the terms reach S3 —
+which is a deployment decision this ADR now names.
+
+*Status.* Accepted (LP-903). Amended (LP-912).
 
 ---
 
@@ -16360,3 +16377,96 @@ LP-910 seed matches on. A lender with the key unset is not an error — its code
 takes.
 
 *Status.* Accepted (LP-903). Builds on ADR-045.
+
+---
+
+## ADR-408
+
+**Two status tracks move, and only a recorded verdict may say the lender cleared anything. A backward
+move needs a reason, a verdict needs a source and a date, and every change is an event.**
+
+*Context.* ADR-404 created `prep_status` and `lender_status` and deliberately moved neither: Stage 1
+could not clear, remove or reopen a condition, which is what made it safe to ship before any
+comparison existed. Stage 2 has to move both, and the failure it must not have is the one a processor
+cannot undo — a condition that reads *Cleared* because the app inferred it, on a file the lender has
+said nothing about. "Only the lender clears" is easy to state and easy to lose in the third or fourth
+place something sets a status.
+
+*Decision.* **Our track has four steps offered on screen** — `to_do` → `waiting` (with a required
+`waiting_on` owner) → `ready` → `with_underwriter` — and `review` stays in the database, offered
+nowhere (default A4). Forward moves need nothing. **A backward move needs a reason**, one short line,
+kept in history.
+
+**The lender's track is only ever set three ways.** `not_cleared` by the lender's own new dated note
+or by a recorded verdict; `cleared` and `waived` **only** by a recorded verdict; `superseded` when a
+processor confirms a reworded pair. `pending_review` stays in the database, offered nowhere (A4).
+
+**A verdict is the record of who said so and where:** `{status, source_kind (portal · email · phone ·
+round_comparison · underwriter_note), source_date, round_id?, note?, recorded_by, recorded_at}`.
+`source_date` is **the date the lender said it** and is never defaulted to today — a verdict dated by
+our clock is a verdict about us. `cleared` and `waived` are impossible at the API level without one.
+
+**Reopening** `cleared` or `waived` needs a reason, writes an event, keeps the old verdict in history,
+and sets our track back to `to_do`. A verdict otherwise leaves our track alone: what we did is already
+in the history and rewriting it would lose that we did it.
+
+**Nothing sets `cleared` or `waived` without a person's click.** The round comparison proposes; the
+processor confirms.
+
+**A new dated note is the lender reopening the condition (A1), with two guards.** Notes are compared
+on **normalised** text (`" ".join(text.lower().split())`), because the reader keeps whatever spacing
+arrives and a browser copy need not space a note as the PDF does. And a saved note with **no date** is
+bounded by the `round_date` of the round it was first seen on: an incoming dated note with the same
+normalised text is the SAME note if its date is on or before that bound — its date is filled in, and
+no status moves — and a re-issue if it is after. Without the bound the guard swallows the case A1
+exists for; without the normalisation it fires on a stray space.
+
+**`condition_came_back` is THE one event for a came-back** (spec §6 rule 4, "exactly one"), and it
+carries **both** from→to pairs: the lender status moving to `not_cleared` and our status moving back to
+`to_do`. Those are one change by the lender with one consequence for us, not two changes, and splitting
+them would let a reader find the reopening without finding what it did to our work.
+
+The other two rows a came-back import writes are **not** second records of that change:
+
+- `CONDITION_SEEN_AGAIN` is the **appearance** record — "this condition was on this sheet" — and it is
+  load-bearing beyond history: `round_numbers`, the `R1 R2` chips, is derived from it. Dropping it to
+  satisfy a literal count would break the chips.
+- `CONDITION_NOTE_ADDED` **folds into `condition_came_back`** when the note is what reopened the
+  condition. The note IS the lender's reopening, so recording it twice is precisely what rule 4
+  forbids. It still stands alone for a new note that does **not** reopen anything — an undated one, or
+  one whose date is within the bound above.
+
+*Rationale.* The two tracks come apart constantly — a condition can be fully prepared, submitted, and
+come back — so one status walking from open to done would make the app claim the underwriter's
+agreement as a consequence of our own work. Requiring a source and a date on the lender's side is what
+makes "Cleared" checkable by a person months later: it says where to look. Requiring a reason only
+**backwards** follows from which direction loses information; forward is the work progressing, backward
+is something having gone wrong, and the reason is the only record of what.
+
+The note guards are here rather than in the import because they are a judgement about what counts as
+the lender speaking, not about parsing. Both were found by measurement against the fixtures, and each
+protects a different direction: the normalisation stops a false *Came back*, the date bound stops a
+missed one.
+
+*Consequences.* Five write endpoints, each refusal typed with one plain sentence the UI shows as-is,
+and optimistic concurrency on `updated_at` — which is why LP-911 had to put that field on the wire at
+all. `OwnerHintSource` gains `manual`, and every one of these is VARCHAR + CHECK (ADR-037), so the
+enum edits are constraint swaps or they are rejected by any migrated database while the suite stays
+green.
+
+**`prep_note` and `verdict.note` are NPI (ADR-405), and the two get DIFFERENT protection** — which is a
+consequence of how the guard works rather than of how sensitive they are. `prep_note` never appears in
+any view's text, so it goes in `EXCLUDED` **and** `NEVER_EXPOSED`: the second is the stronger guard,
+because it survives a later migration adding it. `verdict` cannot have that protection, because the
+view legitimately projects `verdict ->> 'source_kind'` and `verdict ->> 'source_date'` and
+`test_never_exposed_columns_are_absent_from_every_view` searches the select list for `\bverdict\b`. So
+`verdict` is `EXCLUDED` only, **plus a test pinning the view to those two keys** — without it a later
+`verdict ->> 'note'` passes every existing check while publishing the lender's words.
+
+A processor who knows the lender cleared something must still say where and when. That is the accepted
+cost, and it is the same trade ADR-404 made in refusing to let Stage 1 say anything at all.
+
+*Status.* Accepted (LP-912). Extends ADR-404; defaults A1 to A7 of
+`docs/phases/phase4.5-stage2-tickets.md` §1 were accepted by the product owner in the Stage 2 build
+instruction, recorded in `docs/tickets/phase4.5-stage2-survey.md` §5.0 rather than in a conversation
+the tickets file holds.

@@ -24,11 +24,12 @@ and it is the column that lets the readonly layer answer "did this condition rec
 reproducing a word of it.
 """
 
+from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import Boolean, ForeignKey, Index, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -84,6 +85,17 @@ class OwnerHintSource(StrEnum):
     BUCKET = "bucket"  # the heading says so — "Underwriter To Obtain And Clear"
     CODE_MAP = "code_map"  # the (lender, code) default
     NONE = "none"
+    #: The processor said so, and it OUTRANKS every guess above (LP-912, default A2). The three
+    #: sources above are inference — a marker the lender typed, a heading, a code-map default — and A2's
+    #: point is that they "are a good first guess, not the truth". A manual choice is the only one that
+    #: is not a guess, so `effective_owner` returns the override whenever one is set.
+    #:
+    #: ADDING THIS MEMBER IS A MIGRATION (ADR-037). `owner_hint_source` is VARCHAR + CHECK, so this
+    #: line changes what the code writes and nothing about what the database accepts — and
+    #: `conftest` rebuilds the schema from this very enum, so the suite would stay green while every
+    #: real override raised `IntegrityError` on commit. `ck_conditions_ownerhintsource` is swapped in
+    #: LP-912's migration, and `tests/test_activity_type_migrations.py::_CASES` watches it.
+    MANUAL = "manual"
 
 
 class ConditionPrepStatus(StrEnum):
@@ -196,6 +208,73 @@ class Condition(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     )
     origin: Mapped[ConditionOrigin] = mapped_column(
         str_enum(ConditionOrigin), default=ConditionOrigin.SHEET, nullable=False
+    )
+
+    # --- Stage 2: the two tracks actually move (LP-912, ADR-408) ------------------------------- #
+    #
+    # THE THREE `OwnerHint` COLUMNS EACH NAME THEIR CONSTRAINT, AND THEY MUST. `str_enum`'s own
+    # docstring says it: the same enum backing two columns on one table collides on the derived
+    # constraint name. `owner_hint` above keeps `ck_conditions_ownerhint`; these two take names of
+    # their own, and `tests/test_activity_type_migrations.py::_CASES` lists all three — otherwise a
+    # later `OwnerHint` member is accepted by one column and rejected by two.
+    #
+    # WHAT THE NAME IS IN THE DATABASE DEPENDS ON WHO CREATED IT, which is a trap LP-912 measured
+    # rather than inherited quietly. `Base.metadata`'s convention is
+    # `ck_%(table_name)s_%(constraint_name)s`, and `str_enum` passes only the ENUM's name — so
+    # `create_all` (the suite) produces `ck_conditions_waiting_on`. A migration that passes the full
+    # name to `op.create_check_constraint` gets it doubled (`ck_conditions_ck_conditions_waiting_on`),
+    # which is why LP-912's migration builds every CHECK with raw `op.execute`, as the ~20 other
+    # migrations in that directory already do.
+
+    #: Who we are waiting on, required when our status is `waiting` and meaningless otherwise. The
+    #: REASON we are waiting is `prep_note`; this is the party.
+    waiting_on: Mapped[OwnerHint | None] = mapped_column(
+        str_enum(OwnerHint, name="waiting_on"), nullable=True
+    )
+    #: NPI — a short line a processor typed about one borrower's file ("chasing the vendor for a
+    #: corrected invoice"), which is where a name arrives in a shape no scrubber predicts. Excluded
+    #: from `readonly.conditions` AND in `NEVER_EXPOSED`, because unlike `verdict` it appears in no
+    #: view's text, so the stronger guard costs nothing.
+    prep_note: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
+    #: When it was submitted to the lender. Set on the move to `with_underwriter`, defaulting to now
+    #: but overridable, because a processor records a submission they made this morning.
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    #: When each track last moved. TWO COLUMNS, NOT ONE `updated_at`, because the rows answer
+    #: different questions — "how long has this been sitting with the borrower" is about our track and
+    #: must not be reset by the lender answering, or by any other edit to the row.
+    prep_status_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    lender_status_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    #: The CURRENT verdict — `{status, source_kind, source_date, round_id?, note?, recorded_by,
+    #: recorded_at}` — with every past one in `condition_events`. THE ONLY THING THAT MAY SET
+    #: `cleared` or `waived` (ADR-404, ADR-408): a row whose `lender_status` is cleared and whose
+    #: `verdict` is NULL is a bug, not a state.
+    #:
+    #: NPI IN ONE KEY ONLY. `note` is what a processor typed; `source_kind` and `source_date` are the
+    #: provenance an analyst legitimately asks about, so `readonly.conditions` projects exactly those
+    #: two and a test pins it to them — a later `verdict ->> 'note'` would otherwise pass every
+    #: existing guard, because the column cannot go in `NEVER_EXPOSED` while the view names it at all.
+    verdict: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
+    #: The processor's own answer to "who has to act", which OUTRANKS `owner_hint` (default A2). The
+    #: effective owner is this if set, else the hint — stated once in
+    #: `services/conditions.py::effective_owner` and once in SQL beside it, and the two change
+    #: together.
+    owner_override: Mapped[OwnerHint | None] = mapped_column(
+        str_enum(OwnerHint, name="owner_override"), nullable=True
+    )
+
+    #: Set when a reworded pair is confirmed: this condition is Replaced, and this points at the one
+    #: that carries on from it. SELF-REFERENTIAL AND RESTRICT: the successor must not be deletable out
+    #: from under a row whose whole meaning is "see that one instead". Nothing disappears (§6 rule 3),
+    #: so the replaced row stays, struck through, with its history intact.
+    superseded_by_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("conditions.id", ondelete="RESTRICT"), nullable=True
     )
 
     loan_file: Mapped["LoanFile"] = relationship()

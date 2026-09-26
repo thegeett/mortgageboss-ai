@@ -413,7 +413,16 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # `text_fingerprint` is deliberately NOT excluded: it is a sha256, and it is what lets the
     # readonly layer answer "did this condition come back?" without reproducing a word of it.
     "condition_rounds": frozenset({"raw_text", "header", "draft_rows", "parse_report"}),
-    "conditions": frozenset({"verbatim_text", "underwriter_notes"}),
+    # LP-912 adds `prep_note` and `verdict`. `prep_note` is a short line a processor typed about one
+    # borrower's file, which is where a name arrives in a shape no scrubber predicts — it is in
+    # `NEVER_EXPOSED` as well, because it appears in no view's text and the stronger guard therefore
+    # costs nothing. `verdict` CANNOT have that protection: the view legitimately projects
+    # `verdict ->> 'source_kind'` and `verdict ->> 'source_date'` (the provenance that makes "cleared"
+    # checkable), and the never-exposed check is a `\bverdict\b` search of the select list. So it is
+    # excluded here and pinned by `test_the_conditions_view_touches_verdict_only_for_its_provenance`,
+    # which is what stops a later `verdict ->> 'note'` — the processor's own words — from passing every
+    # guard in this file.
+    "conditions": frozenset({"verbatim_text", "underwriter_notes", "prep_note", "verdict"}),
     # Unlike `finding_events.detail`, which is documented PII-safe, this one holds WHAT CHANGED —
     # an edited wording, an appended note — which is the lender's text.
     "condition_events": frozenset({"detail"}),
@@ -546,6 +555,13 @@ NEVER_EXPOSED: tuple[tuple[str, str], ...] = (
     # forces a decision on each, and `tests/test_condition_readonly_npi.py` asserts their absence
     # from the OUTPUT columns of their own views — which is the property that actually matters.
     ("conditions", "verbatim_text"),
+    # LP-912, and the strong form is available here where it is not for `verdict` one entry up in
+    # EXCLUDED. `prep_note` is prose a processor typed about one borrower's file, and no view names it
+    # at all — not even in a predicate — so asserting its absence from every view costs no metric. The
+    # decision cannot then be undone quietly: a later migration adding it would pass both drift tests
+    # and turn the EXCLUDED entry into a stale comment, which is the argument `documents.document_name`
+    # and `upload_links.token_hash` are both here for.
+    ("conditions", "prep_note"),
     # LP-810 — the same content one step earlier, and here for the same strong-form reason: an email
     # body is prose about a named person, which no scrub matches.
     ("email_draft_prose", "body"),

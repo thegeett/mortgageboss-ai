@@ -89,6 +89,21 @@ _CASES: tuple[tuple[str, type[StrEnum]], ...] = (
     ("ck_condition_rounds_conditionroundcompleteness", ConditionRoundCompleteness),
     ("ck_condition_rounds_conditionsheetformat", ConditionSheetFormat),
     ("ck_lender_condition_codes_lendercodestatus", LenderCodeStatus),
+    #: LP-912's two NEW `OwnerHint` columns, `waiting_on` and `owner_override`. They are CREATED rather
+    #: than swapped, and they exist under names of their own because `str_enum` derives a constraint
+    #: name from the ENUM — so three columns sharing `OwnerHint` on one table would otherwise all be
+    #: `ck_conditions_ownerhint`, which is that helper's own documented collision.
+    #:
+    #: LISTED HERE BECAUSE THE NEXT `OwnerHint` MEMBER IS THE FAILURE. Adding one would be swapped into
+    #: `ck_conditions_ownerhint` by whoever remembered that constraint, and silently rejected by these
+    #: two — one enum, three columns, two of them refusing the value. That is the LP-637 shape with the
+    #: mismatch inside a single table.
+    #:
+    #: Their form is `x IS NULL OR x IN (...)`, the same as the two `lender_condition_codes` hints
+    #: excluded above — but these resolve, because the reader takes the value tuple from the `_in(...)`
+    #: call rather than from the whole expression.
+    ("ck_conditions_waiting_on", OwnerHint),
+    ("ck_conditions_owner_override", OwnerHint),
 )
 
 

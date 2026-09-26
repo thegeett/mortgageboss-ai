@@ -30,6 +30,11 @@ const SOURCE_LABEL: Record<OwnerHintSource, string> = {
   bucket: "from bucket",
   code_map: "from code map",
   none: "",
+  // LP-912, A2 — AND IT IS THE ONE THAT IS NOT EVIDENCE. The other three name where a GUESS came
+  // from, which is why they read "from …": a marker the lender typed, a heading, a code-map default.
+  // A manual owner is the processor's decision and outranks all of them, so it says so rather than
+  // citing a source. "set by hand" over "from a person", because the point is that somebody chose it.
+  manual: "set by hand",
 };
 
 /**

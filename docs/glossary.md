@@ -136,6 +136,36 @@ terms (LP-903):
   some** of it. Only a full list can support "this one is gone, so it probably
   cleared"; a partial source may add and update, never remove or clear (ADR-404).
 
+Stage 2 makes the two statuses move, which needs the words for them (ADR-408):
+
+- **Our status / preparation track** — what *we* are doing about a condition: To
+  do, Waiting on someone, Ready to send, Sent to lender. It says nothing about
+  whether the lender has accepted anything. Moving *forward* needs no reason;
+  moving *back* needs one, because backwards is something having gone wrong and
+  the reason is the only record of what.
+- **The lender's status** — what the *lender* said: Open, Came back, Cleared,
+  Waived, Replaced. A condition can be fully prepared and submitted and still be
+  Open, which is why the two are tracked separately.
+- **Verdict** — the record of *who said so and where*: the answer (cleared,
+  waived, came back), where it was said (portal, email, phone, a round
+  comparison, an underwriter's note), **the date the lender said it** — never
+  today by default — and who recorded it. **Nothing may say a condition is
+  Cleared or Waived without one** (ADR-404, ADR-408). It is what makes "cleared
+  on the 12th" checkable months later: it says where to look.
+- **Came back** — the lender has answered and the answer is no, so the work is
+  back with the processor. Usually set by the lender's own new dated
+  **underwriter note**, which is the lender reopening the condition in its own
+  words.
+- **Waived** — the lender dropped the condition. Cleared and waived are different
+  facts and both need a verdict: one says the demand was met, the other that it
+  no longer applies.
+- **Replaced (superseded)** — the lender reworded a condition and the processor
+  confirmed the two are the same demand. The old one stays, struck through,
+  pointing at the one that carries on from it. Nothing disappears.
+- **Probably cleared** — a *suggestion*, never a status: a condition that was open
+  and is absent from a new **full list**. It is always a question with a button,
+  and confirming it is what records the verdict (ADR-404).
+
 ### Rules and verification
 
 - **Investor guidelines** — the baseline rulebooks: the Fannie Mae Selling Guide
