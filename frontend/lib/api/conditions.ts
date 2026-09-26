@@ -16,6 +16,7 @@ import type {
   AddConditionInput,
   Condition,
   ConditionEnrichResult,
+  ConditionEvent,
   ConditionImportResult,
   ConditionRound,
   ConditionRoundCompleteness,
@@ -32,6 +33,8 @@ const PARSE_POLL_MS = 2_000;
 export const conditionRoundsQueryKey = (fileId: string) => ["condition-rounds", fileId] as const;
 export const conditionRoundQueryKey = (roundId: string) => ["condition-round", roundId] as const;
 export const conditionsQueryKey = (fileId: string) => ["conditions", fileId] as const;
+export const conditionRoundEventsQueryKey = (roundId: string) =>
+  ["condition-round-events", roundId] as const;
 
 const filePath = (fileId: string) => `${API_V1}/loan-files/${fileId}`;
 const roundPath = (roundId: string) => `${API_V1}/condition-rounds/${roundId}`;
@@ -139,6 +142,31 @@ export function useConditionRound(roundId: string | null) {
     enabled: Boolean(roundId),
     refetchInterval: (query) =>
       query.state.data && isWorthPolling(query.state.data) ? PARSE_POLL_MS : false,
+  });
+}
+
+export async function fetchRoundEvents(roundId: string): Promise<ConditionEvent[]> {
+  return (await apiClient.get<ConditionEvent[]>(`${roundPath(roundId)}/events`)).data;
+}
+
+/**
+ * One round's history, oldest first — the History section of the round-details sheet (S1-09).
+ *
+ * ⚠️ NOT POLLED, AND NOT PART OF THE ROUND. `condition_events` is APPEND-ONLY, so a history cannot
+ * change under a reader except by something else on this screen writing — and every such write
+ * already invalidates through `invalidateRound`. Polling it would ask a question whose answer only
+ * changes when we change it.
+ *
+ * ⚠️ FETCHED SEPARATELY RATHER THAN EMBEDDED IN THE ROUND, because the round is fetched constantly —
+ * the strip, the dashboard, every mutation's invalidation — and the history is read only when a
+ * processor opens one sheet. Attaching it to `ConditionRoundPublic` would put a second query behind
+ * every round read on the tab to serve a panel almost nobody has open.
+ */
+export function useRoundEvents(roundId: string | null) {
+  return useQuery({
+    queryKey: conditionRoundEventsQueryKey(roundId ?? ""),
+    queryFn: () => fetchRoundEvents(roundId as string),
+    enabled: Boolean(roundId),
   });
 }
 

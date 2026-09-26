@@ -38,6 +38,7 @@ from app.schemas.condition import (
     ConditionCreateRequest,
     ConditionDraftUpdate,
     ConditionEnrichResult,
+    ConditionEventPublic,
     ConditionImportResult,
     ConditionPasteRequest,
     ConditionPublic,
@@ -64,6 +65,7 @@ from app.services.condition_rounds import (
 )
 from app.services.conditions import (
     appearances_for_file,
+    events_for_round,
     list_conditions,
     list_rounds,
     rows_on_sheet,
@@ -586,6 +588,34 @@ async def discard_condition_round(
     await db.commit()
     await db.refresh(round_)
     return await _round_card(db, round_)
+
+
+@rounds_router.get("/{round_id}/events", response_model=list[ConditionEventPublic])
+async def list_round_events(round_: ScopedRound, db: DbSession) -> list[ConditionEventPublic]:
+    """One round's history, oldest first — the History section of the round-details sheet (S1-09).
+
+    ⚠️ THE READER LP-904 BUILT AN INDEX FOR AND NOBODY WROTE. `ix_condition_events_round_occurred`
+    has carried the comment "One round's history in time order — the shape the round-details sheet
+    reads (S1-09)" since the table was created, and no route, schema or service ever read it. So the
+    index paid a write on every event insert — per created condition, per seen-again, per note, per
+    round transition — to serve a query that did not exist. This is that query.
+
+    ⚠️ ITS SIBLING IS STILL UNJUSTIFIED, AND SAYING SO IS THE POINT.
+    `ix_condition_events_condition_occurred` is `(condition_id, occurred_at)` — one CONDITION's
+    history — which nothing in this codebase asks for. It does not inherit this route's justification.
+    Either something reads it, or it should go in a follow-up migration; it is named here so the next
+    person does not read this route as covering both.
+
+    ⚠️ `detail` DOES NOT TRAVEL. `ConditionEventPublic` projects named scalars only — the column is
+    classified NPI ("what changed, which is the lender's text"), `readonly.condition_events` drops it
+    whole rather than scrubbing it, and `condition_import.py` states the rule at its own write site.
+    A history panel is not a reason to open a door the readonly layer deliberately closed.
+
+    Scoped by `get_scoped_round`, which filters `company_id` inside the statement — so another
+    tenant's round is unfetchable rather than fetched and then refused.
+    """
+    events = await events_for_round(db, round_id=round_.id)
+    return [ConditionEventPublic.from_model(event) for event in events]
 
 
 @rounds_router.post(

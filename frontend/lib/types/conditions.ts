@@ -95,6 +95,54 @@ export type ConditionSheetFormat =
 /** How one arrival of a round reached us. A round has a LIST — a paste can be enriched by its PDF. */
 export type ConditionSourceKind = "pdf_upload" | "email" | "paste" | "manual";
 
+/**
+ * What happened to a round — the history on the round-details sheet (S1-09).
+ *
+ * Stage 1 writes all of these and nothing else. Note what is ABSENT and stays absent until Stage 2:
+ * there is no `condition_cleared` and no `round_compared`, because Stage 1 cannot produce them and
+ * an enum member nothing writes is an invitation (ADR-404).
+ */
+export type ConditionEventKind =
+  | "round_received"
+  | "round_parsed"
+  | "round_parse_failed"
+  | "round_reparse_requested"
+  | "round_imported"
+  | "round_discarded"
+  | "round_enriched"
+  | "condition_created"
+  | "condition_seen_again"
+  | "condition_note_added"
+  | "condition_edited";
+
+/**
+ * One line of a round's history (S1-09).
+ *
+ * ⚠️ THE SERVER PROJECTS NAMED SCALARS AND NEVER `detail`, so this carries a wide set of optional
+ * fields rather than a payload. `ConditionEvent.detail` is classified NPI — "what changed, which is
+ * the lender's text" — and the readonly layer drops it whole, so the history is composed from counts
+ * and identifiers instead.
+ *
+ * ⚠️ `actor_user_id` IS NULL FOR A SYSTEM EVENT, and that is a fact rather than missing data: a parse
+ * task has no actor, and naming the processor who uploaded the sheet would make the trail say
+ * something untrue.
+ */
+export interface ConditionEvent {
+  kind: ConditionEventKind;
+  occurred_at: string;
+  actor_user_id: string | null;
+  source_kind: string | null;
+  reader: string | null;
+  reader_version: string | null;
+  rows: number | null;
+  duplicates_dropped: number | null;
+  round_number: number | null;
+  created: number | null;
+  seen_again: number | null;
+  from_status: string | null;
+  filled_from: string | null;
+}
+
 /** The paste endpoint's ceiling, enforced by the request schema (spec §LP-907). */
 export const MAX_PASTE_CHARS = 100_000;
 

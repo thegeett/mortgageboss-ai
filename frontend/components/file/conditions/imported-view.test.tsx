@@ -15,11 +15,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const attachMutate = vi.fn();
 const conditionsQuery = vi.fn();
+const eventsQuery = vi.fn();
 
 vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/conditions")>()),
   useConditions: () => conditionsQuery(),
   useAttachPdf: () => ({ mutate: attachMutate, isPending: false }),
+  // `RoundDetailsSheet` reads the round's history now. An explicit mock object resolves a missing
+  // export to `undefined`, so omitting this throws on every render of the sheet — the fourth time
+  // this shape has cost a run tonight, so it is pre-empted rather than rediscovered.
+  useRoundEvents: () => eventsQuery(),
 }));
 
 vi.mock("@/lib/toast", () => ({
@@ -123,6 +128,7 @@ const handlers = { onPaste: vi.fn(), onAddByHand: vi.fn(), onUploadAnother: vi.f
 
 function show(rounds: ConditionRound[], conditions: Condition[] = [condition()]) {
   conditionsQuery.mockReturnValue({ data: conditions, isPending: false });
+  eventsQuery.mockReturnValue({ data: [], isPending: false, isError: false });
   render(<ImportedView fileId="f1" rounds={rounds} {...handlers} />);
 }
 
@@ -337,14 +343,69 @@ describe("the round-details sheet (S1-09)", () => {
     expect(screen.queryByText(/Filled the codes/)).toBeNull();
   });
 
-  it("⚠️ has no History section, because no endpoint serves one", () => {
-    // S1-09 draws three history entries from `condition_events`. There is no route, no schema and no
-    // service that reads them — while LP-904 built `ix_condition_events_round_occurred` FOR this
-    // screen. An empty History panel would say "this round has no history", which is false; the
-    // section arrives with `GET /condition-rounds/{id}/events`.
-    show([round()]);
+  it("⚠️ shows the History, and this test asserted the opposite one commit ago", () => {
+    // It said "has no History section, because no endpoint serves one" — true at the time: there was
+    // no route, no schema and no service reading `condition_events`, while LP-904 had built
+    // `ix_condition_events_round_occurred` FOR this screen and paid a write on every event insert to
+    // serve a query nobody made. `GET /condition-rounds/{id}/events` is that query.
+    //
+    // A test pinning an absence outlives the absence, which is the same shape as the comment above
+    // it that claimed the mortgagee clause was missing from the server.
+    eventsQuery.mockReturnValue({
+      data: [
+        {
+          kind: "round_received",
+          occurred_at: "2026-09-10T16:20:00Z",
+          actor_user_id: null,
+          source_kind: "paste",
+          reader: null,
+          reader_version: null,
+          rows: 6,
+          duplicates_dropped: null,
+          round_number: null,
+          created: null,
+          seen_again: null,
+          from_status: null,
+          filled_from: null,
+        },
+        {
+          kind: "round_imported",
+          occurred_at: "2026-09-10T16:22:00Z",
+          actor_user_id: "u1",
+          source_kind: null,
+          reader: null,
+          reader_version: null,
+          rows: 6,
+          duplicates_dropped: null,
+          round_number: 2,
+          created: 0,
+          seen_again: 6,
+          from_status: null,
+          filled_from: null,
+        },
+      ],
+      isPending: false,
+      isError: false,
+    });
+    render(<ImportedView fileId="f1" rounds={[round()]} {...handlers} />);
     fireEvent.click(screen.getByRole("button", { name: "Letter details →" }));
-    expect(screen.queryByText(/^History$/)).toBeNull();
+
+    expect(screen.getByText("History")).toBeDefined();
+    // ⚠️ THE NUMBERS, NOT JUST THE LABELS. Each line is composed from projected scalars precisely
+    // because `detail` is NPI and never travels — so asserting only that "Imported" appears would
+    // pass for a version that rendered a kind map and dropped the counts the design asks for.
+    expect(screen.getByText("Pasted · 6 conditions read")).toBeDefined();
+    expect(screen.getByText("Imported as round 2: 0 new, 6 seen again")).toBeDefined();
+  });
+
+  it("⚠️ says the history could not be loaded rather than showing an empty one", () => {
+    // A round always has at least its `ROUND_RECEIVED` event, so "no history" is not a real state.
+    // Rendering nothing on a failed fetch would make a broken endpoint look like a quiet round.
+    eventsQuery.mockReturnValue({ data: undefined, isPending: false, isError: true });
+    render(<ImportedView fileId="f1" rounds={[round()]} {...handlers} />);
+    fireEvent.click(screen.getByRole("button", { name: "Letter details →" }));
+
+    expect(screen.getByText(/The history couldn’t be loaded/)).toBeDefined();
   });
 });
 

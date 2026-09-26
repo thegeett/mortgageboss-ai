@@ -33,6 +33,7 @@ from pathlib import Path
 
 import pytest
 from app.models.condition import BucketKind, ConditionOrigin, OwnerHint, OwnerHintSource
+from app.models.condition_event import ConditionEventKind
 from app.models.condition_round import (
     ConditionRoundCompleteness,
     ConditionRoundStatus,
@@ -60,6 +61,11 @@ _MIRRORED: dict[str, type[StrEnum]] = {
     "ConditionRoundCompleteness": ConditionRoundCompleteness,
     "ConditionSheetFormat": ConditionSheetFormat,
     "ConditionSourceKind": ConditionSourceKind,
+    #: Added with the events endpoint (LP-909 §4). The round-details sheet branches on `kind` to
+    #: compose each history line, so a member the client cannot type renders as an unrecognised
+    #: value — and this enum gained `round_reparse_requested` mid-stage, which is exactly the drift
+    #: this list exists to catch.
+    "ConditionEventKind": ConditionEventKind,
 }
 
 #: `export type Name = "a" | "b";` — on one line when short, wrapped across many when biome decides

@@ -126,6 +126,38 @@ async def appearances_for_file(
     )
 
 
+async def events_for_round(db: AsyncSession, *, round_id: UUID) -> list[ConditionEvent]:
+    """One round's history, oldest first — the history on screen S1-09.
+
+    ⚠️ THE FIRST READER `ix_condition_events_round_occurred` HAS EVER HAD, AND THAT IS THE POINT.
+    LP-904 declared that index with the comment "One round's history in time order — the shape the
+    round-details sheet reads (S1-09)", and no such reader was ever written. So the index paid a
+    write on every event insert — per created condition, per seen-again, per note, per round
+    transition — to serve a query nobody made. `(round_id, occurred_at)` is exactly this ordering, so
+    this function is what finally makes that cost buy something.
+
+    ⚠️ ITS SIBLING STILL HAS NO READER. `ix_condition_events_condition_occurred` is
+    `(condition_id, occurred_at)` — a single CONDITION's history in time order, which is a different
+    question from a round's and which nothing in this codebase asks. It does not get this function's
+    justification, and it is named here so the next person to look does not assume it did.
+
+    ⚠️ OLDEST FIRST, WHICH IS THE OPPOSITE OF THE ROUND STRIP. A history is read downwards as a
+    sequence of events — pasted, then imported, then the PDF attached — so reversing it would make
+    the story run backwards. `list_rounds` is newest-first because a strip answers "what is current".
+
+    ⚠️ NO COMPANY FILTER HERE, AND THAT IS NOT AN OMISSION. The caller resolves the round through
+    `get_scoped_round`, which filters `company_id` INSIDE its statement — so an id that reaches this
+    function has already been proven to belong to the caller. Adding a second filter would read as
+    the gate rather than as a belt, and the gate is the one that must not be forgotten.
+    """
+    result = await db.execute(
+        select(ConditionEvent)
+        .where(ConditionEvent.round_id == round_id)
+        .order_by(ConditionEvent.occurred_at, ConditionEvent.id)
+    )
+    return list(result.scalars().all())
+
+
 def rows_on_sheet(round_: ConditionRound, imported_counts: dict[UUID, int]) -> int:
     """How many conditions this round carried — "11 on sheet" on the round card.
 

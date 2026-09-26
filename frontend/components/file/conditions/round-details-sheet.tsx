@@ -1,7 +1,9 @@
 "use client";
 
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import type { ConditionEnrichResult, ConditionRound } from "@/lib/types/conditions";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useRoundEvents } from "@/lib/api/conditions";
+import type { ConditionEnrichResult, ConditionEvent, ConditionRound } from "@/lib/types/conditions";
 import { CircleCheck } from "lucide-react";
 import { LetterDetails } from "./review-side-panel";
 
@@ -73,16 +75,17 @@ function enrichSummary(result: ConditionEnrichResult): string {
  * appends rather than replaces. That ordering is the visible evidence that one round gained a
  * second arrival instead of a second round being created.
  *
- * ⚠️ NO HISTORY SECTION, AND ITS ABSENCE IS RECORDED RATHER THAN STUBBED. The design shows three
- * entries built from the round's `condition_events` — "PDF attached — letter details filled",
- * "Imported: 0 new, 6 seen again", "Pasted (just some) · 6 conditions read". There is no endpoint:
- * `ConditionEvent` appears nowhere in `app/api/conditions.py` or `app/schemas/condition.py`, and no
- * service reads events for a round. LP-904 built `ix_condition_events_round_occurred` FOR this
- * screen — its comment says "the shape the round-details sheet reads (S1-09)" — so the index is
- * paying write cost on every event insert for a reader that was never written.
+ * ⚠️ THE HISTORY SECTION EXISTS NOW, AND THIS COMMENT USED TO EXPLAIN WHY IT COULD NOT. It said
+ * there was no endpoint — true when written: `ConditionEvent` appeared nowhere in the API or the
+ * schemas, and no service read events for a round, while LP-904 had built
+ * `ix_condition_events_round_occurred` FOR this screen and paid a write on every event insert to
+ * serve a query nobody made. `GET /condition-rounds/{id}/events` is that query, and the index
+ * finally has its first reader.
  *
- * Rendering an empty History panel would make a missing endpoint look like a round with no history,
- * which is a different and false statement. It arrives with `GET /condition-rounds/{id}/events`.
+ * ⚠️ EVERY LINE IS COMPOSED FROM NAMED SCALARS, NEVER FROM `detail`. That column is NPI-classified —
+ * "what changed, which is the lender's text" — and the readonly layer drops it whole, so the server
+ * projects an allow-list and the sentences are built here from counts and identifiers. A history
+ * panel is not a reason to open a door the readonly layer deliberately closed.
  */
 export function RoundDetailsSheet({
   round,
@@ -135,7 +138,117 @@ export function RoundDetailsSheet({
         <div className="mt-3">
           <LetterDetails round={round} />
         </div>
+
+        <RoundHistory roundId={round.id} />
       </SheetContent>
     </Sheet>
+  );
+}
+
+/** `2026-09-10T16:31:00Z` → `09/10 4:31 PM`, the form S1-09's history lines use. */
+function historyStamp(iso: string): string {
+  const when = new Date(iso);
+  if (Number.isNaN(when.getTime())) return iso;
+  const month = `${when.getMonth() + 1}`.padStart(2, "0");
+  const day = `${when.getDate()}`.padStart(2, "0");
+  const time = when.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  return `${month}/${day} ${time}`;
+}
+
+/**
+ * One history line, in the processor's words (S1-09).
+ *
+ * ⚠️ COMPOSED FROM SCALARS, WHICH IS WHY EACH KIND GETS ITS OWN SENTENCE RATHER THAN A LABEL MAP. The
+ * design's lines carry the numbers — "Imported: 0 new, 6 seen again", "Pasted (just some) · 6
+ * conditions read" — and those come from `created`/`seen_again` and `source_kind`/`rows`. A map of
+ * kind → string could not say them.
+ *
+ * ⚠️ EVERY FIELD IS OPTIONAL AND THE FALLBACK IS THE BARE EVENT, NOT A GUESS. The server projects
+ * only what a writer actually stored, and `_as_int` returns null rather than coercing — so a count
+ * can legitimately be absent, and the line says what happened without inventing a number for it.
+ */
+function historyLine(event: ConditionEvent): string {
+  const { kind, rows, created, seen_again, round_number, reader, from_status } = event;
+
+  switch (kind) {
+    case "round_received":
+      return event.source_kind === "paste"
+        ? `Pasted${rows === null ? "" : ` · ${rows} conditions read`}`
+        : "Condition sheet received";
+    case "round_parsed":
+      return reader === "split"
+        ? `Split by AI${rows === null ? "" : ` · ${rows} rows`}`
+        : `Read by the rules${reader ? ` (${reader})` : ""}${rows === null ? "" : ` · ${rows} rows`}`;
+    case "round_parse_failed":
+      return "Could not be read";
+    case "round_reparse_requested":
+      return `Read again${from_status ? ` (was ${from_status.replace(/_/g, " ")})` : ""}`;
+    case "round_imported":
+      return `Imported${round_number === null ? "" : ` as round ${round_number}`}${
+        created === null && seen_again === null
+          ? ""
+          : `: ${created ?? 0} new, ${seen_again ?? 0} seen again`
+      }`;
+    case "round_discarded":
+      return "Discarded";
+    case "round_enriched":
+      return "PDF attached — letter details filled";
+    case "condition_created":
+      return "A condition was added";
+    case "condition_seen_again":
+      return "A condition was seen again";
+    case "condition_note_added":
+      return "An underwriter note was added";
+    case "condition_edited":
+      return "A condition was edited";
+    default:
+      // ⚠️ A KIND THIS BUNDLE HAS NOT HEARD OF DEGRADES TO SOMETHING HONEST rather than rendering
+      // `undefined`. The enum mirror guard makes drift unlikely in CI; it cannot guard a browser tab
+      // running against a backend one deploy ahead.
+      return "Something happened to this round";
+  }
+}
+
+/**
+ * The round's history (S1-09).
+ *
+ * ⚠️ AN EMPTY LIST AND A FAILED FETCH SAY DIFFERENT THINGS, AND NEITHER IS SILENCE. A round always
+ * has at least its `ROUND_RECEIVED` event, so "no history" is not a real state — if the list comes
+ * back empty something is wrong, and saying nothing would make a broken endpoint look like a quiet
+ * round.
+ */
+function RoundHistory({ roundId }: { roundId: string }) {
+  const events = useRoundEvents(roundId);
+
+  return (
+    <div className="mt-3">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">History</p>
+
+      {events.isPending ? (
+        <div className="mt-1 flex flex-col gap-1" aria-busy>
+          <Skeleton className="h-3 w-3/4" />
+          <Skeleton className="h-3 w-2/3" />
+        </div>
+      ) : events.isError ? (
+        <p className="mt-1 text-xs text-muted-foreground">
+          The history couldn’t be loaded. Nothing about the round has changed.
+        </p>
+      ) : (
+        <ol className="mt-1 flex flex-col gap-1">
+          {(events.data ?? []).map((event, index) => (
+            <li
+              key={`${event.kind}-${event.occurred_at}-${index}`}
+              className="flex flex-wrap gap-1.5 text-xs text-foreground-2"
+            >
+              <span className="font-mono text-muted-foreground">
+                {historyStamp(event.occurred_at)}
+              </span>
+              <span>·</span>
+              <span>{historyLine(event)}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
   );
 }

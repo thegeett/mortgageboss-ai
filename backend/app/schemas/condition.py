@@ -46,6 +46,7 @@ from app.models.condition import (
     OwnerHint,
     OwnerHintSource,
 )
+from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_round import (
     ConditionRound,
     ConditionRoundCompleteness,
@@ -130,6 +131,93 @@ class ConditionSourcePublic(BaseModel):
             inbound_attachment_id=source.get("inbound_attachment_id"),
             user_id=source.get("user_id"),
             has_bytes=bool(source.get("storage_path")),
+        )
+
+
+def _as_int(value: object) -> int | None:
+    """An int from `detail`, or None — never a coercion and never a raise.
+
+    `detail` is free-form JSONB written by six different call sites. A history panel must not 500
+    because one of them stored a string where this reads a count, and a coerced `"6"` → 6 would be
+    this layer inventing agreement that the writers do not have.
+    """
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _as_str(value: object) -> str | None:
+    """A string from `detail`, or None. Same reasoning as `_as_int`."""
+    return value if isinstance(value, str) else None
+
+
+class ConditionEventPublic(BaseModel):
+    """One thing that happened to a round — the history on screen S1-09.
+
+    ⚠️ NAMED SCALARS, NEVER `detail` ITSELF, AND THIS IS THE WHOLE DESIGN OF THE SCHEMA.
+    `ConditionEvent.detail` is classified NPI: the round model calls it "what changed, which is the
+    lender's text", `readonly.condition_events` drops it whole rather than scrubbing it, and
+    `condition_import.py` states the rule at its own write site — "WHAT CHANGED, NOT THE WORDING".
+    Passing the dict through would export a column the readonly layer deliberately refuses, through a
+    door built for a history panel.
+
+    So each field below is projected BY NAME from the keys the writers actually use, and anything
+    else they put there stays server-side. The set is the union of what the six writers store:
+    `source_kind`/`bytes` on receipt, `reader`/`reader_version`/`rows`/`duplicates_dropped` on a
+    parse, `round_number`/`rows`/`created`/`seen_again` on import, `from_status` on a reparse,
+    `filled_from` on an enrich, `rows` on a discard.
+
+    ⚠️ `actor_user_id` IS NULL FOR A SYSTEM EVENT, DELIBERATELY. The model says why: "a parse task has
+    no actor, and naming the processor who uploaded the sheet as the actor of the parse would make the
+    trail say something untrue." The history must therefore distinguish "the reader did this" from "a
+    person did this" rather than attributing everything to whoever touched the round last.
+
+    ⚠️ NO `id`. A history line is not addressable — nothing links to one, and `condition_events` is
+    append-only, so there is no update or delete for an id to name. Adding one would invite a caller
+    to build a URL for a resource that has no endpoint.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    kind: ConditionEventKind
+    occurred_at: datetime
+    #: Null for a system event — see the class docstring.
+    actor_user_id: UUID | None = None
+
+    #: How the round arrived (`ROUND_RECEIVED`): `pdf_upload`, `email`, `paste` or `manual`.
+    source_kind: str | None = None
+    #: Which reader ran, and its version (`ROUND_PARSED`). `"split"` after an AI split.
+    reader: str | None = None
+    reader_version: str | None = None
+    #: How many rows the event concerned — read on a parse, imported on an import, thrown away on a
+    #: discard. The three are different facts under one key because the writers named it that way.
+    rows: int | None = None
+    duplicates_dropped: int | None = None
+    #: What an import did (`ROUND_IMPORTED`) — the numbers S1-09's line quotes.
+    round_number: int | None = None
+    created: int | None = None
+    seen_again: int | None = None
+    #: What a reparse came back from (`ROUND_REPARSE_REQUESTED`).
+    from_status: str | None = None
+    #: What an enrich filled the round from (`ROUND_ENRICHED`).
+    filled_from: str | None = None
+
+    @classmethod
+    def from_model(cls, event: ConditionEvent) -> "ConditionEventPublic":
+        """Project the allow-list. Anything else in `detail` does not travel."""
+        detail = event.detail or {}
+        return cls(
+            kind=event.kind,
+            occurred_at=event.occurred_at,
+            actor_user_id=event.actor_user_id,
+            source_kind=_as_str(detail.get("source_kind")),
+            reader=_as_str(detail.get("reader")),
+            reader_version=_as_str(detail.get("reader_version")),
+            rows=_as_int(detail.get("rows")),
+            duplicates_dropped=_as_int(detail.get("duplicates_dropped")),
+            round_number=_as_int(detail.get("round_number")),
+            created=_as_int(detail.get("created")),
+            seen_again=_as_int(detail.get("seen_again")),
+            from_status=_as_str(detail.get("from_status")),
+            filled_from=_as_str(detail.get("filled_from")),
         )
 
 
