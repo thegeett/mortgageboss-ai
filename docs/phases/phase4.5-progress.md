@@ -65,8 +65,7 @@ differences records each difference without stopping on any.
 - **Known gaps left in place:** the stranded-`PARSING` reaper (LP-905, LP-908); unrouted-message
   forwarding (LP-905); "Ignore this line" (LP-909 §4); `failure_kind` in the history (LP-909 §4);
   `ix_condition_events_condition_occurred` has no reader (LP-909 §4).
-- **Visual-check misses still open** — screen by screen in LP-909 §5. After three passes: round-card
-  counts (S1-05, S1-08) need a joined field on the round payload; S1-11's warnings and dateless note
+- **Visual-check misses still open** — screen by screen in LP-909 §5. After four passes: S1-11's warnings and dateless note
   chips need structured reader warnings (**LP-930**); S1-07's just-some callout; "Ignore this line"
   (S1-10). S1-13 now asks attach-or-new and links to the round, but lives behind the `receiving`
   switch, which v1 turns off.
