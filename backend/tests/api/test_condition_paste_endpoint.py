@@ -91,6 +91,27 @@ async def test_a_paste_comes_back_as_a_finished_draft(
     assert body["date_printed"] is None
 
 
+async def test_a_paste_by_display_id_lands_on_that_file(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """The conditions tab posts to `/loan-files/<[id] from the URL>/...`, and the URL carries the
+    display id. The path was typed `UUID`, so a paste from the real screen was a 422."""
+    company, token = await _user(db_session, slug="paste-display-id")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+
+    response = await client.post(
+        _url(loan_file.display_id),
+        headers=_auth(token),
+        json={"text": portal_excerpt(), "completeness": ConditionRoundCompleteness.PARTIAL.value},
+    )
+
+    assert response.status_code == 201, response.text
+    listed = await client.get(
+        f"/api/v1/loan-files/{loan_file.id}/condition-rounds", headers=_auth(token)
+    )
+    assert [r["id"] for r in listed.json()] == [response.json()["id"]]
+
+
 async def test_text_the_rules_cannot_split_comes_back_parsing(
     client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -449,3 +449,46 @@ async def test_the_reads_require_authentication(
         await client.get(f"/api/v1/loan-files/{loan_file.id}/condition-rounds")
     ).status_code == 401
     assert (await client.get(f"/api/v1/condition-rounds/{round_.id}")).status_code == 401
+
+
+async def test_the_reads_accept_the_display_id_the_page_navigates_by(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """THE URL THE CONDITIONS TAB ACTUALLY BUILDS. The dashboard and intake navigate to
+    `/loan-files/LF-XXXX`, and the tab passes that `[id]` segment straight to these reads. The
+    dependency typed the segment as `UUID`, so every real visit was a 422 raised before the handler
+    ran — no log line, and staging showed "The conditions couldn't be loaded" on every file. Every
+    test above used `loan_file.id`, which is why none of them saw it.
+
+    The body is asserted equal to the UUID form, not merely 200: a display id resolving to some other
+    file would pass a status check.
+    """
+    loan_file, _round, token = await _imported_round(db_session, slug="read-display-id")
+    display_id = loan_file.display_id  # type: ignore[attr-defined]
+    uuid_id = loan_file.id  # type: ignore[attr-defined]
+
+    for tail in ("condition-rounds", "conditions"):
+        by_display = await client.get(
+            f"/api/v1/loan-files/{display_id}/{tail}", headers=_auth(token)
+        )
+        by_uuid = await client.get(f"/api/v1/loan-files/{uuid_id}/{tail}", headers=_auth(token))
+
+        assert by_display.status_code == 200, by_display.text
+        assert by_display.json() == by_uuid.json()
+        assert by_display.json(), f"{tail}: an empty list would make the equality vacuous"
+
+
+async def test_another_companys_display_id_is_404(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Widening the path from `UUID` to either form must not widen the tenant gate: a display id is
+    short and guessable, so it is the form an enumeration would try."""
+    loan_file_a, _round, _token_a = await _imported_round(db_session, slug="read-display-a")
+    _company_b, token_b = await _user(db_session, slug="read-display-b")
+    display_id = loan_file_a.display_id  # type: ignore[attr-defined]
+
+    for tail in ("condition-rounds", "conditions"):
+        response = await client.get(
+            f"/api/v1/loan-files/{display_id}/{tail}", headers=_auth(token_b)
+        )
+        assert response.status_code == 404, response.text

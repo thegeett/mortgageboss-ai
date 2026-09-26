@@ -214,7 +214,7 @@ ScopedRound = Annotated[ConditionRound, Depends(get_scoped_round)]
 
 
 async def get_scoped_loan_file_by_id(
-    loan_file_id: UUID, db: DbSession, current_user: CurrentUser
+    loan_file_id: str, db: DbSession, current_user: CurrentUser
 ) -> LoanFile:
     """The loan file in the path, scoped to the caller's company.
 
@@ -230,13 +230,14 @@ async def get_scoped_loan_file_by_id(
     and three test files plus the tenancy test hardcode that shape. Renaming the segment to reuse the
     dependency would churn shipped URLs to save a wrapper, so the wrapper is the smaller change.
 
-    `get_loan_file` takes a `str` identifier and accepts a UUID *or* a `display_id`; the path types it
-    as `UUID`, so only the first form can arrive here — narrower than the generic gate, and
-    deliberately so, because these ids come from the API's own responses rather than from a person.
+    THE SEGMENT IS A `str`, A UUID *OR* A `display_id`, THE SAME AS `ScopedLoanFile`. It was typed
+    `UUID` on the premise that these ids come from the API's own responses; they do not. The
+    conditions tab passes its URL's `[id]` segment, and the dashboard and intake navigate by display
+    id (`/loan-files/LF-XXXX`), so every real visit was a 422 raised before this body ran: no log
+    line, and "The conditions couldn't be loaded" on staging. The tenant gate is `get_loan_file`'s
+    `company_id` filter, not the path type, so accepting either form widens nothing.
     """
-    loan_file = await get_loan_file(
-        db, company_id=current_user.company_id, identifier=str(loan_file_id)
-    )
+    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=loan_file_id)
     if loan_file is None:
         # The same 404 as a missing file: distinguishing them would confirm the id exists, an oracle
         # over another tenant's rows.
