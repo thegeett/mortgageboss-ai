@@ -19,6 +19,19 @@ import { EXTENSIONS, MessageEditor, isSafeHref } from "./message-editor";
  */
 afterEach(cleanup);
 
+/**
+ * How long to let a real ProseMirror editor mount in jsdom before calling it a failure.
+ *
+ * ⚠️ `vi.waitFor` DEFAULTS TO 1000ms, AND THAT IS THE ARBITRARY PART. Measured on a Raspberry Pi,
+ * the mount cases in this file run 834ms and 930ms IDLE — 83% and 93% of the default budget with no
+ * load at all. The sibling `message-dialog.test.tsx` already lost that coin flip under the full
+ * suite's parallel workers (LP-909 §5). Waiting longer for an async mount is what `waitFor` is for.
+ *
+ * Kept below vitest's 5000ms `testTimeout` so a genuinely broken editor reports this wait by name
+ * rather than a bare test timeout.
+ */
+const EDITOR_MOUNT_MS = 4000;
+
 const CATALOG_BODY = [
   "- Driver's licence — front and back",
   "    Where to get it: A photograph or scan of your current licence.",
@@ -29,8 +42,21 @@ describe("MessageEditor", () => {
     render(<MessageEditor value="Send the **most recent** statement" onChange={vi.fn()} />);
 
     // THE REPORTED REQUIREMENT: "user should not see html tag or markdown."
+    //
+    // ⚠️ THE WAIT USED TO POLL A SNAPSHOT, WHICH MEANS IT NEVER WAITED FOR ANYTHING. `text` was read
+    // into a const BEFORE the `waitFor`, and the callback then asserted on that frozen string — so it
+    // could only pass on the first tick or spin the full timeout and fail. A `waitFor` over a value
+    // captured outside it cannot observe the change it is waiting for, and every assertion below ran
+    // against whatever the very first tick happened to hold.
+    //
+    // It survived because the editor usually mounts before the first poll. That makes it a race that
+    // was being won rather than a wait, and raising its timeout would have made it strictly worse:
+    // a longer spin on a condition that cannot change.
+    await vi.waitFor(
+      () => expect(document.querySelector(".ProseMirror")?.textContent).toBeTruthy(),
+      EDITOR_MOUNT_MS,
+    );
     const text = document.querySelector(".ProseMirror")?.textContent ?? "";
-    await vi.waitFor(() => expect(text.length).toBeGreaterThan(0));
     expect(text).not.toContain("**");
     expect(text).not.toContain("<strong>");
     expect(text).toContain("most recent");
@@ -213,7 +239,10 @@ describe("what the editor reports, and when", () => {
     );
 
     // Wait for the editor to actually exist, or this asserts about an empty tree.
-    await vi.waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
+    await vi.waitFor(
+      () => expect(document.querySelector(".ProseMirror")).not.toBeNull(),
+      EDITOR_MOUNT_MS,
+    );
     const surface = document.querySelector(".ProseMirror") as HTMLElement;
     surface.focus();
     surface.dispatchEvent(new Event("focus", { bubbles: true }));
@@ -232,7 +261,10 @@ describe("what the editor reports, and when", () => {
     // is the one thing that makes the component report at all.
     const onChange = vi.fn();
     render(<MessageEditor value="Bank statement" onChange={onChange} />);
-    await vi.waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
+    await vi.waitFor(
+      () => expect(document.querySelector(".ProseMirror")).not.toBeNull(),
+      EDITOR_MOUNT_MS,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Bulleted list" }));
 

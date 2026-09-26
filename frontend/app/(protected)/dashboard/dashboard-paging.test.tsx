@@ -15,8 +15,17 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => params.current,
 }));
 
+// ⚠️ THREE ROWS, NOT TWENTY, AND THE PAGE LABEL DOES NOT COME FROM THIS LIST. "Page 1 / 3" is
+// derived from `total` and `page_size` below, so the row count changes nothing any test here
+// asserts — all three check only `pageLabel()`. Twenty rows bought nothing but render time, and
+// this file is synchronous: no `waitFor`, no `findBy`. It was costing 3.0-3.3s per test on an idle
+// Raspberry Pi against vitest's unconfigured 5000ms default, and 6.7-9.9s under the full suite's
+// parallel workers, where it FAILED (LP-909 §5, measured on two machines' worth of load).
+//
+// Rendering the real `DashboardPage` is still the point — "asserted on the rendered page, not on
+// the reset logic" — and three rows render it just as truly as twenty.
 const files = vi.hoisted(() =>
-  Array.from({ length: 20 }, (_, i) => ({
+  Array.from({ length: 3 }, (_, i) => ({
     id: `u-${i}`,
     display_id: `LF-${1000 + i}`,
     status: "in_processing",

@@ -11,6 +11,24 @@ import type { MessageDetail } from "@/lib/types/communication";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+/**
+ * How long to let a real ProseMirror editor mount in jsdom before calling it a failure.
+ *
+ * ⚠️ `vi.waitFor` DEFAULTS TO 1000ms, AND THAT IS THE ARBITRARY PART — not the assertion. Measured on
+ * a Raspberry Pi: the editor-mount cases here run 566-610ms IDLE, and the neighbouring mail-client
+ * cases 738-902ms, so the whole file sits at 60-90% of the default budget before any load. Under the
+ * full suite's parallel workers one of them failed with "expected null not to be null" — the wait
+ * itself timing out, not a missing element (LP-909 §5, reported by the review peer).
+ *
+ * Waiting longer for an async mount is exactly what `waitFor` is for; a 1s cap on a real editor is a
+ * coin flip on slower hardware, and a CI runner is routinely slower than a dev box.
+ *
+ * ⚠️ DELIBERATELY BELOW vitest's 5000ms `testTimeout` (which this repo leaves at the default), so a
+ * genuinely broken editor reports THIS wait failing rather than a bare test timeout. The difference
+ * is a message naming `.ProseMirror` versus one naming nothing at all.
+ */
+const EDITOR_MOUNT_MS = 4000;
+
 const mockUseMessageDetail = vi.fn();
 const mockSend = vi.fn();
 const sendState = { mutate: mockSend, isPending: false, isError: false };
@@ -251,7 +269,10 @@ describe("DraftPane", () => {
     );
     render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
-    await vi.waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
+    await vi.waitFor(
+      () => expect(document.querySelector(".ProseMirror")).not.toBeNull(),
+      EDITOR_MOUNT_MS,
+    );
     // THE TAGS BECAME ELEMENTS.
     expect(document.querySelector(".ProseMirror p")).toBeTruthy();
     // AND ARE NOT ALSO SITTING THERE AS TEXT. This is the line that fails on the shipped build.
@@ -293,7 +314,10 @@ describe("DraftPane", () => {
     );
     render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
-    await vi.waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
+    await vi.waitFor(
+      () => expect(document.querySelector(".ProseMirror")).not.toBeNull(),
+      EDITOR_MOUNT_MS,
+    );
     expect(document.querySelector(".ProseMirror p")).toBeTruthy();
     expect(document.querySelector(".ProseMirror strong")).toBeTruthy();
     const text = document.querySelector(".ProseMirror")?.textContent ?? "";
@@ -330,7 +354,10 @@ describe("DraftPane", () => {
     );
     render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
-    await vi.waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
+    await vi.waitFor(
+      () => expect(document.querySelector(".ProseMirror")).not.toBeNull(),
+      EDITOR_MOUNT_MS,
+    );
     // The tags ARE on screen as text, and that is the stored content faithfully rendered.
     expect(document.querySelector(".ProseMirror")?.textContent).toContain("<p>Hi Sarah,</p>");
     expect(document.querySelector(".ProseMirror p")).toBeTruthy();
@@ -353,7 +380,10 @@ describe("DraftPane", () => {
     );
     render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
-    await vi.waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
+    await vi.waitFor(
+      () => expect(document.querySelector(".ProseMirror")).not.toBeNull(),
+      EDITOR_MOUNT_MS,
+    );
     // And the notepad it replaced is gone, rather than both being present.
     expect(document.querySelector("textarea")).toBeNull();
     // LP-844's Markdown affordances went with it: a WYSIWYG IS the preview, and telling a processor
@@ -1089,7 +1119,10 @@ describe("the ✦ polish button", () => {
     // paint, so asserting straight away reads a tree that has not mounted — which is how five
     // assertions in the autosave suite came to be vacuous. The button sits beside the editor; if
     // the editor is there and the button is not, the absence is real.
-    await vi.waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
+    await vi.waitFor(
+      () => expect(document.querySelector(".ProseMirror")).not.toBeNull(),
+      EDITOR_MOUNT_MS,
+    );
     expect(screen.queryByRole("button", { name: /polish/i })).toBeNull();
     // AND NOTHING ELSE OF IT EITHER — no explanatory sentence, no disabled shell, no "coming soon".
     expect(screen.queryByText(/Rewrites how it reads/)).toBeNull();
@@ -1100,7 +1133,10 @@ describe("the ✦ polish button", () => {
     // the button, against a broken import, and against an editor that failed to mount.
     draftWithPolish(true);
 
-    await vi.waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
+    await vi.waitFor(
+      () => expect(document.querySelector(".ProseMirror")).not.toBeNull(),
+      EDITOR_MOUNT_MS,
+    );
     expect(screen.getByRole("button", { name: /polish/i })).toBeTruthy();
     expect(screen.getByText(/Rewrites how it reads/)).toBeTruthy();
   });
@@ -1115,7 +1151,10 @@ describe("the ✦ polish button", () => {
     );
     render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
 
-    await vi.waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
+    await vi.waitFor(
+      () => expect(document.querySelector(".ProseMirror")).not.toBeNull(),
+      EDITOR_MOUNT_MS,
+    );
     expect(screen.queryByRole("button", { name: /polish/i })).toBeNull();
   });
 });
