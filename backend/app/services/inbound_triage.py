@@ -477,6 +477,8 @@ async def merge_attachment_into_round(
             f"This attachment has already been used as a condition sheet ({carrying.id})."
         )
 
+    from app.models.condition_round import ConditionSourceKind
+
     content = await _attachment_bytes(db, attachment=attachment)
     await enrich_round_with_pdf(
         db,
@@ -485,6 +487,10 @@ async def merge_attachment_into_round(
         # What the sender's mail client declared, so a refusal quotes the sender's own claim.
         declared_content_type=attachment.declared_content_type,
         actor_user_id=actor_user_id,
+        # ⚠️ EMAIL, NOT THE DEFAULT. This letter arrived as a forwarded attachment, and `sources`
+        # records how each arrival reached us. The enrich hard-coded `PDF_UPLOAD` until now, so every
+        # round merged from a forward has been claiming someone uploaded it.
+        source_kind=ConditionSourceKind.EMAIL,
     )
 
     # The attachment's id goes onto the ROUND's sources by the merge itself, so S1-13's link still

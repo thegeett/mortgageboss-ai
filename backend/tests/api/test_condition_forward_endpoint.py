@@ -234,6 +234,19 @@ async def test_forwarding_into_an_existing_round_merges_instead_of_creating_one(
     assert response.json()["round_id"] == str(pasted.id)
     assert response.json()["disposition"] == AttachmentDisposition.CORRESPONDENCE.value
 
+    # ⚠️ AND THE MERGED ARRIVAL SAYS HOW IT ARRIVED — the assertion this test stopped short of.
+    # `enrich_round_with_pdf` hard-coded `PDF_UPLOAD`, so every round merged from a FORWARD has been
+    # recording that someone uploaded the letter. `ConditionSourceKind` exists to say "how one
+    # arrival of a round reached us", so this was wrong in the row and not only on S1-09's chip,
+    # where the review peer found it by reading the database rather than the screen.
+    #
+    # The scenario was already built here and only the status was checked — the same shape as the
+    # discarded round that was offered an Attach, and the strip that ran backwards under a passing
+    # test.
+    await db_session.refresh(pasted)
+    assert pasted.sources[-1]["kind"] == ConditionSourceKind.EMAIL.value
+    assert pasted.sources[-1]["inbound_attachment_id"] == str(attachment.id)
+
     rounds = (
         (
             await db_session.execute(

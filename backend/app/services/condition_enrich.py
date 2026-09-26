@@ -275,10 +275,21 @@ async def enrich_round_with_pdf(
     content: bytes,
     declared_content_type: str | None = None,
     actor_user_id: UUID | None = None,
+    source_kind: ConditionSourceKind = ConditionSourceKind.PDF_UPLOAD,
 ) -> EnrichResult:
     """Merge a lender's PDF into an existing round. Never creates a second round.
 
     The caller owns the transaction, as every service here does.
+
+    ⚠️ `source_kind` IS A PARAMETER BECAUSE THIS HAS TWO DOORS, AND ONE OF THEM IS NOT AN UPLOAD.
+    It was hard-coded to `PDF_UPLOAD`, which is right for `api/conditions.py`'s attach door and wrong
+    for `merge_attachment_into_round`, where the letter arrived as EMAIL. `sources` exists to record
+    how each arrival reached us — `ConditionSourceKind`'s own docstring says so — so a forwarded
+    letter recorded as an upload is wrong in the data, not merely on S1-09's chip where it shows.
+    Found by the review peer, by checking the row rather than the screen.
+
+    The default keeps the attach door's behaviour exactly, so the caller that was already correct
+    says nothing and the caller that was wrong now has to.
     """
     if round_.status not in ENRICHABLE:
         raise RoundNotEnrichable(
@@ -336,7 +347,7 @@ async def enrich_round_with_pdf(
 
     now = utcnow()
     source: dict[str, object] = {
-        "kind": ConditionSourceKind.PDF_UPLOAD.value,
+        "kind": source_kind.value,
         "at": now.isoformat(),
         "storage_path": storage_path,
     }
