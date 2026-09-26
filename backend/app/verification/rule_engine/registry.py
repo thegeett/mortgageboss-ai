@@ -423,13 +423,17 @@ _LP496A_ACTIVATED: tuple[str, ...] = ("PE-1", "PE-3")
 # overlay for other financed properties, and the 6-month cash-out-over-45%-DTI cell. Neither the
 # financed-property count nor the aggregate UPB reaches the snapshot. Both can only RAISE the
 # requirement, so the encoded figure is a floor and the rule never errs toward clearing.
-# AS-7 IS HELD FOR TWO INDEPENDENT REASONS, neither of them calibration. Its chain is complete and
-# verified (txn_nsf -> _stmt_nsf_count -> AS-7), but (1) txn.is_nsf_or_overdraft is still declared
-# ["yes","no"] while its prompt offers "unknown", so an honest abstain coerces to confidence=None and
-# flags the whole run degraded — LP-495c's fix has NOT landed (68186a1 is its plan doc only); and
-# (2) the trigger does not exist in any available data: 0 NSF lines across the loaded corpus, and in
-# the raw corpus 886 NSF/overdraft mentions across 223 files of which NONE is a real event — 55 fee
-# totals all reading $0.00. No tolerance was invented; the Selling Guide sets none.
+# AS-7 IS HELD FOR ONE REASON, AND THE COMMENT HERE CLAIMED TWO LONG AFTER THE FIRST WAS FIXED. Its
+# chain is complete and verified (txn_nsf -> _stmt_nsf_count -> AS-7).
+# (1) THE ENUM DEFECT IS RESOLVED — corrected rather than deleted, because this text asserted the
+# opposite for two tickets after it stopped being true. txn.is_nsf_or_overdraft WAS declared
+# ["yes","no"] while its prompt offered "unknown", so an honest abstain coerced to confidence=None and
+# flagged the whole run degraded. LP-495c LANDED at 6b1dff73 — 68186a1 was only its plan doc, which is
+# what this comment was reading — and fact_tags.csv now declares ["yes","no","unknown"]. Not a blocker.
+# (2) THE TRIGGER DOES NOT EXIST IN ANY AVAILABLE DATA, and this is now the WHOLE of the hold: 0 NSF
+# lines across the loaded corpus, and in the raw corpus 886 NSF/overdraft mentions across 223 files of
+# which NONE is a real event — 55 fee totals all reading $0.00. So this is not an ingestion gap that
+# loading more documents would close. No tolerance was invented; the Selling Guide sets none.
 _LP497_ACTIVATED: tuple[str, ...] = ("AS-4",)
 
 # LP-498 — the fraud cohort. FR-3 ACTIVATES; FR-1, FR-2, FR-4, FR-5 and FR-6 are HELD, each for a

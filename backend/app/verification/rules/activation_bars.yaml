@@ -342,13 +342,16 @@ AS-7:
     group) -> stmt.nsf_count (derived, _stmt_nsf_count) -> AS-7. Both producers exist and the aggregator
     already abstains rather than reporting 0 when the tag is on no transaction, and when ANY transaction
     reads "unknown" (a count that could be an undercount is not asserted).
-    HELD FOR TWO INDEPENDENT REASONS, neither of them calibration.
-    (1) THE ENUM DEFECT, unfixed. txn.is_nsf_or_overdraft is declared ["yes","no"] while its prompt
-    offers "unknown", so _build_tag coerces an honest abstain to confidence=None — exactly the marker
-    _scan_tag_degradations matches (value=="unknown" + produced_by==AI + confidence is None) — flipping
-    run.degraded. LP-495c is the fix; as of this ticket only its PLAN doc has landed (68186a1), not the
-    declaration change. Activating now would mark every statement the model cannot read as a BROKEN
-    PIPELINE. Re-check fact_tags.csv before activating.
+    HELD FOR ONE REASON. THIS BAR SAID TWO, AND THE FIRST WAS FIXED WITHOUT THE BAR BEING UPDATED.
+    (1) THE ENUM DEFECT IS RESOLVED — recorded rather than deleted, so the transition stays visible.
+    txn.is_nsf_or_overdraft WAS declared ["yes","no"] while its prompt offered "unknown", so _build_tag
+    coerced an honest abstain to confidence=None — exactly the marker _scan_tag_degradations matches
+    (value=="unknown" + produced_by==AI + confidence is None) — flipping run.degraded. LP-495c LANDED
+    at 6b1dff73. Only its PLAN doc (68186a1) had landed when this text was written, and the text went
+    on asserting that state afterwards; fact_tags.csv now declares ["yes","no","unknown"]. Not a
+    blocker. The instruction that would have caught this stands, and is the reason it is kept: RE-CHECK
+    fact_tags.csv BEFORE ACTIVATING — and re-check this rationale against it, because a bar is evidence
+    a human acts on, so a stale one licenses exactly the activation it was written to prevent.
     (2) NO TRIGGER EXISTS IN ANY AVAILABLE DATA, measured rather than assumed. The loaded corpus has 10
     bank statements and 151 transactions with ZERO NSF lines. The raw corpus is stronger evidence: 2,557
     PDFs scanned by content, 223 files carrying an NSF/overdraft signal, 886 occurrences — and not one

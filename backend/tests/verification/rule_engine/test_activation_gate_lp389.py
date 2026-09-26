@@ -261,8 +261,9 @@ def test_the_held_rules_each_fail_for_a_named_reason() -> None:
     # convenience: AS-4 was never held for this reason. Its bar named stmt.is_reserve_eligible
     # load-bearing "via the reserves calculator", and that tag is not in its chain at all, so the
     # 0/5 that held it measured something AS-4 never reads. AS-7 IS held for this reason honestly —
-    # txn.is_nsf_or_overdraft is a real, unscored AI tag in its chain (and its declaration still
-    # coerces an honest abstain into a degraded run until LP-495c lands).
+    # txn.is_nsf_or_overdraft is a real, unscored AI tag in its chain. Its declaration NO LONGER
+    # coerces an honest abstain into a degraded run: LP-495c landed at 6b1dff73 and the tag now reads
+    # ["yes","no","unknown"]. The hold is the unscored tag and the absent trigger, never the enum.
     assert not is_eligible(bars["AS-7"]) and bars["AS-7"].status == "not-calibratable-yet"
     # AS-5 — LP-390-7 fail-closed proof: not-calibratable-yet + null threshold → held; validated stays false
     # (the loader would REJECT a stray true on it — see test_loader_rejects_validating_a_non_calibratable_rule),

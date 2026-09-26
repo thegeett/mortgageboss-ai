@@ -230,11 +230,29 @@ def test_as4_is_active_and_carries_no_ai_tag() -> None:
 
 
 def test_as7_is_built_but_held() -> None:
-    """AS-7 must NOT activate while `txn.is_nsf_or_overdraft` is declared without an abstain: an honest
-    "unknown" coerces to confidence=None, which the orchestrator's degradation scan reads as a broken
-    pipeline. LP-495c is the fix and has not landed. This test fails the moment someone activates AS-7,
-    which is the intent — it should only go live with the declaration fixed."""
+    """AS-7 must NOT activate — and this docstring named the wrong precondition for two tickets.
+
+    ⚠️ THE BLOCKER IT CITED IS GONE, AND IT POINTED AT THE WRONG ACTION. It said AS-7 "should only go
+    live with the declaration fixed": `txn.is_nsf_or_overdraft` declared without an abstain, so an
+    honest "unknown" coerced to confidence=None and read as a broken pipeline. LP-495c LANDED at
+    6b1dff73 and the tag now declares ["yes","no","unknown"]. A reader following the old wording would
+    check the declaration, find it already fixed, and activate AS-7 on a precondition that was met.
+
+    The hold is the CORPUS, and only the corpus: no NSF event exists in any available data — 0 lines
+    across the loaded corpus, 886 raw mentions across 223 files of which not one is an actual event,
+    55 "Total Overdraft/NSF Fees" lines every one reading $0.00.
+
+    The assertions below never checked WHY AS-7 is held, only THAT it is, so nothing here could catch
+    the premise going stale. The enum assertion closes that: it pins the resolved half, so a future
+    claim that AS-7 is held on its declaration fails as a test rather than surviving in prose.
+    """
+    from app.verification.tag_materialization.declarations import _allowed_values_by_tag
+
     bars = load_activation_bars()
     assert "AS-7" not in ACTIVE_RULE_IDS
     assert not is_eligible(bars["AS-7"])
     assert "txn.is_nsf_or_overdraft" in bars["AS-7"].load_bearing_ai_tags
+    assert "unknown" in (_allowed_values_by_tag()["txn.is_nsf_or_overdraft"] or ()), (
+        "the enum blocker is fixed (LP-495c, 6b1dff73) — if this fails, the declaration regressed and "
+        "AS-7's bar and this docstring must both be re-read before anyone acts on either"
+    )

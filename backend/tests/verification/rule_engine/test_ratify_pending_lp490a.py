@@ -105,8 +105,11 @@ def test_a_measured_and_failing_rule_can_never_take_this_path() -> None:
 def test_as4_is_still_held() -> None:
     # LP-497 — AS-4 is now LIVE, and the belief this line encoded is false. It was held on a 0/5
     # measurement of stmt.is_reserve_eligible, a tag that is NOT in its chain (the reserves
-    # calculator reads DB assets and the DTI housing line). AS-7 is still held, on the enum
-    # defect LP-495c fixes, so the held-rule intent of this test is carried by AS-7.
+    # calculator reads DB assets and the DTI housing line). AS-7 is still held, so it carries the
+    # held-rule intent of this test — but NOT for the reason this line used to give. The enum defect
+    # LP-495c fixes LANDED at 6b1dff73; AS-7 is held because no real NSF event exists in the corpus
+    # (0 lines loaded, 886 raw mentions and not one an actual event). A stale premise under a passing
+    # assertion is why this is corrected in place rather than left to read as current.
     assert "AS-4" in ACTIVE_RULE_IDS
     assert "AS-7" not in ACTIVE_RULE_IDS
 
