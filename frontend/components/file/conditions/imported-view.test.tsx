@@ -64,6 +64,23 @@ function condition(overrides: Partial<Condition> = {}): Condition {
     last_seen_round_id: "r1",
     round_numbers: [1],
     created_at: "2026-08-28T10:00:00Z",
+    // LP-911 PUT THE TWO TRACKS ON THE WIRE, AND THE STAGE 1 DEFAULTS ARE WHAT THIS FIXTURE MEANS.
+    // These tests exist to prove an ABSENCE — that this screen never says cleared, done or to do —
+    // so the fixture must carry the values a just-imported condition really has (`to_do` / `open`,
+    // nothing verdicted) rather than anything that would make the absence assertions pass for the
+    // wrong reason.
+    prep_status: "to_do",
+    lender_status: "open",
+    updated_at: "2026-08-28T10:00:00Z",
+    effective_owner: "unknown",
+    effective_owner_source: "none",
+    latest_note: null,
+    is_open: true,
+    days_open: 0,
+    came_back: false,
+    verdict: null,
+    pending_suggestion: null,
+    superseded_by_id: null,
     ...overrides,
   };
 }

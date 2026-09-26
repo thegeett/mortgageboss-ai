@@ -15,17 +15,36 @@ scoped, so a round can only ever be opened on a file the caller's company owns.
 """
 
 from collections.abc import Callable
+from datetime import UTC, date, datetime
 from typing import Annotated
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from kombu.exceptions import OperationalError
 from sqlalchemy import select
 
 from app.api.dependencies import CurrentUser
 from app.core.config import settings
 from app.core.database import DbSession
+from app.models.condition import (
+    BucketKind,
+    Condition,
+    ConditionLenderStatus,
+    ConditionOrigin,
+    ConditionPrepStatus,
+    OwnerHint,
+)
 from app.models.condition_round import (
     ConditionRound,
     ConditionRoundCompleteness,
@@ -36,13 +55,18 @@ from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.schemas.condition import (
     ConditionCreateRequest,
+    ConditionDetailPublic,
     ConditionDraftUpdate,
     ConditionEnrichResult,
     ConditionEventPublic,
     ConditionImportResult,
     ConditionPasteRequest,
     ConditionPublic,
+    ConditionRoundAppearancePublic,
     ConditionRoundPublic,
+    ConditionSort,
+    ConditionSummaryPublic,
+    UnderwriterNotePublic,
 )
 from app.services.condition_enrich import RoundNotEnrichable, enrich_round_with_pdf
 from app.services.condition_import import (
@@ -64,11 +88,20 @@ from app.services.condition_rounds import (
     update_draft,
 )
 from app.services.conditions import (
+    MAX_CONDITIONS,
+    ConditionFilters,
     appearances_for_file,
+    condition_days_open,
+    condition_summary,
+    effective_owner,
+    effective_owner_source,
+    events_for_condition,
     events_for_round,
     import_counts,
     import_counts_for_file,
-    list_conditions,
+    is_open,
+    latest_imported_round,
+    list_conditions_filtered,
     list_rounds,
     rows_on_sheet,
 )
@@ -82,6 +115,14 @@ router = APIRouter(prefix="/loan-files", tags=["conditions"])
 #: scoping moves into the lookup instead (`get_scoped_round`), which is the same shape
 #: `documents.py` uses for its flat router.
 rounds_router = APIRouter(prefix="/condition-rounds", tags=["conditions"])
+#: A THIRD ROUTER, FOR THE SAME REASON THERE IS A SECOND. Spec §LP-911 puts the single condition at
+#: `/api/conditions/{condition_id}`, which carries neither a loan file nor a round — so
+#: `ScopedLoanFileById` has no file to scope and `ScopedRound` scopes the wrong row. The gate moves
+#: into the lookup again (`get_scoped_condition`), and `tests/api/test_condition_route_gating.py`
+#: gains this router in the SAME commit: its `_gate_map()` names routers by hand, so a new one is
+#: invisible to the walk until it is listed, and "the fourth route someone adds in Stage 2 is the one
+#: that ships open" is that file's own warning about exactly this moment.
+conditions_by_id_router = APIRouter(prefix="/conditions", tags=["conditions"])
 
 log = structlog.get_logger(__name__)
 
@@ -211,6 +252,41 @@ async def get_scoped_round(
 
 
 ScopedRound = Annotated[ConditionRound, Depends(get_scoped_round)]
+
+
+async def get_scoped_condition(
+    condition_id: UUID, db: DbSession, current_user: CurrentUser
+) -> Condition:
+    """The condition in the path, scoped to the caller's company.
+
+    THE SCOPE IS IN THE QUERY, the same as `get_scoped_round` above — and deliberately written that
+    way rather than through `scope_to_company`, which is this repo's greppable helper for the same
+    filter. Two idioms one function apart would be worse than one unfashionable one: the two gates in
+    this module should read identically, because the thing a reader must be able to check at a glance
+    is that BOTH of them filter inside the statement rather than after it.
+
+    `Condition.company_id` is on the row for exactly this (`models/condition.py`: "a condition is
+    reached directly by id, so the scoping filter needs a column here"), and soft-deleted rows are
+    excluded — a deleted condition is not found rather than found and refused.
+
+    404, NEVER 403. Confirming that an id exists would be an oracle over another tenant's rows, which
+    is why this is indistinguishable from a missing id.
+    """
+    condition = await db.scalar(
+        only_active(
+            select(Condition).where(
+                Condition.id == condition_id,
+                Condition.company_id == current_user.company_id,
+            ),
+            Condition,
+        )
+    )
+    if condition is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Condition not found.")
+    return condition
+
+
+ScopedCondition = Annotated[Condition, Depends(get_scoped_condition)]
 
 
 async def get_scoped_loan_file_by_id(
@@ -397,11 +473,69 @@ async def get_condition_round(round_: ScopedRound, db: DbSession) -> ConditionRo
     return _round_public(round_, per_round=per_round, imports=imports)
 
 
+def _condition_public(
+    condition: Condition, *, round_numbers: list[int], today: date
+) -> ConditionPublic:
+    """One condition as the wire sees it, with the SERVICE's rules supplying the derived fields.
+
+    ONE PLACE, BECAUSE THE SCHEMA DELIBERATELY CANNOT COMPUTE THEM. `ConditionPublic.from_model`
+    requires `effective_owner`, `is_open` and the day count rather than deriving them, so that the
+    row can never disagree with the filter that selected it — and the only way that guarantee is worth
+    anything is if every caller routes through one helper instead of each answering for itself.
+
+    `today` IS THREADED IN RATHER THAN READ PER ROW. A list that called `date.today()` once per
+    condition would disagree with itself across midnight, and the last row of a long response would
+    count a different number of days from the first.
+    """
+    return ConditionPublic.from_model(
+        condition,
+        round_numbers=round_numbers,
+        effective_owner=effective_owner(condition),
+        effective_owner_source=effective_owner_source(condition),
+        is_open=is_open(condition),
+        days_open=condition_days_open(condition, today=today),
+    )
+
+
+#: Set when the read hit `MAX_CONDITIONS`, so a client can tell a full page from a truncated one.
+#:
+#: A HEADER RATHER THAN A FIELD, AND THE SHAPE IS WHY. Spec §LP-911 says to "cap at 500 and say so in
+#: the response", and its Done-when also requires that "the Stage 1 imported list still works
+#: unchanged, since its default response shape is kept". Wrapping the array in an object to carry a
+#: flag would break the second to satisfy the first; a header is part of the response and costs the
+#: existing client nothing.
+CAPPED_HEADER = "X-Conditions-Capped"
+
+
 @router.get("/{loan_file_id}/conditions", response_model=list[ConditionPublic])
 async def list_file_conditions(
-    loan_file: ScopedLoanFileById, db: DbSession
+    loan_file: ScopedLoanFileById,
+    db: DbSession,
+    response: Response,
+    round_number: Annotated[
+        int | None, Query(alias="round", description="Only conditions on the sheet of this round")
+    ] = None,
+    lender_status: Annotated[list[ConditionLenderStatus] | None, Query()] = None,
+    prep_status: Annotated[list[ConditionPrepStatus] | None, Query()] = None,
+    owner: Annotated[
+        list[OwnerHint] | None, Query(description="The EFFECTIVE owner, not the raw hint")
+    ] = None,
+    bucket_kind: Annotated[list[BucketKind] | None, Query()] = None,
+    lender_code: Annotated[
+        str | None, Query(description="Exact, as printed — 0006 is not 6")
+    ] = None,
+    category: Annotated[str | None, Query()] = None,
+    info_only: Annotated[bool | None, Query()] = None,
+    origin: Annotated[ConditionOrigin | None, Query()] = None,
+    q: Annotated[str | None, Query(description="Text search in the wording and the code")] = None,
+    sort: Annotated[ConditionSort, Query()] = ConditionSort.SHEET,
 ) -> list[ConditionPublic]:
-    """The file's imported conditions, in sheet order, each with the rounds it appeared on.
+    """The file's imported conditions, filtered and sorted, each with the rounds it appeared on.
+
+    THE DEFAULT RESPONSE IS STAGE 1'S, UNCHANGED. Every filter is optional and `sort` defaults to
+    sheet order, so a caller that passes nothing gets exactly what LP-909 served — which is a
+    Done-when of this ticket, not a courtesy: the Stage 1 imported list is still in the tree and still
+    reads this route.
 
     `round_numbers` GETS ITS FIRST PRODUCER HERE — the `R1 R2` chips, which have defaulted to `[]`
     since LP-904. It is derived from each condition's `CONDITION_CREATED` / `CONDITION_SEEN_AGAIN`
@@ -410,14 +544,98 @@ async def list_file_conditions(
 
     That derivation is only as good as the enumeration of who writes conditions, which is why every
     writer emits `CONDITION_CREATED` (LP-907's enrich did not, and its conditions were chipless until
-    that was fixed).
+    that was fixed). The `round` FILTER asks the same question, which is why it is answered from that
+    map rather than from a column.
+
+    `q` IS NEVER LOGGED. It searches `verbatim_text` — the lender's words, and NPI (ADR-405) — so the
+    log line below carries the filter NAMES and the row count and nothing else. `ConditionFilters`
+    holds `names()` for exactly this.
     """
-    conditions = await list_conditions(db, loan_file_id=loan_file.id)
+    filters = ConditionFilters(
+        round_number=round_number,
+        lender_status=tuple(lender_status or ()),
+        prep_status=tuple(prep_status or ()),
+        owner=tuple(owner or ()),
+        bucket_kind=tuple(bucket_kind or ()),
+        lender_code=lender_code,
+        category=category,
+        info_only=info_only,
+        origin=origin,
+        q=q,
+    )
     numbers, _ = await appearances_for_file(db, loan_file_id=loan_file.id)
+    conditions, capped = await list_conditions_filtered(
+        db,
+        loan_file_id=loan_file.id,
+        filters=filters,
+        sort=sort,
+        round_numbers=numbers,
+    )
+    if capped:
+        response.headers[CAPPED_HEADER] = "true"
+        # IDS AND COUNTS ONLY (spec §9.5). A cap being hit on a real file would mean something is
+        # wrong with the file rather than with the request, so it is worth a line — but never the
+        # search term.
+        log.warning(
+            "conditions_read_capped",
+            loan_file_id=str(loan_file.id),
+            limit=MAX_CONDITIONS,
+        )
+
+    # THE FILTER NAMES AND THE COUNT, NEVER A VALUE (ADR-405). `q` searches `verbatim_text`, so
+    # logging what was searched for would put the lender's words in the log to record that somebody
+    # looked for them — and a search term is often a borrower's account ending or employer, which is
+    # exactly what that ADR exists to keep out of the analytics path. `names()` is on
+    # `ConditionFilters` so this line cannot accidentally reach for a value.
+    log.info(
+        "conditions_listed",
+        loan_file_id=str(loan_file.id),
+        filters=filters.names(),
+        sort=sort.value,
+        returned=len(conditions),
+    )
+
+    today = datetime.now(UTC).date()
     return [
-        ConditionPublic.from_model(condition, round_numbers=numbers.get(condition.id, []))
+        _condition_public(condition, round_numbers=numbers.get(condition.id, []), today=today)
         for condition in conditions
     ]
+
+
+@router.get("/{loan_file_id}/conditions/summary", response_model=ConditionSummaryPublic)
+async def get_conditions_summary(
+    loan_file: ScopedLoanFileById, db: DbSession
+) -> ConditionSummaryPublic:
+    """The counts the summary bar and the file rail read (screens S2-01, S2-02).
+
+    PATH ORDER MATTERS AND FASTAPI DOES NOT WARN. `/conditions/summary` is declared AFTER
+    `/conditions` and both are GETs on the same router, which is fine because they are different
+    paths — but if a `/conditions/{condition_id}` route were ever added to THIS router it would have
+    to come after this one, or "summary" would be matched as an id and 422 on the UUID parse. The
+    single-condition read deliberately lives on its own router (no loan file in its path), so the
+    collision does not arise today; this comment is here so it does not arise tomorrow either.
+
+    COUNTS, NEVER ROWS. This is the one response the file rail fetches on every visit, and putting
+    conditions in it would carry the lender's words onto a screen that only ever shows numbers.
+    """
+    summary = await condition_summary(db, loan_file_id=loan_file.id)
+    latest = await latest_imported_round(db, loan_file_id=loan_file.id)
+    return ConditionSummaryPublic(
+        total=summary.total,
+        open=summary.open,
+        cleared=summary.cleared,
+        waived=summary.waived,
+        not_cleared=summary.not_cleared,
+        superseded=summary.superseded,
+        info_only=summary.info_only,
+        by_prep_status=summary.by_prep_status,
+        by_owner=summary.by_owner,
+        by_bucket_kind=summary.by_bucket_kind,
+        open_prior_to_docs=summary.open_prior_to_docs,
+        open_prior_to_funding=summary.open_prior_to_funding,
+        pending_suggestions=summary.pending_suggestions,
+        latest_round=(await _round_card(db, latest) if latest is not None else None),
+    )
 
 
 @router.post(
@@ -764,4 +982,93 @@ async def add_condition_by_hand(
 
     await db.refresh(condition)
     numbers, _ = await appearances_for_file(db, loan_file_id=loan_file.id)
-    return ConditionPublic.from_model(condition, round_numbers=numbers.get(condition.id, []))
+    return _condition_public(
+        condition,
+        round_numbers=numbers.get(condition.id, []),
+        today=datetime.now(UTC).date(),
+    )
+
+
+@conditions_by_id_router.get("/{condition_id}", response_model=ConditionDetailPublic)
+async def get_condition(condition: ScopedCondition, db: DbSession) -> ConditionDetailPublic:
+    """One condition with every round, and whether it was on each one (screen S2-03).
+
+    NO NEW QUERY ANSWERS "WAS IT ON THIS SHEET". `appearances_for_file` already returns the round
+    NUMBERS a condition appeared on, derived from its own events, and every imported round has a
+    number — so membership is a lookup rather than a second derivation of the same fact. A draft or
+    discarded round has no number and is therefore never "on the sheet", which is correct: its rows
+    are not conditions yet.
+
+    THE NOTE IS MATCHED TO THE ROUND THAT BROUGHT IT, through the note's `first_seen_round_id`, so a
+    dated chip appears against the round it actually arrived in rather than against all of them.
+    `first_seen_round_id` is stored as a string by the import, which is why it is compared as one.
+
+    OLDEST FIRST, unlike the round strip: this reads as a history of one condition ("R1 08/28 ✓,
+    R2 09/10 not on it"), where the strip answers "what is the newest sheet".
+
+    THE HISTORY IS A SEPARATE CALL. `…/events` serves it, for the reason LP-909 gives about the
+    round's: this response is fetched whenever the list refreshes, and the history is read only when
+    somebody opens one sheet.
+    """
+    rounds = await list_rounds(db, loan_file_id=condition.loan_file_id)
+    numbers, _ = await appearances_for_file(db, loan_file_id=condition.loan_file_id)
+    seen_on = set(numbers.get(condition.id, []))
+    notes_by_round = {
+        str(note.get("first_seen_round_id")): note
+        for note in (condition.underwriter_notes or [])
+        if isinstance(note, dict) and note.get("first_seen_round_id")
+    }
+
+    appearances = [
+        ConditionRoundAppearancePublic(
+            round_id=round_.id,
+            round_number=round_.round_number,
+            round_date=round_.round_date,
+            date_printed=round_.date_printed,
+            completeness=round_.completeness,
+            on_sheet=round_.round_number is not None and round_.round_number in seen_on,
+            note=(
+                UnderwriterNotePublic.model_validate(notes_by_round[str(round_.id)])
+                if str(round_.id) in notes_by_round
+                else None
+            ),
+        )
+        # `list_rounds` is newest-first for the strip; a condition's own story reads forwards.
+        for round_ in reversed(rounds)
+    ]
+
+    public = _condition_public(
+        condition,
+        round_numbers=sorted(seen_on),
+        today=datetime.now(UTC).date(),
+    )
+    # BUILT FROM THE ROW'S OWN PROJECTION rather than assembled a second time. `ConditionDetailPublic`
+    # extends `ConditionPublic` precisely so the sheet cannot carry a different set of fields than the
+    # row, and re-listing all twenty here would be the drift that inheritance exists to prevent.
+    return ConditionDetailPublic(**public.model_dump(), rounds=appearances)
+
+
+@conditions_by_id_router.get("/{condition_id}/events", response_model=list[ConditionEventPublic])
+async def list_condition_events(
+    condition: ScopedCondition, db: DbSession
+) -> list[ConditionEventPublic]:
+    """One condition's history, newest first — the History section of the detail sheet (S2-03).
+
+    THIS IS THE READER `ix_condition_events_condition_occurred` HAS LACKED SINCE LP-904, and LP-909
+    left the question open in as many words: "either something reads it, or it should go in a
+    follow-up migration". It is answered here, and no migration is needed.
+
+    WHAT IT CARRIES TODAY IS THIN, AND THAT IS HONEST RATHER THAN BROKEN. `ConditionEventPublic`
+    projects a closed set of named scalars, and the ones it names are the ROUND-level keys
+    (`rows`, `created`, `seen_again`, …). A condition-level event stores `source`, `lender_code`,
+    `changed` and `possible_match`, none of which are projected — `detail` is NPI and the readonly
+    layer drops it whole, so opening a door for it here would undo that deliberately. So a caller gets
+    `kind`, `occurred_at` and `actor_user_id`, which is exactly what a plain-words sentence needs:
+    LP-916 composes "Seen again in round 2" from the KIND, and adds whichever scalars its sentences
+    turn out to need, each with the same closed-vocabulary treatment.
+
+    Scoped by `get_scoped_condition`, which filters `company_id` inside its statement — so another
+    tenant's condition is unfetchable rather than fetched and then refused.
+    """
+    events = await events_for_condition(db, condition_id=condition.id)
+    return [ConditionEventPublic.from_model(event) for event in events]

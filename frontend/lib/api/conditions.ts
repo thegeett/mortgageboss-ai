@@ -14,13 +14,21 @@
 import { apiClient } from "@/lib/api/client";
 import type {
   AddConditionInput,
+  BucketKind,
   Condition,
+  ConditionDetail,
   ConditionEnrichResult,
   ConditionEvent,
   ConditionImportResult,
+  ConditionLenderStatus,
+  ConditionOrigin,
+  ConditionPrepStatus,
   ConditionRound,
   ConditionRoundCompleteness,
+  ConditionSort,
+  ConditionSummary,
   DraftUpdateInput,
+  OwnerHint,
   PasteConditionsInput,
 } from "@/lib/types/conditions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -32,7 +40,13 @@ const PARSE_POLL_MS = 2_000;
 
 export const conditionRoundsQueryKey = (fileId: string) => ["condition-rounds", fileId] as const;
 export const conditionRoundQueryKey = (roundId: string) => ["condition-round", roundId] as const;
-export const conditionsQueryKey = (fileId: string) => ["conditions", fileId] as const;
+export const conditionsQueryKey = (fileId: string, params?: ConditionListParams) =>
+  ["conditions", fileId, params ?? {}] as const;
+export const conditionsSummaryQueryKey = (fileId: string) =>
+  ["conditions-summary", fileId] as const;
+export const conditionQueryKey = (conditionId: string) => ["condition", conditionId] as const;
+export const conditionEventsQueryKey = (conditionId: string) =>
+  ["condition-events", conditionId] as const;
 export const conditionRoundEventsQueryKey = (roundId: string) =>
   ["condition-round-events", roundId] as const;
 
@@ -223,16 +237,118 @@ export function useRoundEvents(roundId: string | null) {
   });
 }
 
-export async function fetchConditions(fileId: string): Promise<Condition[]> {
-  return (await apiClient.get<Condition[]>(`${filePath(fileId)}/conditions`)).data;
+/**
+ * EVERY `conditions` QUERY FOR ONE FILE, whatever its filters — what an invalidation must name.
+ *
+ * `conditionsQueryKey` carries the params so two filter sets are two caches, and TanStack matches an
+ * invalidation by PREFIX. Invalidating with the full three-element key would therefore match only the
+ * unfiltered query and leave every filtered one stale: import a round with a filter applied and the
+ * new conditions would not appear. This is the prefix every write invalidates.
+ */
+export const conditionsQueryPrefix = (fileId: string) => ["conditions", fileId] as const;
+
+const conditionPath = (conditionId: string) => `${API_V1}/conditions/${conditionId}`;
+
+/**
+ * The filters and the sort the list reads (LP-911). Every field is optional, and a call with none
+ * gets Stage 1's response unchanged — which is a Done-when of that ticket, not a courtesy.
+ *
+ * ARRAYS MUST SERIALISE AS REPEATED KEYS, AND AXIOS DOES NOT DO THAT BY DEFAULT. FastAPI reads
+ * `?owner=borrower&owner=title`; axios 1.x writes `owner[]=borrower` unless told otherwise, and
+ * FastAPI ignores that — so the filter would silently do nothing and the list would come back
+ * unfiltered, which looks like a backend bug from the screen. `paramsSerializer: { indexes: null }`
+ * is what produces the repeated form.
+ */
+export interface ConditionListParams {
+  round?: number;
+  lender_status?: ConditionLenderStatus[];
+  prep_status?: ConditionPrepStatus[];
+  owner?: OwnerHint[];
+  bucket_kind?: BucketKind[];
+  lender_code?: string;
+  category?: string;
+  info_only?: boolean;
+  origin?: ConditionOrigin;
+  q?: string;
+  sort?: ConditionSort;
 }
 
-/** The file's imported conditions, in sheet order, each with the rounds it appeared on. */
-export function useConditions(fileId: string) {
+export async function fetchConditions(
+  fileId: string,
+  params: ConditionListParams = {},
+): Promise<Condition[]> {
+  return (
+    await apiClient.get<Condition[]>(`${filePath(fileId)}/conditions`, {
+      params,
+      paramsSerializer: { indexes: null },
+    })
+  ).data;
+}
+
+/**
+ * The file's conditions, filtered and sorted — the list (S2-01, S2-02).
+ *
+ * THE PARAMS ARE PART OF THE QUERY KEY. Without that, changing a filter would serve the previous
+ * filter's rows from cache until a refetch landed, so the screen would show a list that does not
+ * match the filter row above it.
+ */
+export function useConditions(fileId: string, params: ConditionListParams = {}) {
   return useQuery({
-    queryKey: conditionsQueryKey(fileId),
-    queryFn: () => fetchConditions(fileId),
+    queryKey: conditionsQueryKey(fileId, params),
+    queryFn: () => fetchConditions(fileId, params),
     enabled: Boolean(fileId),
+  });
+}
+
+export async function fetchConditionsSummary(fileId: string): Promise<ConditionSummary> {
+  return (await apiClient.get<ConditionSummary>(`${filePath(fileId)}/conditions/summary`)).data;
+}
+
+/**
+ * The counts for the summary bar and the file rail (S2-01, S2-02).
+ *
+ * NOT FILTERED, DELIBERATELY. The bar's numbers are what the filters are applied TO — each one is a
+ * filter a processor can click — so recomputing them under the current filter would make every number
+ * describe the view instead of the file, and "Open 6" would change when you clicked it.
+ */
+export function useConditionsSummary(fileId: string) {
+  return useQuery({
+    queryKey: conditionsSummaryQueryKey(fileId),
+    queryFn: () => fetchConditionsSummary(fileId),
+    enabled: Boolean(fileId),
+  });
+}
+
+export async function fetchCondition(conditionId: string): Promise<ConditionDetail> {
+  return (await apiClient.get<ConditionDetail>(conditionPath(conditionId))).data;
+}
+
+/** One condition with every round it did or did not appear on — the detail sheet (S2-03). */
+export function useCondition(conditionId: string | null) {
+  return useQuery({
+    queryKey: conditionQueryKey(conditionId ?? ""),
+    queryFn: () => fetchCondition(conditionId as string),
+    enabled: Boolean(conditionId),
+  });
+}
+
+export async function fetchConditionEvents(conditionId: string): Promise<ConditionEvent[]> {
+  return (await apiClient.get<ConditionEvent[]>(`${conditionPath(conditionId)}/events`)).data;
+}
+
+/**
+ * One condition's history, newest first — the detail sheet's History (S2-03).
+ *
+ * FETCHED SEPARATELY AND NOT POLLED, for the reason `useRoundEvents` gives: `condition_events` is
+ * append-only, so the history cannot change under a reader except by something on this screen
+ * writing — and the condition itself is refetched on every list refresh, where the history is read
+ * only when somebody opens one sheet.
+ */
+export function useConditionEvents(conditionId: string | null) {
+  return useQuery({
+    queryKey: conditionEventsQueryKey(conditionId ?? ""),
+    queryFn: () => fetchConditionEvents(conditionId as string),
+    enabled: Boolean(conditionId),
   });
 }
 
@@ -254,7 +370,13 @@ function invalidateRound(
   roundId?: string,
 ) {
   void queryClient.invalidateQueries({ queryKey: conditionRoundsQueryKey(fileId) });
-  void queryClient.invalidateQueries({ queryKey: conditionsQueryKey(fileId) });
+  // THE PREFIX, NOT THE FULL KEY — see `conditionsQueryPrefix`. The full key would match only the
+  // unfiltered list, so an import performed with a filter applied would leave the visible list stale.
+  void queryClient.invalidateQueries({ queryKey: conditionsQueryPrefix(fileId) });
+  // THE SUMMARY MOVES WHENEVER THE CONDITIONS DO. An import changes every count on the bar, and a
+  // processor who imports and sees the numbers unchanged will import again — the same reasoning this
+  // function's own docstring gives for invalidating both lists rather than one.
+  void queryClient.invalidateQueries({ queryKey: conditionsSummaryQueryKey(fileId) });
   void queryClient.invalidateQueries({ queryKey: ["loan-file-activity", fileId] });
   if (roundId) {
     void queryClient.invalidateQueries({ queryKey: conditionRoundQueryKey(roundId) });

@@ -32,7 +32,14 @@ from enum import StrEnum
 from pathlib import Path
 
 import pytest
-from app.models.condition import BucketKind, ConditionOrigin, OwnerHint, OwnerHintSource
+from app.models.condition import (
+    BucketKind,
+    ConditionLenderStatus,
+    ConditionOrigin,
+    ConditionPrepStatus,
+    OwnerHint,
+    OwnerHintSource,
+)
 from app.models.condition_event import ConditionEventKind
 from app.models.condition_round import (
     ConditionRoundCompleteness,
@@ -40,7 +47,7 @@ from app.models.condition_round import (
     ConditionSheetFormat,
     ConditionSourceKind,
 )
-from app.schemas.condition import MAX_PASTE_CHARS
+from app.schemas.condition import MAX_PASTE_CHARS, ConditionSort
 
 #: `backend/tests/x.py` → `backend/tests` → `backend` → the repo root.
 _TYPES_FILE = Path(__file__).resolve().parents[2] / "frontend" / "lib" / "types" / "conditions.ts"
@@ -66,6 +73,23 @@ _MIRRORED: dict[str, type[StrEnum]] = {
     #: value — and this enum gained `round_reparse_requested` mid-stage, which is exactly the drift
     #: this list exists to catch.
     "ConditionEventKind": ConditionEventKind,
+    #: Added with the filtered list (LP-911). It is a REQUEST enum rather than a column, and it is
+    #: listed here by decision rather than by accident: the client sends `sort`, so a value the server
+    #: grew and the client never heard of is a sort nobody can ask for, and one the client sends and
+    #: the server dropped is a 422 on a screen that used to work. Both directions matter, which is
+    #: what this file's set-equality check gives.
+    "ConditionSort": ConditionSort,
+    #: THE TWO STATUS TRACKS, mirrored as of LP-911 because that is when they reached the wire.
+    #: Stage 1 exposed neither, so neither had a TypeScript twin to compare and both were invisible
+    #: here — the "new backend enum nobody mirrors" case this list's docstring warns about, which is
+    #: caught only when somebody adds the entry.
+    #:
+    #: Both carry a member no Stage 2 control offers (`review`, `pending_review`), kept in the
+    #: database by default A4. The equality below is what stops either side "tidying" those away to
+    #: match the screens: the frontend needs them because the API can send them, and the API can send
+    #: them because the column accepts them.
+    "ConditionPrepStatus": ConditionPrepStatus,
+    "ConditionLenderStatus": ConditionLenderStatus,
 }
 
 #: `export type Name = "a" | "b";` — on one line when short, wrapped across many when biome decides

@@ -154,6 +154,34 @@ export type OwnerHintSource = "prefix" | "bucket" | "code_map" | "none";
 /** Whether the condition came off a sheet or was typed by a processor. */
 export type ConditionOrigin = "sheet" | "manual";
 
+/**
+ * OUR preparation track: what we are doing (ADR-404, ADR-408). Four steps on screen.
+ *
+ * `review` IS IN THIS UNION AND IS NEVER OFFERED, and it must stay. Default A4 keeps it in the
+ * database — removing an enum member costs a migration for no gain, and Stage 3 may use it for
+ * "document arrived, checking it" — while no Stage 2 control lists it. The cross-stack guard
+ * (`backend/tests/test_condition_type_mirror.py`) asserts SET EQUALITY with the backend enum in both
+ * directions, so deleting it here to match what the UI shows breaks the build rather than tidying
+ * anything. Leave it, and leave it out of the selects.
+ */
+export type ConditionPrepStatus = "to_do" | "waiting" | "review" | "ready" | "with_underwriter";
+
+/**
+ * THE LENDER'S track: what the lender said (ADR-404, ADR-408).
+ *
+ * Nothing moves this off `open` except a recorded verdict — who said so and where — or the lender's
+ * own dated note, which sets `not_cleared`. "Cleared" never appears next to anything else.
+ *
+ * `pending_review` is the counterpart of `review` above: kept in the database by A4, never offered.
+ */
+export type ConditionLenderStatus =
+  | "open"
+  | "pending_review"
+  | "cleared"
+  | "not_cleared"
+  | "waived"
+  | "superseded";
+
 /** Where a round is between arriving and being imported. */
 export type ConditionRoundStatus = "parsing" | "draft" | "parse_failed" | "imported" | "discarded";
 
@@ -174,6 +202,18 @@ export type ConditionSheetFormat =
 
 /** How one arrival of a round reached us. A round has a LIST — a paste can be enriched by its PDF. */
 export type ConditionSourceKind = "pdf_upload" | "email" | "paste" | "manual";
+
+/**
+ * How the conditions list is ordered (LP-911). Sent as the `sort` query parameter.
+ *
+ * `sheet` is the default and is the order the lender printed them in on the newest sheet, which is
+ * the order the processor sees in the lender's own portal.
+ *
+ * `code` SORTS AS A STRING. A lender code keeps its leading zeros because it is an identifier printed
+ * on a document, not a quantity (ADR-407), so `"0006"` comes before `"1228"` — the server orders it
+ * and the client must not "helpfully" re-sort numerically.
+ */
+export type ConditionSort = "sheet" | "code" | "status" | "owner" | "updated";
 
 /**
  * What happened to a round — the history on the round-details sheet (S1-09).
@@ -309,7 +349,19 @@ export interface DraftRow {
   source_line_numbers: number[];
 }
 
-/** One imported condition, as the list renders it. NO STATUS FIELDS — see the module docstring. */
+/**
+ * One imported condition, as the list and the detail sheet render it.
+ *
+ * THE STATUS FIELDS ARRIVED IN STAGE 2 (LP-911). Through Stage 1 they were deliberately absent —
+ * created with defaults and moved by nothing, so exposing them would have invited a UI implying
+ * otherwise (ADR-404). LP-912 adds the endpoints that move them. **"Cleared" still means a recorded
+ * verdict and nothing else**; the rule moved from "the field does not exist" to "only a verdict sets
+ * it".
+ *
+ * Three fields have no producer until a later ticket and are `null`/`false` until then, each named
+ * with the ticket that fills it. They are here now because LP-913 renders the row from this type and
+ * adding keys to both sides twice would churn the cross-stack mirror for no gain.
+ */
 export interface Condition {
   id: string;
   lender_code: string | null;
@@ -327,6 +379,43 @@ export interface Condition {
   sequence: number;
   first_round_id: string;
   last_seen_round_id: string;
+  /** Our preparation track. */
+  prep_status: ConditionPrepStatus;
+  /** The lender's answer. Nothing but a recorded verdict moves this off `open`/`not_cleared`. */
+  lender_status: ConditionLenderStatus;
+  /**
+   * When the row last changed — the value an LP-912 write must echo back.
+   *
+   * WITHOUT IT THE STALE-WRITE GUARD IS UNREACHABLE. LP-912's moves are optimistic on `updated_at`,
+   * and a client cannot send a value it was never given. That is not hypothetical: LP-909 §4 found
+   * the draft's 409 could never fire because `ConditionRound` carried only `created_at`.
+   */
+  updated_at: string;
+  /**
+   * The owner the list groups and filters on. `owner_hint` is the sheet's guess; this is the answer,
+   * and LP-912 makes them differ by adding a manual override that wins.
+   *
+   * "Not known" FOLLOWS THE OWNER BEING `unknown`, NEVER THE SOURCE BEING `none`. Measured in the
+   * Stage 2 survey: `1228` comes back `unknown` with source `code_map`, because the UWM map gives it
+   * `default_owner_hint: unknown` — so keying the label off the source renders "Not known · from code
+   * map", which S2-01 does not draw.
+   */
+  effective_owner: OwnerHint;
+  effective_owner_source: OwnerHintSource;
+  /** The newest DATED underwriter note, for the row's chip. Null when every note is undated. */
+  latest_note: UnderwriterNote | null;
+  /** Whether the lender still owes an answer. Info-only and replaced conditions are never open. */
+  is_open: boolean;
+  /** Days since this file first recorded it — not since the lender printed it. */
+  days_open: number;
+  /** The lender said "not satisfied". LP-912 narrows this to "because of an underwriter note". */
+  came_back: boolean;
+  /** Who said it was cleared or waived, and where. Null until LP-912 records one. */
+  verdict: Record<string, unknown> | null;
+  /** LP-915's proposal, e.g. "probably cleared in round 2". Always a question with a button. */
+  pending_suggestion: string | null;
+  /** Set by LP-915 when a "reworded" pair is confirmed. Nothing disappears; it points forward. */
+  superseded_by_id: string | null;
   /**
    * Every round this condition appeared on — the `R1 R2` chips.
    *
@@ -380,6 +469,56 @@ export interface ConditionRound {
    * Added to `ConditionRoundPublic` alongside this (LP-909 §4).
    */
   updated_at: string;
+}
+
+/**
+ * One round, and whether a condition was on it — the detail sheet's Rounds pills (S2-03).
+ *
+ * THE THREE STATES ARE NOT TWO. A condition absent from a `full` round is genuinely absent; absent
+ * from a `partial` one it says nothing at all, because the processor pasted some lines and never
+ * claimed the rest were gone (ADR-404). `on_sheet` together with `completeness` is what lets the
+ * screen say "not comparable" instead of implying a condition was dropped.
+ */
+export interface ConditionRoundAppearance {
+  round_id: string;
+  round_number: number | null;
+  round_date: string;
+  date_printed: string | null;
+  completeness: ConditionRoundCompleteness;
+  on_sheet: boolean;
+  /** The note that arrived IN this round, matched on the note's own `first_seen_round_id`. */
+  note: UnderwriterNote | null;
+}
+
+/** One condition with its whole story — the detail sheet. Extends the row so the two cannot drift. */
+export interface ConditionDetail extends Condition {
+  /** Every round on the file, oldest first, each saying whether this condition was on it. */
+  rounds: ConditionRoundAppearance[];
+}
+
+/**
+ * The summary bar and the file rail's counts (S2-01, S2-02).
+ *
+ * The three breakdowns count OPEN conditions only, which is what makes "Prior to docs open 1" a
+ * different number from how many prior-to-docs conditions the file has ever had.
+ */
+export interface ConditionSummary {
+  total: number;
+  open: number;
+  cleared: number;
+  waived: number;
+  not_cleared: number;
+  superseded: number;
+  info_only: number;
+  by_prep_status: Record<string, number>;
+  by_owner: Record<string, number>;
+  by_bucket_kind: Record<string, number>;
+  open_prior_to_docs: number;
+  open_prior_to_funding: number;
+  /** 0 until LP-915 proposes one. The round card's "N probably cleared — review" reads it. */
+  pending_suggestions: number;
+  /** The newest imported round, for the rail's "from round 2, printed 09/10". */
+  latest_round: ConditionRound | null;
 }
 
 // --- writes ----------------------------------------------------------------- //

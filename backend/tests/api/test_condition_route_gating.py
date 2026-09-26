@@ -53,7 +53,12 @@ _UNGATED_BY_DESIGN: set[tuple[str, str]] = {
 
 def _gate_map() -> list[tuple[str, APIRouter, set[Callable[..., Any]]]]:
     """Each router that can reach a condition, with the gates correct for ITS path shape."""
-    from app.api.conditions import get_scoped_loan_file_by_id, get_scoped_round
+    from app.api.conditions import (
+        conditions_by_id_router,
+        get_scoped_condition,
+        get_scoped_loan_file_by_id,
+        get_scoped_round,
+    )
     from app.api.conditions import rounds_router as condition_rounds_router
     from app.api.conditions import router as conditions_router
     from app.api.dependencies import get_scoped_loan_file
@@ -65,6 +70,10 @@ def _gate_map() -> list[tuple[str, APIRouter, set[Callable[..., Any]]]]:
         ("conditions", conditions_router, {get_scoped_loan_file_by_id}),
         # `/condition-rounds/{round_id}` — no file in the path; the round carries the company.
         ("condition-rounds", condition_rounds_router, {get_scoped_round}),
+        # `/conditions/{condition_id}` — no file AND no round in the path; the condition carries the
+        # company. LP-911's router, listed here in the commit that adds it, because this map is
+        # hand-written and a router missing from it is a router this walk cannot see at all.
+        ("conditions-by-id", conditions_by_id_router, {get_scoped_condition}),
         # `/loan-files/{file_identifier}/inbound/...` — the repo-wide file gate, and the home of
         # the fifth condition route.
         ("inbound", inbound_router, {get_scoped_loan_file}),

@@ -51,6 +51,7 @@ from app.models.lender_condition_code import LenderCodeStatus, LenderConditionCo
 from app.models.loan_file import LoanFile
 from app.schemas.condition import ConditionCreateRequest, DraftRowPublic
 from app.services.activity_log import log_activity
+from app.services.conditions import latest_imported_round
 
 logger = structlog.get_logger(__name__)
 
@@ -775,19 +776,12 @@ async def import_round(
 # --------------------------------------------------------------------------- #
 
 
-async def _latest_imported_round(db: AsyncSession, *, loan_file_id: UUID) -> ConditionRound | None:
-    """The file's highest-numbered imported round, or None if no sheet has ever been imported."""
-    stmt = select(ConditionRound).where(
-        ConditionRound.loan_file_id == loan_file_id,
-        ConditionRound.status == ConditionRoundStatus.IMPORTED,
-    )
-    stmt = only_active(stmt, ConditionRound).order_by(ConditionRound.round_number.desc())
-    # Annotated rather than returned straight: `db.scalar` degrades to `Any` once the select has
-    # been chained through `only_active` and `order_by`, and returning that from a function declared
-    # `ConditionRound | None` is exactly what mypy's `no-any-return` is for. Widening the signature
-    # to match the inference would hide the looseness instead of naming it.
-    latest: ConditionRound | None = await db.scalar(stmt)
-    return latest
+#: `_latest_imported_round` LIVED HERE AND IS NOW `services/conditions.py::latest_imported_round`
+#: (LP-911). That module owns reading rounds, and LP-911's summary needs the same answer for the file
+#: rail's "from round 2, printed 09/10" — one question asked in two modules is how the two come to
+#: disagree, which is the argument that moved `ENQUEUE_FAILED_DETAIL` into a service once two callers
+#: needed it. Imported at the top of this file; the behaviour is unchanged, including the annotated
+#: `db.scalar` result that keeps mypy's `no-any-return` honest.
 
 
 async def _next_sequence(db: AsyncSession, *, loan_file_id: UUID) -> int:
@@ -873,7 +867,7 @@ async def create_manual_condition(
     our own keystrokes. Looking the code up to fill `info_only`, `canonical_type_id` and an owner
     hint costs nothing and is the same meaning the import would have applied.
     """
-    round_ = await _latest_imported_round(db, loan_file_id=loan_file.id)
+    round_ = await latest_imported_round(db, loan_file_id=loan_file.id)
     if round_ is None:
         round_ = await _manual_round(db, loan_file=loan_file, actor_user_id=actor_user_id)
 

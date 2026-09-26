@@ -209,9 +209,28 @@ source being `none`, or `1228` renders as "Not known · from code map".
 **Consequence for every Stage 2 fixture:** the acceptance file must be created with a lender and the
 UWM codes loaded, or nine of the eleven conditions come back `unknown` (only `1947` and `6378` keep
 `title`, from the prefix, which the reader sets without any map) and both the LP-911 assertion and
-S2-01/S2-02/S2-09 are unreproducible. Load all 28 rows with `load_seed("uwm")` (measured: 28, one of
-them `info_only`) rather than hand-typing the eleven. `tests/conditions/test_round_import.py:444-489` is the shape for
-building `LenderConditionCode` rows in a test; `app/conditions/lender_codes/loader.py` loads the YAML.
+S2-01/S2-02/S2-09 are unreproducible.
+
+**Seed through the product's own path, not by hand and not through `load_seed` either** *(refined
+while building LP-911; the review agreed)*. `app/scripts/seed_lender_codes.py::seed_lender_codes(db)`
+is public and split from its CLI for exactly this — its docstring says "separated from the CLI below so
+a test can drive it against a session with no database of its own". So the fixture sets
+`canonical_lender_key = "uwm"` on its lender, flushes, and calls it. Three consequences worth stating,
+because each is a way the fixture silently goes wrong otherwise:
+
+- `make_lender` does **not** set `canonical_lender_key`, and `_lenders_for_key` matches on it alone. A
+  fixture that forgets it seeds nothing, reports the key unclaimed, and yields nine `unknown` owners —
+  a failure that reads as a logic bug in the filter rather than as a fixture that did nothing. **The
+  fixture asserts the rows landed `SEEDED`** so it fails as itself.
+- Rows must be `SEEDED`, not `OBSERVED_UNMAPPED`: `resolved_status` never demotes, and `SEEDED` is what
+  makes `unmapped_codes` come back empty on import.
+- All 28 shipped rows load, not the eleven on round 1 (measured: 28, one of them `info_only`). A subset
+  would be a second hand-maintained list — the LP-910 lesson, whose review had to diff 56 copied rows
+  to find three slips — and the extra rows are inert on a file whose sheets never mention them.
+
+It also makes this fixture **the first thing to exercise the LP-910 seed against a database**, which
+`phase4.5-progress.md` lists under "Never exercised". `tests/conditions/test_round_import.py:444-489` remains the shape for
+building a `LenderConditionCode` row directly when a test wants one specific mapping.
 Noted in the progress file too: **the LP-910 seed has never run against a database**, so the fixture
 must not depend on it having been run.
 

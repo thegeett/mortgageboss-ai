@@ -5,10 +5,13 @@ The read schemas are what the Conditions tab renders. Two rules shape them, both
 * **The lender's wording is carried verbatim and never paraphrased** (ADR-405, spec §9.1). It is
   rendered in serif because it is quoted from a document, and the API is the last place it could be
   quietly "tidied".
-* **No status control exists in Stage 1** (ADR-404). `prep_status` and `lender_status` are
-  deliberately ABSENT from `ConditionPublic`: they are created with defaults in LP-904 and nothing
-  moves them, so exposing them would invite a UI that implies otherwise. They arrive in Stage 2 with
-  the moves that earn them.
+* **The status fields arrived in Stage 2, with the moves that earn them** (LP-911). They were
+  deliberately ABSENT through Stage 1 (ADR-404): created with defaults in LP-904 and moved by nothing,
+  so exposing them would have invited a UI implying otherwise. LP-912 adds the endpoints that move
+  them, and LP-911 exposes them because the list, the detail sheet and the summary bar all render
+  them. **"Cleared" still means a recorded verdict and nothing else** — that rule moved from "the
+  field does not exist" to "the field is only ever set by a verdict", which is where ADR-404 always
+  pointed.
 
 `draft_rows` is a parse result awaiting review, not a condition. It is modelled as its own schema
 rather than reusing `ConditionPublic` because the two differ in the way that matters: a draft row has
@@ -35,6 +38,7 @@ a confidence and the source line numbers it came from, and no identity of its ow
 from collections.abc import Callable
 from datetime import date as date_type
 from datetime import datetime
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -44,7 +48,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.models.condition import (
     BucketKind,
     Condition,
+    ConditionLenderStatus,
     ConditionOrigin,
+    ConditionPrepStatus,
     OwnerHint,
     OwnerHintSource,
 )
@@ -64,6 +70,30 @@ MAX_PASTE_CHARS = 100_000
 #: The reparse window is NOT declared here. It belongs with the parse time limits it is derived
 #: from — `app/conditions/limits.py` — because a schema module importing from `app/tasks/` would
 #: invert the direction this repo's imports run.
+
+
+class ConditionSort(StrEnum):
+    """How the conditions list is ordered (spec §LP-911).
+
+    It lives with the schemas because it is the WIRE CONTRACT — a query parameter the client sends —
+    and `services/conditions.py` imports it from here, the same direction `condition_import.py`
+    already reads `DraftRowPublic`.
+
+    `SHEET` is the default and is what `list_conditions` has always done: `sequence`, then
+    `created_at`. `sequence` is "its order on the latest sheet it appeared on", so sheet order is the
+    order the processor sees in the lender's own portal — and only a FULL round moves it, which is the
+    correction LP-909 §5 had to make after a partial paste renumbered a file.
+
+    `CODE` SORTS AS A STRING, NEVER AS A NUMBER. A lender code keeps its leading zeros because it is
+    an identifier printed on a document, not a quantity (ADR-407), so `"0006"` sorts before `"1228"`
+    and casting to an int to "fix" the order would be the same silent loss the column type refuses.
+    """
+
+    SHEET = "sheet"
+    CODE = "code"
+    STATUS = "status"
+    OWNER = "owner"
+    UPDATED = "updated"
 
 
 class UnderwriterNotePublic(BaseModel):
@@ -383,11 +413,17 @@ class DraftRowPublic(BaseModel):
 
 
 class ConditionPublic(BaseModel):
-    """One imported condition, as the list renders it.
+    """One imported condition, as the list and the detail sheet render it.
 
-    NO STATUS FIELDS — see the module docstring. `round_numbers` is what drives the `R1 R2` chips:
-    every round this condition appeared on, derived from its CONDITION_CREATED / CONDITION_SEEN_AGAIN
-    events.
+    `round_numbers` is what drives the `R1 R2` chips: every round this condition appeared on, derived
+    from its CONDITION_CREATED / CONDITION_SEEN_AGAIN events.
+
+    THE STATUS FIELDS ARE HERE AS OF LP-911 — see the module docstring for why they were absent
+    before. Three of the fields below have **no producer yet** and are shipped anyway, which this
+    repo normally refuses ("a field nothing fills is an invitation"). Each is named with the ticket
+    that fills it, and the reason for shipping them now is narrow: `frontend/lib/types/conditions.ts`
+    mirrors this model, LP-913 renders the summary bar and the row from it, and adding keys to both
+    sides twice would churn the mirror guard for no gain. They are `None`/`False`, never a guess.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -411,12 +447,90 @@ class ConditionPublic(BaseModel):
     round_numbers: list[int] = Field(default_factory=list)
     created_at: datetime
 
+    #: Both tracks (ADR-404). Ours says what WE are doing; the lender's says what the LENDER said.
+    prep_status: ConditionPrepStatus
+    lender_status: ConditionLenderStatus
+
+    #: WITHOUT THIS, LP-912's `stale` REFUSAL IS UNREACHABLE. Its writes are optimistic on
+    #: `updated_at`, and a client cannot echo a value it was never given — which is exactly how
+    #: LP-909 §4 found the draft's 409 could never fire, because `ConditionRoundPublic` carried only
+    #: `created_at`. Exposed here so the guard has something to compare.
+    updated_at: datetime
+
+    #: The owner the list groups and filters on. `owner_hint` is the sheet's guess; this is the
+    #: answer, and LP-912 makes them differ by adding a manual override that wins (A2).
+    effective_owner: OwnerHint
+    effective_owner_source: OwnerHintSource
+
+    #: The newest dated underwriter note, for the row's chip — the whole list is in
+    #: `underwriter_notes`, and this saves every caller re-deriving "newest".
+    latest_note: UnderwriterNotePublic | None = None
+
+    #: Whether the lender has answered, or answered "not satisfied". Info-only and superseded
+    #: conditions are never open (spec §LP-911).
+    is_open: bool
+    #: Days since we first saw it. FROM `created_at`, which is when this file first recorded the
+    #: condition — not from the round's printed date, which is when the LENDER wrote it. The
+    #: distinction is worth keeping: a sheet imported late would otherwise show a condition as open
+    #: for longer than it has been ours.
+    days_open: int
+
+    #: BROADER THAN ITS NAME UNTIL LP-912, AND SAID SO RATHER THAN LEFT TO READ WRONG. The spec
+    #: defines it as "lender status is `not_cleared` **because of an underwriter note**", and which
+    #: cause set the status is only knowable from the verdict's `source_kind` — a column LP-912 adds.
+    #: Here it is simply "the lender said not satisfied", which is the same set today because nothing
+    #: else can produce `not_cleared` yet. LP-912 narrows it.
+    came_back: bool
+
+    #: `None` until LP-912 records one. A verdict is who said so and where, and it is the ONLY thing
+    #: that may set `cleared` or `waived` (ADR-404).
+    verdict: dict[str, Any] | None = None
+    #: `None` until LP-915's round comparison proposes one. "Probably cleared" is always a question
+    #: with a button, never a status (design README rule 4).
+    pending_suggestion: str | None = None
+    #: Set by LP-915 when the processor confirms a "reworded" pair. Nothing disappears: the replaced
+    #: condition stays, struck through, pointing at the one that carries on from it.
+    superseded_by_id: UUID | None = None
+
     @classmethod
     def from_model(
-        cls, condition: Condition, *, round_numbers: list[int] | None = None
+        cls,
+        condition: Condition,
+        *,
+        effective_owner: OwnerHint,
+        effective_owner_source: OwnerHintSource,
+        is_open: bool,
+        days_open: int,
+        round_numbers: list[int] | None = None,
     ) -> "ConditionPublic":
-        """Build the public view. `round_numbers` is supplied by the caller, which reads the events
-        for the whole list in one query rather than per row."""
+        """Build the public view.
+
+        `round_numbers` is supplied by the caller, which reads the events for the whole list in one
+        query rather than per row.
+
+        THE FOUR DERIVED VALUES ARE REQUIRED PARAMETERS, AND THIS SCHEMA DELIBERATELY CANNOT COMPUTE
+        THEM. `services/conditions.py` owns `effective_owner`, `effective_owner_source`, `is_open` and
+        the day count — the same rules its filters and its summary run on. Two things follow, and both
+        are the reason for the awkwardness:
+
+        1. **A schema that re-derived them would be a second statement of each**, free to disagree
+           with the very filter that selected the row. A list filtered on `owner=borrower` rendering a
+           row whose `effective_owner` says something else is the kind of split nothing fails on.
+        2. **This module stays pure.** It already apologises for holding a logger ("a logger in a
+           schema module, which is unusual here and deliberate"); importing a SERVICE would be a
+           larger inversion, and doing it inside the function body to dodge the import cycle —
+           `services/conditions.py` imports `ConditionSort` from here — would leave a trap for whoever
+           later moves it to the top of the file, where it becomes a crash on startup.
+
+        Required rather than defaulted so a new caller cannot quietly get a different answer than the
+        list does. There are two callers, both in `api/conditions.py`, and both already hold the
+        service.
+        """
+        notes = [
+            UnderwriterNotePublic.model_validate(note)
+            for note in (condition.underwriter_notes or [])
+        ]
+        dated = [note for note in notes if note.date is not None]
         return cls(
             id=condition.id,
             lender_code=condition.lender_code,
@@ -424,10 +538,7 @@ class ConditionPublic(BaseModel):
             bucket_heading=condition.bucket_heading,
             bucket_kind=condition.bucket_kind,
             verbatim_text=condition.verbatim_text,
-            underwriter_notes=[
-                UnderwriterNotePublic.model_validate(note)
-                for note in (condition.underwriter_notes or [])
-            ],
+            underwriter_notes=notes,
             owner_hint=condition.owner_hint,
             owner_hint_source=condition.owner_hint_source,
             info_only=condition.info_only,
@@ -438,7 +549,65 @@ class ConditionPublic(BaseModel):
             last_seen_round_id=condition.last_seen_round_id,
             round_numbers=round_numbers or [],
             created_at=condition.created_at,
+            prep_status=condition.prep_status,
+            lender_status=condition.lender_status,
+            updated_at=condition.updated_at,
+            effective_owner=effective_owner,
+            effective_owner_source=effective_owner_source,
+            # NEWEST BY DATE, and undated notes are not candidates: "newest" of a set with no dates
+            # would be "whichever the reader happened to store last", which is not a fact about the
+            # lender. A condition whose only notes are undated therefore has no `latest_note`, and
+            # the chips still show them all.
+            latest_note=max(dated, key=lambda note: note.date) if dated else None,  # type: ignore[arg-type,return-value]
+            is_open=is_open,
+            days_open=days_open,
+            came_back=condition.lender_status is ConditionLenderStatus.NOT_CLEARED,
+            verdict=None,
+            pending_suggestion=None,
+            superseded_by_id=None,
         )
+
+
+class ConditionRoundAppearancePublic(BaseModel):
+    """One round, and whether this condition was on it — the detail sheet's Rounds pills (S2-03).
+
+    "R1 08/28 · on the sheet ✓", "R2 09/10 · full list · not on it —". The three states are NOT two:
+    a condition absent from a FULL round is genuinely absent, while a condition absent from a PARTIAL
+    one says nothing at all — the processor pasted six lines and did not claim the rest were gone
+    (ADR-404). `on_sheet` plus `completeness` is what lets the screen say "not comparable" instead of
+    implying a condition was dropped.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    round_id: UUID
+    round_number: int | None
+    round_date: date_type
+    date_printed: date_type | None
+    completeness: ConditionRoundCompleteness
+    #: Whether this condition appeared on this round's sheet, from its appearance events — not from
+    #: `first_round_id`/`last_seen_round_id`, which cannot express "on R1 and R3 but not R2".
+    on_sheet: bool
+    #: The note that arrived IN this round, if any — matched on the note's `first_seen_round_id`, so
+    #: the chip appears against the round that actually brought it rather than against every round.
+    note: UnderwriterNotePublic | None = None
+
+
+class ConditionDetailPublic(ConditionPublic):
+    """One condition with its whole story — the detail sheet (LP-916, read by LP-911's endpoint).
+
+    IT EXTENDS `ConditionPublic` RATHER THAN RESTATING IT, so a field added to the row cannot go
+    missing from the sheet. The sheet's Previous/Next walks the same list the row came from, and a
+    detail view that carried a different set of fields than the list is how the two come to disagree
+    about a status in front of a processor.
+
+    The history is NOT here: it is a separate call (`…/events`), for the reason LP-909 gives about the
+    round's history — the condition is fetched whenever the list refreshes, and the history is read
+    only when somebody opens one sheet.
+    """
+
+    #: Every round on the file, oldest first, each saying whether this condition was on it.
+    rounds: list[ConditionRoundAppearancePublic] = Field(default_factory=list)
 
 
 class ConditionRoundPublic(BaseModel):
@@ -532,6 +701,57 @@ class ConditionRoundPublic(BaseModel):
             created_at=round_.created_at,
             updated_at=round_.updated_at,
         )
+
+
+class ConditionSummaryPublic(BaseModel):
+    """The summary bar and the file rail's counts (spec §LP-911, screens S2-01 and S2-02).
+
+    IT LIVES BELOW `ConditionRoundPublic` BECAUSE IT REFERS TO IT, and Python resolves an annotation
+    when the class body runs. Declared above, `latest_round: ConditionRoundPublic | None` raises
+    `NameError` on import — measured, not guessed: it did. A quoted forward reference would also work
+    and is the wrong fix here, because it would leave the file readable in an order it cannot actually
+    be built in.
+
+    COUNTS AND NOTHING ELSE — no codes, no wording. It is the one response the file rail reads on
+    every visit, and a summary that carried rows would put the lender's words on a screen that only
+    ever shows numbers.
+
+    `open` COUNTS `not_cleared` TOO, because a condition the lender refused is back with the
+    processor; and info-only and superseded conditions are never open (spec §LP-911). That rule lives
+    in `services/conditions.py::is_open` so the number here and the row's own `is_open` cannot
+    disagree.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    total: int
+    open: int
+    cleared: int
+    waived: int
+    not_cleared: int
+    superseded: int
+    info_only: int
+
+    #: Keyed by the enum's value. OPEN conditions only — the summary bar exists to say what is still
+    #: outstanding, which is what makes S2-02's "Prior to docs open 1" a different number from "how
+    #: many prior-to-docs conditions this file has ever had".
+    by_prep_status: dict[str, int] = Field(default_factory=dict)
+    by_owner: dict[str, int] = Field(default_factory=dict)
+    by_bucket_kind: dict[str, int] = Field(default_factory=dict)
+
+    #: The two the summary bar prints as their own numbers. Both are `by_bucket_kind` lookups rather
+    #: than separate counts, so they cannot drift from it.
+    open_prior_to_docs: int
+    open_prior_to_funding: int
+
+    #: 0 UNTIL LP-915 PRODUCES ONE. Shipped as a key now because LP-913 renders the bar from this
+    #: model and the TypeScript mirror would otherwise change twice; never a guess, and the round
+    #: card's "N probably cleared — review" reads it.
+    pending_suggestions: int = 0
+
+    #: The newest imported round, for the rail's "from round 2, printed 09/10". `None` on a file whose
+    #: sheets have all been discarded or never imported.
+    latest_round: ConditionRoundPublic | None = None
 
 
 # --------------------------------------------------------------------------- #
