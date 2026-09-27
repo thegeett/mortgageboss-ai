@@ -41,7 +41,10 @@ export function ConditionsSummaryBar({
   onFilter: (next: ConditionListUrlState) => void;
 }) {
   const cells: Cell[] = [
-    { label: "Open", value: summary.open, filter: { lenderStatus: ["open"] } },
+    // OPEN MEANS OPEN OR CAME BACK, AS THE NUMBER DOES (LP-913 review). `summary.open` is LP-911's
+    // `is_open` — `open` or `not_cleared` — so a filter of `open` alone showed fewer rows than the
+    // number it was clicked from, and dropped every came-back condition from "Open".
+    { label: "Open", value: summary.open, filter: { lenderStatus: ["open", "not_cleared"] } },
     {
       label: resolveStatus(CONDITION_LENDER_STATUS, "not_cleared").label,
       value: summary.not_cleared,
@@ -61,12 +64,12 @@ export function ConditionsSummaryBar({
     {
       label: "Prior to docs open",
       value: summary.open_prior_to_docs,
-      filter: { lenderStatus: ["open"], bucketKind: ["prior_to_docs"] },
+      filter: { lenderStatus: ["open", "not_cleared"], bucketKind: ["prior_to_docs"] },
     },
     {
       label: "Prior to funding open",
       value: summary.open_prior_to_funding,
-      filter: { lenderStatus: ["open"], bucketKind: ["prior_to_funding"] },
+      filter: { lenderStatus: ["open", "not_cleared"], bucketKind: ["prior_to_funding"] },
     },
   ];
 

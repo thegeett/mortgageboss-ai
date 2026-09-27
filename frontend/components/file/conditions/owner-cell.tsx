@@ -56,17 +56,27 @@ const OWNER_ICON: Record<OwnerHint, LucideIcon | null> = {
  * BOTH screens (10 in the S1-05 mock, 10 in S1-08), so the treatment had to land in both places
  * regardless; sharing the cell is what stops the two drifting the first time an owner is added.
  */
-export function OwnerCell({ hint, source }: { hint: OwnerHint; source: OwnerHintSource }) {
+export function OwnerCell({
+  hint,
+  source,
+  unknownLabel,
+}: {
+  hint: OwnerHint;
+  source: OwnerHintSource;
+  /** Overrides the label for `unknown` only — the Stage 1 review screens say "Owner not known". */
+  unknownLabel?: string;
+}) {
   const Icon = OWNER_ICON[hint];
+  const label = hint === "unknown" && unknownLabel ? unknownLabel : OWNER_LABEL[hint];
   return (
     <div className="flex min-w-0 flex-col items-end gap-0.5">
       {Icon ? (
         <span className="inline-flex items-center gap-1 rounded-md border border-input px-1.5 py-0.5 text-xs text-foreground-2">
           <Icon className="h-3 w-3 shrink-0" aria-hidden />
-          {OWNER_LABEL[hint]}
+          {label}
         </span>
       ) : (
-        <span className="text-xs text-muted-foreground">{OWNER_LABEL[hint]}</span>
+        <span className="text-xs text-muted-foreground">{label}</span>
       )}
       {/* THE PROVENANCE, BECAUSE THE HINTS ARE NOT EQUALLY GOOD. A `TC:` the lender typed is far
           stronger than a default from the code map, and showing them identically would invite

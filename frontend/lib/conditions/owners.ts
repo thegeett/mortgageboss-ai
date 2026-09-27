@@ -8,9 +8,11 @@ import type { OwnerHint } from "@/lib/types/conditions";
  * the longer form was written to avoid that; but "Not known" is what S2-01, S2-02 and S2-03 all draw,
  * on the one screen element this label reaches as a standalone owner.
  *
- * WHY THE LONGER FORM SURVIVED AS LONG AS IT DID: the Stage 1 design pack never draws an unknown
- * owner at all, so it was authored rather than taken from a screen, and LP-909's visual check records
- * "owner chips" without pinning the wording. Stage 2 draws it three times and agrees with itself.
+ * THE STAGE 1 PACK DRAWS THE LONG FORM, AND ONE LIVE SCREEN STILL NEEDS IT (LP-913 review). An
+ * earlier version of this comment said the Stage 1 pack never drew an unknown owner. It does, seven
+ * times: "Owner not known" on S1-04 to S1-09 and S1-12. Most of those draw it in the old imported
+ * list, which the Stage 2 list replaced, so "Not known" is right there. But the DRAFT REVIEW rows
+ * (S1-04, S1-07) are still live, so `review-rows.tsx` passes `OWNER_NOT_KNOWN_LONG` to `OwnerCell`.
  *
  * IT IS SAFE TO SHORTEN BECAUSE THE SENTENCE THAT WOULD SUFFER ALREADY GUARDS THE CASE.
  * `history.ts` never interpolates this for `unknown` — "Moved to Waiting on someone" is its own
@@ -29,3 +31,6 @@ export const OWNER_LABEL: Record<OwnerHint, string> = {
   processor: "Processor",
   unknown: "Not known",
 };
+
+/** The Stage 1 review screens' wording for an unknown owner (S1-04, S1-07). See above. */
+export const OWNER_NOT_KNOWN_LONG = "Owner not known";

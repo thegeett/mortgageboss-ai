@@ -332,16 +332,16 @@ describe("what the screen says about the sheet", () => {
     const chip = within(named).getByText("Title");
     expect(chip.querySelector("svg")).not.toBeNull();
 
-    // THE ABSENCE IS THE DESIGN, NOT A MISSING ICON. "Not known" draws as plain muted text
+    // THE ABSENCE IS THE DESIGN, NOT A MISSING ICON. "Owner not known" draws as plain muted text
     // with no chip and no glyph: a chip says "here is who acts", and an absence of evidence does not
     // belong in the same container as a named party.
     const anonymous = screen
       .getByText("Nobody obvious owns this one.")
       .closest("div.grid") as HTMLElement;
-    // "Not known" since LP-913: S2-01, S2-02 and S2-03 all draw the unknown owner that way, and the
-    // Stage 1 pack never drew one at all. THE ASSERTION BELOW IS UNCHANGED and is the real subject —
-    // no chip, no icon. Only the string moved.
-    const plain = within(anonymous).getByText("Not known");
+    // "Owner not known" ON THIS SCREEN, as S1-04 draws it. LP-913 shortened the shared label to
+    // S2's "Not known" and moved this string with it; its review restored the long form here, since
+    // the review rows are a Stage 1 screen that is still live.
+    const plain = within(anonymous).getByText("Owner not known");
     expect(plain.querySelector("svg")).toBeNull();
     expect(plain.className).not.toContain("border");
   });

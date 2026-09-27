@@ -802,7 +802,9 @@ async def test_a_bulk_verdict_on_five_rows_writes_five_verdicts_and_five_events(
 
     assert response.status_code == 200, response.text
     body = response.json()
-    assert len(body["applied"]) == 5
+    # THE FIVE IDS, NOT FIVE ENTRIES (LP-913 review): a response listing one id five times passed
+    # a length check.
+    assert sorted(body["applied"]) == sorted(str(condition.id) for condition in conditions)
     assert body["refused"] == [], "nothing here is information-only or stale"
 
     for condition in conditions:

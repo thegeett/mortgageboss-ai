@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { OWNER_NOT_KNOWN_LONG } from "@/lib/conditions/owners";
 import { displayWording } from "@/lib/conditions/wording";
 import { BUCKET_KIND_CHIP } from "@/lib/types/conditions";
 import type { DraftRow, UnderwriterNote } from "@/lib/types/conditions";
@@ -136,7 +137,11 @@ function Row({
       {/* The design's `meta` cell is a COLUMN — owner above, the row's controls below it — rather
           than the two side by side. S1-04's mock draws the pencil and × under the chip. */}
       <div className="flex flex-col items-end gap-1">
-        <OwnerCell hint={row.owner_hint} source={row.owner_hint_source} />
+        <OwnerCell
+          hint={row.owner_hint}
+          source={row.owner_hint_source}
+          unknownLabel={OWNER_NOT_KNOWN_LONG}
+        />
         {!editing ? (
           <div className="flex shrink-0 gap-0.5">
             <Button

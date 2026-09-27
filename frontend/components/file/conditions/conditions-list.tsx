@@ -4,6 +4,7 @@ import { StatusToken } from "@/components/status-token";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Select } from "@/components/ui/select";
+import { groupConditions } from "@/lib/conditions/grouping";
 import type { ConditionGroupBy, ConditionListUrlState } from "@/lib/conditions/list-url";
 import { describeConditionFilters } from "@/lib/conditions/list-url";
 import { OWNER_LABEL } from "@/lib/conditions/owners";
@@ -45,12 +46,6 @@ function settledSection(condition: Condition): string | null {
   // The lender is doing this one; it is not our work, but it is not settled either.
   if (condition.bucket_kind === "lender_to_clear") return "Lender is doing it";
   return null;
-}
-
-function groupKeyOf(condition: Condition, groupBy: ConditionGroupBy): string {
-  if (groupBy === "owner") return OWNER_LABEL[condition.effective_owner];
-  if (groupBy === "prep_status") return CONDITION_PREP_STATUS[condition.prep_status].label;
-  return condition.bucket_heading || "No heading given";
 }
 
 const OFFERED_PREP: ConditionPrepStatus[] = ["to_do", "waiting", "ready", "with_underwriter"];
@@ -110,16 +105,8 @@ export function ConditionsList({
     settled.set(section, rows);
   }
 
-  // A GROUP IS A RUN OF ROWS, NOT A HEADING. One heading can own two runs — a hand-typed condition
-  // between two printed ones — and keying by heading alone raised a React duplicate-key error per
-  // repeat in a browser (LP-909 §5, the same bug one screen over).
-  const groups: { key: string; rows: Condition[] }[] = [];
-  for (const condition of live) {
-    const key = groupKeyOf(condition, state.groupBy);
-    const last = groups.at(-1);
-    if (last && last.key === key) last.rows.push(condition);
-    else groups.push({ key, rows: [condition] });
-  }
+  // Runs by heading, one group per value by owner or status — see `groupConditions`.
+  const groups = groupConditions(live, state.groupBy);
 
   const filtered = describeConditionFilters(state, search);
 
