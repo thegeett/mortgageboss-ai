@@ -34,6 +34,11 @@ const FIGURES: [key: string, label: string][] = [
   ["Verified Assets", "Verified assets"],
   ["Max Funds to Close", "Max funds to close"],
   ["Must Not Close Before", "Must not close before"],
+  //: ADDED BY LP-917-lite, AND ITS ABSENCE WAS A REAL GAP. The spec asks the round card and this
+  //: sheet for "must not close before · must fund by · rate lock expiry", and this map — the single
+  //: source both render from — carried only two of the three, so no screen could show it. The reader
+  //: has always stored the key (`_FACTS` in `condition_compare.py` lists it); nothing read it.
+  ["Must Fund By", "Must fund by"],
   ["Rate Lock Exp", "Rate lock exp."],
 ];
 
@@ -47,7 +52,7 @@ const FIGURES: [key: string, label: string][] = [
  * The keys are the server's; the labels are the design's sentence case ("Close by", not the
  * reader's printed "Close By").
  */
-const EXPIRY: [key: string, label: string][] = [
+export const EXPIRY: [key: string, label: string][] = [
   ["close_by", "Close by"],
   ["appraisal", "Appraisal"],
   ["asset", "Asset"],

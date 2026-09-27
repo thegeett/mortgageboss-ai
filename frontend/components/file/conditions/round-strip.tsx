@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { canAttachPdf } from "@/lib/api/conditions";
+import { lenderFactsFor } from "@/lib/conditions/lender-dates";
 import { COMPLETENESS_CHIP } from "@/lib/types/conditions";
 import type { ConditionRound } from "@/lib/types/conditions";
 import { cn } from "@/lib/utils";
@@ -67,6 +68,17 @@ export function RoundStrip({
       {[...rounds].reverse().map((round) => {
         const attachable = canAttachPdf(round);
         const pendingSuggestions = round.comparison?.probably_cleared.length ?? 0;
+        // THE LENDER'S OWN DATES, AS PRINTED (LP-917-lite, S2-11: "Lock 09/30/2026 · Not before
+        // 09/30/2026"). Read from THIS round's letter rather than the file's newest, because a card
+        // draws the round it names. Plain text, no colour for "soon" — spec.
+        const facts = lenderFactsFor(round);
+        const dateLine = [
+          facts.rateLockExpires ? `Lock ${facts.rateLockExpires}` : null,
+          facts.mustNotCloseBefore ? `Not before ${facts.mustNotCloseBefore}` : null,
+          facts.mustFundBy ? `Fund by ${facts.mustFundBy}` : null,
+        ]
+          .filter((part): part is string => part !== null)
+          .join(" · ");
         return (
           <div
             key={round.id}
@@ -120,6 +132,12 @@ export function RoundStrip({
               <span className="text-xs font-medium text-primary">
                 {pendingSuggestions} probably cleared — review
               </span>
+            ) : null}
+
+            {/* Absent entirely when this round's letter printed none, rather than a row of dashes:
+                a round with no dates has nothing to say here, which is not the same as empty fields. */}
+            {dateLine !== "" ? (
+              <span className="text-xs text-muted-foreground">{dateLine}</span>
             ) : null}
 
             <div className="flex flex-wrap items-center gap-2">

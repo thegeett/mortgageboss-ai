@@ -1,17 +1,20 @@
 "use client";
 
 import { useDraftConflict } from "@/components/file/communication/use-draft-conflict";
+import { EXPIRY } from "@/components/file/conditions/review-side-panel";
 import { StatusToken, figureToneClass } from "@/components/status-token";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCalculator } from "@/lib/api/calculators";
+import { useConditionRounds } from "@/lib/api/conditions";
 import { useLoanFileDocuments } from "@/lib/api/documents";
 import type { ConflictChoice } from "@/lib/api/draft-conflict";
 import { useDti } from "@/lib/api/dti";
 import { useLoanFile, useLoanFileActivity } from "@/lib/api/loan-files";
 import { useLtv } from "@/lib/api/ltv";
 import { useResolveFinding, useVerification } from "@/lib/api/verification";
+import { expiryLine, lenderDates } from "@/lib/conditions/lender-dates";
 import { formatMoney, humanize } from "@/lib/format";
 import { documentCoverage, inFlightDocuments } from "@/lib/loan-files/documents";
 import { fileTabSegment } from "@/lib/navigation";
@@ -249,6 +252,13 @@ function ContextSections({ fileId }: { fileId: string }) {
 
       {tab === "documents" ? <DocumentsSection fileId={fileId} /> : null}
       {tab === "verification" ? <VerificationSection fileId={fileId} /> : null}
+      {/* BETWEEN RATIOS AND RECENT ACTIVITY (S2-11), and behind a tab check like its two siblings.
+          This rail "does NOT fetch anything of its own" — every hook is one the current tab already
+          calls, so React Query serves both from one request. Only the Conditions tab fetches rounds,
+          so showing lender dates on every tab would add a request to every other tab to draw four
+          lines. Recorded as a decision in docs/tickets/LP-917.md: widening it later is a backend
+          question (the dates would need to reach the file read), not a placement one. */}
+      {tab === "conditions" ? <LenderDatesSection fileId={fileId} /> : null}
 
       <Section title="Recent activity">
         {activityPending ? (
@@ -271,6 +281,77 @@ function ContextSections({ fileId }: { fileId: string }) {
       </Section>
     </>
   );
+}
+
+/**
+ * The dates the lender printed, from the newest round that carries any (LP-917-lite, S2-11).
+ *
+ * PLAIN TEXT ONLY. No colours for "soon", no alert icons, no attention-queue items — the spec says so
+ * twice, and Stage 4 is where warnings and the Today queue belong. A date that has already passed reads
+ * "26 days ago" in the same muted grey as one months away, because deciding which dates are alarming is
+ * exactly the judgement this ticket is not making.
+ *
+ * "No dates from the lender yet." RATHER THAN FOUR EM DASHES. The rail's own `Metric` treats an em dash
+ * as "this file has no such value", and four of them under a heading would read as a letter we failed to
+ * parse. `lenderDates` returns null for a file whose rounds carry no letter at all, which is a different
+ * statement from a letter whose fields were blank — and the spec's sentence is for the first.
+ *
+ * IT NAMES THE ROUND IT CAME FROM, which is the whole reason the section is trustworthy: "From round 2,
+ * printed 09/10" says these are round 2's numbers and not a merge of every sheet on the file.
+ */
+function LenderDatesSection({ fileId }: { fileId: string }) {
+  const { data: rounds, isPending } = useConditionRounds(fileId);
+  // TODAY AS A DATE STRING, so the countdown is calendar arithmetic rather than a 24-hour span (see
+  // `daysUntil`). Computed here, at the edge, so `lib/conditions/lender-dates.ts` stays pure and its
+  // tests pin numbers instead of the clock.
+  const today = new Date();
+  const todayIso = `${today.getFullYear()}-${`${today.getMonth() + 1}`.padStart(2, "0")}-${`${today.getDate()}`.padStart(2, "0")}`;
+  const dates = lenderDates(rounds ?? [], EXPIRY, todayIso);
+
+  return (
+    <Section title="Lender dates">
+      {isPending ? (
+        <div className="space-y-1.5 py-1">
+          <Skeleton className="h-3 w-32" />
+          <Skeleton className="h-3 w-full" />
+        </div>
+      ) : dates === null ? (
+        <p className="py-1 text-xs text-muted-foreground">No dates from the lender yet.</p>
+      ) : (
+        <>
+          <p className="pb-0.5 text-xs text-muted-foreground">
+            From round {dates.roundNumber}
+            {dates.datePrinted ? `, printed ${shortUsDate(dates.datePrinted)}` : ""}
+          </p>
+          {/* The lender's printed strings, shown as they were printed. */}
+          <Metric label="Must not close before" value={dates.mustNotCloseBefore ?? DASH} />
+          <Metric label="Must fund by" value={dates.mustFundBy ?? DASH} />
+          <Metric label="Rate lock expires" value={dates.rateLockExpires ?? DASH} />
+          <Metric
+            label="Soonest doc expiry"
+            value={dates.soonestExpiry ? usDate(dates.soonestExpiry.date) : DASH}
+          />
+          {dates.soonestExpiry ? (
+            <p className="pt-0.5 text-xs text-muted-foreground">
+              {expiryLine(dates.soonestExpiry)}
+            </p>
+          ) : null}
+        </>
+      )}
+    </Section>
+  );
+}
+
+/** `2026-11-03` → `11/03/2026`, the form every conditions screen prints a full date in. */
+function usDate(iso: string): string {
+  const [year, month, day] = iso.split("-");
+  return year && month && day ? `${month}/${day}/${year}` : iso;
+}
+
+/** `2026-09-10` → `09/10`, the form S2-11's "printed 09/10" uses. */
+function shortUsDate(iso: string): string {
+  const [, month, day] = iso.split("-");
+  return month && day ? `${month}/${day}` : iso;
 }
 
 /**
