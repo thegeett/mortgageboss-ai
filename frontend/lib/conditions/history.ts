@@ -16,27 +16,57 @@
  * rather than a sentence somebody remembers to add.
  *
  * WHAT THESE SENTENCES MAY NOT SAY. `ConditionEventPublic` projects named scalars and never `detail`,
- * because that column is NPI — the lender's wording. Two design lines are therefore poorer than the
- * mockup, and both are recorded decisions rather than oversights:
+ * because that column is NPI — the lender's wording. One design line is therefore poorer than the
+ * mockup, and it is a recorded decision:
  *
  *   * S2-03 draws `Underwriter note added in round 1: “8/28 Not in Upload”`. The quote is the
  *     lender's text and does not travel; the line keeps everything else.
- *   * S2-03 draws `Imported from round 1 (PDF upload, printed 08/28)`. `condition_created` stores
- *     `source` and `lender_code`, not the round's arrival kind or its printed date, and decorating a
- *     sentence is not a reason to widen an NPI-bearing projection.
+ *
+ * (A second line, `Imported from round 1 (PDF upload, printed 08/28)`, was first dropped on the same
+ * grounds. LP-916's review restored it: neither fact is NPI, and both come from the ROUND the detail
+ * read already returns, so nothing is projected out of `detail`. See `importedFrom`.)
  *
  * THE STATUS WORDS COME FROM `lib/status.ts`, never retyped here. "Waiting on someone" and "Came
  * back" are the words the controls, the refusal sentences and the chips already use; a second copy
  * is how a history line ends up calling something by a name no control offers.
  */
+import { OWNER_LABEL } from "@/lib/conditions/owners";
 import { CONDITION_LENDER_STATUS, CONDITION_PREP_STATUS } from "@/lib/status";
-import type { ConditionEvent } from "@/lib/types/conditions";
+import type {
+  ConditionEvent,
+  ConditionRoundAppearance,
+  ConditionSourceKind,
+} from "@/lib/types/conditions";
+
+/** How a round arrived, in the words S2-03 uses ("PDF upload"). */
+const ARRIVAL_LABEL: Record<ConditionSourceKind, string> = {
+  pdf_upload: "PDF upload",
+  email: "email",
+  paste: "paste",
+  manual: "added by hand",
+};
 
 /** `2026-09-12` → `09/12`, the short form the history lines use beside a status. */
 function shortDate(iso: string | null): string | null {
   if (!iso) return null;
   const [, month, day] = iso.split("-");
   return month && day ? `${month}/${day}` : iso;
+}
+
+/**
+ * "(PDF upload, printed 08/28)" for the round an import came from, or nothing.
+ *
+ * FROM THE ROUND, NOT FROM THE EVENT (LP-916 review). `condition_created` stores neither fact, but
+ * the detail read already carries each round's arrival kind and printed date, and neither is NPI.
+ */
+function importedFrom(event: ConditionEvent, rounds: ConditionRoundAppearance[]): string {
+  const round = rounds.find((r) => r.round_number === event.round_number);
+  if (!round) return "";
+  const parts = [
+    round.arrived_as ? ARRIVAL_LABEL[round.arrived_as] : null,
+    round.date_printed ? `printed ${shortDate(round.date_printed)}` : null,
+  ].filter((part): part is string => part !== null);
+  return parts.length > 0 ? ` (${parts.join(", ")})` : "";
 }
 
 /** "in round 2", or nothing when the event names no round. */
@@ -100,7 +130,10 @@ function ourTrackMoved(event: ConditionEvent): string {
  * rather than at runtime. `lib/conditions/history.test.ts` pins the same property from the other
  * side, for the case where someone satisfies the compiler with an empty string.
  */
-export function conditionHistoryLine(event: ConditionEvent): string {
+export function conditionHistoryLine(
+  event: ConditionEvent,
+  rounds: ConditionRoundAppearance[] = [],
+): string {
   switch (event.kind) {
     // --- this condition ---------------------------------------------------- //
     case "condition_created":
@@ -108,7 +141,7 @@ export function conditionHistoryLine(event: ConditionEvent): string {
       // S1-12's whole point is that the two stay distinguishable.
       return event.round_number === null
         ? "Added to this file"
-        : `Imported from round ${event.round_number}`;
+        : `Imported from round ${event.round_number}${importedFrom(event, rounds)}`;
     case "condition_seen_again":
       return `Seen again${inRound(event)}`;
     case "condition_note_added": {
@@ -119,6 +152,11 @@ export function conditionHistoryLine(event: ConditionEvent): string {
       return `The wording was edited${by(event)}`;
     case "condition_prep_moved": {
       const to = event.prep_status_to;
+      // "Moved to Waiting on Borrower" (S2-03) names the owner. `unknown` keeps the generic label:
+      // "Waiting on Owner not known" would read worse than "Waiting on someone".
+      if (to === "waiting" && event.waiting_on && event.waiting_on !== "unknown") {
+        return `Moved to Waiting on ${OWNER_LABEL[event.waiting_on]}${by(event)}`;
+      }
       return to ? `Moved to ${CONDITION_PREP_STATUS[to].label}${by(event)}` : `Moved${by(event)}`;
     }
     case "condition_verdict_recorded": {

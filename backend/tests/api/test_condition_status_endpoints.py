@@ -131,8 +131,8 @@ async def test_a_forward_move_needs_no_reason(
     assert response.json()["prep_status"] == "ready"
     (event,) = await _events(db_session, condition.id)
     assert event.kind is ConditionEventKind.CONDITION_PREP_MOVED
-    assert event.detail["from"] == "to_do"
-    assert event.detail["to"] == "ready"
+    assert event.detail["prep_status_from"] == "to_do"
+    assert event.detail["prep_status_to"] == "ready"
     assert "reason" not in event.detail
 
 
@@ -180,7 +180,7 @@ async def test_a_backward_move_with_a_reason_keeps_it_in_the_history(
     assert response.status_code == 200, response.text
     (event,) = await _events(db_session, condition.id)
     assert event.detail["reason"] == "Invoice amount does not match the credit report fee."
-    assert event.detail["from"] == "with_underwriter"
+    assert event.detail["prep_status_from"] == "with_underwriter"
 
 
 async def test_waiting_without_an_owner_is_refused(

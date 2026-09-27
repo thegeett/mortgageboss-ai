@@ -427,6 +427,10 @@ class ConditionEventPublic(BaseModel):
     #: `not_cleared` verdict). CLOSED enums.
     prep_status_from: ConditionPrepStatus | None = None
     prep_status_to: ConditionPrepStatus | None = None
+    #: Who we are waiting on, when a move went TO `waiting` (LP-916 review) — what turns "Moved to
+    #: Waiting on someone" into S2-03's "Moved to Waiting on Borrower". A CLOSED enum (`OwnerHint`),
+    #: projected for `CONDITION_PREP_MOVED` only.
+    waiting_on: OwnerHint | None = None
     #: The lender's track's move, on the three events that state one. CLOSED enums.
     lender_status_from: ConditionLenderStatus | None = None
     lender_status_to: ConditionLenderStatus | None = None
@@ -481,6 +485,13 @@ class ConditionEventPublic(BaseModel):
             prep_status_to=_as_vocab(
                 detail.get("prep_status_to"), prep_values, ConditionPrepStatus
             ),
+            waiting_on=_as_vocab(
+                detail.get("waiting_on"),
+                frozenset(member.value for member in OwnerHint),
+                OwnerHint,
+            )
+            if kind is ConditionEventKind.CONDITION_PREP_MOVED
+            else None,
             lender_status_from=_as_vocab(
                 detail.get("lender_status_from"), lender_values, ConditionLenderStatus
             ),
@@ -835,6 +846,12 @@ class ConditionRoundAppearancePublic(BaseModel):
     round_date: date_type
     date_printed: date_type | None
     completeness: ConditionRoundCompleteness
+    #: How the round FIRST arrived — a closed `ConditionSourceKind`, not NPI (LP-916 review). S2-03's
+    #: history reads "Imported from round 1 (PDF upload, printed 08/28)"; `condition_created` stores
+    #: neither fact, but the ROUND holds both, and neither is the lender's words: `date_printed` is
+    #: already in `readonly.condition_rounds`, and the arrival kind is a closed set. So the sentence
+    #: is built from the round, and nothing is projected out of `detail`.
+    arrived_as: ConditionSourceKind | None = None
     #: Whether this condition appeared on this round's sheet, from its appearance events — not from
     #: `first_round_id`/`last_seen_round_id`, which cannot express "on R1 and R3 but not R2".
     on_sheet: bool

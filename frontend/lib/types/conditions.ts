@@ -349,6 +349,8 @@ export interface ConditionEvent {
   /** Our track's move, on the events that state one. */
   prep_status_from: ConditionPrepStatus | null;
   prep_status_to: ConditionPrepStatus | null;
+  /** Who we are waiting on, on a move TO `waiting` only (LP-916 review). */
+  waiting_on: OwnerHint | null;
   /** The lender's track's move. */
   lender_status_from: ConditionLenderStatus | null;
   lender_status_to: ConditionLenderStatus | null;
@@ -622,6 +624,8 @@ export interface ConditionRoundAppearance {
   round_date: string;
   date_printed: string | null;
   completeness: ConditionRoundCompleteness;
+  /** How the round first arrived (LP-916 review) — what "Imported from round 1 (PDF upload, …)" reads. */
+  arrived_as: ConditionSourceKind | null;
   on_sheet: boolean;
   /** The notes that arrived IN this round, matched on each note's `first_seen_round_id`. */
   notes: UnderwriterNote[];

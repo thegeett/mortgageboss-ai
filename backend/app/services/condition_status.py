@@ -295,7 +295,12 @@ async def move_prep_status(
         return
 
     now = datetime.now(UTC)
-    detail: dict[str, Any] = {"from": current.value, "to": target.value}
+    # `prep_status_from` / `prep_status_to`, THE NAMES THE CAME-BACK AND THE VERDICT EVENTS USE (LP-916
+    # review). This event first stored bare `from` / `to`, while `ConditionEventPublic` projects the
+    # prefixed pair, so every real move reached the history as "Moved" with no target, and S2-03's
+    # "Moved to Waiting on Borrower" could not be rendered. The projection tests built their events
+    # by hand with the prefixed keys, a shape this writer never produced, so they passed.
+    detail: dict[str, Any] = {"prep_status_from": current.value, "prep_status_to": target.value}
     if backward:
         detail["reason"] = (payload.reason or "").strip()
 

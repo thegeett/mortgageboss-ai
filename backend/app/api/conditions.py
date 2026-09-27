@@ -1168,6 +1168,16 @@ async def bulk_update_conditions(
     )
 
 
+def _first_arrival(round_: ConditionRound) -> ConditionSourceKind | None:
+    """How a round first reached us, or None when its first source names no known kind."""
+    first = round_.sources[0] if round_.sources else None
+    kind = first.get("kind") if isinstance(first, dict) else None
+    try:
+        return ConditionSourceKind(kind) if isinstance(kind, str) else None
+    except ValueError:
+        return None
+
+
 @conditions_by_id_router.get("/{condition_id}", response_model=ConditionDetailPublic)
 async def get_condition(condition: ScopedCondition, db: DbSession) -> ConditionDetailPublic:
     """One condition with every round, and whether it was on each one (screen S2-03).
@@ -1209,6 +1219,7 @@ async def get_condition(condition: ScopedCondition, db: DbSession) -> ConditionD
             round_date=round_.round_date,
             date_printed=round_.date_printed,
             completeness=round_.completeness,
+            arrived_as=_first_arrival(round_),
             on_sheet=round_.round_number is not None and round_.round_number in seen_on,
             notes=notes_by_round.get(str(round_.id), []),
         )

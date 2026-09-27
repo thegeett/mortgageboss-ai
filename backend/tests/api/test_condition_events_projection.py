@@ -400,3 +400,63 @@ async def test_another_company_cannot_read_a_conditions_history(
     )
 
     assert response.status_code == 404, response.text
+
+
+async def test_a_real_move_reaches_the_history_with_its_target_and_owner(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """THROUGH THE REAL WRITER, NOT A HAND-BUILT EVENT (LP-916 review).
+
+    Every prep-move event above is built with `prep_status_from` / `prep_status_to`, while
+    `move_prep_status` stored bare `from` / `to`. So each real move reached the sheet as "Moved" with
+    no target, and S2-03's "Moved to Waiting on Borrower" could not be rendered at all.
+    """
+    company = await make_company(db_session)
+    loan_file = await make_loan_file(db_session, company=company)
+    round_ = await make_round(db_session, company=company, loan_file=loan_file, round_number=1)
+    condition = await make_condition(
+        db_session, company=company, loan_file=loan_file, round_=round_
+    )
+    user = User(
+        company_id=company.id,
+        email=f"u-{uuid4().hex[:8]}@example.com",
+        hashed_password=hash_password("irrelevant"),
+        first_name="Priya",
+        last_name="Raman",
+        role=UserRole.PROCESSOR,
+        is_active=True,
+    )
+    db_session.add(user)
+    await db_session.flush()
+    auth = {"Authorization": f"Bearer {create_access_token(user.id)}"}
+
+    moved = await client.post(
+        f"{API}/conditions/{condition.id}/prep-status",
+        headers=auth,
+        json={"to": "waiting", "waiting_on": "borrower"},
+    )
+    assert moved.status_code == 200, moved.text
+    response = await client.get(f"{API}/conditions/{condition.id}/events", headers=auth)
+
+    assert response.status_code == 200, response.text
+    (event,) = [row for row in response.json() if row["kind"] == "condition_prep_moved"]
+    assert (event["prep_status_from"], event["prep_status_to"]) == ("to_do", "waiting")
+    assert event["waiting_on"] == "borrower"
+    assert event["actor_name"] == "Priya Raman"
+
+
+def test_waiting_on_is_projected_for_a_move_only() -> None:
+    """A closed vocabulary, on the one kind that means it — the same guard-by-kind as the two sources."""
+    moved = ConditionEventPublic.from_model(
+        _event(ConditionEventKind.CONDITION_PREP_MOVED, {"waiting_on": "title"})
+    )
+    other = ConditionEventPublic.from_model(
+        _event(ConditionEventKind.CONDITION_OWNER_CHANGED, {"waiting_on": "title"})
+    )
+    bad = ConditionEventPublic.from_model(
+        _event(ConditionEventKind.CONDITION_PREP_MOVED, {"waiting_on": "Alex Rivera"})
+    )
+
+    assert moved.waiting_on is not None and moved.waiting_on.value == "title"
+    assert other.waiting_on is None
+    assert bad.waiting_on is None, "an open string never travels"

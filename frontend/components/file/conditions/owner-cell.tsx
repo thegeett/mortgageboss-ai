@@ -1,21 +1,6 @@
+import { OWNER_LABEL } from "@/lib/conditions/owners";
 import type { OwnerHint, OwnerHintSource } from "@/lib/types/conditions";
 import { Building2, ClipboardList, type LucideIcon, ShieldCheck, User } from "lucide-react";
-
-/**
- * Who probably has to act. A HINT, never a decision (Stage 3 decides).
- *
- * `unknown` IS "Owner not known", NOT "Unknown". The chip sits where a name goes, and a bare
- * "Unknown" reads as a party called Unknown rather than as an absence of evidence.
- */
-const OWNER_LABEL: Record<OwnerHint, string> = {
-  borrower: "Borrower",
-  title: "Title",
-  insurance: "Insurance",
-  lender: "Lender",
-  broker: "Broker",
-  processor: "Processor",
-  unknown: "Owner not known",
-};
 
 /**
  * Where the hint came from, in the design's words (S1-04).

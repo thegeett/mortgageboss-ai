@@ -157,6 +157,11 @@ export function ConditionDetailSheet({
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) {
         return;
       }
+      // NOT WHILE A DIALOG IS OPEN ON TOP (LP-916 review). The sheet is itself a dialog, so a second
+      // one is S2-04 or S2-05 over it. The first version stepped the sheet underneath when an arrow
+      // key was pressed on the dialog's Portal / Email / Phone buttons: the answer still went to the
+      // right row, but the sheet behind it showed a different condition when the dialog closed.
+      if (document.querySelectorAll('[role="dialog"]').length > 1) return;
       event.preventDefault();
       step(event.key === "ArrowUp" ? -1 : 1);
     };
@@ -450,7 +455,7 @@ function SheetBody({
                   <span className="font-mono tabular-nums text-muted-foreground">
                     {historyStamp(event.occurred_at)}
                   </span>
-                  <span>{conditionHistoryLine(event)}</span>
+                  <span>{conditionHistoryLine(event, detail.data?.rounds ?? [])}</span>
                 </li>
               ))}
             </ol>

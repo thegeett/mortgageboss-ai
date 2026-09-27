@@ -545,6 +545,9 @@ async def test_one_condition_comes_back_with_every_round_and_whether_it_was_on_i
     assert appearance["round_number"] == 1
     assert appearance["on_sheet"] is True
     assert appearance["completeness"] == "full"
+    # LP-916 REVIEW: how the round arrived, for S2-03's "Imported from round 1 (PDF upload, …)".
+    assert appearance["arrived_as"] == "pdf_upload"
+    assert appearance["date_printed"] == "2026-08-28"
     # `6132` carries the sheet's dated note, and it arrived in THIS round.
     assert [note["text"] for note in appearance["notes"]] == ["Not in Upload"]
 

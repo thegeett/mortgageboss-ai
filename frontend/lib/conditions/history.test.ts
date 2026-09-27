@@ -64,6 +64,7 @@ function makeEvent(overrides: Partial<ConditionEvent> = {}): ConditionEvent {
     matched: null,
     prep_status_from: null,
     prep_status_to: null,
+    waiting_on: null,
     lender_status_from: null,
     lender_status_to: null,
     verdict_source_kind: null,
@@ -151,6 +152,37 @@ describe("a move the app made is never silent", () => {
     );
 
     expect(line).toContain("our status moved from Sent to lender back to To do");
+  });
+
+  it("says how and when the round was printed on an import, as S2-03 draws it", () => {
+    const line = conditionHistoryLine(makeEvent({ kind: "condition_created", round_number: 1 }), [
+      {
+        round_id: "r1",
+        round_number: 1,
+        round_date: "2026-08-28",
+        date_printed: "2026-08-28",
+        completeness: "full",
+        arrived_as: "pdf_upload",
+        on_sheet: true,
+        notes: [],
+      },
+    ]);
+
+    expect(line).toBe("Imported from round 1 (PDF upload, printed 08/28)");
+  });
+
+  it("names who a move to waiting is waiting on, as S2-03 draws it", () => {
+    const line = conditionHistoryLine(
+      makeEvent({
+        kind: "condition_prep_moved",
+        prep_status_from: "to_do",
+        prep_status_to: "waiting",
+        waiting_on: "borrower",
+        actor_name: "Priya Raman",
+      }),
+    );
+
+    expect(line).toBe("Moved to Waiting on Borrower — Priya Raman");
   });
 
   it("says nothing when our track did not move", () => {

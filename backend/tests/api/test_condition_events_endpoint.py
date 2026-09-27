@@ -269,6 +269,9 @@ async def test_only_the_named_scalars_are_exposed(
         "verdict_source_date",
         "notes_added",
         "actor_name",
+        # LP-916 REVIEW: an `OwnerHint` member, projected on `CONDITION_PREP_MOVED` only — what makes
+        # "Moved to Waiting on Borrower" (S2-03) sayable. A closed set, like the statuses above.
+        "waiting_on",
     }
     # THREE FIELDS CAME OFF THIS LIST AND THAT IS THE POINT. `reader_version`,
     # `duplicates_dropped` and `filled_from` were projected and read by no sentence — three open

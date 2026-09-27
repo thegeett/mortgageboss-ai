@@ -189,6 +189,7 @@ function event(overrides: Partial<ConditionEvent> = {}): ConditionEvent {
     // shape the real app cannot produce.
     prep_status_from: null,
     prep_status_to: null,
+    waiting_on: null,
     lender_status_from: null,
     lender_status_to: null,
     verdict_source_kind: null,
