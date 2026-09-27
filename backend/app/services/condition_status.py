@@ -372,9 +372,19 @@ async def record_verdict(
 ) -> None:
     """Record what the lender said. The ONLY route to `cleared` or `waived`. Flushes; caller commits.
 
-    OUR TRACK IS LEFT ALONE, DELIBERATELY (ADR-408). A condition that was *Sent to lender* and is now
-    cleared was still sent, and rewriting our status to something tidier would erase what we did. The
-    history says it; the row does not need to.
+    OUR TRACK IS LEFT ALONE FOR `cleared` AND `waived`, DELIBERATELY (ADR-408). A condition that was
+    *Sent to lender* and is now cleared was still sent, and rewriting our status to something tidier
+    would erase what we did. The history says it; the row does not need to.
+
+    `not_cleared` IS THE EXCEPTION, AND IT NOW MATCHES THE NOTE-DRIVEN CAME-BACK (ADR-408 as amended;
+    LP-912 follow-up). The part 2 review found two routes to one status with opposite effects: the
+    lender's dated note reset our track, while a processor recording that same refusal from a phone call
+    left the condition sitting at *Sent to lender*. This function's own reopen argument settles which is
+    right — leaving it there hides the condition from the list that would make somebody pick it up — so
+    both routes reset `ready` / `with_underwriter` to `to_do`.
+
+    AND BOTH LEAVE `to_do` / `waiting` ALONE, for the reason the import gives: a condition already being
+    worked needs no correction, and resetting it would wipe the owner a processor chose.
     """
     await _lock_fresh(db, condition, payload.expected_updated_at)
     # An information-only line has no lender answer either: nothing was asked, so nothing can be
@@ -411,9 +421,21 @@ async def record_verdict(
             raise _refuse(RefusalCode.VERDICT_NEEDS_ROUND, _VERDICT_NEEDS_ROUND)
 
     now = datetime.now(UTC)
+    lender_from = condition.lender_status
+    prep_from = condition.prep_status
     condition.verdict = verdict_record(payload, actor_user_id=actor_user_id, at=now)
     condition.lender_status = payload.status
     condition.lender_status_changed_at = now
+    # THE REFUSAL PUTS THE WORK BACK, exactly as the note-driven came-back does. Scoped to
+    # `not_cleared`: a cleared or waived condition is finished, and moving our track there would erase
+    # that it had been sent.
+    if payload.status is ConditionLenderStatus.NOT_CLEARED and prep_from in (
+        ConditionPrepStatus.READY,
+        ConditionPrepStatus.WITH_UNDERWRITER,
+    ):
+        condition.prep_status = ConditionPrepStatus.TO_DO
+        condition.prep_status_changed_at = now
+        condition.waiting_on = None
 
     db.add(
         _event(
@@ -423,6 +445,15 @@ async def record_verdict(
                 "status": payload.status.value,
                 "source_kind": payload.source_kind.value,
                 "source_date": payload.source_date.isoformat(),
+                # BOTH FROM→TO PAIRS, NAMED AS `condition_came_back` NAMES THEM. The lender's answer
+                # and its consequence for our work are one statement, so one event carries both — and a
+                # reader composing a history line should not have to read two different vocabularies
+                # depending on which route produced the refusal. `status` is kept beside them because it
+                # is what existing readers already use.
+                "lender_status_from": lender_from.value,
+                "lender_status_to": payload.status.value,
+                "prep_status_from": prep_from.value,
+                "prep_status_to": condition.prep_status.value,
                 **({"round_id": str(payload.round_id)} if payload.round_id else {}),
             },
             actor_user_id=actor_user_id,

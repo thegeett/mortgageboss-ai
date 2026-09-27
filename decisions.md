@@ -16407,8 +16407,21 @@ round_comparison · underwriter_note), source_date, round_id?, note?, recorded_b
 our clock is a verdict about us. `cleared` and `waived` are impossible at the API level without one.
 
 **Reopening** `cleared` or `waived` needs a reason, writes an event, keeps the old verdict in history,
-and sets our track back to `to_do`. A verdict otherwise leaves our track alone: what we did is already
-in the history and rewriting it would lose that we did it.
+and sets our track back to `to_do`.
+
+**A `cleared` or `waived` verdict leaves our track alone**: what we did is already in the history, and
+rewriting it would lose that we did it. A condition that was *Sent to lender* and is now cleared was
+still sent.
+
+**A `not_cleared` verdict puts the work back, exactly as the lender's own dated note does** —
+`ready` / `with_underwriter` → `to_do`, leaving `to_do` / `waiting` untouched, with both from→to pairs
+on the one event. *(Amended after LP-912's part 2 review, which found two routes to one status with
+opposite effects: the note-driven came-back reset our track while a processor recording the same refusal
+by phone left the condition at *Sent to lender*. The reopen rule above is the deciding argument — leaving
+it there hides the condition from the list that would make somebody pick it up — and it clears nothing
+without a click, because the click is the verdict. Recorded as a decision taken without the product
+owner in `docs/tickets/LP-912.md`; `to_do` / `waiting` are spared because a condition already being
+worked needs no correction and resetting it would wipe the owner a processor chose.)*
 
 **Nothing sets `cleared` or `waived` without a person's click.** The round comparison proposes; the
 processor confirms.

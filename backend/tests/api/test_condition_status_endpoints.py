@@ -316,6 +316,91 @@ async def test_a_refusal_recorded_from_a_phone_call_is_not_a_came_back(
     )
 
 
+async def test_a_refusal_puts_the_work_back_the_way_the_lenders_note_does(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """TWO ROUTES TO ONE STATUS MUST NOT HAVE OPPOSITE EFFECTS (LP-912 part 2 review, settled here).
+
+    The lender's dated note reset our track; a processor recording that same refusal from a phone call
+    left the condition sitting at *Sent to lender*. Same status, same meaning, opposite consequence —
+    and the second is the wrong one by this feature's own reopen argument: leaving it there hides the
+    condition from the list that would make somebody pick it up again.
+
+    A DECISION TAKEN WITHOUT THE PRODUCT OWNER, recorded in `docs/tickets/LP-912.md` and ADR-408.
+    """
+    condition, auth, _file = await _one(db_session)
+    condition.prep_status = ConditionPrepStatus.WITH_UNDERWRITER
+    await db_session.flush()
+
+    response = await client.post(
+        f"{API}/conditions/{condition.id}/verdict",
+        headers=auth,
+        json={"status": "not_cleared", "source_kind": "phone", "source_date": "2026-09-18"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["prep_status"] == "to_do"
+
+    (event,) = await _events(db_session, condition.id)
+    # BOTH FROM→TO PAIRS, NAMED AS `condition_came_back` NAMES THEM, so a history line does not need a
+    # different vocabulary depending on which route produced the refusal.
+    assert event.detail["lender_status_from"] == "open"
+    assert event.detail["lender_status_to"] == "not_cleared"
+    assert event.detail["prep_status_from"] == "with_underwriter"
+    assert event.detail["prep_status_to"] == "to_do"
+
+
+async def test_a_refusal_leaves_work_already_in_hand_alone(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """THE OTHER HALF, AND IT IS WHAT KEEPS THE RESET FROM BEING DESTRUCTIVE.
+
+    A condition still `waiting` on the borrower was already being worked. Resetting it to `to_do` would
+    wipe the owner a processor chose and claim a correction that was not needed — so the scope is
+    `ready` / `with_underwriter` only, exactly as the import's came-back branch has it.
+    """
+    condition, auth, _file = await _one(db_session)
+    condition.prep_status = ConditionPrepStatus.WAITING
+    condition.waiting_on = OwnerHint.BORROWER
+    await db_session.flush()
+
+    response = await client.post(
+        f"{API}/conditions/{condition.id}/verdict",
+        headers=auth,
+        json={"status": "not_cleared", "source_kind": "email", "source_date": "2026-09-18"},
+    )
+
+    assert response.status_code == 200, response.text
+    await db_session.refresh(condition)
+    assert condition.prep_status is ConditionPrepStatus.WAITING
+    assert condition.waiting_on is OwnerHint.BORROWER, "the owner somebody chose survives"
+    # The lender's track still moved — only ours was left alone.
+    assert condition.lender_status is ConditionLenderStatus.NOT_CLEARED
+
+
+async def test_a_cleared_verdict_still_leaves_our_track_where_it_was(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """THE SCOPE OF THE RESET, PINNED FROM THE OTHER SIDE. Only `not_cleared` puts work back.
+
+    A condition that was *Sent to lender* and is now cleared **was still sent**. Moving our track there
+    would erase what we did, which is ADR-408's original rule and still correct — so this test exists to
+    stop the new reset quietly widening to every verdict.
+    """
+    condition, auth, _file = await _one(db_session)
+    condition.prep_status = ConditionPrepStatus.WITH_UNDERWRITER
+    await db_session.flush()
+
+    response = await client.post(
+        f"{API}/conditions/{condition.id}/verdict",
+        headers=auth,
+        json={"status": "cleared", "source_kind": "portal", "source_date": "2026-09-12"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["prep_status"] == "with_underwriter"
+
+
 async def test_a_verdict_without_a_date_is_refused_by_the_schema(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:

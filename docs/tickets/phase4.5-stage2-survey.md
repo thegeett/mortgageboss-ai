@@ -436,6 +436,15 @@ Collected so it is not re-derived six times.
   attention / `cleared` verified / `waived` verified / `superseded` muted. Read through
   `resolveStatus`, never indexed directly — LP-909 fixed that exact bug in `round-reading.tsx`.
 
+  **A third thing, from LP-912's part 2 review (Q1):** **render `effective_owner` and
+  `effective_owner_source`, never `owner_hint` / `owner_hint_source`.** `imported-conditions.tsx` and
+  `review-rows.tsx` both render the hint pair, so a manual owner override — the whole point of
+  `PUT /owner` — is **invisible in the list**: a processor reassigns a condition to Title and the row
+  still says what the code map guessed. The hint pair stays on the wire deliberately (it is a true fact
+  about what the sheet said, and S1-04 shows its provenance), so this is not a rename: the list and the
+  filters read the effective pair, and only the detail sheet has any business showing the hint it
+  overrode.
+
   **Two things LP-911's review hands forward** (LP-911 §Review, R6 and its residual):
   - **Read `X-Conditions-Capped`.** The cap is reported in a header, not the body, because the list's
     response shape is a Done-when. `fetchConditions` returns `.data` only, so nothing reads it yet —
@@ -472,6 +481,18 @@ Collected so it is not re-derived six times.
 - **LP-915:** `condition_rounds.comparison` is a new column and therefore a `readonly` decision (D-1);
   the `possible_match` id the "Reworded?" rule reads is written only for same-code /
   different-fingerprint, and points at the **oldest** such condition.
+
+  **Two things LP-912's part 2 review hands forward** (LP-912 §Review of `c1fbfedc`):
+  - **Refuse verdicts and moves on a Replaced condition, and add the guard WITH the producer.** Nothing
+    writes `superseded` until LP-915, so the guard has nothing to protect today and would be untestable
+    if written now — which is precisely how it gets forgotten. A superseded condition's successor carries
+    the work, so a verdict recorded against the replaced one is a verdict nobody will see.
+  - **`record_verdict` takes `derived_allowed=False`** and refuses `round_comparison` /
+    `underwriter_note` from a client (R2: a client could otherwise post
+    `{not_cleared, underwriter_note, <any uuid>}` and paint S2-08's amber *Came back* on a note that
+    never existed — measured, 200 and `came_back: true`). **LP-915's confirm step is one of the only two
+    legitimate writers of a derived source and must pass `derived_allowed=True`**, along with a
+    `round_id` that is an active round on the condition's own file.
 - **LP-917:** dates from the newest round that has a header or expiry table; 38 days, not 65 (§5.1).
 
 ### The exact strings from S2-04 and S2-05
