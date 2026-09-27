@@ -275,14 +275,27 @@ async def test_stage2_acceptance_steps_1_to_8(
         "6637",
         "7086",
     ]
-    assert len(comparison["still_open"]) == 6
+    # EXACT SETS, NOT COUNTS (Stage 2 review): §7.2 says "an exact assertion, not a count".
+    assert _codes_of(comparison["still_open"], by_code) == sorted(
+        ["1228", "1947", "1582", "0006", "0007", "6378"]
+    )
     assert comparison["new"] == []
     assert comparison["came_back"] == []
     assert comparison["compared_with"] == 11
     # The letter changes are pinned value by value in `test_round_compare.py`; here the panel must
     # simply have them, because §5 step 3 names them as part of what the screen shows.
+    # EXACTLY the eight LP-915's Done-when lists, and nothing that did not change.
     labels = {change["label"] for change in comparison["letter_changes"]}
-    assert "note rate" in labels and "verified assets" in labels
+    assert labels == {
+        "note rate",
+        "housing / debt ratios",
+        "verified assets",
+        "max funds to close",
+        "rate lock expiry",
+        "UW team",
+        "close by expiry",
+        "asset expiry",
+    }
 
     # --- step 4: untick 0132, confirm 4. Open 7 · Cleared 4. 0132 keeps no suggestion ---------- #
     unticked = by_code["0132"][0]
@@ -330,6 +343,8 @@ async def test_stage2_acceptance_steps_1_to_8(
     assert _codes_of(comparison["came_back"], after_3) == ["1228"]
     assert _codes_of(comparison["new"], after_3) == ["7383"]
     assert _codes_of(comparison["probably_cleared"], after_3) == ["0006", "0007"]
+    # §7.3's full expectation: still open `1947 1582` (Stage 2 review — it was not asserted).
+    assert _codes_of(comparison["still_open"], after_3) == ["1582", "1947"]
 
     came_back_row = next(
         row for row in await _rows(client, auth, loan_file) if row["id"] == by_code["1228"][0]
@@ -342,6 +357,11 @@ async def test_stage2_acceptance_steps_1_to_8(
     # The reworded pair: two conditions, one code.
     assert len(after_3["6378"]) == 2, "round 3 reworded 6378 into a second condition"
     (pair,) = comparison["reworded"]
+    # THE PAIR IS 6378 OLD → 6378 NEW (Stage 2 review): the old half is round 1's condition, and the
+    # old half is never in probably cleared.
+    assert pair["old_id"] == after_3["6378"][0]
+    assert pair["new_id"] == after_3["6378"][1]
+    assert pair["old_id"] not in comparison["probably_cleared"]
     same = await client.post(
         f"{API}/condition-rounds/{round_3}/reworded",
         headers=auth,

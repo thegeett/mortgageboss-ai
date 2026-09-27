@@ -114,8 +114,13 @@ leave the file untouched.
 
 **Step 10 is not done and no assertion in that file should be mistaken for it.** It is the screens.
 
-**Measured after Stage 2:** full backend suite, run alone, **8506 passed, 3 failed, 10 skipped,
-1 xfailed** in 21 m 19 s. The three are the baseline's and none touches conditions
+**Measured after Stage 2, at the Stage 2 review:** full backend suite, run alone, **8507 passed,
+3 failed, 10 skipped, 1 xfailed** in 21 m 31 s (the builder's 8506 plus the review's bulk test).
+`ruff`, `ruff format`, `mypy app/` clean. Frontend: `tsc` 0, biome clean over 456 files, and vitest on
+`lib/conditions`, `components/file/conditions` and `components/layout` **231 / 231** (the affected
+directories, not the full suite). The review also tightened this acceptance test from counts to exact
+sets: round 2's still-open six, round 2's eight letter changes, round 3's still-open pair, and the
+reworded pair's two halves. The three are the baseline's and none touches conditions
 (`test_cli_refuses_unpaced_bedrock`, and the two `test_page_ocr` tesseract tests — tesseract is absent
 on this machine). Migrations `f3a9c05d81e7` and `a7c31e6d94b2` are both applied in that run.
 
@@ -134,6 +139,8 @@ overturn:
 | [LP-915](../tickets/LP-915.md) #8 | S2-06's "line naming what didn't change" | Not built. The saved comparison stores only the values that MOVED, and widening it would put more of the lender's letter into an NPI column to decorate one line |
 | [LP-917](../tickets/LP-917.md) #1 | The tickets file's example says "Asset docs expire 11/30/2026 · 65 days"; S2-11 draws 11/03/2026 and "· 38 days" | The design and the Done-when, which agree with each other. The prose example appears to predate the fixture |
 | [LP-917](../tickets/LP-917.md) #2 | S2-11 shows Lender dates in the rail without naming a tab; the rail never fetches anything of its own | Behind a Conditions-tab check, like its two siblings. Showing it everywhere is a BACKEND change (the dates reaching the file read), not a placement one |
+| [LP-912](../tickets/LP-912.md) #10 | A *Came back* recorded BY HAND left our track at *Sent to lender*, while the lender's own note reset it to *To do* | Both now reset `ready` / `with_underwriter` to *To do* (ADR-408 amended). The one row most likely to be revisited if the product owner wants the two routes to differ |
+| Stage 2 review | Bulk "Set status → Waiting" sends no owner (one request cannot carry one per row) | Each row waits on its own effective owner, the rule the single-row control already follows. Before this, every row was refused "Say who you are waiting on." |
 
 Also recorded and not fixed: a reworded pair answered *Different* is asked again if the round is
 switched *Full → Just some → Full*, because keeping that answer would need it stored on the round
@@ -161,9 +168,21 @@ fixtures as PDFs through the upload door: `uwm_round1_2026-08-28.txt`, then
 | S2-10 partial round, nothing suggested | LP-915 | import round 2 as *Just some* instead | **UNVERIFIED ON SCREEN** |
 | S2-11 lender dates | LP-917 | the Conditions tab after round 2 or 3 | **UNVERIFIED ON SCREEN** |
 
-Two items in those tickets are **NOT BUILT** rather than merely unverified, and are named so the label
-is not used to cover an absence: S2-06's "line naming what didn't change" (LP-915 #8), and the second
-clause of S2-08's came-back line, which the review then built from the round's own events (R5).
+**Where the build is short of a screen, as opposed to unverified on it.** Named here so the
+"unverified" label is not used to cover an absence *(corrected in the Stage 2 review: the first version
+listed S2-08's second came-back clause as not built, but LP-915's review built it (R5), and it missed
+the other three rows below)*:
+
+| Screen | Item | State | Where recorded |
+|---|---|---|---|
+| S2-06 | "a line naming what didn't change" | **NOT BUILT.** The saved comparison stores only the values that moved | LP-915 #8 |
+| S2-09 | the line explaining *why* the filter matches nothing ("6178 was cleared in round 2") | **NOT BUILT.** On S2-09's May-differ list; the named filter is present | LP-913 |
+| S2-03 | the note's quote in "Underwriter note added in round 1: “8/28 Not in Upload”" | **Left out by decision.** The quote is the lender's words (NPI); the line keeps everything else | LP-916 #1 |
+| S2-08 | round 3's card text | **Count form only**, not "Review what changed" | LP-915 #11 |
+
+And two behaviours a person checking S2-02 should judge (LP-913 review): the collapsed "Cleared"
+section also holds **waived** rows, and clicking "Cleared 5" empties the live list and points at the
+section below rather than expanding it.
 
 ## Stage 2 — deferred, on purpose
 
@@ -172,9 +191,25 @@ clause of S2-08's came-back line, which the review then built from the round's o
   (LP-915 leaves it out with a note), "Email borrower" / "Request document" actions.
 - **Stage 4:** contract closing / signing / funding dates a processor enters, "soon" warnings and
   colours on the lender dates, the Today queue (LP-917 keeps the section plain text for this reason).
-- **Never exercised in Stage 2:** LP-915's migration downgrade against a database with data; the
-  `GRANT` in that migration (the role `mbai_readonly` does not exist on this machine, so the guard
-  takes its no-op branch).
+- **Never exercised in Stage 2:** both migrations' downgrades against a database with data; the
+  `GRANT` in LP-912's and LP-915's view rebuilds (the role `mbai_readonly` does not exist on this
+  machine, so the guard takes its no-op branch).
+
+## Stage 2 — follow-ups the reviews recorded, not done
+
+- **LP-909's event kind is unwritable on any database migrated through it.** Measured on a scratch
+  database: at `b6d1e93f57ac`, `condition_events.kind` carries two CHECKs and only one admits
+  `round_reparse_requested`. LP-912's migration repairs it. **Staging was not checked:** the query is
+  in LP-912's Review section and needs an AWS SSO login.
+- **Three CHECKs the models declare were never migrated:** `communications.body_format`,
+  `users.mail_client` and `validation_verdicts.kind` accept any string in production. They are held in
+  `_KNOWN_MISSING` in `tests/test_migrated_checks_match_models.py` until a migration adds them.
+- **24 CHECK constraints carry a different name on a migrated database** than in the models (19
+  doubled by the naming convention, 5 named differently). This is harmless while the new guard holds:
+  a swap by the wrong name now fails the suite. Renaming them is optional tidying.
+- **`q` in the URL** is kept out of the conditions list's shareable URL (ADR-405 as amended). The
+  pipeline's borrower-name search still writes to its URL, and the amendment names it as the same
+  exposure for the product owner to decide.
 
 ## CI
 
@@ -182,7 +217,7 @@ clause of S2-08's came-back line, which the review then built from the round's o
 `pull_request` to `main` — a push of this branch runs nothing, so CI needs a PR against `main`, and
 this branch is not to be merged (LP-909).
 
-Measured rather than asserted: `origin/phase4.5-conditions` is at `76d1ef80` and `HEAD` is
-`d39670c4`, so **three commits are local and unpushed** — LP-915's review, LP-917, and LP-917's
-review. Local results and their limits are in LP-909 §5 for Stage 1, and in each Stage 2 ticket's
-own Verification section.
+Measured rather than asserted, at the Stage 2 review: `origin/phase4.5-conditions` is at `ffa3a7d7`,
+which includes every Stage 2 ticket and review up to this page. The Stage 2 review's own commit is
+local until it is pushed. Local results and their limits are in LP-909 §5 for Stage 1, and in each
+Stage 2 ticket's own Verification section.

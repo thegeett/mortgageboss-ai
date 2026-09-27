@@ -730,12 +730,22 @@ async def _apply_one(
     if payload.action is BulkAction.PREP_STATUS:
         if payload.to is None:
             raise _refuse(RefusalCode.STATUS_NOT_OFFERED, _STATUS_NOT_OFFERED)
+        # A BULK MOVE TO WAITING WITH NO OWNER WAITS ON EACH ROW'S OWN OWNER (Stage 2 review). The
+        # bulk bar's "Set status → Waiting on someone" sends `to` alone — one request cannot carry a
+        # different owner per row — and `move_prep_status` refuses `waiting` without `waiting_on`,
+        # so every selected row came back "Say who you are waiting on." and nothing moved. The
+        # single-row control already sends the row's `effective_owner`; this is the same rule.
+        waiting_on = payload.waiting_on
+        if payload.to is ConditionPrepStatus.WAITING and waiting_on is None:
+            from app.services.conditions import effective_owner
+
+            waiting_on = effective_owner(condition)
         await move_prep_status(
             db,
             condition=condition,
             payload=PrepStatusRequest(
                 to=payload.to,
-                waiting_on=payload.waiting_on,
+                waiting_on=waiting_on,
                 reason=payload.reason,
                 note=payload.note,
                 sent_at=payload.sent_at,

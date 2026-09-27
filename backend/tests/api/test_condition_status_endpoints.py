@@ -1216,3 +1216,37 @@ async def test_a_backward_move_to_waiting_names_the_owner(
 
     assert response.status_code == 409, response.text
     assert _error(response)["message"] == "Moving back to Waiting on Title needs a short reason."
+
+
+async def test_a_bulk_move_to_waiting_waits_on_each_rows_own_owner(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Stage 2 review. The bulk bar's "Set status → Waiting on someone" sends `to` alone, and every
+    row was refused "Say who you are waiting on." Each row now waits on its own effective owner,
+    which is what the single-row control sends."""
+    company = await make_company(db_session)
+    loan_file = await make_loan_file(db_session, company=company)
+    round_ = await make_round(db_session, company=company, loan_file=loan_file, round_number=1)
+    title = await make_condition(db_session, company=company, loan_file=loan_file, round_=round_)
+    borrower = await make_condition(db_session, company=company, loan_file=loan_file, round_=round_)
+    title.owner_hint = OwnerHint.TITLE
+    borrower.owner_hint = OwnerHint.BORROWER
+    await db_session.flush()
+    auth = await _auth_for(db_session, company)
+
+    response = await client.post(
+        f"{API}/loan-files/{loan_file.id}/conditions/bulk",
+        headers=auth,
+        json={
+            "condition_ids": [str(title.id), str(borrower.id)],
+            "action": "prep_status",
+            "to": "waiting",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["refused"] == []
+    for condition, owner in ((title, OwnerHint.TITLE), (borrower, OwnerHint.BORROWER)):
+        await db_session.refresh(condition)
+        assert condition.prep_status is ConditionPrepStatus.WAITING
+        assert condition.waiting_on is owner
