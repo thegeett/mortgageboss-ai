@@ -124,6 +124,11 @@ from app.services.conditions import (
 from app.services.loan_files import get_loan_file
 from app.services.needs_engine import loan_file_needs_lock
 
+# THE SHARED RESOLVER, NOT A SECOND ONE. `overlay_admin.py` already imports this for the same
+# question — "what is this actor's display name" — and its own docstring gives the reason two
+# lookups are not allowed to exist: "two lookups would eventually give one actor two names."
+from app.services.override_attribution import resolve_user_names
+
 router = APIRouter(prefix="/loan-files", tags=["conditions"])
 #: A SECOND ROUTER, BECAUSE THE PATH CARRIES NO LOAN FILE. Spec §LP-907 writes
 #: `POST /api/condition-rounds/{round_id}/attach-pdf`, and a round id is globally unique — so
@@ -1240,8 +1245,44 @@ async def list_condition_events(
     LP-916 composes "Seen again in round 2" from the KIND, and adds whichever scalars its sentences
     turn out to need, each with the same closed-vocabulary treatment.
 
+    IT IS NO LONGER THIN, AND THE PARAGRAPH ABOVE USED TO SAY IT WAS. LP-916 projects the
+    condition-level scalars S2-03's sentences actually need — both status tracks' from→to pairs, a
+    verdict's source and the lender's date, and a note COUNT — each drawn from a closed vocabulary
+    exactly like the round-level keys. `detail` itself still never travels.
+
+    THE LENDER'S WORDS ARE STILL NOT HERE, AND ONE DESIGN LINE IS POORER FOR IT. S2-03 draws
+    "Underwriter note added in round 1: “8/28 Not in Upload”". That quote is the lender's text —
+    NPI by rule 7, dropped whole from `readonly.condition_events` — so the sentence ships without it.
+    Recorded as a decision in `docs/tickets/LP-916.md` rather than quietly rendered.
+
+    TWO LOOKUPS, NOT TWO PER LINE. A name lives in `users` and a condition event's round is
+    `round_id` on the event, so both are resolved for the whole history at once — a per-event query
+    would be a query per history line on a sheet that opens constantly.
+
     Scoped by `get_scoped_condition`, which filters `company_id` inside its statement — so another
     tenant's condition is unfetchable rather than fetched and then refused.
     """
     events = await events_for_condition(db, condition_id=condition.id)
-    return [ConditionEventPublic.from_model(event) for event in events]
+
+    actor_ids = {event.actor_user_id for event in events if event.actor_user_id is not None}
+    names = await resolve_user_names(db, actor_ids)
+
+    round_ids = {event.round_id for event in events if event.round_id is not None}
+    numbers: dict[UUID, int] = {}
+    if round_ids:
+        rows = await db.execute(
+            select(ConditionRound.id, ConditionRound.round_number).where(
+                ConditionRound.id.in_(round_ids),
+                ConditionRound.round_number.is_not(None),
+            )
+        )
+        numbers = {row_id: number for row_id, number in rows.tuples().all() if number is not None}
+
+    return [
+        ConditionEventPublic.from_model(
+            event,
+            actor_name=names.get(event.actor_user_id) if event.actor_user_id else None,
+            round_number=numbers.get(event.round_id) if event.round_id else None,
+        )
+        for event in events
+    ]

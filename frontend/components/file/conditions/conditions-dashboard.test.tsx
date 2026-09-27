@@ -48,6 +48,17 @@ vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   // attach-PDF mutation. Third time an explicit mock has needed a new export one at a time.
   useConditions: () => ({ data: [], isPending: false }),
   useAttachPdf: () => ({ mutate: vi.fn(), isPending: false }),
+  // FOURTH TIME, AND ADDED ALL AT ONCE RATHER THAN ONE FAILURE AT A TIME. LP-916 gives
+  // `ImportedView` the detail sheet and its two dialogs, so it now mounts four writes and two reads
+  // — every one calling `useQueryClient()`, which throws here before this file reaches an assertion
+  // about which screen rendered. The comments above record the same lesson three times; this is the
+  // whole set the component currently uses.
+  usePrepStatus: () => ({ mutate: vi.fn(), isPending: false }),
+  useOwner: () => ({ mutate: vi.fn(), isPending: false }),
+  useVerdict: () => ({ mutate: vi.fn(), isPending: false }),
+  useReopen: () => ({ mutate: vi.fn(), isPending: false }),
+  useCondition: () => ({ data: undefined, isPending: false, isError: false }),
+  useConditionEvents: () => ({ data: [], isPending: false, isError: false }),
 }));
 
 vi.mock("@/lib/api/timeline", () => ({

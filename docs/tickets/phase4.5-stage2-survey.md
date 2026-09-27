@@ -428,6 +428,15 @@ Collected so it is not re-derived six times.
     than by anyone remembering the map.
 - **LP-916:** the new one-condition events reader, and a line in the ticket closing LP-909's open
   question about `ix_condition_events_condition_occurred` (D-5).
+
+  **A MOVE THE APP MADE MUST NEVER BE SILENT** *(LP-912 follow-up review)*. A `not_cleared` verdict now
+  resets our track from `ready` / `with_underwriter` to `to_do` (ADR-408 as amended, LP-912 decision
+  row 10). The rule is not the surprise risk — **invisibility is**: a processor records "underwriter
+  phoned, refused it" and finds the row at *To do* with nothing saying why. S2-08 already draws the
+  sentence for the note-driven route — *"our status moved from Sent to lender back to To do"* — so the
+  history line must say the same for the manual route, composed from the event's `prep_status_from` /
+  `prep_status_to`, which `condition_verdict_recorded` now carries under the same key names
+  `condition_came_back` uses. One sentence, two routes, one vocabulary.
 - **LP-913:** replaces `ImportedView`; "Not known" follows the owner being `unknown`, not the source
   being `none` (D-6, `1228`); two new `StatusToken` vocabularies in `lib/status.ts`
   (`CONDITION_PREP_STATUS`, `CONDITION_LENDER_STATUS`) typed `Record<Enum, StatusMeta>` so a new
@@ -444,6 +453,16 @@ Collected so it is not re-derived six times.
   about what the sheet said, and S1-04 shows its provenance), so this is not a rename: the list and the
   filters read the effective pair, and only the detail sheet has any business showing the hint it
   overrode.
+
+  **A fourth, from LP-916:** **the client cannot read a refusal's typed CODE, only its sentence.**
+  `lib/errors/api-error.ts` normalises the LP-46 envelope (`error.type` / `error.message` /
+  `error.details`) and never reads `error.data`, which is where LP-912 puts `{message, code}`. So
+  `getErrorMessage` returns the right sentence — §6 rule 5 holds — and `ConditionRefusalCode` is
+  unreachable in a component today. **Left deliberately unfixed by LP-916**, whose dialogs act on one
+  condition at a time, where the sentence is the whole answer. **LP-913 is where it becomes real**:
+  the bulk bar has to group refused rows ("4 updated · 1 skipped: information only") and cannot do
+  that from prose. Widening the shared error module then, with its first actual consumer, rather than
+  now on speculation.
 
   **Two things LP-911's review hands forward** (LP-911 §Review, R6 and its residual):
   - **Read `X-Conditions-Capped`.** The cap is reported in a header, not the body, because the list's
@@ -481,6 +500,16 @@ Collected so it is not re-derived six times.
 - **LP-915:** `condition_rounds.comparison` is a new column and therefore a `readonly` decision (D-1);
   the `possible_match` id the "Reworded?" rule reads is written only for same-code /
   different-fingerprint, and points at the **oldest** such condition.
+
+  **Two parts of the DETAIL SHEET that LP-916 deliberately did not build** (LP-916 §"Two items from
+  the ticket's content list are NOT built"), because each would be a branch no condition can reach
+  until LP-915 writes its producer — **add them in the commit that adds the producer**:
+  - **The pending-suggestion block** on S2-03: *"Round 2 suggests this probably cleared"* with
+    **Confirm** and **Keep open**. `pending_suggestion` is not on `Condition`; LP-911's review removed
+    it for having no producer, and it comes back typed WITH one, the way `verdict` did in LP-912.
+  - **The "Replaced by / replaces" link** on S2-03. `superseded_by_id` is null on every row until a
+    reworded pair is confirmed. The inverse direction ("replaces") is derivable from the list —
+    the condition whose `superseded_by_id` names this one — so it needs no second endpoint.
 
   **Two things LP-912's part 2 review hands forward** (LP-912 §Review of `c1fbfedc`):
   - **Refuse verdicts and moves on a Replaced condition, and add the guard WITH the producer.** Nothing

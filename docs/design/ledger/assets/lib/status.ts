@@ -26,7 +26,11 @@
  * the five unions, or deleting an entry from any map, would compile silently and
  * fall through to `resolveStatus`'s amber fallback at runtime.
  */
-import type { ConditionRoundStatus } from "@/lib/types/conditions";
+import type {
+  ConditionLenderStatus,
+  ConditionPrepStatus,
+  ConditionRoundStatus,
+} from "@/lib/types/conditions";
 import type { DocumentStatus } from "@/lib/types/document";
 import type { DtiLimitStatus } from "@/lib/types/dti";
 import type { LoanFileStatus } from "@/lib/types/loan-file";
@@ -248,6 +252,81 @@ export const CONDITION_ROUND_STATUS: Record<ConditionRoundStatus, StatusMeta> = 
   // they can see they did it, and painting it red would turn their own decision
   // into something that looks like it went wrong.
   discarded: { tone: "neutral", label: "Discarded" },
+};
+
+// --- the two condition tracks (lib/types/conditions.ts) --------------------- //
+//
+// TWO VOCABULARIES BECAUSE THERE ARE TWO TRACKS, AND CONFLATING THEM IS THE ONE
+// MISTAKE THIS FEATURE CANNOT MAKE (ADR-404, ADR-408). Ours is what WE are doing;
+// the lender's is what the LENDER said. A single map would let "Ready to send"
+// and "Cleared" sit in one list, and the whole stage exists to stop a screen
+// implying the lender answered when it was us who moved something.
+
+/**
+ * OUR preparation track — what we are doing about the condition.
+ *
+ * `waiting` READS "Waiting on someone" HERE AND "Waiting on Title" ON SCREEN. A
+ * `StatusMeta` label is a constant and the owner is per-row, so the row and the
+ * sheet compose the owner-specific form; this is the standalone wording, and it
+ * matches the backend's `_PREP_LABEL` so a refusal sentence ("Moving back to
+ * Waiting on Title needs a short reason") and the control agree on the words.
+ *
+ * `review` IS HERE AND IS OFFERED NOWHERE. Default A4 keeps it in the database,
+ * and the type mirrors the backend enum exactly, so the map must be exhaustive
+ * over it. It gets an honest label rather than being omitted — if a row ever
+ * arrives carrying it, the screen says "Review", not an amber unrecognised value.
+ */
+export const CONDITION_PREP_STATUS: Record<ConditionPrepStatus, StatusMeta> = {
+  // Nothing has happened yet. Neutral rather than attention: an untouched
+  // condition is the normal state of a freshly imported sheet, and painting
+  // eleven rows amber on import would make the colour mean nothing.
+  to_do: { tone: "neutral", label: "To do" },
+  // In flight, but on somebody OUTSIDE the app — the borrower, title, insurance.
+  // No spinner: nothing is processing, a person is being waited on.
+  waiting: { tone: "progress", label: "Waiting on someone" },
+  // `verified` is "checked and good — by a rule or by a person", which is what
+  // this is: a processor looked at what they have and judged it ready. The claim
+  // stops at OUR side of the file and says nothing about the lender.
+  ready: { tone: "verified", label: "Ready to send" },
+  // Sent, and now the lender owes an answer. Progress, not verified: submitting
+  // is not being satisfied, and only a recorded verdict may say otherwise.
+  with_underwriter: { tone: "progress", label: "Sent to lender" },
+  // Kept by A4, offered by no control. See the docstring above.
+  review: { tone: "progress", label: "Review" },
+};
+
+/**
+ * THE LENDER'S track — what the lender said, and nothing else.
+ *
+ * Nothing moves this off `open` except a recorded verdict naming who said so and
+ * where, or the lender's own dated note (ADR-408). "Cleared" never appears beside
+ * anything that is not one.
+ *
+ * `pending_review` is `review`'s counterpart: kept in the database by A4, never
+ * offered, present here because the map is exhaustive over the mirrored union.
+ */
+export const CONDITION_LENDER_STATUS: Record<ConditionLenderStatus, StatusMeta> = {
+  // The lender still owes an answer. Neutral, because an open condition is not a
+  // problem — it is the ordinary state of the work.
+  open: { tone: "neutral", label: "Open" },
+  // ATTENTION, AND THE LABEL IS THE DESIGN'S OWN WORD. S2-04 offers this choice
+  // as "Came back" ("Lender says not satisfied") and S2-08 shows it on the row,
+  // so "Not cleared" would be a paraphrase of a phrase the screens and the
+  // processor already share. It needs a person because the work restarts.
+  not_cleared: { tone: "attention", label: "Came back" },
+  // The lender signed it off. This is the only tone in the app allowed to mean
+  // "the lender is satisfied", and it is reachable only from a recorded verdict.
+  cleared: { tone: "verified", label: "Cleared" },
+  // The lender dropped the requirement. Verified for the same reason as cleared:
+  // the file may move on, and the lender is the one who said so.
+  waived: { tone: "verified", label: "Waived" },
+  // Replaced by a later condition that carries the work (LP-915). NEUTRAL, and
+  // the design draws this as `muted` — a tone this vocabulary does not have,
+  // because `muted` and `neutral` render identically in the mockup's own CSS.
+  // Nothing disappears: the row stays, collapsed, pointing forward.
+  superseded: { tone: "neutral", label: "Replaced" },
+  // Kept by A4, offered by no control. See the docstring above.
+  pending_review: { tone: "progress", label: "Pending review" },
 };
 
 /**

@@ -339,6 +339,38 @@ export interface ConditionEvent {
   filled_header: boolean | null;
   filled_expiry: boolean | null;
   matched: number | null;
+
+  // --- condition-level scalars (LP-916, S2-03's History) --------------------- //
+  //
+  // THE FIELDS ABOVE ALL DESCRIBE A ROUND, which is why a condition's history
+  // arrived as little more than a timestamp before this. Each of these is an enum
+  // value, a date or a count — never the lender's words.
+
+  /** Our track's move, on the events that state one. */
+  prep_status_from: ConditionPrepStatus | null;
+  prep_status_to: ConditionPrepStatus | null;
+  /** The lender's track's move. */
+  lender_status_from: ConditionLenderStatus | null;
+  lender_status_to: ConditionLenderStatus | null;
+  /**
+   * Where the lender said it — a SEPARATE field from `source_kind` above.
+   *
+   * `source_kind` is `ConditionSourceKind` (how a ROUND arrived); this is
+   * `VerdictSourceKind` (where the lender said it). Two closed vocabularies that
+   * share the word "source", kept apart so a value from one cannot arrive typed
+   * as the other.
+   */
+  verdict_source_kind: VerdictSourceKind | null;
+  /** The date the LENDER said it, never ours. */
+  verdict_source_date: string | null;
+  /** How many notes an import added. A count — the notes themselves never travel. */
+  notes_added: number | null;
+  /**
+   * Who did it. Null for a system event, which is a fact rather than missing
+   * data: a parse task has no actor, and naming the processor who uploaded the
+   * sheet would make the trail say something untrue.
+   */
+  actor_name: string | null;
 }
 
 /** The paste endpoint's ceiling, enforced by the request schema (spec §LP-907). */

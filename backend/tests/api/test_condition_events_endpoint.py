@@ -243,6 +243,32 @@ async def test_only_the_named_scalars_are_exposed(
         "filled_header",
         "filled_expiry",
         "matched",
+        # --- LP-916, and this test is what made them a decision rather than an appearance --------- #
+        #
+        # S2-03's history needed facts the ROUND-level keys above cannot carry, so a condition event
+        # used to arrive as little more than a timestamp. Each of these was weighed against the rule
+        # the sibling test above enforces — every exposed STRING comes from a closed set:
+        #
+        #   * the four status fields are `ConditionPrepStatus` / `ConditionLenderStatus` members, and
+        #     `verdict_source_kind` a `VerdictSourceKind` one. Rule 7 permits statuses.
+        #   * `verdict_source_date` is a date and `notes_added` a count. Rule 7 permits both. The note
+        #     itself never travels — the COUNT is what the sentence uses.
+        #
+        # `actor_name` IS THE ONE THAT BREAKS THE VOCABULARY RULE, AND IT IS SAFE FOR A DIFFERENT
+        # REASON: its SOURCE, not its shape. It is an open string, but it is resolved from the `users`
+        # table by `resolve_user_names` and is NEVER read from `detail` — so the trick the test above
+        # plays (NPI stored under a legitimate key) cannot reach it. It is a colleague's own name,
+        # already exposed by `timeline.py` and `override_attribution`, and it is not borrower NPI.
+        # `test_an_actor_name_in_detail_is_ignored` pins that door shut, because this entry's
+        # justification is only true while nothing reads the key.
+        "prep_status_from",
+        "prep_status_to",
+        "lender_status_from",
+        "lender_status_to",
+        "verdict_source_kind",
+        "verdict_source_date",
+        "notes_added",
+        "actor_name",
     }
     # THREE FIELDS CAME OFF THIS LIST AND THAT IS THE POINT. `reader_version`,
     # `duplicates_dropped` and `filled_from` were projected and read by no sentence — three open

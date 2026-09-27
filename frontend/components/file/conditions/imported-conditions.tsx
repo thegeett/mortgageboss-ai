@@ -25,7 +25,14 @@ function noteDate(value: string | null): string | null {
  * R2", and that is exactly what the chips are for. A condition on one round shows one chip and is
  * NOT marked missing, removed or cleared for the rounds it is absent from (S1-08).
  */
-export function ImportedConditions({ conditions }: { conditions: Condition[] }) {
+export function ImportedConditions({
+  conditions,
+  onOpen,
+}: {
+  conditions: Condition[];
+  /** Opens the S2-03 detail sheet on this condition. Optional so S1-era callers are unchanged. */
+  onOpen?: (conditionId: string) => void;
+}) {
   const groups: { heading: string; kind: Condition["bucket_kind"]; rows: Condition[] }[] = [];
   for (const condition of [...conditions].sort((a, b) => a.sequence - b.sequence)) {
     const last = groups.at(-1);
@@ -69,9 +76,23 @@ export function ImportedConditions({ conditions }: { conditions: Condition[] }) 
             </div>
 
             {group.rows.map((condition) => (
-              <div
+              // CLICKING A ROW OPENS THE DETAIL SHEET (spec §LP-913: "the list stays in place and
+              // the row is highlighted").
+              //
+              // A REAL `<button>`, NOT A DIV WITH `role="button"`. The first version was the div,
+              // reasoning that the row IS a grid and a button would collapse its four columns — true
+              // of the OUTER element, and irrelevant once the grid moves inside. Biome's
+              // `useSemanticElements` was right: the button gets focus order, Enter/Space, the
+              // disabled semantics and the screen-reader role for free, where the div had me
+              // reimplementing three of them and forgetting the fourth.
+              //
+              // `text-left` and `w-full` because a button centres and shrinks its content by default,
+              // which would undo the column alignment the header depends on.
+              <button
                 key={condition.id}
-                className="grid grid-cols-[4rem_7rem_1fr_9rem] items-start gap-3 border-t border-input px-3 py-2.5 first:border-t-0"
+                type="button"
+                onClick={() => onOpen?.(condition.id)}
+                className="grid w-full cursor-pointer grid-cols-[4rem_7rem_1fr_9rem] items-start gap-3 border-t border-input px-3 py-2.5 text-left first:border-t-0 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
               >
                 <div className="font-mono text-xs text-foreground-2">
                   {condition.lender_code ?? "—"}
@@ -108,8 +129,20 @@ export function ImportedConditions({ conditions }: { conditions: Condition[] }) 
 
                 <div className="flex min-w-0 flex-col items-end gap-1">
                   {/* The design draws owner chips on this screen too — 10 in the S1-05 mock and 10
-                      in S1-08 — so the cell is shared rather than reimplemented here. */}
-                  <OwnerCell hint={condition.owner_hint} source={condition.owner_hint_source} />
+                      in S1-08 — so the cell is shared rather than reimplemented here.
+
+                      THE EFFECTIVE OWNER, NOT THE HINT (LP-912 review Q1). This rendered
+                      `owner_hint` / `owner_hint_source`, which was harmless while nothing could
+                      override them — and LP-916 is what changes that: the detail sheet's Owner
+                      select writes `owner_override`, so with the hint pair here a processor
+                      reassigns a condition to Title and the row behind the sheet still shows what
+                      the code map guessed. The override would have been invisible on the one screen
+                      it exists to change. `effective_owner` already coalesces the two, server-side
+                      and in SQL, so the row and the filter agree. */}
+                  <OwnerCell
+                    hint={condition.effective_owner}
+                    source={condition.effective_owner_source}
+                  />
                   <div className="flex flex-wrap justify-end gap-1">
                     {condition.round_numbers.map((number) => (
                       <span
@@ -121,7 +154,7 @@ export function ImportedConditions({ conditions }: { conditions: Condition[] }) 
                     ))}
                   </div>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         );

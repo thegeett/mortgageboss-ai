@@ -184,6 +184,62 @@ log = structlog.get_logger(__name__)
 _READERS = frozenset({"uwm", "champions", "generic", "split"})
 
 
+class VerdictSourceKind(StrEnum):
+    """Where the lender said it (ADR-408). Part of a verdict, and a verdict requires one.
+
+    IT IS DEFINED UP HERE, ABOVE EVERY MODEL THAT NAMES IT, AND IT HAS NOW MOVED TWICE. The first
+    attempt put it with the request bodies at the foot of the file and `VerdictPublic` raised
+    `NameError` on import; LP-916 then annotated it on `ConditionEventPublic`, three hundred lines
+    higher, and raised the identical error again. That is the same trap `ConditionSummaryPublic` hit
+    against `ConditionRoundPublic` earlier in this same feature — three times in one module, so it is
+    worth stating as a rule rather than a war story: **an annotation is evaluated when the class body
+    runs, so in this file a type must appear above every model that names it.** It is placed beside the
+    module's other vocabularies, where the next model to need it will already be below it.
+
+    IT IS NOT A DATABASE ENUM, because a verdict lives in a JSONB column — so there is no CHECK to swap
+    and nothing for `test_activity_type_migrations.py` to watch. It IS a wire contract: the client sends
+    it and the detail sheet renders it ("Cleared · portal · 09/12/2026"), so it is mirrored in
+    `frontend/lib/types/conditions.ts` and registered in `_MIRRORED`.
+
+    THE TWO DERIVED SOURCES ARE NOT INTERCHANGEABLE WITH THE THREE A PERSON PICKS.
+    `round_comparison` and `underwriter_note` are produced by the app — the first when a processor
+    confirms a "probably cleared" suggestion, the second when the lender's own dated note reopens a
+    condition — and both carry a `round_id` naming the sheet that showed it. The three a processor picks
+    by hand carry no round, because a portal screen is not a sheet.
+
+    `underwriter_note` IS ALSO WHAT `came_back` KEYS ON. A manual "Came back" recorded from a phone
+    call is `not_cleared` and is NOT a came-back, which is the distinction S2-08's amber rail draws.
+
+    IT SHARES `email` WITH `ConditionSourceKind`, WHICH IS WHY THE TWO ARE PROJECTED SEPARATELY. See
+    `_VERDICT_SOURCE_KINDS` immediately below.
+    """
+
+    PORTAL = "portal"
+    EMAIL = "email"
+    PHONE = "phone"
+    ROUND_COMPARISON = "round_comparison"
+    UNDERWRITER_NOTE = "underwriter_note"
+
+
+#: The kinds whose writers store a VERDICT's source under `detail["source_kind"]`.
+#:
+#: A KEY NAME IS NOT ENOUGH, AND `email` IS THE PROOF. `ConditionSourceKind` (how a round arrived)
+#: and `VerdictSourceKind` (where the lender said it) BOTH contain `email`, and both are written to
+#: the same `source_kind` key by different writers. Without this set, a `condition_verdict_recorded`
+#: carrying `source_kind: "email"` would satisfy the round-level field too, and the history would
+#: render a lender's emailed answer as though a condition sheet had been forwarded to us.
+#:
+#: `condition_reopened` is ABSENT on purpose: it stores `overruled_source_kind`, a different key,
+#: because it describes the verdict it undid rather than one it is making.
+_VERDICT_SOURCE_KINDS = frozenset(
+    {ConditionEventKind.CONDITION_VERDICT_RECORDED, ConditionEventKind.CONDITION_CAME_BACK}
+)
+
+#: The only kind that stores how a ROUND arrived. Guarded for the same reason, in the other
+#: direction: `ROUND_RECEIVED` is the sole writer of a `ConditionSourceKind`.
+_ROUND_SOURCE_KINDS = frozenset({ConditionEventKind.ROUND_RECEIVED})
+
+
 def _logged_mismatch(kind: object, key: str, expected: str) -> None:
     """Report that a writer stored the wrong shape — by KEY NAME, never by value.
 
@@ -226,6 +282,29 @@ def _as_bool(value: object, *, kind: object = None, key: str = "") -> bool | Non
             _logged_mismatch(kind, key, "bool")
         return None
     return value
+
+
+def _as_date(value: object, *, kind: object = None, key: str = "") -> date_type | None:
+    """A date from `detail`, or None — never a raise and never today.
+
+    THE LENDER'S DATE IS THE WHOLE POINT OF THE FIELD IT READS. `verdict_source_date` is when the
+    LENDER said it, so a value this cannot parse becomes None rather than falling back to the import's
+    clock: a history line that silently dated a verdict by our own day would be the exact claim
+    ADR-408 refuses to let the schema make.
+
+    A PRESENT key of the wrong shape is logged by name, like its siblings, because a line that simply
+    renders without its date teaches nobody that a writer drifted.
+    """
+    if not isinstance(value, str):
+        if value is not None and key:
+            _logged_mismatch(kind, key, "date")
+        return None
+    try:
+        return date_type.fromisoformat(value)
+    except ValueError:
+        if key:
+            _logged_mismatch(kind, key, "date")
+        return None
 
 
 def _as_vocab[T](value: object, allowed: frozenset[str], build: Callable[[str], T]) -> T | None:
@@ -333,23 +412,118 @@ class ConditionEventPublic(BaseModel):
     filled_expiry: bool | None = None
     matched: int | None = None
 
+    # --- condition-level scalars (LP-916, screen S2-03) --------------------------------------- #
+    #
+    # THE ROUND-LEVEL KEYS ABOVE ARE NOT ENOUGH FOR A CONDITION'S HISTORY, and the events route said
+    # so in as many words: a condition event arrived carrying `kind`, `occurred_at` and
+    # `actor_user_id` and nothing else, because every projected key belongs to a ROUND. S2-03's
+    # sentences need what our own LP-912 writers already store.
+    #
+    # EVERY ONE IS AN ENUM VALUE, A DATE OR AN INT. Nothing here is open text, which is the rule the
+    # class docstring sets and the reason `lender_code` is deliberately ABSENT: it is free text off
+    # the sheet, and the sheet already knows which condition it is showing.
+
+    #: Our track's move (`CONDITION_PREP_MOVED`, and the consequence recorded on a came-back or a
+    #: `not_cleared` verdict). CLOSED enums.
+    prep_status_from: ConditionPrepStatus | None = None
+    prep_status_to: ConditionPrepStatus | None = None
+    #: The lender's track's move, on the three events that state one. CLOSED enums.
+    lender_status_from: ConditionLenderStatus | None = None
+    lender_status_to: ConditionLenderStatus | None = None
+    #: WHERE THE LENDER SAID IT — and NOT under `source_kind`, which is already taken by
+    #: `ConditionSourceKind` (how a ROUND arrived: pdf_upload / email / paste / manual). These are two
+    #: different closed vocabularies that share the word "source", and reusing the key would let a
+    #: value from one arrive in a field typed as the other — the precise hole LP-909's review closed
+    #: when it stopped projecting named keys as open `str`.
+    verdict_source_kind: VerdictSourceKind | None = None
+    #: The date the LENDER said it, never ours. See `_as_date`.
+    verdict_source_date: date_type | None = None
+    #: How many notes an import added (`CONDITION_NOTE_ADDED`, `CONDITION_CAME_BACK`). A COUNT, never
+    #: the notes: the wording is the lender's and is dropped whole from `readonly.condition_events`.
+    notes_added: int | None = None
+    #: Who did it, resolved from `actor_user_id` by the caller — NOT read from `detail`, which is why
+    #: no closed-vocabulary check applies: it comes from our own `users` table. Null for a system
+    #: event, deliberately (see the class docstring). Follows `timeline.py`'s existing `actor_name`
+    #: rather than inventing a second attribution shape.
+    actor_name: str | None = None
+
     @classmethod
-    def from_model(cls, event: ConditionEvent) -> "ConditionEventPublic":
-        """Project the allow-list, with every string drawn from a closed vocabulary."""
+    def from_model(
+        cls,
+        event: ConditionEvent,
+        *,
+        actor_name: str | None = None,
+        round_number: int | None = None,
+    ) -> "ConditionEventPublic":
+        """Project the allow-list, with every string drawn from a closed vocabulary.
+
+        `actor_name` AND `round_number` ARE SUPPLIED BY THE CALLER, because neither can be read from
+        this row alone. A name lives in `users`, and a condition event's round is `round_id` on the
+        event — the import's condition-level writers store `lender_code` and `changed` in `detail`,
+        never a round number. Resolving either one per event would be a query per history line, so the
+        route resolves both in one go and passes them down.
+
+        `round_number` FALLS BACK TO `detail`, which keeps the ROUND events unchanged: `ROUND_IMPORTED`
+        stores its own number and has no `round_id` to resolve.
+        """
         detail = event.detail or {}
         kind = event.kind
+        prep_values = frozenset(member.value for member in ConditionPrepStatus)
+        lender_values = frozenset(member.value for member in ConditionLenderStatus)
         return cls(
             kind=kind,
             occurred_at=event.occurred_at,
             actor_user_id=event.actor_user_id,
+            actor_name=actor_name,
+            prep_status_from=_as_vocab(
+                detail.get("prep_status_from"), prep_values, ConditionPrepStatus
+            ),
+            prep_status_to=_as_vocab(
+                detail.get("prep_status_to"), prep_values, ConditionPrepStatus
+            ),
+            lender_status_from=_as_vocab(
+                detail.get("lender_status_from"), lender_values, ConditionLenderStatus
+            ),
+            lender_status_to=_as_vocab(
+                detail.get("lender_status_to"), lender_values, ConditionLenderStatus
+            ),
+            verdict_source_kind=_as_vocab(
+                detail.get("source_kind"),
+                frozenset(member.value for member in VerdictSourceKind),
+                VerdictSourceKind,
+            )
+            if kind in _VERDICT_SOURCE_KINDS
+            else None,
+            verdict_source_date=_as_date(detail.get("source_date"), kind=kind, key="source_date")
+            if kind in _VERDICT_SOURCE_KINDS
+            else None,
+            notes_added=_as_int(detail.get("notes_added"), kind=kind, key="notes_added"),
+            # GUARDED BY KIND, NOT JUST BY KEY — see `_ROUND_SOURCE_KINDS`. Both source vocabularies
+            # contain `email` and share this key, so without the guard a lender's emailed verdict
+            # would also read as a condition sheet arriving by email.
             source_kind=_as_vocab(
                 detail.get("source_kind"),
                 frozenset(member.value for member in ConditionSourceKind),
                 ConditionSourceKind,
-            ),
+            )
+            if kind in _ROUND_SOURCE_KINDS
+            else None,
             reader=_as_vocab(detail.get("reader"), _READERS, str),
             rows=_as_int(detail.get("rows"), kind=kind, key="rows"),
-            round_number=_as_int(detail.get("round_number"), kind=kind, key="round_number"),
+            # THE CALLER'S VALUE WINS, AND THE `detail` FALLBACK KEEPS THE ROUND EVENTS UNCHANGED:
+            # `ROUND_IMPORTED` stores its own number and has no `round_id` to resolve, while a
+            # condition event is the exact opposite — `round_id` on the row, no number in `detail`.
+            #
+            # THE PARAMETER WAS ACCEPTED AND IGNORED IN THE FIRST VERSION OF THIS METHOD. The
+            # signature took `round_number`, the docstring above described this very fallback, and the
+            # body read only `detail` — so the route resolved a number, passed it in, and every
+            # condition event still came back `round_number: null`. Nothing failed: the field was
+            # already nullable and the round events were unaffected. A dead parameter that reads as a
+            # feature is the same defect `_gate_map` shipped in LP-911, and only a test that asserted
+            # the resolved value found either one.
+            round_number=round_number
+            if round_number is not None
+            else _as_int(detail.get("round_number"), kind=kind, key="round_number"),
             created=_as_int(detail.get("created"), kind=kind, key="created"),
             seen_again=_as_int(detail.get("seen_again"), kind=kind, key="seen_again"),
             from_status=_as_vocab(
@@ -410,37 +584,6 @@ class DraftRowPublic(BaseModel):
     #: below 0.8 first and requires the flagged-rows checkbox before import.
     confidence: float = 1.0
     source_line_numbers: list[int] = Field(default_factory=list)
-
-
-class VerdictSourceKind(StrEnum):
-    """Where the lender said it (ADR-408). Part of a verdict, and a verdict requires one.
-
-    IT IS DEFINED HERE, ABOVE `VerdictPublic`, AND THE FIRST ATTEMPT PUT IT WITH THE REQUEST BODIES
-    AT THE FOOT OF THE FILE. That raised `NameError` on import, because `VerdictPublic` annotates it and
-    an annotation is evaluated when the class body runs — the identical mistake `ConditionSummaryPublic`
-    made against `ConditionRoundPublic` earlier in this same ticket. Twice in one file is enough to say
-    it plainly: in this module, a type must appear above every model that names it.
-
-    IT IS NOT A DATABASE ENUM, because a verdict lives in a JSONB column — so there is no CHECK to swap
-    and nothing for `test_activity_type_migrations.py` to watch. It IS a wire contract: the client sends
-    it and the detail sheet renders it ("Cleared · portal · 09/12/2026"), so it is mirrored in
-    `frontend/lib/types/conditions.ts` and registered in `_MIRRORED`.
-
-    THE TWO DERIVED SOURCES ARE NOT INTERCHANGEABLE WITH THE THREE A PERSON PICKS.
-    `round_comparison` and `underwriter_note` are produced by the app — the first when a processor
-    confirms a "probably cleared" suggestion, the second when the lender's own dated note reopens a
-    condition — and both carry a `round_id` naming the sheet that showed it. The three a processor picks
-    by hand carry no round, because a portal screen is not a sheet.
-
-    `underwriter_note` IS ALSO WHAT `came_back` KEYS ON. A manual "Came back" recorded from a phone
-    call is `not_cleared` and is NOT a came-back, which is the distinction S2-08's amber rail draws.
-    """
-
-    PORTAL = "portal"
-    EMAIL = "email"
-    PHONE = "phone"
-    ROUND_COMPARISON = "round_comparison"
-    UNDERWRITER_NOTE = "underwriter_note"
 
 
 class VerdictPublic(BaseModel):

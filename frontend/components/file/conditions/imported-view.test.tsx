@@ -30,6 +30,18 @@ vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   // export to `undefined`, so omitting this throws on every render of the sheet — the fourth time
   // this shape has cost a run tonight, so it is pre-empted rather than rediscovered.
   useRoundEvents: () => eventsQuery(),
+  // LP-916: `ImportedView` now owns the detail sheet's four writes, and every one of them calls
+  // `useQueryClient()`. Unmocked they reach the real hook, which throws "No QueryClient set" — 28
+  // tests in this file, none of them about a mutation. Exactly the failure the comment above warns
+  // about, one ticket later.
+  usePrepStatus: () => ({ mutate: vi.fn(), isPending: false }),
+  useOwner: () => ({ mutate: vi.fn(), isPending: false }),
+  useVerdict: () => ({ mutate: vi.fn(), isPending: false }),
+  useReopen: () => ({ mutate: vi.fn(), isPending: false }),
+  // The sheet fetches the condition and its history when opened. These render nothing while the
+  // sheet is closed, which is every test here — but an absent export throws on import, not on use.
+  useCondition: () => ({ data: undefined, isPending: false, isError: false }),
+  useConditionEvents: () => ({ data: [], isPending: false, isError: false }),
 }));
 
 vi.mock("@/lib/toast", () => ({
@@ -172,6 +184,17 @@ function event(overrides: Partial<ConditionEvent> = {}): ConditionEvent {
     filled_header: null,
     filled_expiry: null,
     matched: null,
+    // LP-916's condition-level scalars, null for the same reason as every field above: the server
+    // projects only what a writer actually stored, so a fixture that invented one would describe a
+    // shape the real app cannot produce.
+    prep_status_from: null,
+    prep_status_to: null,
+    lender_status_from: null,
+    lender_status_to: null,
+    verdict_source_kind: null,
+    verdict_source_date: null,
+    notes_added: null,
+    actor_name: null,
     ...overrides,
   };
 }
@@ -212,7 +235,10 @@ describe("the imported list (S1-05)", () => {
     // condition, which is the thing that must never happen.
     const row = screen
       .getByText("Final inspection is required.")
-      .closest("div.grid") as HTMLElement;
+      // `.grid`, NOT `div.grid`: LP-916 made the row a `<button>` so a click opens the detail
+      // sheet with real button semantics. The ASSERTION below is unchanged and still the point —
+      // no row may say cleared, satisfied or done. Only the element type moved.
+      .closest(".grid") as HTMLElement;
     for (const forbidden of [/cleared/i, /satisfied/i, /mark as done/i, /to do/i, /\bopen\b/i]) {
       expect(within(row).queryByText(forbidden)).toBeNull();
     }
@@ -280,11 +306,13 @@ describe("the imported list (S1-05)", () => {
       ],
     );
 
-    const both = screen.getByText("Seen on both rounds.").closest("div.grid") as HTMLElement;
+    // `.grid` rather than `div.grid` — the row is a `<button>` since LP-916. See the note at the
+    // "no status control" test above: the element changed, the assertions did not.
+    const both = screen.getByText("Seen on both rounds.").closest(".grid") as HTMLElement;
     expect(within(both).getByText("R1")).toBeDefined();
     expect(within(both).getByText("R2")).toBeDefined();
 
-    const only = screen.getByText("Only on round 1.").closest("div.grid") as HTMLElement;
+    const only = screen.getByText("Only on round 1.").closest(".grid") as HTMLElement;
     expect(within(only).getByText("R1")).toBeDefined();
     expect(within(only).queryByText("R2")).toBeNull();
     // The absence must be silent — no badge, no strikethrough, no "not on this round".

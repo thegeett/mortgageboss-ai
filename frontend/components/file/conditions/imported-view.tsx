@@ -2,15 +2,45 @@
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAttachPdf, useConditions } from "@/lib/api/conditions";
+import {
+  useAttachPdf,
+  useConditions,
+  useOwner,
+  usePrepStatus,
+  useReopen,
+  useVerdict,
+} from "@/lib/api/conditions";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { notifyError, notifySuccess } from "@/lib/toast";
-import type { ConditionEnrichResult, ConditionRound } from "@/lib/types/conditions";
+import type {
+  Condition,
+  ConditionEnrichResult,
+  ConditionPrepStatus,
+  ConditionRound,
+  OwnerHint,
+} from "@/lib/types/conditions";
 import { Info } from "lucide-react";
 import { useState } from "react";
+import { MoveBackDialog, RecordAnswerDialog } from "./condition-answer-dialogs";
+import { ConditionDetailSheet } from "./condition-detail-sheet";
 import { ImportedConditions } from "./imported-conditions";
 import { RoundDetailsSheet } from "./round-details-sheet";
 import { RoundStrip } from "./round-strip";
+
+/**
+ * Our track in order, which is what makes a move "backward" — the client's copy of the backend's
+ * `_PREP_RANK`.
+ *
+ * `review` IS ABSENT HERE FOR THE SAME REASON IT IS ABSENT THERE (default A4): it stays in the
+ * database, no control offers it, and it has no rank. A move involving an unranked status is not
+ * judged here at all — it is sent, and the server's own refusal is what the processor reads.
+ */
+const PREP_RANK: Partial<Record<ConditionPrepStatus, number>> = {
+  to_do: 0,
+  waiting: 1,
+  ready: 2,
+  with_underwriter: 3,
+};
 
 /**
  * The file's conditions after at least one round has been imported (S1-05, S1-08).
@@ -53,6 +83,70 @@ export function ImportedView({
   const [enrichment, setEnrichment] = useState<ConditionEnrichResult | null>(null);
 
   const newest = rounds.find((round) => round.status === "imported") ?? rounds[0];
+
+  // --- LP-916: the detail sheet and the two dialogs it opens --------------------------------- //
+
+  const [openConditionId, setOpenConditionId] = useState<string | null>(null);
+  const [answerFor, setAnswerFor] = useState<Condition | null>(null);
+  const [moveBack, setMoveBack] = useState<{
+    condition: Condition;
+    to: ConditionPrepStatus | null;
+    mode: "move-back" | "reopen";
+  } | null>(null);
+  // The SERVER'S sentence, held while a dialog is open so it appears beside the field that caused it
+  // rather than as a toast that outlives the dialog (spec §6 rule 5: shown as-is, never paraphrased).
+  const [refusal, setRefusal] = useState<string | null>(null);
+
+  const prepStatus = usePrepStatus(fileId);
+  const owner = useOwner(fileId);
+  const verdict = useVerdict(fileId);
+  const reopen = useReopen(fileId);
+
+  const rows = conditions.data ?? [];
+
+  /** Every write echoes the `updated_at` it read, so a stale one is refused rather than winning. */
+  const movePrep = (condition: Condition, to: ConditionPrepStatus) => {
+    const from = PREP_RANK[condition.prep_status];
+    const target = PREP_RANK[to];
+    if (from !== undefined && target !== undefined && target < from) {
+      // BACKWARD MOVES GO THROUGH S2-05, because the server refuses one without a reason and the
+      // dialog is where the reason comes from. Sending it first would mean showing a processor a
+      // refusal for something the screen could have asked them for.
+      setRefusal(null);
+      setMoveBack({ condition, to, mode: "move-back" });
+      return;
+    }
+    prepStatus.mutate(
+      {
+        conditionId: condition.id,
+        to,
+        // "Waiting" WITH NOBODY NAMED IS REFUSED, and the row already knows who it is waiting on —
+        // S2-03 draws the control as "Waiting on Borrower" for exactly that reason. The owner comes
+        // from the row rather than a second prompt.
+        waiting_on: to === "waiting" ? condition.effective_owner : null,
+        expected_updated_at: condition.updated_at,
+      },
+      {
+        onError: (error) =>
+          notifyError({
+            title: "That status could not be changed",
+            whatToDo: getErrorMessage(error),
+          }),
+      },
+    );
+  };
+
+  const setConditionOwner = (condition: Condition, next: OwnerHint | null) =>
+    owner.mutate(
+      { conditionId: condition.id, owner: next, expected_updated_at: condition.updated_at },
+      {
+        onError: (error) =>
+          notifyError({
+            title: "The owner could not be changed",
+            whatToDo: getErrorMessage(error),
+          }),
+      },
+    );
 
   return (
     <div className="flex flex-col gap-3">
@@ -105,9 +199,15 @@ export function ImportedView({
         }
       />
 
-      {/* THE SENTENCE IS THE DESIGN'S, VERBATIM, AND IT IS THE WHOLE PROMISE OF STAGE 1. Nothing
-          here is marked cleared or removed, and only the lender clears a condition — which is why
-          the imported list has no status control of any kind (design rule 3, ADR-404). */}
+      {/* THE SENTENCE IS THE DESIGN'S, VERBATIM, AND IT IS STILL TRUE IN STAGE 2. Nothing in this
+          list is marked cleared or removed, and only the lender clears a condition.
+
+          ITS REASONING CHANGED WITH LP-916 AND THIS COMMENT USED TO STATE THE OLD ONE — "which is
+          why the imported list has no status control of any kind". The LIST still has none, but a
+          row now opens the detail sheet, and that sheet has both status controls. The promise the
+          sentence makes is unaffected: `cleared` and `waived` are reachable only through a recorded
+          verdict naming who said so and where (ADR-404), which is a stronger guarantee than a screen
+          simply not offering a control. */}
       <p className="flex items-start gap-2 rounded-md border border-input bg-muted/40 p-2.5 text-xs text-muted-foreground">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
         This is the lender’s list exactly as issued. Only the lender clears a condition — nothing
@@ -138,7 +238,7 @@ export function ImportedView({
           <Skeleton className="h-24 w-full" />
         </div>
       ) : (
-        <ImportedConditions conditions={conditions.data ?? []} />
+        <ImportedConditions conditions={rows} onOpen={setOpenConditionId} />
       )}
 
       <RoundDetailsSheet
@@ -149,6 +249,93 @@ export function ImportedView({
           if (!next) {
             setOpenRoundId(null);
             setEnrichment(null);
+          }
+        }}
+      />
+
+      {/* THE SHEET IS GIVEN THE ROWS THE LIST IS RENDERING, IN THAT ORDER. That is how Previous and
+          Next "follow the list's current filter and sort" without the sheet knowing what either is —
+          and when LP-913 adds the filter row, they follow it with no change here. */}
+      <ConditionDetailSheet
+        conditions={rows}
+        openId={openConditionId}
+        onOpenChange={(next) => {
+          if (!next) setOpenConditionId(null);
+        }}
+        onSelect={setOpenConditionId}
+        onMovePrepStatus={movePrep}
+        onSetOwner={setConditionOwner}
+        onRecordAnswer={(condition) => {
+          setRefusal(null);
+          setAnswerFor(condition);
+        }}
+        onReopen={(condition) => {
+          setRefusal(null);
+          setMoveBack({ condition, to: null, mode: "reopen" });
+        }}
+      />
+
+      <RecordAnswerDialog
+        conditions={answerFor ? [answerFor] : []}
+        open={answerFor !== null}
+        onOpenChange={(next) => {
+          if (!next) setAnswerFor(null);
+        }}
+        refusal={refusal}
+        pending={verdict.isPending}
+        onSubmit={(values) => {
+          if (!answerFor) return;
+          setRefusal(null);
+          verdict.mutate(
+            { conditionId: answerFor.id, ...values, expected_updated_at: answerFor.updated_at },
+            {
+              onSuccess: () => setAnswerFor(null),
+              // THE SERVER'S WORDS, IN THE DIALOG. A toast would be dismissed with the dialog still
+              // open on the values that caused it.
+              onError: (error) => setRefusal(getErrorMessage(error)),
+            },
+          );
+        }}
+      />
+
+      <MoveBackDialog
+        condition={moveBack?.condition ?? null}
+        to={moveBack?.to ?? null}
+        mode={moveBack?.mode ?? "move-back"}
+        open={moveBack !== null}
+        onOpenChange={(next) => {
+          if (!next) setMoveBack(null);
+        }}
+        refusal={refusal}
+        pending={prepStatus.isPending || reopen.isPending}
+        onSubmit={(reason) => {
+          if (!moveBack) return;
+          setRefusal(null);
+          const { condition, to, mode } = moveBack;
+          const settle = {
+            onSuccess: () => setMoveBack(null),
+            onError: (error: unknown) => setRefusal(getErrorMessage(error)),
+          };
+          if (mode === "reopen") {
+            reopen.mutate(
+              {
+                conditionId: condition.id,
+                reason,
+                expected_updated_at: condition.updated_at,
+              },
+              settle,
+            );
+          } else if (to) {
+            prepStatus.mutate(
+              {
+                conditionId: condition.id,
+                to,
+                reason,
+                waiting_on: to === "waiting" ? condition.effective_owner : null,
+                expected_updated_at: condition.updated_at,
+              },
+              settle,
+            );
           }
         }}
       />
