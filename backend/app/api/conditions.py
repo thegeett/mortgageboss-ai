@@ -1008,6 +1008,7 @@ async def confirm_round_suggestions(
             round_=round_,
             condition_ids=payload.condition_ids,
             actor_user_id=current_user.id,
+            resolve_rest=payload.resolve_rest,
         )
     except RoundComparisonRefused as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc

@@ -128,6 +128,11 @@ class RoundComparison:
     letter_changes: list[LetterChange] = field(default_factory=list)
     #: Why no suggestions were produced, or None when they were. Shown as the panel's callout.
     no_suggestions_reason: str | None = None
+    #: `{condition: (from, to)}` for each came-back that moved OUR track — S2-08's "our status moved
+    #: from Sent to lender back to To do" (LP-915 review). Read off the round's own
+    #: `CONDITION_CAME_BACK` events, which this function already walks, so the panel needs no history
+    #: fetch per condition. Statuses only; nothing the lender wrote.
+    came_back_moves: dict[UUID, tuple[str, str]] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
         """The stored shape. Ids as strings, because JSONB holds no UUIDs."""
@@ -145,6 +150,10 @@ class RoundComparison:
                 for change in self.letter_changes
             ],
             "no_suggestions_reason": self.no_suggestions_reason,
+            "came_back_moves": {
+                str(condition_id): [before, after]
+                for condition_id, (before, after) in self.came_back_moves.items()
+            },
         }
 
 
@@ -281,6 +290,7 @@ async def confirm_probably_cleared(
     round_: ConditionRound,
     condition_ids: list[UUID],
     actor_user_id: UUID | None = None,
+    resolve_rest: bool = True,
 ) -> list[UUID]:
     """Turn ticked suggestions into recorded verdicts (S2-07). Flushes; caller commits.
 
@@ -297,9 +307,13 @@ async def confirm_probably_cleared(
     round's date. `VerdictRequest.source_date` has no default precisely so this choice is made
     somewhere a reader can see it.
 
-    UNTICKED ONES STAY OPEN AND LOSE THE SUGGESTION (spec §LP-915). After a confirm the round has no
-    pending suggestions at all: the processor decided, and a panel that kept offering the ones they
-    declined would ask the same question until they answered it the other way.
+    UNTICKED ONES STAY OPEN AND LOSE THE SUGGESTION (spec §LP-915), WHEN THE PANEL CONFIRMS. The
+    panel is the processor deciding the whole round, so `resolve_rest` is true there.
+
+    FROM THE DETAIL SHEET IT IS ONE CONDITION (LP-915 review). "The suggestion is per condition, so
+    she can also confirm one from the detail sheet", and *Not now* keeps the rest pending "until she
+    decides". The first version resolved the whole round on a one-row confirm, so confirming `7086`
+    from its sheet silently withdrew the other four questions. The sheet sends `resolve_rest: false`.
     """
     from app.schemas.condition import VerdictRequest, VerdictSourceKind
 
@@ -338,6 +352,14 @@ async def confirm_probably_cleared(
         from app.services.condition_status import record_verdict
 
         for condition in rows:
+            # ALREADY ANSWERED IS SKIPPED, NEVER OVERWRITTEN. `record_verdict` withdraws a suggestion
+            # when any verdict lands, so this should not happen; it is here so a stale saved list can
+            # never replace a processor's recorded answer with an inferred one.
+            if (
+                condition.lender_status not in _OPEN_BEFORE
+                or condition.superseded_by_id is not None
+            ):
+                continue
             await record_verdict(
                 db,
                 condition=condition,
@@ -347,8 +369,19 @@ async def confirm_probably_cleared(
             )
             confirmed.append(condition.id)
 
-    # The suggestions are resolved either way — see the docstring.
-    round_.comparison = {**saved, "probably_cleared": []}
+    # Resolved: the whole round from the panel, or only the ones named from the detail sheet.
+    # `record_verdict` has already withdrawn the confirmed ids, so read the CURRENT list.
+    current = round_.comparison or {}
+    remaining = (
+        []
+        if resolve_rest
+        else [
+            value
+            for value in current.get("probably_cleared") or []
+            if UUID(str(value)) not in set(ticked)
+        ]
+    )
+    round_.comparison = {**current, "probably_cleared": remaining}
     await db.flush()
     logger.info(
         "condition_suggestions_confirmed",
@@ -593,6 +626,7 @@ async def compare_round(
     created_here: set[UUID] = set()
     reworded: list[tuple[UUID, UUID]] = []
     came_back: set[UUID] = set()
+    came_back_moves: dict[UUID, tuple[str, str]] = {}
     on_sheet: set[UUID] = set()
 
     for event in events:
@@ -614,6 +648,10 @@ async def compare_round(
                     logger.warning("condition_compare_bad_possible_match", round_id=str(round_.id))
         elif event.kind is ConditionEventKind.CONDITION_CAME_BACK:
             came_back.add(condition_id)
+            before = (event.detail or {}).get("prep_status_from")
+            after = (event.detail or {}).get("prep_status_to")
+            if isinstance(before, str) and isinstance(after, str) and before != after:
+                came_back_moves[condition_id] = (before, after)
 
     open_before = await _open_before(
         db, loan_file_id=round_.loan_file_id, created_here=created_here
@@ -640,6 +678,24 @@ async def compare_round(
             "so missing conditions aren't treated as cleared."
         )
 
+    # A PAIR ALREADY ANSWERED *SAME* IS NOT ASKED AGAIN (LP-915 review). `reworded` is rebuilt from
+    # the import's events, so a Full → Just some → Full switch recomputed it and re-asked a pair
+    # whose old half is already Replaced, where *Same* is then refused as "already replaced".
+    if reworded:
+        replaced = set(
+            (
+                await db.execute(
+                    select(Condition.id).where(
+                        Condition.id.in_([old for old, _ in reworded]),
+                        Condition.superseded_by_id.is_not(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        reworded = [(old, new) for old, new in reworded if old not in replaced]
+
     reworded_old = {old for old, _ in reworded}
     probably_cleared: list[UUID] = []
     if reason is None:
@@ -660,7 +716,21 @@ async def compare_round(
         probably_cleared=sorted(probably_cleared, key=str),
         letter_changes=letter_changes(previous, round_),
         no_suggestions_reason=reason,
+        came_back_moves=came_back_moves,
     )
+
+    # A NEWER FULL SHEET SUPERSEDES OLDER ROUNDS' PENDING QUESTIONS (LP-915 review). This comparison
+    # re-derives "probably cleared" against everything still open (A6), so a condition missing from
+    # both sheets is asked about again HERE, by the newer sheet. Left in place, the older round's
+    # questions were counted twice by the summary and could no longer be answered from the list or
+    # the sheet, which read only the newest round. A partial or older sheet supersedes nothing.
+    superseded = 0
+    if reason is None:
+        from app.services.condition_status import withdraw_suggestions
+
+        superseded = await withdraw_suggestions(
+            db, loan_file_id=round_.loan_file_id, condition_ids=set(), except_round_id=round_.id
+        )
 
     # A NEW dict rather than a mutated one: SQLAlchemy does not track in-place JSONB mutation, so an
     # updated key on the existing object would simply not be written.
@@ -681,6 +751,7 @@ async def compare_round(
                 "came_back": len(comparison.came_back),
                 "reworded": len(comparison.reworded),
                 "new": len(comparison.new),
+                "suggestions_superseded": superseded,
             },
         )
     )

@@ -463,6 +463,14 @@ async def record_verdict(
     now = datetime.now(UTC)
     lender_from = condition.lender_status
     prep_from = condition.prep_status
+    # A VERDICT ANSWERS ANY "PROBABLY CLEARED" QUESTION ABOUT THIS CONDITION (LP-915 review). The
+    # first version left the suggestion pending, so a condition cleared by hand from the portal
+    # stayed in "5 probably cleared — review", and pressing Confirm afterwards overwrote the
+    # processor's portal verdict with a round-comparison one: "nothing already cleared is touched"
+    # (spec §5 step 6), broken.
+    await withdraw_suggestions(
+        db, loan_file_id=condition.loan_file_id, condition_ids={condition.id}
+    )
     condition.verdict = verdict_record(payload, actor_user_id=actor_user_id, at=now)
     condition.lender_status = payload.status
     condition.lender_status_changed_at = now
@@ -770,6 +778,40 @@ async def _apply_one(
 # --------------------------------------------------------------------------- #
 
 
+async def withdraw_suggestions(
+    db: AsyncSession,
+    *,
+    loan_file_id: UUID,
+    condition_ids: set[UUID],
+    except_round_id: UUID | None = None,
+) -> int:
+    """Remove conditions from every imported round's pending "probably cleared" list. Returns how
+    many entries were removed.
+
+    `condition_ids` EMPTY MEANS EVERY SUGGESTION, used when a newer full comparison supersedes the
+    older rounds' questions (`compare_round`). A new dict is assigned, never a mutated one:
+    SQLAlchemy does not track in-place JSONB changes.
+    """
+    stmt = select(ConditionRound).where(
+        ConditionRound.loan_file_id == loan_file_id,
+        ConditionRound.comparison.is_not(None),
+    )
+    removed = 0
+    for round_ in (await db.execute(only_active(stmt, ConditionRound))).scalars().all():
+        if round_.id == except_round_id or not isinstance(round_.comparison, dict):
+            continue
+        pending = round_.comparison.get("probably_cleared") or []
+        keep = (
+            []
+            if not condition_ids
+            else [value for value in pending if UUID(str(value)) not in condition_ids]
+        )
+        if len(keep) != len(pending):
+            removed += len(pending) - len(keep)
+            round_.comparison = {**round_.comparison, "probably_cleared": keep}
+    return removed
+
+
 def normalise_note_text(text: str) -> str:
     """A note's text for COMPARISON only — never for display (survey §5.2, R8).
 
@@ -812,4 +854,5 @@ __all__ = [
     "reopen",
     "set_owner",
     "verdict_record",
+    "withdraw_suggestions",
 ]

@@ -902,6 +902,14 @@ class RewordedPairPublic(BaseModel):
     new_id: UUID
 
 
+class CameBackMovePublic(BaseModel):
+    """What a came-back did to OUR track, for S2-08's "our status moved from … back to …"."""
+
+    condition_id: UUID
+    prep_status_from: ConditionPrepStatus
+    prep_status_to: ConditionPrepStatus
+
+
 class RoundComparisonPublic(BaseModel):
     """What one import changed, as the panel reads it (S2-06 / S2-07 / S2-08 / S2-10).
 
@@ -930,6 +938,9 @@ class RoundComparisonPublic(BaseModel):
     letter_changes: list[LetterChangePublic] = Field(default_factory=list)
     #: Why nothing is suggested, or None when something is. S2-10's callout shows it as-is.
     no_suggestions_reason: str | None = None
+    #: Each came-back that moved our track (LP-915 review). CLOSED enums; an unrecognised stored value
+    #: drops the entry rather than travelling as an open string.
+    came_back_moves: list[CameBackMovePublic] = Field(default_factory=list)
 
     @classmethod
     def from_stored(cls, stored: dict[str, Any] | None) -> "RoundComparisonPublic | None":
@@ -963,6 +974,17 @@ class RoundComparisonPublic(BaseModel):
                 for change in stored.get("letter_changes") or []
             ],
             no_suggestions_reason=stored.get("no_suggestions_reason"),
+            came_back_moves=[
+                CameBackMovePublic(
+                    condition_id=UUID(str(condition_id)),
+                    prep_status_from=ConditionPrepStatus(pair[0]),
+                    prep_status_to=ConditionPrepStatus(pair[1]),
+                )
+                for condition_id, pair in (stored.get("came_back_moves") or {}).items()
+                if isinstance(pair, (list, tuple))
+                and len(pair) == 2
+                and all(value in ConditionPrepStatus._value2member_map_ for value in pair)
+            ],
         )
 
 
@@ -1308,6 +1330,9 @@ class ConfirmClearedRequest(BaseModel):
     """
 
     condition_ids: list[UUID] = Field(min_length=1)
+    #: True from the PANEL, which decides the whole round (the unticked lose their suggestion). False
+    #: from the DETAIL SHEET, which answers one condition and leaves the rest pending (LP-915 review).
+    resolve_rest: bool = True
 
 
 class RewordedDecisionRequest(BaseModel):

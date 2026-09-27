@@ -739,3 +739,199 @@ async def test_a_draft_round_cannot_have_its_completeness_switched(
     assert "Only an imported round" in refused.json()["error"]["message"]
     await db_session.refresh(draft)
     assert draft.completeness is ConditionRoundCompleteness.FULL
+
+
+# --------------------------------------------------------------------------- #
+# Found in LP-915's review
+# --------------------------------------------------------------------------- #
+
+
+async def test_confirming_one_from_the_sheet_leaves_the_rest_pending(
+    client: AsyncClient, db_session: AsyncSession, enqueued: list[str]
+) -> None:
+    """ "The suggestion is per condition, so she can also confirm one from the detail sheet", and
+    *Not now* keeps the rest pending "until she decides". The first version resolved the whole round
+    on a one-row confirm, silently withdrawing the other four questions."""
+    _loan_file, auth, round_2 = await _rounds_one_and_two(client, db_session, enqueued)
+    suggested = (await _round(db_session, round_2)).comparison["probably_cleared"]
+    one = suggested[0]
+
+    response = await client.post(
+        f"{API}/condition-rounds/{round_2}/confirm-cleared",
+        headers=auth,
+        json={"condition_ids": [one], "resolve_rest": False},
+    )
+
+    assert response.status_code == 200, response.text
+    assert sorted(response.json()["comparison"]["probably_cleared"]) == sorted(suggested[1:])
+
+
+async def test_a_hand_verdict_answers_the_suggestion_and_is_never_overwritten(
+    client: AsyncClient, db_session: AsyncSession, enqueued: list[str]
+) -> None:
+    """Spec §5 step 6: "nothing already cleared is touched". The first version left a condition
+    cleared by hand in "probably cleared", so the panel's Confirm replaced the processor's portal
+    verdict with a round-comparison one."""
+    loan_file, auth, round_2 = await _rounds_one_and_two(client, db_session, enqueued)
+    suggested = (await _round(db_session, round_2)).comparison["probably_cleared"]
+    (by_hand,) = await _by_code(db_session, loan_file, "0132")
+    assert str(by_hand.id) in suggested
+
+    recorded = await client.post(
+        f"{API}/conditions/{by_hand.id}/verdict",
+        headers=auth,
+        json={"status": "cleared", "source_kind": "portal", "source_date": "2026-09-12"},
+    )
+    assert recorded.status_code == 200, recorded.text
+    pending = (await _round(db_session, round_2)).comparison["probably_cleared"]
+    assert str(by_hand.id) not in pending
+    summary = await client.get(f"{API}/loan-files/{loan_file.id}/conditions/summary", headers=auth)
+    assert summary.json()["pending_suggestions"] == 4
+
+    # A panel drawn before the hand verdict still names all five.
+    confirmed = await client.post(
+        f"{API}/condition-rounds/{round_2}/confirm-cleared",
+        headers=auth,
+        json={"condition_ids": suggested},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    await db_session.refresh(by_hand)
+    assert by_hand.verdict is not None
+    assert by_hand.verdict["source_kind"] == "portal", "the processor's recorded answer stands"
+
+
+async def test_a_newer_full_sheet_supersedes_older_pending_questions(
+    client: AsyncClient, db_session: AsyncSession, enqueued: list[str]
+) -> None:
+    """*Not now* on round 2, then round 3. Round 3 re-derives against everything still open (A6), so
+    it asks again about whatever is still missing. The first version left round 2's five pending as
+    well: counted twice by the summary, and unanswerable from the list, which reads the newest round."""
+    loan_file, auth, round_2 = await _rounds_one_and_two(client, db_session, enqueued)
+
+    round_3 = await _upload_and_import(
+        client, auth, loan_file, db=db_session, enqueued=enqueued, fixture=UWM_ROUND_3
+    )
+
+    assert (await _round(db_session, round_2)).comparison["probably_cleared"] == []
+    asked_now = (await _round(db_session, round_3)).comparison["probably_cleared"]
+    summary = await client.get(f"{API}/loan-files/{loan_file.id}/conditions/summary", headers=auth)
+    assert summary.json()["pending_suggestions"] == len(asked_now)
+
+
+async def test_an_older_sheet_imported_late_suggests_nothing_and_says_why(
+    client: AsyncClient, db_session: AsyncSession, enqueued: list[str]
+) -> None:
+    """Spec §LP-915: "An older sheet imported late … produces no Probably cleared, with the warning".
+    Untested before this review. Round 2's letter is imported first, then round 1's (printed
+    earlier): round 1's six missing conditions must not be suggested."""
+    loan_file, auth = await _file_with_codes(db_session)
+    await _upload_and_import(
+        client, auth, loan_file, db=db_session, enqueued=enqueued, fixture=UWM_ROUND_2
+    )
+    late = await _upload_and_import(
+        client, auth, loan_file, db=db_session, enqueued=enqueued, fixture=UWM_ROUND_1
+    )
+
+    comparison = (await _round(db_session, late)).comparison
+    assert comparison["probably_cleared"] == []
+    assert comparison["no_suggestions_reason"] == (
+        "This sheet is older than round 1, so missing conditions aren't treated as cleared."
+    )
+
+
+async def test_a_hand_typed_condition_is_never_suggested(
+    client: AsyncClient, db_session: AsyncSession, enqueued: list[str]
+) -> None:
+    """A5, untested before this review. A condition typed by hand never appears on a sheet, so its
+    absence from round 2 is not evidence of anything."""
+    loan_file, auth = await _file_with_codes(db_session)
+    await _upload_and_import(
+        client, auth, loan_file, db=db_session, enqueued=enqueued, fixture=UWM_ROUND_1
+    )
+    typed = await client.post(
+        f"{API}/loan-files/{loan_file.id}/conditions",
+        headers=auth,
+        json={"verbatim_text": "Chase the HOA for the transfer fee letter."},
+    )
+    assert typed.status_code in (200, 201), typed.text
+
+    round_2 = await _upload_and_import(
+        client, auth, loan_file, db=db_session, enqueued=enqueued, fixture=UWM_ROUND_2
+    )
+
+    suggested = (await _round(db_session, round_2)).comparison["probably_cleared"]
+    assert typed.json()["id"] not in suggested
+    assert sorted(await _codes(db_session, suggested)) == sorted(
+        ["7086", "6132", "6637", "6178", "0132"]
+    )
+
+
+async def test_another_company_gets_404_on_the_three_round_decisions(
+    client: AsyncClient, db_session: AsyncSession, enqueued: list[str]
+) -> None:
+    """Spec §5 step 9: a second company cannot compare, confirm or switch completeness. Untested
+    before this review — the gating walk proves the gate is DECLARED; this proves it refuses."""
+    _loan_file, _auth, round_2 = await _rounds_one_and_two(client, db_session, enqueued)
+    suggested = (await _round(db_session, round_2)).comparison["probably_cleared"]
+    _other_file, stranger = await _file_with_codes(db_session)
+
+    attempts = [
+        client.post(
+            f"{API}/condition-rounds/{round_2}/confirm-cleared",
+            headers=stranger,
+            json={"condition_ids": suggested},
+        ),
+        client.post(
+            f"{API}/condition-rounds/{round_2}/reworded",
+            headers=stranger,
+            json={"old_id": str(uuid4()), "new_id": str(uuid4()), "same": True},
+        ),
+        client.put(
+            f"{API}/condition-rounds/{round_2}/completeness",
+            headers=stranger,
+            json={"completeness": "partial"},
+        ),
+    ]
+    for attempt in attempts:
+        response = await attempt
+        assert response.status_code == 404, (response.request.url, response.status_code)
+
+    assert (await _round(db_session, round_2)).comparison["probably_cleared"] == suggested
+
+
+async def test_a_came_back_records_what_it_did_to_our_track(
+    client: AsyncClient, db_session: AsyncSession, enqueued: list[str]
+) -> None:
+    """Spec §5 step 6 and S2-08: `1228` Sent to lender, round 3 brings it back, and the panel's line
+    reads "our status moved from Sent to lender back to To do". The first version omitted the clause
+    as needing a history fetch per condition; the round's own came-back event already carries it."""
+    loan_file, auth, round_2 = await _rounds_one_and_two(client, db_session, enqueued)
+    suggested = (await _round(db_session, round_2)).comparison["probably_cleared"]
+    confirmed = await client.post(
+        f"{API}/condition-rounds/{round_2}/confirm-cleared",
+        headers=auth,
+        json={"condition_ids": suggested},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    (appraisal,) = await _by_code(db_session, loan_file, "1228")
+    sent = await client.post(
+        f"{API}/conditions/{appraisal.id}/prep-status",
+        headers=auth,
+        json={"to": "with_underwriter"},
+    )
+    assert sent.status_code == 200, sent.text
+
+    round_3 = await _upload_and_import(
+        client, auth, loan_file, db=db_session, enqueued=enqueued, fixture=UWM_ROUND_3
+    )
+    response = await client.get(f"{API}/condition-rounds/{round_3}", headers=auth)
+
+    assert response.status_code == 200, response.text
+    moves = response.json()["comparison"]["came_back_moves"]
+    assert moves == [
+        {
+            "condition_id": str(appraisal.id),
+            "prep_status_from": "with_underwriter",
+            "prep_status_to": "to_do",
+        }
+    ]

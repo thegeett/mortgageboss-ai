@@ -657,6 +657,11 @@ export interface ConfirmClearedInput {
   roundId: string;
   /** The TICKED ids. S2-07's whole content is that one is unticked and the count is live. */
   condition_ids: string[];
+  /**
+   * True (the default) from the PANEL, which decides the whole round: the unticked lose their
+   * suggestion. False from the DETAIL SHEET, which answers one condition (LP-915 review).
+   */
+  resolve_rest?: boolean;
 }
 
 /**

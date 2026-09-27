@@ -3,6 +3,7 @@
 import { StatusToken } from "@/components/status-token";
 import { Button } from "@/components/ui/button";
 import { displayWording } from "@/lib/conditions/wording";
+import { CONDITION_PREP_STATUS } from "@/lib/status";
 import { CONDITION_LENDER_STATUS, resolveStatus } from "@/lib/status";
 import type { Condition, ConditionRound, LetterChange } from "@/lib/types/conditions";
 import { cn } from "@/lib/utils";
@@ -104,6 +105,8 @@ export function RoundComparisonPanel({
   // ALL TICKED TO START (S2-06), and re-synced when the round's suggestions change — after a confirm
   // the list empties, and a stale selection would leave the button counting ids that are gone.
   const [ticked, setTicked] = useState<ReadonlySet<string>>(() => new Set(suggested));
+  // S2-08's Probably cleared starts collapsed behind **Review**; opening it is per visit.
+  const [reviewing, setReviewing] = useState(false);
   const signature = suggested.join(",");
   useEffect(() => {
     setTicked(new Set(signature === "" ? [] : signature.split(",")));
@@ -126,6 +129,100 @@ export function RoundComparisonPanel({
   const suggestionsOffered = comparison.no_suggestions_reason === null;
   const tickedIds = suggested.filter((id) => ticked.has(id));
   const untickedCodes = codesOf(suggested.filter((id) => !ticked.has(id)));
+
+  // ONE RULE FOR BOTH SCREENS (LP-915 review). S2-06 puts Probably cleared first; S2-08 puts Came
+  // back, Reworded and New first and draws Probably cleared collapsed with **Review**. They agree once
+  // read as: the sheet's own news comes first when there is any, and the question about what is
+  // missing waits behind it. S2-06 has no news (all three are 0), so its question leads.
+  const attentionFirst =
+    comparison.came_back.length + comparison.reworded.length + comparison.new.length > 0;
+  const probablyBlock =
+    suggested.length > 0 ? (
+      <div className="flex flex-col gap-2">
+        <div>
+          <p className="text-sm font-semibold text-foreground">
+            Probably cleared — not on the lender’s full list
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Nothing changes until you confirm. Each one is recorded as{" "}
+            <span className="font-medium text-foreground-2">
+              Cleared · round {comparison.round_number} comparison · {usDate(sheetDate)}
+            </span>
+            .
+          </p>
+        </div>
+
+        <ul className="flex flex-col">
+          {suggested.map((id) => {
+            const condition = byId.get(id);
+            if (!condition) return null;
+            const lastOn = condition.round_numbers
+              .filter((number) => number !== comparison.round_number)
+              .at(-1);
+            return (
+              <li
+                key={id}
+                className="flex items-start gap-3 border-b border-input py-2 last:border-b-0"
+              >
+                <label className="flex cursor-pointer items-center pt-0.5">
+                  <input
+                    type="checkbox"
+                    className="accent-primary"
+                    checked={ticked.has(id)}
+                    onChange={() => {
+                      const next = new Set(ticked);
+                      if (next.has(id)) next.delete(id);
+                      else next.add(id);
+                      setTicked(next);
+                    }}
+                    aria-label={`Confirm ${condition.lender_code ?? "condition"} as cleared`}
+                  />
+                </label>
+                <span className="w-10 shrink-0 font-mono text-xs font-medium text-foreground-2">
+                  {condition.lender_code ?? "—"}
+                </span>
+                <span className="line-clamp-2 min-w-0 flex-1 font-serif text-xs text-foreground">
+                  {displayWording(condition.verbatim_text, condition.underwriter_notes.length)}
+                </span>
+                <span className="w-28 shrink-0 text-right text-xs text-muted-foreground">
+                  {lastOn === undefined
+                    ? "—"
+                    : `last on round ${lastOn} · ${shortDate(roundDateByNumber.get(lastOn) ?? null)}`}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+
+        {/* S2-07: the unticked ones are named, and what happens to them is spelled out. */}
+        {untickedCodes.length > 0 ? (
+          <p className="text-xs text-muted-foreground">
+            <span className="font-mono text-foreground-2">{untickedCodes.join(", ")}</span>{" "}
+            {untickedCodes.length === 1 ? "stays" : "stay"} Open and{" "}
+            {untickedCodes.length === 1 ? "loses" : "lose"} the suggestion. You can still record the
+            lender’s answer on {untickedCodes.length === 1 ? "it" : "them"} by hand.
+          </p>
+        ) : null}
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* THE COUNT IS LIVE (S2-07's Must-match). Disabled at zero: confirming nothing would
+                withdraw every suggestion and record no verdict, which the server also refuses. */}
+          <Button
+            size="sm"
+            disabled={pending || tickedIds.length === 0}
+            onClick={() => onConfirm(tickedIds)}
+          >
+            Confirm {tickedIds.length} as cleared
+          </Button>
+          <Button variant="outline" size="sm" disabled={pending} onClick={onNotNow}>
+            Not now
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            “Not now” keeps them open with a “probably cleared — review” mark.
+          </span>
+        </div>
+      </div>
+    ) : null;
 
   return (
     <section className="flex flex-col gap-3 rounded-lg border border-primary/35 bg-card p-4">
@@ -152,17 +249,19 @@ export function RoundComparisonPanel({
         </Button>
       </div>
 
-      {/* THE PILL SET IS FIXED IN THIS ORDER (S2-06). S2-08's PNG lists the same five in a different
-          order; one stable order is easier to read than pills that move between rounds, and the
-          difference is recorded in the ticket. The Probably cleared pill is absent entirely when
-          nothing could be suggested, which is S2-10's Must-match. */}
+      {/* THE PILL ORDER FOLLOWS THE SECTIONS (LP-915 review): S2-06's order when the sheet has no
+          news, S2-08's when it does — see `attentionFirst`. The Probably cleared pill is absent
+          entirely when nothing could be suggested, which is S2-10's Must-match. */}
       <div className="flex flex-wrap gap-2">
-        {suggestionsOffered ? (
+        {suggestionsOffered && !attentionFirst ? (
           <CountPill label="Probably cleared" count={suggested.length} />
         ) : null}
         <CountPill label="Came back" count={comparison.came_back.length} />
         <CountPill label="Reworded" count={comparison.reworded.length} />
         <CountPill label="New" count={comparison.new.length} />
+        {suggestionsOffered && attentionFirst ? (
+          <CountPill label="Probably cleared" count={suggested.length} />
+        ) : null}
         <CountPill label="Still open" count={comparison.still_open.length} />
       </div>
 
@@ -197,93 +296,8 @@ export function RoundComparisonPanel({
         </div>
       ) : null}
 
-      {/* --- probably cleared (S2-06, S2-07) ---------------------------------------------- */}
-      {suggested.length > 0 ? (
-        <div className="flex flex-col gap-2">
-          <div>
-            <p className="text-sm font-semibold text-foreground">
-              Probably cleared — not on the lender’s full list
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Nothing changes until you confirm. Each one is recorded as{" "}
-              <span className="font-medium text-foreground-2">
-                Cleared · round {comparison.round_number} comparison · {usDate(sheetDate)}
-              </span>
-              .
-            </p>
-          </div>
-
-          <ul className="flex flex-col">
-            {suggested.map((id) => {
-              const condition = byId.get(id);
-              if (!condition) return null;
-              const lastOn = condition.round_numbers
-                .filter((number) => number !== comparison.round_number)
-                .at(-1);
-              return (
-                <li
-                  key={id}
-                  className="flex items-start gap-3 border-b border-input py-2 last:border-b-0"
-                >
-                  <label className="flex cursor-pointer items-center pt-0.5">
-                    <input
-                      type="checkbox"
-                      className="accent-primary"
-                      checked={ticked.has(id)}
-                      onChange={() => {
-                        const next = new Set(ticked);
-                        if (next.has(id)) next.delete(id);
-                        else next.add(id);
-                        setTicked(next);
-                      }}
-                      aria-label={`Confirm ${condition.lender_code ?? "condition"} as cleared`}
-                    />
-                  </label>
-                  <span className="w-10 shrink-0 font-mono text-xs font-medium text-foreground-2">
-                    {condition.lender_code ?? "—"}
-                  </span>
-                  <span className="line-clamp-2 min-w-0 flex-1 font-serif text-xs text-foreground">
-                    {displayWording(condition.verbatim_text, condition.underwriter_notes.length)}
-                  </span>
-                  <span className="w-28 shrink-0 text-right text-xs text-muted-foreground">
-                    {lastOn === undefined
-                      ? "—"
-                      : `last on round ${lastOn} · ${shortDate(roundDateByNumber.get(lastOn) ?? null)}`}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-
-          {/* S2-07: the unticked ones are named, and what happens to them is spelled out. */}
-          {untickedCodes.length > 0 ? (
-            <p className="text-xs text-muted-foreground">
-              <span className="font-mono text-foreground-2">{untickedCodes.join(", ")}</span>{" "}
-              {untickedCodes.length === 1 ? "stays" : "stay"} Open and{" "}
-              {untickedCodes.length === 1 ? "loses" : "lose"} the suggestion. You can still record
-              the lender’s answer on {untickedCodes.length === 1 ? "it" : "them"} by hand.
-            </p>
-          ) : null}
-
-          <div className="flex flex-wrap items-center gap-2">
-            {/* THE COUNT IS LIVE (S2-07's Must-match). Disabled at zero: confirming nothing would
-                withdraw every suggestion and record no verdict, which the server also refuses. */}
-            <Button
-              size="sm"
-              disabled={pending || tickedIds.length === 0}
-              onClick={() => onConfirm(tickedIds)}
-            >
-              Confirm {tickedIds.length} as cleared
-            </Button>
-            <Button variant="outline" size="sm" disabled={pending} onClick={onNotNow}>
-              Not now
-            </Button>
-            <span className="text-xs text-muted-foreground">
-              “Not now” keeps them open with a “probably cleared — review” mark.
-            </span>
-          </div>
-        </div>
-      ) : null}
+      {/* --- probably cleared (S2-06, S2-07): FIRST only when nothing else needs attention --- */}
+      {attentionFirst ? null : probablyBlock}
 
       {/* --- came back (S2-08) ------------------------------------------------------------ */}
       {comparison.came_back.length > 0 ? (
@@ -329,6 +343,13 @@ export function RoundComparisonPanel({
                 {condition.latest_note?.date ? (
                   <p className="mt-1.5 text-xs text-muted-foreground">
                     set by the lender’s {shortDate(condition.latest_note.date)} note
+                    {/* S2-08's second clause (LP-915 review), from the came-back event's own pair. */}
+                    {(() => {
+                      const move = comparison.came_back_moves?.find((m) => m.condition_id === id);
+                      return move
+                        ? ` · our status moved from ${CONDITION_PREP_STATUS[move.prep_status_from].label} back to ${CONDITION_PREP_STATUS[move.prep_status_to].label}`
+                        : "";
+                    })()}
                   </p>
                 ) : null}
               </div>
@@ -434,6 +455,27 @@ export function RoundComparisonPanel({
             );
           })}
         </div>
+      ) : null}
+
+      {/* --- probably cleared AFTER came back / reworded / new, collapsed with Review (S2-08) --- */}
+      {attentionFirst && suggested.length > 0 ? (
+        reviewing ? (
+          probablyBlock
+        ) : (
+          <div className="flex items-center gap-2 rounded-md border border-input px-3 py-2">
+            <span className="text-sm font-semibold text-foreground">
+              Probably cleared ({suggested.length}: {codesOf(suggested).join(", ")})
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto"
+              onClick={() => setReviewing(true)}
+            >
+              Review
+            </Button>
+          </div>
+        )
       ) : null}
 
       {/* --- letter changes (S2-06) ------------------------------------------------------ */}

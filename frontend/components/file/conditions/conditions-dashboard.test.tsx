@@ -78,6 +78,12 @@ vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   // them — the comments above record this same lesson three times, one export at a time.
   useConditionsSummary: () => ({ data: undefined, isPending: false, isError: false }),
   useBulkConditions: () => ({ mutate: vi.fn(), isPending: false }),
+  // LP-915's three round decisions, which `ConditionsListView` now owns. Unmocked they reach the real
+  // `useQueryClient()` and throw "No QueryClient set" — LP-915 shipped with this test failing for
+  // exactly that reason, found by its review (the commit quoted tsc and biome, not vitest).
+  useConfirmCleared: () => ({ mutate: vi.fn(), isPending: false }),
+  useResolveReworded: () => ({ mutate: vi.fn(), isPending: false }),
+  useSwitchCompleteness: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@/lib/api/timeline", () => ({

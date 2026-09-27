@@ -607,6 +607,12 @@ export interface RoundComparison {
   compared_with: number;
   new: string[];
   still_open: string[];
+  /** Each came-back that moved OUR track — S2-08's "our status moved from … back to …". */
+  came_back_moves: {
+    condition_id: string;
+    prep_status_from: ConditionPrepStatus;
+    prep_status_to: ConditionPrepStatus;
+  }[];
   came_back: string[];
   reworded: RewordedPair[];
   /**

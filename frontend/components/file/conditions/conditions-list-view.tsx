@@ -147,7 +147,15 @@ export function ConditionsListView({
           .find(
             (round) => (round.round_number as number) < (comparisonRound.round_number as number),
           )?.round_number ?? null);
-  const suggestedIds = new Set(comparisonRound?.comparison?.probably_cleared ?? []);
+  // THE ROUND THAT IS ASKING, NOT THE NEWEST ONE COMPARED (LP-915 review). They differ when a
+  // partial round or a late older sheet follows a full one: the newest comparison suggests nothing,
+  // and the full round's questions are still pending. At most one round is ever asking, because a
+  // newer FULL comparison withdraws the older rounds' questions server-side.
+  const suggestionRound =
+    [...importedAscending]
+      .reverse()
+      .find((round) => (round.comparison?.probably_cleared.length ?? 0) > 0) ?? null;
+  const suggestedIds = new Set(suggestionRound?.comparison?.probably_cleared ?? []);
 
   // The selection is by ID, so a row that a filter hides stays selected and still gets the bulk
   // action — which is what a processor who ticked it then narrowed the view would expect.
@@ -344,7 +352,7 @@ export function ConditionsListView({
           conditions={rows}
           settledFrom={allRows}
           suggestedIds={suggestedIds}
-          suggestedRoundNumber={comparisonRound?.comparison?.round_number ?? null}
+          suggestedRoundNumber={suggestionRound?.comparison?.round_number ?? null}
           state={urlState}
           search={searchInput}
           capped={filtered.data?.capped ?? false}
@@ -423,7 +431,7 @@ export function ConditionsListView({
           setMoveBack({ condition, to: null, mode: "reopen" });
         }}
         suggestedIds={suggestedIds}
-        suggestedRoundNumber={comparisonRound?.comparison?.round_number ?? null}
+        suggestedRoundNumber={suggestionRound?.comparison?.round_number ?? null}
         // ONE CONDITION THROUGH THE SAME DOOR THE PANEL USES — "the suggestion is per condition, so
         // she can also confirm one from the detail sheet" (spec §LP-915). It is the round's endpoint
         // either way, because the round's saved comparison is what authorises the verdict at all.
@@ -431,16 +439,22 @@ export function ConditionsListView({
         // UNDEFINED WHEN NO ROUND HAS BEEN COMPARED, so the sheet renders no block rather than a
         // button with nowhere to send the click.
         onConfirmSuggestion={
-          comparisonRound === null
+          suggestionRound === null
             ? undefined
             : (condition) =>
                 confirmCleared.mutate(
-                  { roundId: comparisonRound.id, condition_ids: [condition.id] },
+                  // `resolve_rest: false` — ONE condition answered here; the round's other
+                  // questions stay pending until she decides them (LP-915 review).
+                  {
+                    roundId: suggestionRound.id,
+                    condition_ids: [condition.id],
+                    resolve_rest: false,
+                  },
                   {
                     onSuccess: () =>
                       notifySuccess({
                         title: `${condition.lender_code ?? "That condition"} recorded as cleared`,
-                        consequence: `It says it came from round ${comparisonRound.comparison?.round_number}. The other suggestions on that round are resolved too.`,
+                        consequence: `It says it came from round ${suggestionRound.comparison?.round_number}. The round's other suggestions are still waiting.`,
                       }),
                     onError: (error) =>
                       notifyError({

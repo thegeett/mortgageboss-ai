@@ -693,14 +693,16 @@ async def pending_suggestion_count(db: AsyncSession, *, loan_file_id: UUID) -> i
         ConditionRound.loan_file_id == loan_file_id,
         ConditionRound.status == ConditionRoundStatus.IMPORTED,
     )
-    total = 0
+    # DISTINCT CONDITIONS, NOT LIST ENTRIES (LP-915 review): one condition asked about by two rounds
+    # is one question for the processor.
+    pending_ids: set[str] = set()
     for comparison in (await db.execute(only_active(stmt, ConditionRound))).scalars().all():
         if not isinstance(comparison, dict):
             continue
         pending = comparison.get("probably_cleared")
         if isinstance(pending, list):
-            total += len(pending)
-    return total
+            pending_ids.update(str(value) for value in pending)
+    return len(pending_ids)
 
 
 async def imported_rounds_oldest_first(
