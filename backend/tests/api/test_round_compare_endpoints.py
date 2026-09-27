@@ -935,3 +935,19 @@ async def test_a_came_back_records_what_it_did_to_our_track(
             "prep_status_to": "to_do",
         }
     ]
+
+
+async def test_withdrawing_an_empty_set_removes_nothing(
+    client: AsyncClient, db_session: AsyncSession, enqueued: list[str]
+) -> None:
+    """The sweep is asked for by name. The first version read an empty set as "every suggestion on
+    the file", one miscomputed set away from withdrawing every question left pending with Not now."""
+    from app.services.condition_status import withdraw_suggestions
+
+    loan_file, _auth, round_2 = await _rounds_one_and_two(client, db_session, enqueued)
+    suggested = (await _round(db_session, round_2)).comparison["probably_cleared"]
+
+    removed = await withdraw_suggestions(db_session, loan_file_id=loan_file.id, condition_ids=set())
+
+    assert removed == 0
+    assert (await _round(db_session, round_2)).comparison["probably_cleared"] == suggested

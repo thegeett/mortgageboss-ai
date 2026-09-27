@@ -729,7 +729,11 @@ async def compare_round(
         from app.services.condition_status import withdraw_suggestions
 
         superseded = await withdraw_suggestions(
-            db, loan_file_id=round_.loan_file_id, condition_ids=set(), except_round_id=round_.id
+            db,
+            loan_file_id=round_.loan_file_id,
+            condition_ids=set(),
+            except_round_id=round_.id,
+            all_conditions=True,
         )
 
     # A NEW dict rather than a mutated one: SQLAlchemy does not track in-place JSONB mutation, so an

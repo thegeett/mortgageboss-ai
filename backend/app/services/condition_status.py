@@ -784,14 +784,20 @@ async def withdraw_suggestions(
     loan_file_id: UUID,
     condition_ids: set[UUID],
     except_round_id: UUID | None = None,
+    all_conditions: bool = False,
 ) -> int:
     """Remove conditions from every imported round's pending "probably cleared" list. Returns how
     many entries were removed.
 
-    `condition_ids` EMPTY MEANS EVERY SUGGESTION, used when a newer full comparison supersedes the
-    older rounds' questions (`compare_round`). A new dict is assigned, never a mutated one:
-    SQLAlchemy does not track in-place JSONB changes.
+    THE SWEEP IS ASKED FOR BY NAME (`all_conditions=True`), never implied by an empty set. The first
+    version read an empty `condition_ids` as "every suggestion on the file", so a caller whose set
+    came out empty by mistake would withdraw every question a processor had left pending with *Not
+    now*. An empty set now removes nothing, which fails safe. `compare_round`'s supersession is the
+    one caller that sweeps. A new dict is assigned, never a mutated one: SQLAlchemy does not track
+    in-place JSONB changes.
     """
+    if not condition_ids and not all_conditions:
+        return 0
     stmt = select(ConditionRound).where(
         ConditionRound.loan_file_id == loan_file_id,
         ConditionRound.comparison.is_not(None),
@@ -803,7 +809,7 @@ async def withdraw_suggestions(
         pending = round_.comparison.get("probably_cleared") or []
         keep = (
             []
-            if not condition_ids
+            if all_conditions
             else [value for value in pending if UUID(str(value)) not in condition_ids]
         )
         if len(keep) != len(pending):
