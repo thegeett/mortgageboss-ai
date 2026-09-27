@@ -464,6 +464,19 @@ Collected so it is not re-derived six times.
   that from prose. Widening the shared error module then, with its first actual consumer, rather than
   now on speculation.
 
+  **Two things LP-916's review hands forward** (LP-916 §Review of `cf3b7fd3`):
+  - **The sheet must be fed the DISPLAYED order, not the server's.** `ConditionDetailSheet` steps
+    through the array it is given, which is how Previous/Next follow the filter and sort without
+    knowing what they are — but LP-913 sorts and groups CLIENT-side, so passing it
+    `conditions.data` would make ↑/↓ walk a different order from the one on screen. Pass the rows in
+    the order they are rendered, after grouping.
+  - **The Owner select cannot clear an override back to the hint, although `PUT /owner` accepts
+    `owner: null`.** The sheet offers the seven owners and a Clear button; the LIST's inline owner
+    control needs the same escape, or a processor who overrides by mistake can only pick another
+    owner, never go back to what the sheet said. **A decision for LP-913** — the safest reading is
+    that "back to the suggestion" must always be reachable wherever an override can be set, since
+    the alternative is a one-way door.
+
   **Two things LP-911's review hands forward** (LP-911 §Review, R6 and its residual):
   - **Read `X-Conditions-Capped`.** The cap is reported in a header, not the body, because the list's
     response shape is a Done-when. `fetchConditions` returns `.data` only, so nothing reads it yet —

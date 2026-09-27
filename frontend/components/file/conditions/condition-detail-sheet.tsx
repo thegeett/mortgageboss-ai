@@ -7,6 +7,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCondition, useConditionEvents } from "@/lib/api/conditions";
 import { conditionHistoryLine } from "@/lib/conditions/history";
+import { OWNER_LABEL } from "@/lib/conditions/owners";
 import { CONDITION_LENDER_STATUS, CONDITION_PREP_STATUS, resolveStatus } from "@/lib/status";
 import type {
   Condition,
@@ -337,7 +338,13 @@ function SheetBody({
               >
                 {OFFERED_OWNERS.map((value) => (
                   <option key={value} value={value}>
-                    {value === "unknown" ? "Not known" : value[0]?.toUpperCase() + value.slice(1)}
+                    {/* THE SHARED LABEL, NOT A CAPITALISED ENUM VALUE. This built its own words —
+                        agreeing with `OWNER_LABEL` only by coincidence once LP-913 shortened
+                        `unknown` to "Not known", and diverging silently the next time an owner is
+                        added or reworded. The reviewer consolidated this vocabulary one ticket ago
+                        so the chip and the history line read one copy; the select is the third
+                        reader and was quietly a fourth copy. */}
+                    {OWNER_LABEL[value]}
                   </option>
                 ))}
               </Select>

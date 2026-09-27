@@ -1,0 +1,430 @@
+"use client";
+
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import type { ConditionListParams } from "@/lib/api/conditions";
+import {
+  useAttachPdf,
+  useBulkConditions,
+  useConditions,
+  useConditionsSummary,
+  useOwner,
+  usePrepStatus,
+  useReopen,
+  useVerdict,
+} from "@/lib/api/conditions";
+import type { ConditionListUrlState } from "@/lib/conditions/list-url";
+import { useConditionListUrl, writeConditionListUrl } from "@/lib/conditions/list-url";
+import { getErrorMessage } from "@/lib/errors/api-error";
+import { notifyError, notifySuccess } from "@/lib/toast";
+import type {
+  Condition,
+  ConditionEnrichResult,
+  ConditionPrepStatus,
+  ConditionRound,
+  OwnerHint,
+} from "@/lib/types/conditions";
+import { Info } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { useState } from "react";
+import { MoveBackDialog, RecordAnswerDialog } from "./condition-answer-dialogs";
+import { ConditionDetailSheet } from "./condition-detail-sheet";
+import { ConditionsBulkBar, bulkResultSummary } from "./conditions-bulk-bar";
+import { ConditionsFilterRow } from "./conditions-filter-row";
+import { ConditionsList } from "./conditions-list";
+import { ConditionsSummaryBar } from "./conditions-summary-bar";
+import { RoundDetailsSheet } from "./round-details-sheet";
+import { RoundStrip } from "./round-strip";
+
+/**
+ * The conditions list screen (S2-01, S2-02, S2-09) — LP-913.
+ *
+ * REPLACES `ImportedView` FOR AN IMPORTED ROUND. Stage 1's review, reading, failed and empty screens
+ * are untouched: this is one branch of `ConditionsDashboard`, not a rewrite of the tab.
+ *
+ * TWO QUERIES, AND THE SECOND ONE IS NOT AN OVERSIGHT. The live list is filtered BY THE SERVER —
+ * those filters are what LP-911 built and pinned ("open + owner=borrower returns exactly 7086 6132
+ * 6637"), and not using them would strand that work and put a second, disagreeing implementation of
+ * "what does owner=title mean" in the client. But the collapsed sections at the bottom must survive
+ * the filters: S2-09 says in as many words that "the Cleared section is still shown below" when the
+ * filters match nothing. One filtered query cannot answer both questions, so there is one of each.
+ *
+ * `q` GOES TO THE SERVER AND NEVER INTO THE URL. It is a server filter and `conditions_listed` logs
+ * only the filter NAMES (LP-911 pins that with `structlog.testing.capture_logs`), so the term is not
+ * recorded anywhere. What ADR-405's amendment governs is the SHAREABLE URL — a link carrying the
+ * lender's wording — and `lib/conditions/list-url.ts` has no field that could serialise it.
+ *
+ * THE SHEET IS GIVEN THE ROWS THE LIST RENDERS, IN THAT ORDER, so Previous/Next follow the filter and
+ * the grouping without the sheet knowing either exists.
+ */
+export function ConditionsListView({
+  fileId,
+  rounds,
+  onPaste,
+  onAddByHand,
+  onUploadAnother,
+}: {
+  fileId: string;
+  /** Every round on the file, newest first — the strip's own order. */
+  rounds: ConditionRound[];
+  onPaste: () => void;
+  onAddByHand: () => void;
+  onUploadAnother: () => void;
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const urlState = useConditionListUrl();
+
+  // THE SEARCH TERM LIVES HERE, NOT IN THE URL. See the module docstring.
+  const [searchInput, setSearchInput] = useState("");
+  const search = useDebouncedValue(searchInput, 300);
+
+  const params: ConditionListParams = {
+    round: urlState.roundNumber ?? undefined,
+    lender_status: urlState.lenderStatus.length > 0 ? urlState.lenderStatus : undefined,
+    prep_status: urlState.prepStatus.length > 0 ? urlState.prepStatus : undefined,
+    owner: urlState.owner.length > 0 ? urlState.owner : undefined,
+    bucket_kind: urlState.bucketKind.length > 0 ? urlState.bucketKind : undefined,
+    q: search.trim() === "" ? undefined : search.trim(),
+  };
+
+  const filtered = useConditions(fileId, params);
+  const everything = useConditions(fileId, {});
+  const summary = useConditionsSummary(fileId);
+  const attach = useAttachPdf(fileId);
+
+  const prepStatus = usePrepStatus(fileId);
+  const owner = useOwner(fileId);
+  const verdict = useVerdict(fileId);
+  const reopen = useReopen(fileId);
+  const bulk = useBulkConditions(fileId);
+
+  const [openRoundId, setOpenRoundId] = useState<string | null>(null);
+  const [enrichment, setEnrichment] = useState<ConditionEnrichResult | null>(null);
+  const [openConditionId, setOpenConditionId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
+  const [answerFor, setAnswerFor] = useState<Condition[] | null>(null);
+  const [moveBack, setMoveBack] = useState<{
+    condition: Condition;
+    to: ConditionPrepStatus | null;
+    mode: "move-back" | "reopen";
+  } | null>(null);
+  const [refusal, setRefusal] = useState<string | null>(null);
+
+  const openRound = rounds.find((round) => round.id === openRoundId) ?? null;
+  const rows = filtered.data?.rows ?? [];
+  const allRows = everything.data?.rows ?? [];
+  const roundNumbers = rounds
+    .filter((round) => round.round_number !== null && round.status === "imported")
+    .map((round) => round.round_number as number);
+
+  // The selection is by ID, so a row that a filter hides stays selected and still gets the bulk
+  // action — which is what a processor who ticked it then narrowed the view would expect.
+  const selected = allRows.filter((row) => selectedIds.has(row.id));
+
+  function applyUrl(next: ConditionListUrlState) {
+    // `replace`, not `push`: a filter click is not a place to go back to, and twelve of them would
+    // bury the page a processor arrived from under twelve history entries.
+    router.replace(`${pathname}${writeConditionListUrl(next)}`, { scroll: false });
+  }
+
+  /** Every write echoes the `updated_at` it read, so a stale one is refused rather than winning. */
+  function movePrep(condition: Condition, to: ConditionPrepStatus) {
+    const rank: Partial<Record<ConditionPrepStatus, number>> = {
+      to_do: 0,
+      waiting: 1,
+      ready: 2,
+      with_underwriter: 3,
+    };
+    const from = rank[condition.prep_status];
+    const target = rank[to];
+    if (from !== undefined && target !== undefined && target < from) {
+      setRefusal(null);
+      setMoveBack({ condition, to, mode: "move-back" });
+      return;
+    }
+    prepStatus.mutate(
+      {
+        conditionId: condition.id,
+        to,
+        waiting_on: to === "waiting" ? condition.effective_owner : null,
+        expected_updated_at: condition.updated_at,
+      },
+      {
+        // THE ROW ROLLS BACK BY ITSELF. The mutation never writes to local state, so a refusal
+        // leaves the cache holding the server's row and the select snaps back to it — and the
+        // server's SENTENCE is what the processor reads, never a wording of ours (spec §6 rule 5).
+        onError: (error) =>
+          notifyError({
+            title: "That status could not be changed",
+            whatToDo: getErrorMessage(error),
+          }),
+      },
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" size="sm" onClick={onAddByHand}>
+          Add a condition
+        </Button>
+        <Button variant="outline" size="sm" onClick={onPaste}>
+          Paste
+        </Button>
+        <Button size="sm" onClick={onUploadAnother}>
+          Upload sheet
+        </Button>
+      </div>
+
+      <RoundStrip
+        rounds={rounds}
+        total={allRows.length}
+        busyRoundId={attach.isPending ? (attach.variables?.roundId ?? null) : null}
+        onOpenDetails={(round) => {
+          setEnrichment(null);
+          setOpenRoundId(round.id);
+        }}
+        onAttachPdf={(roundId, file) =>
+          attach.mutate(
+            { roundId, file },
+            {
+              onSuccess: (result) => {
+                notifySuccess({
+                  title: "The lender’s PDF was attached",
+                  consequence: "It merged into that round. No new conditions, no second round.",
+                });
+                setEnrichment(result);
+                setOpenRoundId(result.round_id);
+              },
+              onError: (error) =>
+                notifyError({
+                  title: "That PDF could not be attached",
+                  whatToDo: getErrorMessage(error),
+                }),
+            },
+          )
+        }
+      />
+
+      {summary.data ? (
+        <ConditionsSummaryBar summary={summary.data} state={urlState} onFilter={applyUrl} />
+      ) : (
+        <Skeleton className="h-14 w-full" />
+      )}
+
+      <ConditionsFilterRow
+        state={urlState}
+        onChange={applyUrl}
+        search={searchInput}
+        onSearchChange={setSearchInput}
+        roundNumbers={roundNumbers}
+      />
+
+      {/* S1-08'S SAFETY LINE SURVIVES STAGE 2. A partial round leaves everything it did not mention
+          alone, and absence must not read as removal — still true once the list has status controls,
+          and still the sentence that says so. The Stage 1 "no status control of any kind" callout is
+          NOT carried over: this screen has them, and repeating it would be false. */}
+      {rounds.find((round) => round.status === "imported")?.completeness === "partial" ? (
+        <p className="flex items-start gap-2 rounded-md border border-input bg-muted/40 p-2.5 text-xs text-muted-foreground">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span>
+            The newest round was just some conditions. Conditions that weren’t in it were left as
+            they are — nothing is removed or cleared.
+          </span>
+        </p>
+      ) : null}
+
+      {filtered.isPending ? (
+        <div className="flex flex-col gap-2" aria-busy>
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-24 w-full" />
+        </div>
+      ) : (
+        <ConditionsList
+          conditions={rows}
+          settledFrom={allRows}
+          state={urlState}
+          search={searchInput}
+          capped={filtered.data?.capped ?? false}
+          selected={selectedIds}
+          onSelectedChange={setSelectedIds}
+          onOpen={setOpenConditionId}
+          onMovePrepStatus={movePrep}
+          onClearFilters={() => {
+            setSearchInput("");
+            applyUrl({
+              ...urlState,
+              roundNumber: null,
+              lenderStatus: [],
+              prepStatus: [],
+              owner: [],
+              bucketKind: [],
+            });
+          }}
+        />
+      )}
+
+      <ConditionsBulkBar
+        selected={selected}
+        pending={bulk.isPending}
+        onClear={() => setSelectedIds(new Set())}
+        onSetPrepStatus={(to) =>
+          runBulk({ condition_ids: selected.map((row) => row.id), action: "prep_status", to })
+        }
+        onSetOwner={(value: OwnerHint) =>
+          runBulk({ condition_ids: selected.map((row) => row.id), action: "owner", owner: value })
+        }
+        onRecordAnswer={() => {
+          setRefusal(null);
+          setAnswerFor(selected);
+        }}
+      />
+
+      <RoundDetailsSheet
+        round={openRound}
+        enrichment={enrichment}
+        open={openRound !== null}
+        onOpenChange={(next) => {
+          if (!next) {
+            setOpenRoundId(null);
+            setEnrichment(null);
+          }
+        }}
+      />
+
+      <ConditionDetailSheet
+        conditions={rows}
+        openId={openConditionId}
+        onOpenChange={(next) => {
+          if (!next) setOpenConditionId(null);
+        }}
+        onSelect={setOpenConditionId}
+        onMovePrepStatus={movePrep}
+        onSetOwner={(condition, value) =>
+          owner.mutate(
+            { conditionId: condition.id, owner: value, expected_updated_at: condition.updated_at },
+            {
+              onError: (error) =>
+                notifyError({
+                  title: "The owner could not be changed",
+                  whatToDo: getErrorMessage(error),
+                }),
+            },
+          )
+        }
+        onRecordAnswer={(condition) => {
+          setRefusal(null);
+          setAnswerFor([condition]);
+        }}
+        onReopen={(condition) => {
+          setRefusal(null);
+          setMoveBack({ condition, to: null, mode: "reopen" });
+        }}
+      />
+
+      <RecordAnswerDialog
+        conditions={answerFor ?? []}
+        open={answerFor !== null && answerFor.length > 0}
+        onOpenChange={(next) => {
+          if (!next) setAnswerFor(null);
+        }}
+        refusal={refusal}
+        pending={verdict.isPending || bulk.isPending}
+        onSubmit={(values) => {
+          const targets = answerFor ?? [];
+          if (targets.length === 0) return;
+          setRefusal(null);
+          // ONE ROW GOES THROUGH THE SINGLE WRITE, MANY THROUGH BULK — and both reach the same
+          // service, so a rule enforced on one is enforced on eleven.
+          if (targets.length === 1 && targets[0]) {
+            const only = targets[0];
+            verdict.mutate(
+              { conditionId: only.id, ...values, expected_updated_at: only.updated_at },
+              {
+                onSuccess: () => setAnswerFor(null),
+                onError: (error) => setRefusal(getErrorMessage(error)),
+              },
+            );
+            return;
+          }
+          runBulk(
+            {
+              condition_ids: targets.map((row) => row.id),
+              action: "verdict",
+              status: values.status,
+              source_kind: values.source_kind,
+              source_date: values.source_date,
+              note: values.note,
+            },
+            () => setAnswerFor(null),
+          );
+        }}
+      />
+
+      <MoveBackDialog
+        condition={moveBack?.condition ?? null}
+        to={moveBack?.to ?? null}
+        mode={moveBack?.mode ?? "move-back"}
+        open={moveBack !== null}
+        onOpenChange={(next) => {
+          if (!next) setMoveBack(null);
+        }}
+        refusal={refusal}
+        pending={prepStatus.isPending || reopen.isPending}
+        onSubmit={(reason) => {
+          if (!moveBack) return;
+          setRefusal(null);
+          const { condition, to, mode } = moveBack;
+          const settle = {
+            onSuccess: () => setMoveBack(null),
+            onError: (error: unknown) => setRefusal(getErrorMessage(error)),
+          };
+          if (mode === "reopen") {
+            reopen.mutate(
+              { conditionId: condition.id, reason, expected_updated_at: condition.updated_at },
+              settle,
+            );
+          } else if (to) {
+            prepStatus.mutate(
+              {
+                conditionId: condition.id,
+                to,
+                reason,
+                waiting_on: to === "waiting" ? condition.effective_owner : null,
+                expected_updated_at: condition.updated_at,
+              },
+              settle,
+            );
+          }
+        }}
+      />
+    </div>
+  );
+
+  /**
+   * Run a bulk write and REPORT WHAT IT ACTUALLY DID.
+   *
+   * 200 WITH REFUSALS AS DATA, so `onSuccess` runs for a partly-applied write. A dialog that closed
+   * on success without reading `refused` would tell a processor eleven rows were cleared when one was
+   * skipped — which is why the toast carries `bulkResultSummary` rather than a count of what was sent.
+   */
+  function runBulk(input: Parameters<typeof bulk.mutate>[0], onDone?: () => void) {
+    bulk.mutate(input, {
+      onSuccess: (result) => {
+        onDone?.();
+        setSelectedIds(new Set());
+        notifySuccess({
+          title: bulkResultSummary(result),
+          consequence:
+            result.refused.length > 0
+              ? "The skipped ones were left exactly as they were."
+              : "Every selected condition was updated.",
+        });
+      },
+      onError: (error) =>
+        notifyError({ title: "Nothing was changed", whatToDo: getErrorMessage(error) }),
+    });
+  }
+}

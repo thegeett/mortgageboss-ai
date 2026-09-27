@@ -281,16 +281,36 @@ export interface ConditionListParams {
   sort?: ConditionSort;
 }
 
+/**
+ * The list, and whether the server had more to give.
+ *
+ * A PAIR RATHER THAN A BARE ARRAY, BECAUSE THE CAP IS REPORTED IN A HEADER. `MAX_CONDITIONS` is 500
+ * and the endpoint sets `X-Conditions-Capped: true` when it hit that — in a header, because the
+ * response body's shape is a Done-when of LP-911 and could not grow a wrapper. `fetchConditions`
+ * returned `.data` and dropped the header on the floor, so **a truncated list rendered as a complete
+ * one**: the exact failure the cap exists to make visible. Raised in LP-911's review and carried
+ * forward to here.
+ */
+export interface ConditionListPage {
+  rows: Condition[];
+  /** True when the server stopped at its ceiling. The list says so rather than implying completeness. */
+  capped: boolean;
+}
+
 export async function fetchConditions(
   fileId: string,
   params: ConditionListParams = {},
-): Promise<Condition[]> {
-  return (
-    await apiClient.get<Condition[]>(`${filePath(fileId)}/conditions`, {
-      params,
-      paramsSerializer: { indexes: null },
-    })
-  ).data;
+): Promise<ConditionListPage> {
+  const response = await apiClient.get<Condition[]>(`${filePath(fileId)}/conditions`, {
+    params,
+    paramsSerializer: { indexes: null },
+  });
+  // LOWERCASED, AND ONLY READABLE BECAUSE THE API NAMES IT IN `expose_headers`. A browser reads no
+  // custom response header across origins otherwise — `page-image.ts` carries the same note, having
+  // had width and height silently read back as 0 for a whole ticket. Header values are strings, so
+  // this compares against "true" rather than trusting truthiness: the string "false" is truthy.
+  const capped = String(response.headers["x-conditions-capped"] ?? "").toLowerCase() === "true";
+  return { rows: response.data, capped };
 }
 
 /**
@@ -299,6 +319,10 @@ export async function fetchConditions(
  * THE PARAMS ARE PART OF THE QUERY KEY. Without that, changing a filter would serve the previous
  * filter's rows from cache until a refetch landed, so the screen would show a list that does not
  * match the filter row above it.
+ *
+ * IT RETURNS A PAGE, NOT AN ARRAY. One hook answering "what are the rows, and were there more" beats
+ * a second hook for the cap: two hooks asking one question is how the two come to disagree, which is
+ * the argument `resolve_user_names` and `usePipelineUrl` both make in their own docstrings.
  */
 export function useConditions(fileId: string, params: ConditionListParams = {}) {
   return useQuery({

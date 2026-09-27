@@ -763,6 +763,61 @@ async def test_bulk_applies_what_it_can_and_reports_the_rest(
     assert await _events(db_session, skipped.id) == []
 
 
+async def test_a_bulk_verdict_on_five_rows_writes_five_verdicts_and_five_events(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """LP-913's DONE-WHEN, AT THE SCALE IT NAMES: "Bulk verdict on 5 rows writes 5 verdicts and 5
+    events."
+
+    THE SIBLING TEST ABOVE DOES NOT COVER THIS, AND THE GAP IS NOT THE NUMBER. It applies TWO rows and
+    counts events per row — it never asserts that each row ends up carrying its OWN recorded verdict.
+    A bulk write that moved five `lender_status` values while recording a single verdict for the
+    batch, or one shared event, would satisfy every assertion in this file.
+
+    THAT FAILURE WOULD PUT "CLEARED" ON FOUR CONDITIONS WITH NOTHING BEHIND IT. Only a recorded
+    verdict may say the lender cleared anything (ADR-404), and the verdict is what names who said so
+    and where — so a shared one is four rows a processor cannot trace to an answer, on the word this
+    whole stage exists to protect.
+    """
+    company = await make_company(db_session)
+    loan_file = await make_loan_file(db_session, company=company)
+    round_ = await make_round(db_session, company=company, loan_file=loan_file, round_number=1)
+    conditions = [
+        await make_condition(db_session, company=company, loan_file=loan_file, round_=round_)
+        for _ in range(5)
+    ]
+    auth = await _auth_for(db_session, company)
+
+    response = await client.post(
+        f"{API}/loan-files/{loan_file.id}/conditions/bulk",
+        headers=auth,
+        json={
+            "condition_ids": [str(condition.id) for condition in conditions],
+            "action": "verdict",
+            "status": "cleared",
+            "source_kind": "portal",
+            "source_date": "2026-09-12",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body["applied"]) == 5
+    assert body["refused"] == [], "nothing here is information-only or stale"
+
+    for condition in conditions:
+        await db_session.refresh(condition)
+        assert condition.lender_status is ConditionLenderStatus.CLEARED
+        # ITS OWN VERDICT, not the batch's. This is the assertion the two-row test never makes.
+        assert condition.verdict is not None
+        assert condition.verdict["source_kind"] == "portal"
+        assert condition.verdict["source_date"] == "2026-09-12"
+
+        events = await _events(db_session, condition.id)
+        assert len(events) == 1, "exactly one event per change (spec §6 rule 4)"
+        assert events[0].kind is ConditionEventKind.CONDITION_VERDICT_RECORDED
+
+
 async def test_bulk_goes_through_the_same_service_as_one_row(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:

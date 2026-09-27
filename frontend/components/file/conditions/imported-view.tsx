@@ -102,7 +102,9 @@ export function ImportedView({
   const verdict = useVerdict(fileId);
   const reopen = useReopen(fileId);
 
-  const rows = conditions.data ?? [];
+  // `.rows`, because the hook returns a PAGE now: the list plus whether the server hit its 500-row
+  // ceiling (LP-911's review — a capped list used to render as a complete one).
+  const rows = conditions.data?.rows ?? [];
 
   /** Every write echoes the `updated_at` it read, so a stale one is refused rather than winning. */
   const movePrep = (condition: Condition, to: ConditionPrepStatus) => {
@@ -165,7 +167,7 @@ export function ImportedView({
 
       <RoundStrip
         rounds={rounds}
-        total={conditions.data?.length ?? 0}
+        total={rows.length}
         // The round being attached to is the mutation's own argument. `openRound` is null while an
         // attach runs from the strip, so the card it was clicked on never showed as busy.
         busyRoundId={attach.isPending ? (attach.variables?.roundId ?? null) : null}

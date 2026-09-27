@@ -26,6 +26,19 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const useConditionRounds = vi.fn();
 
+// LP-913's imported branch holds its filters in the URL, so it reads the router and the search
+// params. Unmocked, `useRouter` throws outside an app-router context and takes EVERY test in this
+// file with it — not just the one about that branch.
+//
+// `useSearchParams` RETURNS A REAL `URLSearchParams`, not a stub: `useConditionListUrl` calls
+// `.toString()` on it and re-parses, so an object with only `.get` would parse as "no filters" and
+// quietly make any filter assertion vacuous.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => "/loan-files/f1/conditions",
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/conditions")>()),
   useConditionRounds: (...args: unknown[]) => useConditionRounds(...args),
@@ -46,7 +59,8 @@ vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   useImportRound: () => ({ mutate: vi.fn(), isPending: false }),
   // The imported branch mounts `ImportedView`, which reads the file's conditions and owns the
   // attach-PDF mutation. Third time an explicit mock has needed a new export one at a time.
-  useConditions: () => ({ data: [], isPending: false }),
+  // `{ rows, capped }`, matching the hook since LP-913 — see the note in round-review.test.tsx.
+  useConditions: () => ({ data: { rows: [], capped: false }, isPending: false }),
   useAttachPdf: () => ({ mutate: vi.fn(), isPending: false }),
   // FOURTH TIME, AND ADDED ALL AT ONCE RATHER THAN ONE FAILURE AT A TIME. LP-916 gives
   // `ImportedView` the detail sheet and its two dialogs, so it now mounts four writes and two reads
@@ -59,6 +73,11 @@ vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   useReopen: () => ({ mutate: vi.fn(), isPending: false }),
   useCondition: () => ({ data: undefined, isPending: false, isError: false }),
   useConditionEvents: () => ({ data: [], isPending: false, isError: false }),
+  // LP-913: the imported branch is `ConditionsListView` now, which also reads the summary and owns
+  // the bulk write. Added WITH the branch change rather than after the run that would have found
+  // them — the comments above record this same lesson three times, one export at a time.
+  useConditionsSummary: () => ({ data: undefined, isPending: false, isError: false }),
+  useBulkConditions: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@/lib/api/timeline", () => ({
@@ -272,7 +291,15 @@ describe("which screen the Conditions tab shows", () => {
     // its handler cannot do.
     show([round({ status: "imported", round_number: 1, draft_rows: null })]);
 
-    expect(screen.getByText(/This is the lender’s list exactly as issued/)).toBeDefined();
+    // THE PROBE MOVED WITH THE BRANCH; THE INTENT DID NOT. This asserted "This is the lender's list
+    // exactly as issued", which was `ImportedView`'s callout — and that sentence went on to say
+    // "nothing here is marked cleared or removed", which was true of a screen with NO status
+    // controls. LP-913's list has them, so carrying the line over would have been a false promise
+    // and it was deliberately dropped. The search box is what this branch renders instead.
+    //
+    // The two NEGATIVE assertions below are the ones that carry the defect this test is named for,
+    // and both are unchanged.
+    expect(screen.getByLabelText("Search code or words")).toBeDefined();
     expect(screen.queryByText("Review · not imported yet")).toBeNull();
     expect(screen.queryByRole("button", { name: /^Import \d+ condition/ })).toBeNull();
   });

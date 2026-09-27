@@ -28,7 +28,9 @@ vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   // runs, and all 28 tests fail as one missing line. `imported-view.test.tsx` already mocks it for
   // the same reason. Empty by default: these cases pin the screen WITHOUT the callout's first clause,
   // which is the round-1 shape anyway.
-  useConditions: () => ({ data: [], isPending: false, isError: false }),
+  // A PAGE, NOT AN ARRAY: `useConditions` returns `{ rows, capped }` since LP-913 taught it to read
+  // `X-Conditions-Capped`. A bare `[]` here would leave the component reading `.rows` of an array.
+  useConditions: () => ({ data: { rows: [], capped: false }, isPending: false, isError: false }),
 }));
 
 vi.mock("@/lib/toast", () => ({
@@ -330,13 +332,16 @@ describe("what the screen says about the sheet", () => {
     const chip = within(named).getByText("Title");
     expect(chip.querySelector("svg")).not.toBeNull();
 
-    // THE ABSENCE IS THE DESIGN, NOT A MISSING ICON. "Owner not known" draws as plain muted text
+    // THE ABSENCE IS THE DESIGN, NOT A MISSING ICON. "Not known" draws as plain muted text
     // with no chip and no glyph: a chip says "here is who acts", and an absence of evidence does not
     // belong in the same container as a named party.
     const anonymous = screen
       .getByText("Nobody obvious owns this one.")
       .closest("div.grid") as HTMLElement;
-    const plain = within(anonymous).getByText("Owner not known");
+    // "Not known" since LP-913: S2-01, S2-02 and S2-03 all draw the unknown owner that way, and the
+    // Stage 1 pack never drew one at all. THE ASSERTION BELOW IS UNCHANGED and is the real subject —
+    // no chip, no icon. Only the string moved.
+    const plain = within(anonymous).getByText("Not known");
     expect(plain.querySelector("svg")).toBeNull();
     expect(plain.className).not.toContain("border");
   });

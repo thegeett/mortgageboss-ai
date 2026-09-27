@@ -26,7 +26,7 @@ const SOURCE_LABEL: Record<OwnerHintSource, string> = {
  * The glyph beside each owner, matched to the design pack's own markup (S1-04, S1-11).
  *
  * `unknown` IS `null`, AND THAT IS THE DESIGN RATHER THAN AN OMISSION. Every other owner draws as
- * a bordered chip; "Owner not known" draws as plain muted text with no chip and no icon. A chip says
+ * a bordered chip; "Not known" draws as plain muted text with no chip and no icon. A chip says
  * "here is who acts", and putting an absence of evidence in the same container as a named party is
  * the same mistake as labelling it "Unknown", one layer up.
  *

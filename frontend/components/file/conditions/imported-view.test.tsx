@@ -203,7 +203,10 @@ function event(overrides: Partial<ConditionEvent> = {}): ConditionEvent {
 const handlers = { onPaste: vi.fn(), onAddByHand: vi.fn(), onUploadAnother: vi.fn() };
 
 function show(rounds: ConditionRound[], conditions: Condition[] = [condition()]) {
-  conditionsQuery.mockReturnValue({ data: conditions, isPending: false });
+  // A PAGE, NOT A BARE ARRAY. `useConditions` returns `{ rows, capped }` since LP-913 taught it to
+  // read `X-Conditions-Capped` — a capped list used to render as a complete one. The helper takes a
+  // plain array because that is what every caller cares about, and wraps it here in one place.
+  conditionsQuery.mockReturnValue({ data: { rows: conditions, capped: false }, isPending: false });
   eventsQuery.mockReturnValue({ data: [], isPending: false, isError: false });
   render(<ImportedView fileId="f1" rounds={rounds} {...handlers} />);
 }
@@ -473,7 +476,10 @@ describe("the round-details sheet (S1-09)", () => {
     const before = round({ id: "r2", round_number: 2, header: null, expiry_dates: null }, [
       "paste",
     ]);
-    conditionsQuery.mockReturnValue({ data: [condition()], isPending: false });
+    conditionsQuery.mockReturnValue({
+      data: { rows: [condition()], capped: false },
+      isPending: false,
+    });
     eventsQuery.mockReturnValue({ data: [], isPending: false, isError: false });
     const { rerender } = render(<ImportedView fileId="f1" rounds={[before]} {...handlers} />);
 

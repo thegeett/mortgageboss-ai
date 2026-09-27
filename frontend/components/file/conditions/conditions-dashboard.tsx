@@ -8,7 +8,11 @@ import { useConditionRounds } from "@/lib/api/conditions";
 import type { ConditionRound } from "@/lib/types/conditions";
 import { TriangleAlert } from "lucide-react";
 import { ConditionsEmpty } from "./conditions-empty";
-import { ImportedView } from "./imported-view";
+// LP-913 REPLACES `ImportedView` FOR AN IMPORTED ROUND, and only for that branch. Stage 1's reading,
+// failed, empty-draft and review screens are untouched — this is one line of this file, not a
+// rewrite of the tab. `ImportedView` itself is left in place with its tests: deleting a tested
+// component in the commit that supersedes it would mix two changes into one review.
+import { ConditionsListView } from "./conditions-list-view";
 import { RoundFailed } from "./round-failed";
 import { RoundReading } from "./round-reading";
 import { RoundReview } from "./round-review";
@@ -168,7 +172,7 @@ export function ConditionsDashboard({
   // reads as data loss.
   if (current.status === "imported") {
     return (
-      <ImportedView
+      <ConditionsListView
         fileId={fileId}
         rounds={rounds.data ?? []}
         onPaste={onPaste}

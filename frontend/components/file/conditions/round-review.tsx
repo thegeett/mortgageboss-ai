@@ -347,8 +347,10 @@ export function RoundReview({
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
           <span>
             <span className="font-medium text-foreground-2">Just some:</span>{" "}
-            {(conditions.data?.length ?? 0) > 0
-              ? `the ${conditions.data?.length} conditions already on this file are compared with these ${rows.length} when you import. `
+            {/* `.rows` since the hook returns a page (list + capped flag). THE NUMBER IN THIS
+                SENTENCE IS A MUST-MATCH LINE, so it has to keep counting the same thing. */}
+            {(conditions.data?.rows.length ?? 0) > 0
+              ? `the ${conditions.data?.rows.length} conditions already on this file are compared with these ${rows.length} when you import. `
               : null}
             Anything not in this paste stays exactly as it is.
           </span>
