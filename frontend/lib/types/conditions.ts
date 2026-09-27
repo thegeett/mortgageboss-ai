@@ -173,6 +173,14 @@ export type VerdictSourceKind =
   | "round_comparison"
   | "underwriter_note";
 
+/**
+ * The three sources a PERSON may record (S2-04), and the only ones the verdict and bulk endpoints
+ * accept (LP-912 review). The server refuses the two derived sources from a client with
+ * `verdict_needs_source`, because `came_back` keys on `underwriter_note` and a client that could post
+ * it could paint *Came back* on a note that never existed. Typed here so the client cannot send them.
+ */
+export type ManualVerdictSourceKind = Extract<VerdictSourceKind, "portal" | "email" | "phone">;
+
 /** Which of the three writes a bulk call applies. */
 export type BulkAction = "prep_status" | "verdict" | "owner";
 
@@ -692,9 +700,9 @@ export interface PrepStatusInput extends ConcurrentWrite {
  */
 export interface VerdictInput extends ConcurrentWrite {
   status: ConditionLenderStatus;
-  source_kind: VerdictSourceKind;
+  source_kind: ManualVerdictSourceKind;
   source_date: string;
-  /** Required for the two sources the app derives, which name the sheet that showed it. */
+  /** Optional provenance: when given, the server requires it to be a round on this file. */
   round_id?: string | null;
   /** The PROCESSOR'S note about the verdict, not the lender's words. */
   note?: string | null;
@@ -728,7 +736,7 @@ export interface BulkInput extends ConcurrentWrite {
   note?: string | null;
   sent_at?: string | null;
   status?: ConditionLenderStatus | null;
-  source_kind?: VerdictSourceKind | null;
+  source_kind?: ManualVerdictSourceKind | null;
   source_date?: string | null;
   round_id?: string | null;
   owner?: OwnerHint | null;

@@ -316,3 +316,75 @@ async def test_the_same_note_arriving_twice_reopens_once(db_session: AsyncSessio
     assert [note.get("text") for note in condition.underwriter_notes] == [NOTE_TEXT], (
         "one note, not two copies of it"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Found in LP-912's review — each failed against c1fbfedc
+# --------------------------------------------------------------------------- #
+
+
+async def test_the_same_words_on_a_later_date_are_a_re_issue_and_come_back(
+    db_session: AsyncSession,
+) -> None:
+    """THE CASE A1 EXISTS FOR: "8/28 Not in Upload", then "9/10 Not in Upload" on the next sheet.
+
+    The first version looked a saved note up by text alone and skipped the incoming one whenever the
+    saved copy had any date. So a lender re-issuing the same words on a later day was read as the old
+    note again: the new note was DROPPED from the row and nothing came back. Same text under two known,
+    different dates is two notes (ADR-408).
+    """
+    earlier = date(2026, 8, 20)
+    first, loan_file = await _imported_round_1(
+        db_session, rows=[_row(underwriter_notes=[_note(note_date=earlier)])]
+    )
+    second = await _second_sheet(
+        db_session,
+        first=first,
+        rows=[_row(underwriter_notes=[_note(note_date=earlier), _note(note_date=NOTE_DATE)])],
+    )
+
+    await import_round(db_session, round_=second)
+
+    condition = await _the_condition(db_session, loan_file.id)
+    assert [note["date"] for note in condition.underwriter_notes] == [
+        earlier.isoformat(),
+        NOTE_DATE.isoformat(),
+    ]
+    event = await _came_back_event(db_session, condition.id)
+    assert event.detail["source_date"] == NOTE_DATE.isoformat()
+
+
+async def test_the_event_records_the_status_it_really_came_back_from(
+    db_session: AsyncSession,
+) -> None:
+    """A condition we recorded as CLEARED can come back on the lender's next note. The first version
+    hardcoded `lender_status_from: open`, a false line in the one history a processor audits."""
+    first, loan_file = await _imported_round_1(db_session)
+    condition = await _the_condition(db_session, loan_file.id)
+    condition.lender_status = ConditionLenderStatus.CLEARED
+    await db_session.flush()
+
+    second = await _second_sheet(db_session, first=first, rows=[_row(underwriter_notes=[_note()])])
+    await import_round(db_session, round_=second)
+
+    event = await _came_back_event(db_session, condition.id)
+    assert event.detail["lender_status_from"] == ConditionLenderStatus.CLEARED.value
+
+
+async def test_an_information_line_never_comes_back(db_session: AsyncSession) -> None:
+    """An information-only line asks for nothing, so nothing can come back, and `record_verdict`
+    refuses a verdict on one for that reason. The first version set it `not_cleared` anyway. The note
+    is still kept, as a plain note."""
+    first, loan_file = await _imported_round_1(db_session)
+    condition = await _the_condition(db_session, loan_file.id)
+    condition.info_only = True
+    await db_session.flush()
+
+    second = await _second_sheet(db_session, first=first, rows=[_row(underwriter_notes=[_note()])])
+    await import_round(db_session, round_=second)
+
+    await db_session.refresh(condition)
+    assert condition.lender_status is ConditionLenderStatus.OPEN
+    kinds = [event.kind for event in await _events(db_session, condition.id)]
+    assert ConditionEventKind.CONDITION_CAME_BACK not in kinds
+    assert ConditionEventKind.CONDITION_NOTE_ADDED in kinds

@@ -43,6 +43,7 @@ from app.models.condition import (
     ConditionPrepStatus,
 )
 from app.models.condition_event import ConditionEvent, ConditionEventKind
+from app.models.condition_round import ConditionRound
 from app.models.helpers import only_active
 from app.schemas.condition import (
     BulkAction,
@@ -161,6 +162,22 @@ def _refuse(code: RefusalCode, message: str) -> ConditionRefused:
     return ConditionRefused(code, message)
 
 
+async def _lock_fresh(db: AsyncSession, condition: Condition, expected: datetime | None) -> None:
+    """Lock the row, re-read it, THEN compare — so the stale check cannot race (LP-912 review).
+
+    THE FIRST VERSION COMPARED A VALUE READ WITHOUT A LOCK, the same shape LP-909 uses for drafts.
+    Two requests that both read `updated_at = U` both passed the check and both wrote, the second
+    silently overwriting the first: the lost update the check exists to prevent, in exactly the
+    concurrent case it is for. `SELECT … FOR UPDATE` makes the second request wait for the first to
+    commit, and the refresh then hands it the NEW `updated_at`, which the check refuses as stale.
+
+    The lock is held to the end of the caller's transaction. Every caller here commits straight after,
+    and bulk's rows are locked one at a time in request order.
+    """
+    await db.refresh(condition, with_for_update=True)
+    _guard_fresh(condition, expected)
+
+
 def _guard_fresh(condition: Condition, expected: datetime | None) -> None:
     """Optimistic concurrency, the pattern LP-909 established for drafts.
 
@@ -232,8 +249,8 @@ async def move_prep_status(
     a file's history shows a condition bouncing between states with no account of why, which is worse
     than no history because it looks like one.
     """
+    await _lock_fresh(db, condition, payload.expected_updated_at)
     _guard_trackable(condition)
-    _guard_fresh(condition, payload.expected_updated_at)
 
     target = payload.to
     if target not in _PREP_RANK:
@@ -248,13 +265,34 @@ async def move_prep_status(
     backward = _PREP_RANK[target] < current_rank
 
     if backward and not (payload.reason or "").strip():
+        # THE OWNER BY NAME WHEN THE MOVE IS TO WAITING (LP-912 review): the screens say "Waiting on
+        # Title", so "Moving back to Waiting on someone" was the one place the sentence and the
+        # status token disagreed.
+        label = _PREP_LABEL[target]
+        if target is ConditionPrepStatus.WAITING and payload.waiting_on is not None:
+            label = f"Waiting on {payload.waiting_on.value.capitalize()}"
         raise _refuse(
             RefusalCode.BACKWARD_MOVE_NEEDS_REASON,
-            _BACKWARD_MOVE_NEEDS_REASON.format(target=_PREP_LABEL[target]),
+            _BACKWARD_MOVE_NEEDS_REASON.format(target=label),
         )
 
     if target is ConditionPrepStatus.WAITING and payload.waiting_on is None:
         raise _refuse(RefusalCode.WAITING_NEEDS_OWNER, _WAITING_NEEDS_OWNER)
+
+    # A MOVE TO WHERE IT ALREADY IS CHANGES NOTHING, SO IT WRITES NOTHING (LP-912 review). The first
+    # version wrote an event and reset `prep_status_changed_at` anyway, so a bulk "Waiting on Borrower"
+    # over rows already waiting on the borrower restarted every clock the column exists to keep ("how
+    # long has this sat with the borrower") and put a line in each history for nothing that happened.
+    # Same status with a different owner, a note or a new sent date IS a change and is recorded.
+    new_waiting_on = payload.waiting_on if target is ConditionPrepStatus.WAITING else None
+    status_changed = target is not current
+    if (
+        not status_changed
+        and new_waiting_on == condition.waiting_on
+        and payload.note is None
+        and payload.sent_at is None
+    ):
+        return
 
     now = datetime.now(UTC)
     detail: dict[str, Any] = {"from": current.value, "to": target.value}
@@ -262,11 +300,12 @@ async def move_prep_status(
         detail["reason"] = (payload.reason or "").strip()
 
     condition.prep_status = target
-    condition.prep_status_changed_at = now
+    if status_changed:
+        condition.prep_status_changed_at = now
     # THE OWNER IS CLEARED WHEN LEAVING `waiting`, because "waiting on Title" is meaningless once we
     # are no longer waiting — and a stale value there would keep the row in the Owner filter's Title
     # group after the work moved on.
-    condition.waiting_on = payload.waiting_on if target is ConditionPrepStatus.WAITING else None
+    condition.waiting_on = new_waiting_on
     if payload.waiting_on is not None and target is ConditionPrepStatus.WAITING:
         detail["waiting_on"] = payload.waiting_on.value
     if payload.note is not None:
@@ -329,6 +368,7 @@ async def record_verdict(
     condition: Condition,
     payload: VerdictRequest,
     actor_user_id: UUID | None = None,
+    derived_allowed: bool = False,
 ) -> None:
     """Record what the lender said. The ONLY route to `cleared` or `waived`. Flushes; caller commits.
 
@@ -336,15 +376,39 @@ async def record_verdict(
     cleared was still sent, and rewriting our status to something tidier would erase what we did. The
     history says it; the row does not need to.
     """
-    _guard_fresh(condition, payload.expected_updated_at)
+    await _lock_fresh(db, condition, payload.expected_updated_at)
     # An information-only line has no lender answer either: nothing was asked, so nothing can be
     # cleared. Same sentence as the prep track, because it is the same fact about the row.
     _guard_trackable(condition)
 
     if payload.status not in _VERDICT_STATUSES:
         raise _refuse(RefusalCode.STATUS_NOT_OFFERED, _STATUS_NOT_OFFERED)
+    # THE APP'S OWN SOURCES ARE NOT A CLIENT'S TO CLAIM (LP-912 review). `round_comparison` and
+    # `underwriter_note` say "the app read this off a sheet", and `came_back` is defined as a
+    # `not_cleared` sourced to an underwriter note — so the first version let any client post
+    # `{not_cleared, underwriter_note, <any uuid>}` and paint S2-08's amber *Came back* on a note that
+    # never existed. Measured: 200, `came_back: true`, a round id that named nothing. A person records
+    # what the lender said through portal, email or phone (S2-04); LP-915's confirm step and the import
+    # are the only writers of the other two, and they pass `derived_allowed`.
+    if payload.source_kind in _DERIVED_SOURCES and not derived_allowed:
+        raise _refuse(RefusalCode.VERDICT_NEEDS_SOURCE, _VERDICT_NEEDS_SOURCE)
     if payload.source_kind in _DERIVED_SOURCES and payload.round_id is None:
         raise _refuse(RefusalCode.VERDICT_NEEDS_ROUND, _VERDICT_NEEDS_ROUND)
+    if payload.round_id is not None:
+        # AND THE ROUND MUST BE THIS FILE'S. A verdict's round is its provenance — "the sheet that
+        # showed it" — and one naming another file's round, or another company's, points an auditor at
+        # a sheet that says nothing about this condition.
+        on_this_file = await db.scalar(
+            only_active(
+                select(ConditionRound.id).where(
+                    ConditionRound.id == payload.round_id,
+                    ConditionRound.loan_file_id == condition.loan_file_id,
+                ),
+                ConditionRound,
+            )
+        )
+        if on_this_file is None:
+            raise _refuse(RefusalCode.VERDICT_NEEDS_ROUND, _VERDICT_NEEDS_ROUND)
 
     now = datetime.now(UTC)
     condition.verdict = verdict_record(payload, actor_user_id=actor_user_id, at=now)
@@ -394,7 +458,7 @@ async def reopen(
     working again, so leaving it at *Sent to lender* would hide it from the only list that would make
     somebody pick it up.
     """
-    _guard_fresh(condition, payload.expected_updated_at)
+    await _lock_fresh(db, condition, payload.expected_updated_at)
 
     if condition.lender_status not in _REOPENABLE:
         raise _refuse(RefusalCode.NOTHING_TO_REOPEN, _NOTHING_TO_REOPEN)
@@ -462,9 +526,12 @@ async def set_owner(
     derives `manual` from the override instead, so there is nothing here to overwrite and nothing to
     reconstruct.
     """
-    _guard_fresh(condition, payload.expected_updated_at)
+    await _lock_fresh(db, condition, payload.expected_updated_at)
 
     before = condition.owner_override
+    if payload.owner == before:
+        # NOTHING CHANGES, SO NOTHING IS WRITTEN (LP-912 review) — see `move_prep_status`.
+        return
     condition.owner_override = payload.owner
 
     db.add(

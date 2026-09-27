@@ -599,7 +599,7 @@ async def test_a_first_import_writes_only_created_even_for_a_condition_with_a_no
     `6132` carries the sheet's dated note "8/28 Not in Upload", and it is stored by
     `_create_condition` as part of the row — `underwriter_notes=_notes_from_row(...)` — so the note
     ARRIVED WITH the condition rather than being added to it. `CONDITION_NOTE_ADDED` is written only on
-    the seen-again path, where `_new_notes` finds a note the saved condition did not already have.
+    the seen-again path, where `_resolve_notes` finds a note the saved condition did not already have.
 
     Worth pinning rather than just fixing: LP-912 wires A1 (came back) to that same "new note"
     decision, so anything reasoning from "this condition has a note" to "a note event exists" would be

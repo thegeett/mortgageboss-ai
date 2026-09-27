@@ -23,7 +23,7 @@ from app.conditions.readers.model import ParsedSheet
 from app.conditions.readers.paste import read_pasted_text
 from app.conditions.readers.uwm import read_uwm
 from app.models.condition import Condition
-from app.services.condition_import import _new_notes, _resolve_notes
+from app.services.condition_import import _resolve_notes
 from tests.conditions.fixture_helpers import sheet_lines, sheet_text
 
 _ROUND_1 = "uwm_round1_2026-08-28.txt"
@@ -53,32 +53,6 @@ def test_the_paste_carries_the_note_undated_and_the_pdf_dated() -> None:
     assert pasted.date_printed is None
     assert _saved(pasted, "6132") == [{"date": None, "text": "Not in Upload"}]
     assert _saved(pdf, "6132") == [{"date": "2026-08-28", "text": "Not in Upload"}]
-
-
-def test_the_same_dated_note_again_is_not_new() -> None:
-    pdf = _saved(read_uwm(sheet_lines(_ROUND_1)), "6132")
-    assert _new_notes(pdf, pdf) == []
-
-
-def test_the_same_text_under_a_new_date_is_new() -> None:
-    old = [{"date": "2026-08-28", "text": "Not in Upload"}]
-    new = [{"date": "2026-09-10", "text": "Not in Upload"}]
-    assert _new_notes(old, new) == new
-
-
-def test_the_raw_rule_still_calls_the_redated_note_new() -> None:
-    """THE GAP THIS FILE WAS WRITTEN TO MEASURE, now asserted as a fact rather than as an xfail.
-
-    `_new_notes` compares `(date, text)` exactly, so the paste's undated note and the PDF's dated one
-    are two notes to it. That is TRUE and it is not a bug in that function: it has no access to the
-    file's rounds and therefore cannot know whether the undated one could possibly predate the dated
-    one. Pinned here so the raw rule's limit stays visible — and so that anything which starts making
-    A1 decisions from `_new_notes` alone fails a test that says why it must not.
-    """
-    saved_from_paste = _saved(_pasted_round_1(), "6132")
-    on_the_pdf = _saved(read_uwm(sheet_lines(_ROUND_1)), "6132")
-
-    assert _new_notes(saved_from_paste, on_the_pdf) == on_the_pdf
 
 
 def _condition_with(notes: list[dict[str, Any]], *, first_round_id: UUID) -> Condition:
@@ -178,3 +152,54 @@ def test_inner_whitespace_does_not_make_it_a_different_note() -> None:
 
     assert outcome.reopened_by is None, "a double space must not read as a new note"
     assert outcome.dated == ["not in upload"]
+
+
+def test_the_same_dated_note_again_is_nothing_new() -> None:
+    """Moved here from the deleted `_new_notes` (LP-912 review), so it tests the rule production runs."""
+    round_id = uuid4()
+    saved = [
+        {**note, "first_seen_round_id": str(round_id)}
+        for note in _saved(read_uwm(sheet_lines(_ROUND_1)), "6132")
+    ]
+    condition = _condition_with(saved, first_round_id=round_id)
+    row = {"underwriter_notes": _saved(read_uwm(sheet_lines(_ROUND_1)), "6132")}
+
+    outcome = _resolve_notes(
+        condition,
+        row,
+        round_=SimpleNamespace(id=uuid4()),  # type: ignore[arg-type]
+        round_dates={round_id: date(2026, 8, 28)},
+    )
+
+    assert (outcome.added, outcome.dated, outcome.reopened_by) == (0, [], None)
+
+
+def test_the_same_text_under_a_new_date_is_a_new_note_and_reopens() -> None:
+    """THE PROPERTY THE DELETED `_new_notes` TEST ASSERTED, NOW AGAINST THE RULE THAT RUNS.
+
+    `test_the_same_text_under_a_new_date_is_new` held this for `_new_notes`, while `_resolve_notes`,
+    the function production actually calls, broke it: it skipped any incoming note whose text matched a
+    DATED saved note, whatever its date. The passing test on the dead function was the false comfort.
+    """
+    round_id = uuid4()
+    condition = _condition_with(
+        [{"date": "2026-08-28", "text": "Not in Upload", "first_seen_round_id": str(round_id)}],
+        first_round_id=round_id,
+    )
+    row = {
+        "underwriter_notes": [
+            {"date": "2026-08-28", "text": "Not in Upload"},
+            {"date": "2026-09-10", "text": "Not in Upload"},
+        ]
+    }
+
+    outcome = _resolve_notes(
+        condition,
+        row,
+        round_=SimpleNamespace(id=uuid4()),  # type: ignore[arg-type]
+        round_dates={round_id: date(2026, 8, 28)},
+    )
+
+    assert outcome.added == 1
+    assert outcome.reopened_by is not None and outcome.reopened_by["date"] == "2026-09-10"
+    assert [note["date"] for note in outcome.notes] == ["2026-08-28", "2026-09-10"]

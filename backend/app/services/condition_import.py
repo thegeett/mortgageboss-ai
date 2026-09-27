@@ -210,16 +210,6 @@ def _match(
 # --------------------------------------------------------------------------- #
 
 
-def _note_key(note: dict[str, Any]) -> tuple[str | None, str]:
-    """A note's identity: the date it carries and its text.
-
-    Not the whole dict, because `first_seen_round_id` is OURS — stamped when we first saw the note —
-    so comparing it would make every note look new on the round after the one that recorded it.
-    """
-    raw_date = note.get("date")
-    return (raw_date if isinstance(raw_date, str) else None, str(note.get("text") or ""))
-
-
 def _notes_from_row(row: dict[str, Any], *, round_id: UUID) -> list[dict[str, Any]]:
     """The row's notes, each stamped with the round it was first seen on."""
     notes: list[dict[str, Any]] = []
@@ -231,24 +221,6 @@ def _notes_from_row(row: dict[str, Any], *, round_id: UUID) -> list[dict[str, An
             note["first_seen_round_id"] = str(round_id)
         notes.append(note)
     return notes
-
-
-def _new_notes(
-    existing: list[dict[str, Any]], incoming: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    """The RAW comparison: a note is new unless its exact `(date, text)` is already saved.
-
-    KEPT AS IT WAS, AND IT IS NOT WHAT A1 DECIDES ON. `_resolve_notes` below is the rule LP-912 acts
-    on, because two things this cannot see are load-bearing: whitespace inside a note (a paste and a
-    PDF space the same note differently) and whether an undated saved note could possibly predate an
-    incoming dated one. This function has no access to the file's rounds and therefore cannot answer
-    the second at all.
-
-    It stays because it states the narrow question honestly and `test_note_identity.py` measures the
-    gap between the two.
-    """
-    seen = {_note_key(note) for note in existing if isinstance(note, dict)}
-    return [note for note in incoming if _note_key(note) not in seen]
 
 
 async def _round_dates(db: AsyncSession, *, loan_file_id: UUID) -> dict[UUID, date]:
@@ -328,9 +300,24 @@ def _resolve_notes(
     existing: list[dict[str, Any]] = [
         dict(note) for note in (condition.underwriter_notes or []) if isinstance(note, dict)
     ]
-    by_text: dict[str, int] = {}
+    # KEYED ON TEXT AND DATE TOGETHER FOR A DATED NOTE (LP-912 review). The first version looked a note
+    # up by text alone and skipped the incoming one whenever the saved copy carried ANY date — so
+    # "8/28 Not in Upload" followed by "9/10 Not in Upload", the lender re-issuing the same words on a
+    # later day, was treated as already saved: the 9/10 note was dropped and nothing came back. Same
+    # text under two KNOWN, different dates is two notes (ADR-408). Text alone identifies a note only
+    # when one side has no date.
+    seen: set[tuple[str, date | None]] = set()
+    texts: set[str] = set()
+    #: Saved notes with NO date, by text, that an incoming dated note may still fill. A fill consumes
+    #: the entry, so a second incoming date for the same words is not folded into the same note.
+    undated: dict[str, int] = {}
     for index, note in enumerate(existing):
-        by_text.setdefault(normalise_note_text(str(note.get("text") or "")), index)
+        text = normalise_note_text(str(note.get("text") or ""))
+        note_date = _note_date(note)
+        seen.add((text, note_date))
+        texts.add(text)
+        if note_date is None:
+            undated.setdefault(text, index)
 
     added: list[dict[str, Any]] = []
     dated: list[str] = []
@@ -339,14 +326,14 @@ def _resolve_notes(
     for incoming in _notes_from_row(row, round_id=round_.id):
         text = normalise_note_text(str(incoming.get("text") or ""))
         incoming_date = _note_date(incoming)
-        saved_index = by_text.get(text)
 
-        if saved_index is not None:
-            saved = existing[saved_index]
-            if _note_date(saved) is not None or incoming_date is None:
-                # Outcome 1: already saved, with or without a date on both sides.
-                continue
+        if (text, incoming_date) in seen or (incoming_date is None and text in texts):
+            # Outcome 1: already saved — the same words on the same date, or an undated copy of
+            # words we already hold in some form.
+            continue
 
+        if incoming_date is not None and text in undated:
+            saved = existing[undated[text]]
             bound_source = saved.get("first_seen_round_id")
             bound = None
             if isinstance(bound_source, str):
@@ -358,10 +345,14 @@ def _resolve_notes(
             if bound is None or incoming_date <= bound:
                 # Outcome 2: the same note, now dated. Fill it; move nothing.
                 saved["date"] = incoming_date.isoformat()
+                del undated[text]
+                seen.add((text, incoming_date))
                 dated.append(text)
                 continue
 
-        # Outcome 3: new text, or the same text dated after the bound.
+        # Outcome 3: new text, or the same text on a new date (a re-issue).
+        seen.add((text, incoming_date))
+        texts.add(text)
         added.append(incoming)
         if incoming_date is not None and (
             reopened is None or incoming_date > (_note_date(reopened) or incoming_date)
@@ -847,7 +838,10 @@ async def import_round(
             # list would not mark the attribute dirty.
             match.underwriter_notes = notes_outcome.notes
 
-        if notes_outcome.reopened_by is not None:
+        # NOT FOR AN INFORMATION-ONLY LINE (LP-912 review). It asks for nothing, so nothing can come
+        # back — and `record_verdict` refuses a verdict on one for the same reason. The first version
+        # set `not_cleared` on it anyway. Its note is still recorded, as a plain note.
+        if notes_outcome.reopened_by is not None and not match.info_only:
             # A1, AND THIS IS THE ONE EVENT FOR IT (ADR-408, spec §6 rule 4). It carries BOTH from→to
             # pairs, because the lender's answer and its consequence for our work are one statement —
             # and `CONDITION_NOTE_ADDED` folds into it rather than being written beside it, since the
@@ -856,6 +850,7 @@ async def import_round(
             note_date = date.fromisoformat(str(note["date"]))
             now = utcnow()
             prep_from = match.prep_status
+            lender_from = match.lender_status
             match.lender_status = ConditionLenderStatus.NOT_CLEARED
             match.lender_status_changed_at = now
             match.verdict = came_back_verdict(note_date=note_date, round_id=round_.id, at=now)
@@ -881,7 +876,11 @@ async def import_round(
                     # because it names the source and the note's date. A test asserts exactly that.
                     detail={
                         "lender_code": match.lender_code,
-                        "lender_status_from": ConditionLenderStatus.OPEN.value,
+                        # WHAT IT WAS, NOT WHAT IT USUALLY IS (LP-912 review). A condition recorded
+                        # as cleared can come back on the lender's next note; hardcoding `open` wrote
+                        # a false history line for exactly that case.
+                        "lender_status_from": lender_from.value,
+                        "notes_added": notes_outcome.added,
                         "lender_status_to": ConditionLenderStatus.NOT_CLEARED.value,
                         "prep_status_from": prep_from.value,
                         "prep_status_to": match.prep_status.value,

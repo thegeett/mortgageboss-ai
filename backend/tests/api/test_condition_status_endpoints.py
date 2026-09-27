@@ -19,6 +19,7 @@ hook, which DOES depend on real notes on a real round, is tested in
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import date
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -35,9 +36,10 @@ from app.models.condition import (
     OwnerHint,
 )
 from app.models.condition_event import ConditionEvent, ConditionEventKind
+from app.schemas.condition import VerdictRequest, VerdictSourceKind
 from app.services import condition_status
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.models.conftest_helpers import make_company, make_condition, make_loan_file, make_round
 
@@ -336,26 +338,83 @@ async def test_a_verdict_without_a_date_is_refused_by_the_schema(
     assert condition.verdict is None
 
 
-async def test_a_derived_verdict_must_name_its_round(
-    client: AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_a_derived_verdict_must_name_its_round(db_session: AsyncSession) -> None:
     """`round_comparison` and `underwriter_note` are produced by the app from a SHEET, so they carry
-    the round that showed it. Without it the provenance is a claim with nothing behind it."""
+    the round that showed it. Without it the provenance is a claim with nothing behind it.
+
+    THROUGH THE SERVICE, AS LP-915 WILL CALL IT (LP-912 review). The public endpoint no longer accepts
+    these sources at all — see `test_a_client_cannot_claim_the_apps_own_sources`."""
+    condition, _auth, _file = await _one(db_session)
+
+    with pytest.raises(condition_status.ConditionRefused) as refused:
+        await condition_status.record_verdict(
+            db_session,
+            condition=condition,
+            payload=VerdictRequest(
+                status=ConditionLenderStatus.CLEARED,
+                source_kind=VerdictSourceKind.ROUND_COMPARISON,
+                source_date=date(2026, 9, 10),
+            ),
+            derived_allowed=True,
+        )
+
+    assert refused.value.code is condition_status.RefusalCode.VERDICT_NEEDS_ROUND
+    await db_session.refresh(condition)
+    assert condition.verdict is None
+
+
+async def test_a_derived_verdict_must_name_a_round_on_this_file(db_session: AsyncSession) -> None:
+    """LP-912 REVIEW. The first version stored whatever `round_id` it was given. A round from another
+    file (here another company's) is not "the sheet that showed it", so it is refused."""
+    condition, _auth, _file = await _one(db_session)
+    elsewhere, _other_auth, _other_file = await _one(db_session)
+
+    with pytest.raises(condition_status.ConditionRefused) as refused:
+        await condition_status.record_verdict(
+            db_session,
+            condition=condition,
+            payload=VerdictRequest(
+                status=ConditionLenderStatus.CLEARED,
+                source_kind=VerdictSourceKind.ROUND_COMPARISON,
+                source_date=date(2026, 9, 10),
+                round_id=elsewhere.first_round_id,
+            ),
+            derived_allowed=True,
+        )
+
+    assert refused.value.code is condition_status.RefusalCode.VERDICT_NEEDS_ROUND
+    await db_session.refresh(condition)
+    assert condition.verdict is None
+
+
+@pytest.mark.parametrize("source_kind", ["underwriter_note", "round_comparison"])
+async def test_a_client_cannot_claim_the_apps_own_sources(
+    client: AsyncClient, db_session: AsyncSession, source_kind: str
+) -> None:
+    """LP-912 REVIEW. Measured against c1fbfedc: `{not_cleared, underwriter_note, <random uuid>}`
+    answered 200 with `came_back: true`, painting S2-08's amber rail for a note that never existed.
+    A person records what the lender said through portal, email or phone (S2-04)."""
     condition, auth, _file = await _one(db_session)
 
     response = await client.post(
         f"{API}/conditions/{condition.id}/verdict",
         headers=auth,
         json={
-            "status": "cleared",
-            "source_kind": "round_comparison",
+            "status": "not_cleared",
+            "source_kind": source_kind,
             "source_date": "2026-09-10",
+            "round_id": str(condition.first_round_id),
         },
     )
 
     assert response.status_code == 409, response.text
-    assert _error(response)["data"]["code"] == "verdict_needs_round"
+    error = _error(response)
+    assert error["data"]["code"] == "verdict_needs_source"
+    assert error["message"] == (
+        "Say where the lender cleared it (portal, email, phone) and on what date."
+    )
     await db_session.refresh(condition)
+    assert condition.lender_status is ConditionLenderStatus.OPEN
     assert condition.verdict is None
 
 
@@ -703,14 +762,172 @@ async def test_every_refusal_code_the_service_can_raise_has_been_exercised() -> 
         "stale",
         "waiting_needs_owner",
         "nothing_to_reopen",
+        # BOTH WERE LISTED AS "COVERED ELSEWHERE OR UNREACHABLE" AND NEITHER WAS TRIGGERED ANYWHERE
+        # (LP-912 review): only their sentences were compared. Each now has a test that sends the
+        # request. `status_not_offered` was never unreachable — any client can post `review`.
+        "verdict_needs_source",
+        "status_not_offered",
     }
-    # `verdict_needs_source` is reachable only through BULK (a single-row verdict missing its source is
-    # a 422 from the request model, asserted above), and `status_not_offered` guards the A4 statuses
-    # `review` / `pending_review`, which no client offers.
-    known_elsewhere = {"verdict_needs_source", "status_not_offered"}
+    known_elsewhere: set[str] = set()
 
     all_codes = {code.value for code in condition_status.RefusalCode}
     assert covered_here | known_elsewhere == all_codes, (
         "the refusal codes and this census disagree: "
         f"{sorted(all_codes - (covered_here | known_elsewhere))} are new and untested"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Found in LP-912's review
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("prep-status", {"to": "review"}),
+        (
+            "verdict",
+            {"status": "pending_review", "source_kind": "portal", "source_date": "2026-09-10"},
+        ),
+    ],
+)
+async def test_the_a4_statuses_are_refused_with_their_sentence(
+    client: AsyncClient, db_session: AsyncSession, path: str, body: dict[str, Any]
+) -> None:
+    """`status_not_offered` was listed in the census as "unreachable", and nothing triggered it. Any
+    client can post `review` or `pending_review`; this is the refusal they get."""
+    condition, auth, _file = await _one(db_session)
+
+    response = await client.post(f"{API}/conditions/{condition.id}/{path}", headers=auth, json=body)
+
+    assert response.status_code == 409, response.text
+    error = _error(response)
+    assert error["data"]["code"] == "status_not_offered"
+    assert error["message"] == "That status is not one this screen offers."
+    assert await _events(db_session, condition.id) == []
+
+
+async def test_a_bulk_verdict_with_no_source_is_refused_per_row(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """`verdict_needs_source` was listed as covered "through bulk", and no test sent that bulk."""
+    condition, auth, loan_file = await _one(db_session)
+
+    response = await client.post(
+        f"{API}/loan-files/{loan_file.id}/conditions/bulk",
+        headers=auth,
+        json={"condition_ids": [str(condition.id)], "action": "verdict", "status": "cleared"},
+    )
+
+    assert response.status_code == 200, response.text
+    (refusal,) = response.json()["refused"]
+    assert refusal["code"] == "verdict_needs_source"
+    await db_session.refresh(condition)
+    assert condition.lender_status is ConditionLenderStatus.OPEN
+
+
+async def test_a_move_to_where_it_already_is_writes_nothing(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """LP-912 REVIEW. The first version wrote an event and reset `prep_status_changed_at` on a move to
+    the current status, so a bulk "Waiting on Borrower" over rows already waiting restarted every
+    clock and put a line in each history for nothing that happened."""
+    condition, auth, _file = await _one(db_session)
+    body = {"to": "waiting", "waiting_on": "borrower"}
+    first = await client.post(
+        f"{API}/conditions/{condition.id}/prep-status", headers=auth, json=body
+    )
+    assert first.status_code == 200, first.text
+    await db_session.refresh(condition)
+    clock = condition.prep_status_changed_at
+
+    again = await client.post(
+        f"{API}/conditions/{condition.id}/prep-status", headers=auth, json=body
+    )
+
+    assert again.status_code == 200, again.text
+    await db_session.refresh(condition)
+    assert condition.prep_status_changed_at == clock
+    kinds = [event.kind for event in await _events(db_session, condition.id)]
+    assert kinds == [ConditionEventKind.CONDITION_PREP_MOVED]
+
+    # A DIFFERENT OWNER WHILE STILL WAITING IS A CHANGE, and is recorded — but the status clock,
+    # which is about how long it has sat in this STATUS, keeps running.
+    other = await client.post(
+        f"{API}/conditions/{condition.id}/prep-status",
+        headers=auth,
+        json={"to": "waiting", "waiting_on": "title"},
+    )
+    assert other.status_code == 200, other.text
+    await db_session.refresh(condition)
+    assert condition.waiting_on is OwnerHint.TITLE
+    assert condition.prep_status_changed_at == clock
+    assert len(await _events(db_session, condition.id)) == 2
+
+
+async def test_setting_the_owner_it_already_has_writes_nothing(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    condition, auth, _file = await _one(db_session)
+    for _ in range(2):
+        response = await client.put(
+            f"{API}/conditions/{condition.id}/owner", headers=auth, json={"owner": "title"}
+        )
+        assert response.status_code == 200, response.text
+
+    kinds = [event.kind for event in await _events(db_session, condition.id)]
+    assert kinds == [ConditionEventKind.CONDITION_OWNER_CHANGED]
+
+
+async def test_every_write_locks_the_row_before_the_stale_check(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """LP-912 REVIEW. Comparing `updated_at` read without a lock lets two concurrent writers both pass
+    and the second overwrite the first — the lost update the check exists for. The race itself needs
+    two connections, which this harness does not have; what it CAN pin is that the row is read FOR
+    UPDATE before anything is written."""
+    condition, auth, _file = await _one(db_session)
+    statements: list[str] = []
+    connection = (await db_session.connection()).sync_connection
+    assert connection is not None
+
+    def _record(_conn: Any, _cursor: Any, statement: str, *_args: Any) -> None:
+        statements.append(statement)
+
+    event.listen(connection, "before_cursor_execute", _record)
+    try:
+        response = await client.post(
+            f"{API}/conditions/{condition.id}/prep-status", headers=auth, json={"to": "ready"}
+        )
+    finally:
+        event.remove(connection, "before_cursor_execute", _record)
+
+    assert response.status_code == 200, response.text
+    locked = next(i for i, sql in enumerate(statements) if "FOR UPDATE" in sql)
+    updated = next(
+        i for i, sql in enumerate(statements) if sql.lstrip().startswith("UPDATE conditions")
+    )
+    assert locked < updated
+
+
+async def test_a_backward_move_to_waiting_names_the_owner(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """LP-912 REVIEW. The screens say "Waiting on Title"; the sentence said "Waiting on someone"."""
+    condition, auth, _file = await _one(db_session)
+    sent = await client.post(
+        f"{API}/conditions/{condition.id}/prep-status",
+        headers=auth,
+        json={"to": "with_underwriter"},
+    )
+    assert sent.status_code == 200, sent.text
+
+    response = await client.post(
+        f"{API}/conditions/{condition.id}/prep-status",
+        headers=auth,
+        json={"to": "waiting", "waiting_on": "title"},
+    )
+
+    assert response.status_code == 409, response.text
+    assert _error(response)["message"] == "Moving back to Waiting on Title needs a short reason."
