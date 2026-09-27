@@ -110,6 +110,53 @@ def test_the_condition_views_still_answer_something(table: str) -> None:
     )
 
 
+#: What may follow a mention of the `verdict` column: one of its two provenance keys, and nothing else.
+_PERMITTED_VERDICT_USE = re.compile(r"\s*->>\s*'(source_kind|source_date)'")
+
+
+def _verdict_references(body: str) -> tuple[int, list[str]]:
+    """``(how many times the view names `verdict`, the mentions that reach for anything else)``.
+
+    EVERY MENTION, CASE-INSENSITIVELY, EACH CHECKED WHERE IT STANDS (LP-912 review). The first version
+    split the select list at commas and checked only how each piece BEGAN, case-sensitively, so
+    `verdict ->> 'source_kind' || (verdict ->> 'note')` passed on its first mention and
+    `VERDICT ->> 'note'` was never found at all. SQL identifiers are case-insensitive, and one
+    expression can name a column twice.
+
+    `\bverdict\b` does not match the ALIASES `verdict_source_kind` / `verdict_source_date`, because
+    `_` is a word character — so only real column references are counted.
+    """
+    select_list = body.split("FROM")[0]
+    mentions = list(re.finditer(r"\bverdict\b", select_list, flags=re.IGNORECASE))
+    offenders = [
+        select_list[m.start() : m.end() + 30].strip()
+        for m in mentions
+        if not _PERMITTED_VERDICT_USE.match(select_list, m.end())
+    ]
+    return len(mentions), offenders
+
+
+@pytest.mark.parametrize(
+    ("select_list", "allowed"),
+    [
+        (
+            "(verdict ->> 'source_kind') AS verdict_source_kind, (verdict->>'source_date') AS d",
+            True,
+        ),
+        ("(verdict ->> 'source_kind' || (verdict ->> 'note')) AS x", False),
+        ("(VERDICT ->> 'note') AS x", False),
+        ("verdict AS whole_thing", False),
+        ("(verdict -> 'note') AS x", False),
+        ("(c.verdict ->> 'note') AS x", False),
+    ],
+)
+def test_the_verdict_reference_check_reads_every_mention(select_list: str, allowed: bool) -> None:
+    """The guard above, shown to catch the shapes its first version let through."""
+    mentions, offenders = _verdict_references(f"SELECT {select_list} FROM public.conditions")
+    assert mentions
+    assert (not offenders) is allowed, offenders
+
+
 def test_the_conditions_view_touches_verdict_only_for_its_provenance() -> None:
     """`verdict ->> 'note'` IS NPI AND NO OTHER GUARD IN THIS SUITE WOULD STOP IT (LP-912).
 
@@ -133,15 +180,12 @@ def test_the_conditions_view_touches_verdict_only_for_its_provenance() -> None:
     module = _readonly_module()
     body = module._view_bodies()["conditions"]
 
-    references = re.findall(r"verdict[^,\n]*", body)
+    references, offenders = _verdict_references(body)
     assert references, (
         "readonly.conditions does not mention `verdict` at all. Either the provenance projection was "
         "dropped — and `verdict_source_kind` / `verdict_source_date` are what make a recorded verdict "
         "auditable from staging — or this guard is reading the wrong view and is checking nothing."
     )
-
-    permitted = re.compile(r"^verdict\s*->>\s*'(source_kind|source_date)'")
-    offenders = [ref.strip() for ref in references if not permitted.match(ref.strip())]
 
     assert not offenders, (
         "readonly.conditions reaches into `verdict` for something other than its provenance: "

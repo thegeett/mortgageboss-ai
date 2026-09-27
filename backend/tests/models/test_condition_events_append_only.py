@@ -145,7 +145,15 @@ def test_no_event_kind_can_state_a_clearing_on_its_own() -> None:
     `condition_cleared` would be the app asserting the lender's answer without its provenance.
 
     THE TEST TO APPLY BEFORE ADDING AN EVENT KIND — a question, not a category:
-    **could a reader of this row infer that the lender answered, from the row alone?**
+    **could a reader of this row infer that the lender answered, WITHOUT the row saying where the
+    lender said it?**
+
+    (Sharpened in LP-912's review. The first wording was "infer that the lender answered, from the row
+    alone", and `condition_came_back` fails that as written: it does state the lender's answer, "not
+    satisfied". What makes it allowed is that it carries its provenance, a verdict sourced to the
+    `underwriter_note` with that note's date, exactly as `CONDITION_VERDICT_RECORDED` does. Part 2 must
+    assert that detail on the event it writes, or `came_back` becomes the bare claim this test exists
+    to forbid.)
 
       * `condition_cleared` / `condition_waived` / `condition_removed` — yes, each STATES one. Always
         forbidden.

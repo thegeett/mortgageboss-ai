@@ -16433,8 +16433,11 @@ The other two rows a came-back import writes are **not** second records of that 
   satisfy a literal count would break the chips.
 - `CONDITION_NOTE_ADDED` **folds into `condition_came_back`** when the note is what reopened the
   condition. The note IS the lender's reopening, so recording it twice is precisely what rule 4
-  forbids. It still stands alone for a new note that does **not** reopen anything — an undated one, or
-  one whose date is within the bound above.
+  forbids. It still stands alone for a new note that does **not** reopen anything, which is an undated
+  one. A dated note within the bound above is not a new note at all: it is the saved undated one, its
+  date is filled in, and the fill is recorded in that import's `CONDITION_SEEN_AGAIN` (survey §5.2,
+  R10), so it writes neither event. *(Corrected in LP-912's review: this sentence first listed the
+  within-bound note as a `CONDITION_NOTE_ADDED` case.)*
 
 *Rationale.* The two tracks come apart constantly — a condition can be fully prepared, submitted, and
 come back — so one status walking from open to done would make the app claim the underwriter's
@@ -16461,7 +16464,8 @@ because it survives a later migration adding it. `verdict` cannot have that prot
 view legitimately projects `verdict ->> 'source_kind'` and `verdict ->> 'source_date'` and
 `test_never_exposed_columns_are_absent_from_every_view` searches the select list for `\bverdict\b`. So
 `verdict` is `EXCLUDED` only, **plus a test pinning the view to those two keys** — without it a later
-`verdict ->> 'note'` passes every existing check while publishing the lender's words.
+`verdict ->> 'note'` passes every existing check while publishing what a processor typed about one
+borrower's file.
 
 A processor who knows the lender cleared something must still say where and when. That is the accepted
 cost, and it is the same trade ADR-404 made in refusing to let Stage 1 say anything at all.
