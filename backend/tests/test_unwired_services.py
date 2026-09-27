@@ -109,6 +109,17 @@ KNOWN_UNWIRED = {
     "_is_borrower_facing",  # LP-809
     "open_draft_preview",  # LP-811a
     "existing_identities",  # LP-93
+    # SUPERSEDED RATHER THAN WAITING, which is a different reason from every entry above and is why it
+    # says so here. `_new_notes` is the RAW `(date, text)` comparison; LP-912's A1 rule replaced it in
+    # production with `_resolve_notes`, which matches on NORMALISED text — raw equality was the defect
+    # R8 found, where a paste's `'Not in  Upload'` and a PDF's `'Not in Upload'` read as different notes
+    # and fired a false *Came back*. So it must NOT be wired back up.
+    #
+    # It is kept, with three assertions in `tests/conditions/test_note_identity.py`, because those
+    # measure the GAP between the narrow question and A1's rule — the evidence for why A1 needed more.
+    # If that ever stops being worth its keep, the deletion takes `_note_key` with it, which nothing
+    # else uses.
+    "_new_notes",  # LP-912
 }
 
 

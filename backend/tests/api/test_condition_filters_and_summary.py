@@ -208,8 +208,14 @@ async def test_the_unfiltered_list_is_stage_ones_response_in_sheet_order(
 
     assert _codes(rows) == ROUND_1_CODES
     assert all(row["round_numbers"] == [1] for row in rows)
-    # Stage 1's response carried no fields that LP-911's producers do not fill yet (LP-911 review).
-    assert all("verdict" not in row and "pending_suggestion" not in row for row in rows)
+    # `verdict` IS ON THE ROW NOW AND IS NULL, WHICH IS LP-912 HONOURING LP-911'S REVIEW. That review
+    # took `verdict` and `pending_suggestion` OFF `ConditionPublic` because neither had a producer and
+    # a guessed type reads as coverage it does not have. LP-912 ships the producer, so `verdict` comes
+    # back — null on a freshly imported round, because the lender has not answered yet.
+    #
+    # `pending_suggestion` STAYS ABSENT until LP-915 proposes one, for exactly the reason it left.
+    assert all(row["verdict"] is None for row in rows)
+    assert all("pending_suggestion" not in row for row in rows)
     assert all(row["prep_status"] == "to_do" for row in rows)
     assert all(row["lender_status"] == "open" for row in rows)
 

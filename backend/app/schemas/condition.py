@@ -43,7 +43,7 @@ from typing import Any
 from uuid import UUID
 
 import structlog
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.models.condition import (
     BucketKind,
@@ -412,6 +412,95 @@ class DraftRowPublic(BaseModel):
     source_line_numbers: list[int] = Field(default_factory=list)
 
 
+class VerdictSourceKind(StrEnum):
+    """Where the lender said it (ADR-408). Part of a verdict, and a verdict requires one.
+
+    IT IS DEFINED HERE, ABOVE `VerdictPublic`, AND THE FIRST ATTEMPT PUT IT WITH THE REQUEST BODIES
+    AT THE FOOT OF THE FILE. That raised `NameError` on import, because `VerdictPublic` annotates it and
+    an annotation is evaluated when the class body runs — the identical mistake `ConditionSummaryPublic`
+    made against `ConditionRoundPublic` earlier in this same ticket. Twice in one file is enough to say
+    it plainly: in this module, a type must appear above every model that names it.
+
+    IT IS NOT A DATABASE ENUM, because a verdict lives in a JSONB column — so there is no CHECK to swap
+    and nothing for `test_activity_type_migrations.py` to watch. It IS a wire contract: the client sends
+    it and the detail sheet renders it ("Cleared · portal · 09/12/2026"), so it is mirrored in
+    `frontend/lib/types/conditions.ts` and registered in `_MIRRORED`.
+
+    THE TWO DERIVED SOURCES ARE NOT INTERCHANGEABLE WITH THE THREE A PERSON PICKS.
+    `round_comparison` and `underwriter_note` are produced by the app — the first when a processor
+    confirms a "probably cleared" suggestion, the second when the lender's own dated note reopens a
+    condition — and both carry a `round_id` naming the sheet that showed it. The three a processor picks
+    by hand carry no round, because a portal screen is not a sheet.
+
+    `underwriter_note` IS ALSO WHAT `came_back` KEYS ON. A manual "Came back" recorded from a phone
+    call is `not_cleared` and is NOT a came-back, which is the distinction S2-08's amber rail draws.
+    """
+
+    PORTAL = "portal"
+    EMAIL = "email"
+    PHONE = "phone"
+    ROUND_COMPARISON = "round_comparison"
+    UNDERWRITER_NOTE = "underwriter_note"
+
+
+class VerdictPublic(BaseModel):
+    """What the lender said, and where — the callout on S2-03 ("Cleared · portal · 09/12/2026").
+
+    IT IS DEFINED ABOVE `ConditionPublic` BECAUSE THAT MODEL ANNOTATES IT. Python evaluates an
+    annotation when the class body runs, and LP-912 already learned this the hard way one model over:
+    `ConditionSummaryPublic` referencing `ConditionRoundPublic` from above it raised `NameError` on
+    import. Order here is mechanical, not stylistic.
+
+    BUILT LENIENTLY FROM JSONB, WHICH IS UNUSUAL IN THIS FILE AND DELIBERATE. `conditions.verdict` is
+    written only by `services/condition_status.py`, so the values are ours — but it is still a free-form
+    column, and a list of sixty conditions must not 500 because one row was written by an older shape or
+    edited by hand on staging. `from_stored` returns `None` for anything it cannot read, which the UI
+    already has to handle: most conditions have no verdict at all.
+
+    `source_kind` COMES THROUGH A CLOSED VOCABULARY, and that is load-bearing rather than tidy.
+    `ConditionPublic.came_back` branches on it being `underwriter_note`, so an unrecognised string
+    coerced to that value would paint the amber "Came back" rail on a condition the lender never
+    reopened. Anything outside the enum makes the whole verdict unreadable instead — the same argument
+    `ConditionEventPublic` makes for `_as_vocab`, where an open `str` let `{"reader": "Alex Rivera"}`
+    through a key that was on the allow-list.
+
+    `note` IS THE PROCESSOR'S OWN, AND IT DOES TRAVEL HERE. It is NPI and stays out of
+    `readonly.conditions` (ADR-405), but so does `verbatim_text`, which this same model returns: the
+    readonly views are the analytics path, not the API. The processor who typed it is the one reading it
+    back.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    status: ConditionLenderStatus
+    source_kind: VerdictSourceKind
+    #: The date the LENDER said it. Never defaulted to today — that is the point of recording it.
+    source_date: date_type
+    #: The sheet that showed it, for the two sources the app derives. `None` for portal/email/phone,
+    #: because a portal screen is not a sheet.
+    round_id: UUID | None = None
+    note: str | None = None
+    recorded_by: UUID | None = None
+    recorded_at: datetime | None = None
+
+    @classmethod
+    def from_stored(cls, stored: dict[str, Any] | None) -> "VerdictPublic | None":
+        """The row's verdict, or `None` if there is none or it cannot be read.
+
+        A MALFORMED VERDICT IS REPORTED, NOT SWALLOWED SILENTLY. The log line carries the keys and the
+        condition is the caller's to identify — never the note, which is what a processor typed. The
+        same judgement `_logged_mismatch` above makes: dropping a writer's drift in silence means the
+        field renders blank and nobody learns the shape changed.
+        """
+        if not stored:
+            return None
+        try:
+            return cls.model_validate(stored)
+        except ValidationError:
+            log.warning("condition_verdict_unreadable", keys=sorted(stored))
+            return None
+
+
 class ConditionPublic(BaseModel):
     """One imported condition, as the list and the detail sheet render it.
 
@@ -485,8 +574,19 @@ class ConditionPublic(BaseModel):
     #: else can produce `not_cleared` yet. LP-912 narrows it.
     came_back: bool
 
+    #: What the lender said and where, or `None` while they have not answered. THE ONLY THING THAT MAY
+    #: SET `cleared` OR `waived` (ADR-404, ADR-408), which is why it travels with the row rather than
+    #: behind a second request: a screen showing "Cleared" has to be able to say who said so.
+    #:
+    #: TYPED, HAVING SHIPPED AS `dict[str, Any]` AND BEEN REMOVED FOR IT (LP-911 review, R8). The
+    #: argument then was "add the key once so the cross-stack mirror changes once", and it did not
+    #: survive the key being the wrong shape — LP-912 had to replace the type anyway. It arrives now
+    #: because it now has a producer.
+    verdict: VerdictPublic | None = None
     #: Set by LP-915 when the processor confirms a "reworded" pair. Nothing disappears: the replaced
     #: condition stays, struck through, pointing at the one that carries on from it.
+    #:
+    #: Read from the row as of LP-912, which added the column; it was hard-coded `None` before.
     superseded_by_id: UUID | None = None
 
     @classmethod
@@ -528,6 +628,7 @@ class ConditionPublic(BaseModel):
             for note in (condition.underwriter_notes or [])
         ]
         dated = [note for note in notes if note.date is not None]
+        verdict = VerdictPublic.from_stored(condition.verdict)
         return cls(
             id=condition.id,
             lender_code=condition.lender_code,
@@ -558,8 +659,19 @@ class ConditionPublic(BaseModel):
             latest_note=max(dated, key=lambda note: note.date) if dated else None,  # type: ignore[arg-type,return-value]
             is_open=is_open,
             days_open=days_open,
-            came_back=condition.lender_status is ConditionLenderStatus.NOT_CLEARED,
-            superseded_by_id=None,
+            verdict=verdict,
+            # NARROWED, AS LP-912 SAID IT WOULD BE. The spec defines `came_back` as `not_cleared`
+            # **because of an underwriter note**, and which cause set the status is only knowable from
+            # the verdict — so until the verdict was projected this could only be the broader "the
+            # lender said not satisfied". It now requires both: the status AND a verdict sourced to the
+            # note. A manual "Came back" recorded from a phone call is `not_cleared` and is NOT
+            # `came_back`, which is the distinction the amber rail on S2-08 is drawing.
+            came_back=(
+                condition.lender_status is ConditionLenderStatus.NOT_CLEARED
+                and verdict is not None
+                and verdict.source_kind is VerdictSourceKind.UNDERWRITER_NOTE
+            ),
+            superseded_by_id=condition.superseded_by_id,
         )
 
 
@@ -753,6 +865,151 @@ class ConditionSummaryPublic(BaseModel):
 # --------------------------------------------------------------------------- #
 # Write bodies
 # --------------------------------------------------------------------------- #
+
+
+class BulkAction(StrEnum):
+    """Which of the three writes a bulk call applies (spec §LP-912)."""
+
+    PREP_STATUS = "prep_status"
+    VERDICT = "verdict"
+    OWNER = "owner"
+
+
+#: `expected_updated_at` RATHER THAN THE SPEC'S `updated_at`, AND THE DEPARTURE IS DELIBERATE.
+#: Spec §LP-912 writes `updated_at` in all five request bodies; `ConditionDraftUpdate` above already
+#: ships `expected_updated_at` for exactly this purpose, in this same feature, since LP-909. Two names
+#: for one concept inside one feature is the drift this repo keeps correcting, and the existing name is
+#: the clearer of the two — it says it is the value the caller READ, not the value it is setting.
+#:
+#: OPTIONAL, AND THAT IS NOT A LOOPHOLE. `None` means "no opinion", the same as on the draft: a caller
+#: that never read the row cannot be made to echo it. What makes the guard real is that the client
+#: always has the value (LP-911 put `updated_at` on `ConditionPublic` for this), and a test asserts a
+#: stale value is refused AND changed nothing.
+class _ConcurrentWrite(BaseModel):
+    """The optimistic-concurrency field every LP-912 write carries."""
+
+    expected_updated_at: datetime | None = None
+
+
+class PrepStatusRequest(_ConcurrentWrite):
+    """Move our track (ADR-408). Forward needs nothing; backward needs a reason.
+
+    `waiting_on` IS REQUIRED WHEN MOVING TO `waiting` and the service refuses without it: "waiting"
+    with nobody named is a status that cannot be acted on, and the list groups by owner.
+    """
+
+    to: ConditionPrepStatus
+    waiting_on: OwnerHint | None = None
+    #: Required for a BACKWARD move only. One short line, kept in history.
+    reason: str | None = Field(default=None, max_length=500)
+    #: NPI — what a processor typed about this file. Never logged, never in `readonly.*`.
+    note: str | None = Field(default=None, max_length=256)
+    #: Defaults to now on a move to `with_underwriter`, but overridable: a processor records a
+    #: submission they made this morning.
+    sent_at: datetime | None = None
+
+
+class VerdictRequest(_ConcurrentWrite):
+    """Record what the lender said (ADR-408). The ONLY way to `cleared` or `waived`.
+
+    `source_date` IS REQUIRED AND IS NEVER DEFAULTED TO TODAY. It is the date the LENDER said it; a
+    verdict dated by our clock is a verdict about us. That is why it has no default here rather than
+    `date.today()`.
+    """
+
+    status: ConditionLenderStatus
+    source_kind: VerdictSourceKind
+    source_date: date_type
+    #: Required for the two derived sources, which name the sheet that showed it.
+    round_id: UUID | None = None
+    #: NPI — the processor's own note about the verdict ("Cleared in EASE, condition status screen").
+    note: str | None = Field(default=None, max_length=500)
+
+
+class ReopenRequest(_ConcurrentWrite):
+    """Put a cleared or waived condition back to open. The reason is required.
+
+    The old verdict STAYS in history: this says it was overruled, not that it never happened.
+    """
+
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class OwnerRequest(_ConcurrentWrite):
+    """Set or clear the manual owner override (A2).
+
+    `None` MEANS "BACK TO THE HINT", not "nobody". Clearing the override restores whatever the sheet or
+    the code map suggested, which is why the field is nullable rather than the endpoint having a second
+    verb.
+    """
+
+    owner: OwnerHint | None = None
+
+
+class BulkRequest(_ConcurrentWrite):
+    """One write applied to many conditions, refusing the rows that may not have it.
+
+    THE FIELDS OF ALL THREE ACTIONS LIVE HERE, and the service validates the ones the chosen action
+    needs. The spec's shape is `{condition_ids[], action, …same fields}`, and a discriminated union per
+    action would be the tidier model — rejected because the UI sends one dialog's worth of fields for a
+    row set it does not want to split, and three request models would push that split onto the client.
+    """
+
+    condition_ids: list[UUID] = Field(min_length=1, max_length=500)
+    action: BulkAction
+
+    # `prep_status`
+    to: ConditionPrepStatus | None = None
+    waiting_on: OwnerHint | None = None
+    reason: str | None = Field(default=None, max_length=500)
+    #: 256, MATCHING `PrepStatusRequest.note`, AND THE MISMATCH WAS A REAL HOLE. This was 500 while
+    #: that one is 256 (the width of the `prep_note` column), so a bulk prep-status call carrying a
+    #: 300-character note built a `PrepStatusRequest` inside `_apply_one` and raised a Pydantic
+    #: `ValidationError` — which is not a `ConditionRefused`, so it escaped the per-row `except` and
+    #: would have failed the whole batch with a 500 instead of refusing one row. Both linters and mypy
+    #: were happy: two different valid integers.
+    #:
+    #: `reason` is deliberately still 500 here and 500 there, so the pair now agrees in both fields.
+    #: The general rule this is an instance of: a bulk request that re-constructs a single-row request
+    #: must not be able to hold a value the single-row request rejects, or bulk becomes the way round
+    #: the validation.
+    note: str | None = Field(default=None, max_length=256)
+    sent_at: datetime | None = None
+
+    # `verdict`
+    status: ConditionLenderStatus | None = None
+    source_kind: VerdictSourceKind | None = None
+    source_date: date_type | None = None
+    round_id: UUID | None = None
+
+    # `owner`
+    owner: OwnerHint | None = None
+
+
+class BulkRefusalPublic(BaseModel):
+    """One row the bulk write would not touch, and why — in the server's own sentence."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    condition_id: UUID
+    #: The typed code, so a client can branch without parsing prose.
+    code: str
+    #: The plain sentence the UI shows AS-IS (spec §6 rule 5). It never writes its own.
+    message: str
+
+
+class BulkResultPublic(BaseModel):
+    """What a bulk write did and what it refused (spec §LP-912).
+
+    BOTH HALVES, ALWAYS. The UI's line is "4 marked cleared · 1 skipped: information only", so a
+    response that reported only the successes would leave the processor to work out which row did not
+    move — and silently skipping a row is the failure this shape exists to prevent.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    applied: list[UUID] = Field(default_factory=list)
+    refused: list[BulkRefusalPublic] = Field(default_factory=list)
 
 
 class ConditionPasteRequest(BaseModel):

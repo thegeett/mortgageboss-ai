@@ -1,0 +1,716 @@
+"""The five writes: moving our track, recording the lender's answer, reopening, the owner, and bulk.
+
+WHAT THESE TESTS ARE ABOUT IS WHAT THE ENDPOINTS REFUSE. The happy paths are one assertion each; the
+refusals are the product decision (ADR-404, ADR-408), so each one is checked for its STATUS, its typed
+CODE and its SENTENCE — the UI shows the server's words as-is (spec §6 rule 5), so a sentence that
+drifts is a user-visible defect that no other test would catch.
+
+AND FOR EVERY REFUSAL, THAT NOTHING CHANGED. A 409 that has already written is worse than no guard at
+all: the processor is told the write was refused and the row moved anyway. That is asserted rather than
+assumed, because it is invisible from the response alone.
+
+THE FIXTURES ARE THE LIGHT ONES ON PURPOSE. Status rules do not depend on a lender's sheet, so these
+build conditions with `make_condition` rather than importing a PDF — a status refusal that failed
+because a code map was unseeded would be a test failing for a reason it is not about. The came-back
+hook, which DOES depend on real notes on a real round, is tested in
+`tests/conditions/test_came_back.py` against the fixtures.
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from typing import Any
+from uuid import UUID, uuid4
+
+import pytest
+from app.core.database import get_db
+from app.core.jwt import create_access_token
+from app.core.security import hash_password
+from app.main import app
+from app.models import Company, User, UserRole
+from app.models.condition import (
+    Condition,
+    ConditionLenderStatus,
+    ConditionPrepStatus,
+    OwnerHint,
+)
+from app.models.condition_event import ConditionEvent, ConditionEventKind
+from app.services import condition_status
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from tests.models.conftest_helpers import make_company, make_condition, make_loan_file, make_round
+
+API = "/api/v1"
+
+
+@pytest.fixture
+async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    """Shadows the root fixture so the request shares this test's session (see LP-905 §1)."""
+
+    async def _override_get_db() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override_get_db
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            yield c
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+async def _auth_for(db: AsyncSession, company: Company) -> dict[str, str]:
+    user = User(
+        company_id=company.id,
+        email=f"u-{uuid4().hex[:8]}@example.com",
+        hashed_password=hash_password("irrelevant"),
+        first_name="Test",
+        last_name="Processor",
+        role=UserRole.PROCESSOR,
+        is_active=True,
+    )
+    db.add(user)
+    await db.flush()
+    return {"Authorization": f"Bearer {create_access_token(user.id)}"}
+
+
+async def _one(
+    db: AsyncSession, *, info_only: bool = False
+) -> tuple[Condition, dict[str, str], Any]:
+    """One condition on one file, with a token for its company. Returns `(condition, auth, file)`."""
+    company = await make_company(db)
+    loan_file = await make_loan_file(db, company=company)
+    round_ = await make_round(db, company=company, loan_file=loan_file, round_number=1)
+    condition = await make_condition(db, company=company, loan_file=loan_file, round_=round_)
+    if info_only:
+        condition.info_only = True
+        await db.flush()
+    return condition, await _auth_for(db, company), loan_file
+
+
+async def _events(db: AsyncSession, condition_id: UUID) -> list[ConditionEvent]:
+    result = await db.execute(
+        select(ConditionEvent)
+        .where(ConditionEvent.condition_id == condition_id)
+        .order_by(ConditionEvent.occurred_at)
+    )
+    return list(result.scalars().all())
+
+
+def _error(response: Any) -> dict[str, Any]:
+    """The refusal envelope: `{"error": {"type", "message", "data": {"message", "code"}}}`.
+
+    READ FROM THE RESPONSE, NEVER FROM THE EXCEPTION. LP-850's review found every assertion about a
+    structured refusal written against the exception object at the service layer, while the client was
+    receiving "Request failed" and none of the contents. These assert what a browser would see.
+    """
+    body: dict[str, Any] = response.json()["error"]
+    return body
+
+
+# --------------------------------------------------------------------------- #
+# Our track
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_forward_move_needs_no_reason(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Forward is the work progressing, and the move itself is the record (ADR-408)."""
+    condition, auth, _file = await _one(db_session)
+
+    response = await client.post(
+        f"{API}/conditions/{condition.id}/prep-status",
+        headers=auth,
+        json={"to": "ready"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["prep_status"] == "ready"
+    (event,) = await _events(db_session, condition.id)
+    assert event.kind is ConditionEventKind.CONDITION_PREP_MOVED
+    assert event.detail["from"] == "to_do"
+    assert event.detail["to"] == "ready"
+    assert "reason" not in event.detail
+
+
+async def test_a_backward_move_without_a_reason_is_refused_in_the_specs_words(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """The refusal S2-05 exists to prevent, with its code AND its sentence.
+
+    The sentence names the TARGET, which the spec's example does not: a move back to *Waiting on
+    someone* is also backward, and "Moving back to To do" would be wrong there.
+    """
+    condition, auth, _file = await _one(db_session)
+    condition.prep_status = ConditionPrepStatus.READY
+    await db_session.flush()
+
+    response = await client.post(
+        f"{API}/conditions/{condition.id}/prep-status", headers=auth, json={"to": "to_do"}
+    )
+
+    assert response.status_code == 409, response.text
+    error = _error(response)
+    assert error["data"]["code"] == "backward_move_needs_reason"
+    assert error["message"] == "Moving back to To do needs a short reason."
+
+    # AND NOTHING MOVED. A 409 that has already written is worse than no guard.
+    await db_session.refresh(condition)
+    assert condition.prep_status is ConditionPrepStatus.READY
+    assert await _events(db_session, condition.id) == []
+
+
+async def test_a_backward_move_with_a_reason_keeps_it_in_the_history(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """The reason is the only record of what went wrong, so it lives in the event, not just the row."""
+    condition, auth, _file = await _one(db_session)
+    condition.prep_status = ConditionPrepStatus.WITH_UNDERWRITER
+    await db_session.flush()
+
+    response = await client.post(
+        f"{API}/conditions/{condition.id}/prep-status",
+        headers=auth,
+        json={"to": "to_do", "reason": "Invoice amount does not match the credit report fee."},
+    )
+
+    assert response.status_code == 200, response.text
+    (event,) = await _events(db_session, condition.id)
+    assert event.detail["reason"] == "Invoice amount does not match the credit report fee."
+    assert event.detail["from"] == "with_underwriter"
+
+
+async def test_waiting_without_an_owner_is_refused(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """ "Waiting" with nobody named is a status nobody can act on, and the list groups by owner."""
+    condition, auth, _file = await _one(db_session)
+
+    response = await client.post(
+        f"{API}/conditions/{condition.id}/prep-status", headers=auth, json={"to": "waiting"}
+    )
+
+    assert response.status_code == 409, response.text
+    assert _error(response)["data"]["code"] == "waiting_needs_owner"
+    await db_session.refresh(condition)
+    assert condition.prep_status is ConditionPrepStatus.TO_DO
+
+
+async def test_leaving_waiting_clears_the_owner(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """ "Waiting on Title" is meaningless once we are no longer waiting, and a stale value would keep
+    the row in Title's group after the work moved on."""
+    condition, auth, _file = await _one(db_session)
+    await client.post(
+        f"{API}/conditions/{condition.id}/prep-status",
+        headers=auth,
+        json={"to": "waiting", "waiting_on": "title"},
+    )
+    await db_session.refresh(condition)
+    assert condition.waiting_on is OwnerHint.TITLE
+
+    response = await client.post(
+        f"{API}/conditions/{condition.id}/prep-status", headers=auth, json={"to": "ready"}
+    )
+
+    assert response.status_code == 200, response.text
+    await db_session.refresh(condition)
+    assert condition.waiting_on is None
+
+
+async def test_an_information_only_line_has_no_status_to_move(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """It asks for nothing, so there is nothing to prepare — the spec's sentence, verbatim."""
+    condition, auth, _file = await _one(db_session, info_only=True)
+
+    response = await client.post(
+        f"{API}/conditions/{condition.id}/prep-status", headers=auth, json={"to": "ready"}
+    )
+
+    assert response.status_code == 409, response.text
+    error = _error(response)
+    assert error["data"]["code"] == "info_only_has_no_status"
+    assert error["message"] == (
+        "This line is information from the lender — there is nothing to track."
+    )
+
+
+# --------------------------------------------------------------------------- #
+# The lender's track
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_verdict_is_the_only_route_to_cleared(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """ADR-404's rule, as the API enforces it: `cleared` arrives with who said so and when."""
+    condition, auth, _file = await _one(db_session)
+
+    response = await client.post(
+        f"{API}/conditions/{condition.id}/verdict",
+        headers=auth,
+        json={
+            "status": "cleared",
+            "source_kind": "portal",
+            "source_date": "2026-09-12",
+            "note": "Cleared in EASE, condition status screen",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["lender_status"] == "cleared"
+    assert body["verdict"]["source_kind"] == "portal"
+    assert body["verdict"]["source_date"] == "2026-09-12"
+    assert body["verdict"]["recorded_by"] is not None
+    # NOT a came-back: the lender cleared it, and `came_back` is the note-sourced case only.
+    assert body["came_back"] is False
+    assert body["is_open"] is False
+
+    (event,) = await _events(db_session, condition.id)
+    assert event.kind is ConditionEventKind.CONDITION_VERDICT_RECORDED
+    assert event.detail["source_kind"] == "portal"
+    # THE NOTE IS NOT IN THE EVENT. `detail` is dropped whole from `readonly.condition_events`, and the
+    # sibling writers keep it to counts, codes and names (LP-909's decision 4).
+    assert "note" not in event.detail
+
+
+async def test_a_refusal_recorded_from_a_phone_call_is_not_a_came_back(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """THE NARROWING LP-911'S REVIEW CARRIED FORWARD (R1/R8), AND THE HALF THAT PROVES IT.
+
+    `came_back` does not mean "the lender said not satisfied". It means "the lender said it IN A DATED
+    NOTE". A processor recording a refusal from a phone call sets `not_cleared` and must NOT set
+    `came_back`, because S2-08's amber rail and its "set by the lender's note" line would then have no
+    note to name.
+
+    WITHOUT THIS ASSERTION THE NARROWING IS UNTESTED. Every test in `test_came_back.py` drives the
+    note-sourced path, so the pre-narrowing rule — `came_back = (lender_status == not_cleared)` —
+    satisfies all of them. This is the only case that separates the two.
+    """
+    condition, auth, _file = await _one(db_session)
+
+    response = await client.post(
+        f"{API}/conditions/{condition.id}/verdict",
+        headers=auth,
+        json={
+            "status": "not_cleared",
+            "source_kind": "phone",
+            "source_date": "2026-09-18",
+            "note": "Underwriter called, wants the invoice reissued on letterhead.",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["lender_status"] == "not_cleared"
+    assert body["verdict"]["source_kind"] == "phone"
+    assert body["came_back"] is False, (
+        "a phone call names no note, so there is no came-back to draw"
+    )
+
+
+async def test_a_verdict_without_a_date_is_refused_by_the_schema(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """`source_date` HAS NO DEFAULT, which is the single most important line in the schema.
+
+    A verdict dated by our clock is a verdict about us, so the field is required — and a missing one is
+    a 422 from the request model rather than a silent `today()`.
+    """
+    condition, auth, _file = await _one(db_session)
+
+    response = await client.post(
+        f"{API}/conditions/{condition.id}/verdict",
+        headers=auth,
+        json={"status": "cleared", "source_kind": "portal"},
+    )
+
+    assert response.status_code == 422, response.text
+    await db_session.refresh(condition)
+    assert condition.lender_status is ConditionLenderStatus.OPEN
+    assert condition.verdict is None
+
+
+async def test_a_derived_verdict_must_name_its_round(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """`round_comparison` and `underwriter_note` are produced by the app from a SHEET, so they carry
+    the round that showed it. Without it the provenance is a claim with nothing behind it."""
+    condition, auth, _file = await _one(db_session)
+
+    response = await client.post(
+        f"{API}/conditions/{condition.id}/verdict",
+        headers=auth,
+        json={
+            "status": "cleared",
+            "source_kind": "round_comparison",
+            "source_date": "2026-09-10",
+        },
+    )
+
+    assert response.status_code == 409, response.text
+    assert _error(response)["data"]["code"] == "verdict_needs_round"
+    await db_session.refresh(condition)
+    assert condition.verdict is None
+
+
+async def test_a_verdict_leaves_our_track_alone(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """A condition that was *Sent to lender* and is now cleared was still sent (ADR-408).
+
+    Rewriting our status to something tidier would erase what we did; the history says it instead.
+    """
+    condition, auth, _file = await _one(db_session)
+    condition.prep_status = ConditionPrepStatus.WITH_UNDERWRITER
+    await db_session.flush()
+
+    await client.post(
+        f"{API}/conditions/{condition.id}/verdict",
+        headers=auth,
+        json={"status": "cleared", "source_kind": "email", "source_date": "2026-09-12"},
+    )
+
+    await db_session.refresh(condition)
+    assert condition.prep_status is ConditionPrepStatus.WITH_UNDERWRITER
+
+
+async def test_reopening_keeps_the_old_verdict_in_history_and_resets_our_track(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Both cases this serves — a misclick and a lender re-issuing — need the old verdict remembered.
+
+    The row's `verdict` is "the current one", so a reopened condition has none; the event is where
+    "it was cleared on the 12th and reopened after" lives.
+    """
+    condition, auth, _file = await _one(db_session)
+    condition.prep_status = ConditionPrepStatus.WITH_UNDERWRITER
+    await db_session.flush()
+    await client.post(
+        f"{API}/conditions/{condition.id}/verdict",
+        headers=auth,
+        json={"status": "cleared", "source_kind": "portal", "source_date": "2026-09-12"},
+    )
+
+    response = await client.post(
+        f"{API}/conditions/{condition.id}/reopen",
+        headers=auth,
+        json={"reason": "The lender re-issued it on the next sheet."},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["lender_status"] == "open"
+    assert body["verdict"] is None
+    # OUR TRACK GOES BACK, unlike after a verdict: the condition needs working again, and leaving it at
+    # *Sent to lender* would hide it from the list that would make somebody pick it up.
+    assert body["prep_status"] == "to_do"
+
+    kinds = [event.kind for event in await _events(db_session, condition.id)]
+    assert kinds == [
+        ConditionEventKind.CONDITION_VERDICT_RECORDED,
+        ConditionEventKind.CONDITION_REOPENED,
+    ]
+    reopened = (await _events(db_session, condition.id))[-1]
+    assert reopened.detail["overruled_source_kind"] == "portal"
+    assert reopened.detail["overruled_source_date"] == "2026-09-12"
+
+
+async def test_there_is_nothing_to_reopen_on_an_open_condition(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Reopen undoes a verdict. With none recorded there is nothing to undo, and saying so is clearer
+    than silently succeeding."""
+    condition, auth, _file = await _one(db_session)
+
+    response = await client.post(
+        f"{API}/conditions/{condition.id}/reopen", headers=auth, json={"reason": "Mistake."}
+    )
+
+    assert response.status_code == 409, response.text
+    assert _error(response)["data"]["code"] == "nothing_to_reopen"
+
+
+# --------------------------------------------------------------------------- #
+# Who it is waiting on
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_manual_owner_outranks_the_hint_and_says_so(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """A2: the code map and the prefixes are a good first guess, not the truth.
+
+    `owner_hint` IS UNTOUCHED, because it is a true fact about what the sheet said. The override is a
+    separate fact about what we decided, and overwriting the hint would destroy the better record of
+    where the guess came from.
+    """
+    condition, auth, _file = await _one(db_session)
+    assert condition.owner_hint is OwnerHint.PROCESSOR
+
+    response = await client.put(
+        f"{API}/conditions/{condition.id}/owner", headers=auth, json={"owner": "title"}
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["effective_owner"] == "title"
+    assert body["effective_owner_source"] == "manual"
+    assert body["owner_hint"] == "processor", "the sheet's guess is still on the row"
+
+    (event,) = await _events(db_session, condition.id)
+    assert event.kind is ConditionEventKind.CONDITION_OWNER_CHANGED
+    assert event.detail["to"] == "title"
+
+
+async def test_clearing_the_override_goes_back_to_the_hint(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """`owner: null` means "back to the hint", not "nobody" — which is why the field is nullable rather
+    than the endpoint having a second verb."""
+    condition, auth, _file = await _one(db_session)
+    await client.put(
+        f"{API}/conditions/{condition.id}/owner", headers=auth, json={"owner": "title"}
+    )
+
+    response = await client.put(
+        f"{API}/conditions/{condition.id}/owner", headers=auth, json={"owner": None}
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["effective_owner"] == "processor", "the hint is what is left"
+    assert body["effective_owner_source"] != "manual", "it no longer claims a person chose it"
+
+
+async def test_the_owner_filter_returns_what_the_row_displays(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """THE HALF OF THE OVERRIDE BUG THAT NO RESPONSE BODY SHOWS.
+
+    `effective_owner` runs in Python for the rendered field and `_effective_owner_column` runs in SQL
+    for the filter, and the two are one rule written twice. When only the Python side honoured the
+    override, a condition reassigned to Title DISPLAYED as Title and did not come back under
+    `owner=title` — and nothing failed, because each answer is individually valid. The processor's
+    symptom is a row they just reassigned vanishing from the group they reassigned it to.
+
+    SO THIS ASSERTS BOTH DIRECTIONS: it appears under the new owner and is gone from the hint's group.
+    One without the other would pass on a filter that ignored the override entirely.
+    """
+    company = await make_company(db_session)
+    loan_file = await make_loan_file(db_session, company=company)
+    round_ = await make_round(db_session, company=company, loan_file=loan_file, round_number=1)
+    condition = await make_condition(
+        db_session, company=company, loan_file=loan_file, round_=round_
+    )
+    auth = await _auth_for(db_session, company)
+
+    moved = await client.put(
+        f"{API}/conditions/{condition.id}/owner", headers=auth, json={"owner": "title"}
+    )
+    assert moved.status_code == 200, moved.text
+
+    async def _owned_by(owner: str) -> list[str]:
+        response = await client.get(
+            f"{API}/loan-files/{loan_file.id}/conditions", headers=auth, params={"owner": owner}
+        )
+        assert response.status_code == 200, response.text
+        rows: list[dict[str, Any]] = response.json()
+        return [row["id"] for row in rows]
+
+    assert await _owned_by("title") == [str(condition.id)]
+    assert await _owned_by("processor") == [], "it left the group the code map had guessed"
+
+
+# --------------------------------------------------------------------------- #
+# Concurrency
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_stale_write_is_refused_and_changes_nothing(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """The guard LP-911 put `updated_at` on the wire to make reachable at all.
+
+    Two processors on one condition is the case; the same check also refuses a tab whose row was moved
+    by an import underneath it, which is the same hazard.
+    """
+    condition, auth, _file = await _one(db_session)
+    stale = condition.updated_at
+
+    first = await client.post(
+        f"{API}/conditions/{condition.id}/prep-status",
+        headers=auth,
+        json={"to": "ready", "expected_updated_at": stale.isoformat()},
+    )
+    assert first.status_code == 200, first.text
+
+    second = await client.post(
+        f"{API}/conditions/{condition.id}/prep-status",
+        headers=auth,
+        json={"to": "with_underwriter", "expected_updated_at": stale.isoformat()},
+    )
+
+    assert second.status_code == 409, second.text
+    error = _error(second)
+    assert error["data"]["code"] == "stale"
+    assert error["message"] == "Someone else changed this condition — reload to see their change."
+
+    await db_session.refresh(condition)
+    assert condition.prep_status is ConditionPrepStatus.READY, "the second write changed nothing"
+
+
+# --------------------------------------------------------------------------- #
+# Bulk
+# --------------------------------------------------------------------------- #
+
+
+async def test_bulk_applies_what_it_can_and_reports_the_rest(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """The shape the UI's "4 marked cleared · 1 skipped: information only" needs (spec §LP-912).
+
+    200 AND NOT 409: partial success is the expected outcome, so the refusals are DATA. A 409 would
+    throw away the rows that worked, and a 200 listing only successes would leave a processor to work
+    out which row did not move.
+    """
+    company = await make_company(db_session)
+    loan_file = await make_loan_file(db_session, company=company)
+    round_ = await make_round(db_session, company=company, loan_file=loan_file, round_number=1)
+    good = [
+        await make_condition(db_session, company=company, loan_file=loan_file, round_=round_)
+        for _ in range(2)
+    ]
+    skipped = await make_condition(db_session, company=company, loan_file=loan_file, round_=round_)
+    skipped.info_only = True
+    await db_session.flush()
+    auth = await _auth_for(db_session, company)
+
+    response = await client.post(
+        f"{API}/loan-files/{loan_file.id}/conditions/bulk",
+        headers=auth,
+        json={
+            "condition_ids": [str(c.id) for c in [*good, skipped]],
+            "action": "verdict",
+            "status": "cleared",
+            "source_kind": "portal",
+            "source_date": "2026-09-12",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert sorted(body["applied"]) == sorted(str(c.id) for c in good)
+    (refusal,) = body["refused"]
+    assert refusal["condition_id"] == str(skipped.id)
+    assert refusal["code"] == "info_only_has_no_status"
+    assert refusal["message"] == (
+        "This line is information from the lender — there is nothing to track."
+    )
+
+    # The two that applied each wrote exactly one event; the refused one wrote none.
+    for condition in good:
+        assert len(await _events(db_session, condition.id)) == 1
+    assert await _events(db_session, skipped.id) == []
+
+
+async def test_bulk_goes_through_the_same_service_as_one_row(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """THE HOLE THIS CLOSES: if bulk had its own copy of the backward-move rule, "needs a reason" would
+    be enforceable one row at a time and not eleven — making a bulk action the way round a guard."""
+    company = await make_company(db_session)
+    loan_file = await make_loan_file(db_session, company=company)
+    round_ = await make_round(db_session, company=company, loan_file=loan_file, round_number=1)
+    condition = await make_condition(
+        db_session, company=company, loan_file=loan_file, round_=round_
+    )
+    condition.prep_status = ConditionPrepStatus.READY
+    await db_session.flush()
+    auth = await _auth_for(db_session, company)
+
+    response = await client.post(
+        f"{API}/loan-files/{loan_file.id}/conditions/bulk",
+        headers=auth,
+        json={"condition_ids": [str(condition.id)], "action": "prep_status", "to": "to_do"},
+    )
+
+    assert response.status_code == 200, response.text
+    (refusal,) = response.json()["refused"]
+    assert refusal["code"] == "backward_move_needs_reason"
+    await db_session.refresh(condition)
+    assert condition.prep_status is ConditionPrepStatus.READY
+
+
+# --------------------------------------------------------------------------- #
+# Tenancy
+# --------------------------------------------------------------------------- #
+
+
+async def test_another_company_gets_404_on_every_write(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """404 AND NEVER 403 — confirming the id exists would be an oracle over another tenant's rows.
+
+    The gating walk proves the dependency is DECLARED; this proves it refuses, and that the refusal
+    happens BEFORE the write.
+    """
+    condition, _auth, loan_file = await _one(db_session)
+    stranger_company = await make_company(db_session, name="Stranger")
+    stranger = await _auth_for(db_session, stranger_company)
+
+    for method, path, body in (
+        ("POST", f"/conditions/{condition.id}/prep-status", {"to": "ready"}),
+        (
+            "POST",
+            f"/conditions/{condition.id}/verdict",
+            {"status": "cleared", "source_kind": "portal", "source_date": "2026-09-12"},
+        ),
+        ("POST", f"/conditions/{condition.id}/reopen", {"reason": "x"}),
+        ("PUT", f"/conditions/{condition.id}/owner", {"owner": "title"}),
+        (
+            "POST",
+            f"/loan-files/{loan_file.id}/conditions/bulk",
+            {"condition_ids": [str(condition.id)], "action": "owner", "owner": "title"},
+        ),
+    ):
+        response = await client.request(method, f"{API}{path}", headers=stranger, json=body)
+        assert response.status_code == 404, (method, path, response.status_code)
+
+    await db_session.refresh(condition)
+    assert condition.prep_status is ConditionPrepStatus.TO_DO
+    assert condition.lender_status is ConditionLenderStatus.OPEN
+    assert condition.owner_override is None
+    assert await _events(db_session, condition.id) == []
+
+
+async def test_every_refusal_code_the_service_can_raise_has_been_exercised() -> None:
+    """A CENSUS, SO A NEW CODE IS NOT SHIPPED UNTESTED.
+
+    Four of the eight are asserted above with their sentences; the other four are covered elsewhere or
+    are unreachable from these endpoints. This lists which is which, so adding a code forces a decision
+    rather than sliding in with no test at all.
+    """
+    covered_here = {
+        "backward_move_needs_reason",
+        "info_only_has_no_status",
+        "verdict_needs_round",
+        "stale",
+        "waiting_needs_owner",
+        "nothing_to_reopen",
+    }
+    # `verdict_needs_source` is reachable only through BULK (a single-row verdict missing its source is
+    # a 422 from the request model, asserted above), and `status_not_offered` guards the A4 statuses
+    # `review` / `pending_review`, which no client offers.
+    known_elsewhere = {"verdict_needs_source", "status_not_offered"}
+
+    all_codes = {code.value for code in condition_status.RefusalCode}
+    assert covered_here | known_elsewhere == all_codes, (
+        "the refusal codes and this census disagree: "
+        f"{sorted(all_codes - (covered_here | known_elsewhere))} are new and untested"
+    )

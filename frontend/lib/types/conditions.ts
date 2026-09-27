@@ -155,6 +155,50 @@ export type OwnerHintSource = "prefix" | "bucket" | "code_map" | "none" | "manua
 export type ConditionOrigin = "sheet" | "manual";
 
 /**
+ * Where the lender said it (ADR-408). Part of a verdict, and a verdict is required for one.
+ *
+ * THE TWO DERIVED SOURCES ARE NOT INTERCHANGEABLE WITH THE THREE A PERSON PICKS.
+ * `round_comparison` and `underwriter_note` are produced by the app — the first when a processor
+ * confirms a "probably cleared" suggestion, the second when the lender's own dated note reopens a
+ * condition — and both name the round that showed it. The three a processor picks carry no round,
+ * because a portal screen is not a sheet.
+ *
+ * `underwriter_note` is also what `came_back` keys on: a manual "Came back" recorded from a phone call
+ * is `not_cleared` and is NOT a came-back, which is the distinction the amber rail on S2-08 draws.
+ */
+export type VerdictSourceKind =
+  | "portal"
+  | "email"
+  | "phone"
+  | "round_comparison"
+  | "underwriter_note";
+
+/** Which of the three writes a bulk call applies. */
+export type BulkAction = "prep_status" | "verdict" | "owner";
+
+/**
+ * Why the server refused a write (LP-912). The CODE is for the client; the sentence is for a person.
+ *
+ * A CLOSED UNION RATHER THAN `string`, BECAUSE THE UI BRANCHES ON IT. A bulk write reports
+ * `{condition_id, code, message}` per refused row so the toast can say "1 skipped: information only"
+ * without parsing prose — and branching on a mistyped literal is a branch that silently never runs.
+ *
+ * THE MESSAGE IS STILL WHAT GETS SHOWN. Spec §6 rule 5: refusals carry one plain sentence and the UI
+ * renders it as-is. This union is for deciding which rows to group and where to put the focus, never
+ * for composing a replacement wording — four of the eight sentences are the spec's, character for
+ * character, and re-writing them on the client would defeat the test that pins them.
+ */
+export type ConditionRefusalCode =
+  | "backward_move_needs_reason"
+  | "info_only_has_no_status"
+  | "verdict_needs_source"
+  | "stale"
+  | "waiting_needs_owner"
+  | "nothing_to_reopen"
+  | "verdict_needs_round"
+  | "status_not_offered";
+
+/**
  * OUR preparation track: what we are doing (ADR-404, ADR-408). Four steps on screen.
  *
  * `review` IS IN THIS UNION AND IS NEVER OFFERED, and it must stay. Default A4 keeps it in the
@@ -374,6 +418,31 @@ export interface DraftRow {
 }
 
 /**
+ * What the lender said, and where — the verdict callout on S2-03.
+ *
+ * "Cleared · round 2 comparison · 09/10/2026 · Confirmed by Priya Raman on 09/10 at 4:31 PM" is this
+ * object rendered. **Nothing may show "Cleared" without one** (ADR-404), which is why it travels with
+ * the row rather than behind a second request: a screen saying "Cleared" has to be able to say who
+ * said so.
+ *
+ * `source_date` IS THE LENDER'S DATE AND `recorded_at` IS OURS. Keeping both is the point — "cleared
+ * on the 12th, recorded on the 14th" is a different fact from either date alone.
+ *
+ * `note` is the PROCESSOR'S note about the verdict ("Cleared in EASE, condition status screen"), not
+ * the lender's words.
+ */
+export interface Verdict {
+  status: ConditionLenderStatus;
+  source_kind: VerdictSourceKind;
+  source_date: string;
+  /** The sheet that showed it, for the two sources the app derives. Null for portal/email/phone. */
+  round_id: string | null;
+  note: string | null;
+  recorded_by: string | null;
+  recorded_at: string | null;
+}
+
+/**
  * One imported condition, as the list and the detail sheet render it.
  *
  * THE STATUS FIELDS ARRIVED IN STAGE 2 (LP-911). Through Stage 1 they were deliberately absent —
@@ -432,8 +501,16 @@ export interface Condition {
   is_open: boolean;
   /** Days since this file first recorded it — not since the lender printed it. */
   days_open: number;
-  /** The lender said "not satisfied". LP-912 narrows this to "because of an underwriter note". */
+  /**
+   * The lender said "not satisfied" AND said it in an underwriter's note (LP-912 narrowed this).
+   *
+   * Both halves matter: a manual "Came back" recorded from a phone call is `not_cleared` and is not
+   * `came_back`, so the amber rail and the "set by the lender's 9/18 note" line on S2-08 only appear
+   * for the note-sourced case.
+   */
   came_back: boolean;
+  /** What the lender said and where, or null while they have not answered. */
+  verdict: Verdict | null;
   /** Set by LP-915 when a "reworded" pair is confirmed. Nothing disappears; it points forward. */
   superseded_by_id: string | null;
   /**
@@ -573,6 +650,107 @@ export interface AddConditionInput {
   lender_category?: string | null;
   bucket_heading?: string | null;
   bucket_kind?: BucketKind;
+}
+
+/**
+ * The field every LP-912 write may echo so a stale one is refused rather than silently winning.
+ *
+ * `expected_updated_at` IS THE SERVER'S NAME FOR IT, and the spec writes `updated_at` in all five
+ * request bodies. The existing name won: `DraftUpdateInput` has shipped it since LP-909 for exactly
+ * this purpose, and two names for one concept inside one feature is the drift this repo keeps
+ * correcting. It also says the truer thing — the value the caller READ, not the value it is setting.
+ *
+ * OPTIONAL, AND NOT A LOOPHOLE. Omitting it means "no opinion", the same as on the draft. What makes
+ * the guard real is that the client always has the value, because `Condition.updated_at` is on the
+ * wire for this reason.
+ */
+export interface ConcurrentWrite {
+  expected_updated_at?: string | null;
+}
+
+/** Move OUR track (S2-05). Forward needs nothing; backward needs a reason. */
+export interface PrepStatusInput extends ConcurrentWrite {
+  to: ConditionPrepStatus;
+  /**
+   * REQUIRED BY THE SERVER WHEN `to` IS `waiting`, and refused without it. "Waiting" with nobody
+   * named is a status nobody can act on, and the list groups by owner.
+   */
+  waiting_on?: OwnerHint | null;
+  /** Required for a BACKWARD move, and kept in the history as the only record of what went wrong. */
+  reason?: string | null;
+  note?: string | null;
+  /** Defaults to now on a move to `with_underwriter`; sent explicitly for a submission made earlier. */
+  sent_at?: string | null;
+}
+
+/**
+ * Record what the lender said — the ONLY route to `cleared` or `waived` (ADR-404).
+ *
+ * `source_date` IS REQUIRED AND IS THE LENDER'S DATE, never today's. A verdict dated by our clock is
+ * a verdict about us, which is why the server has no default for it and this type does not make it
+ * optional.
+ */
+export interface VerdictInput extends ConcurrentWrite {
+  status: ConditionLenderStatus;
+  source_kind: VerdictSourceKind;
+  source_date: string;
+  /** Required for the two sources the app derives, which name the sheet that showed it. */
+  round_id?: string | null;
+  /** The PROCESSOR'S note about the verdict, not the lender's words. */
+  note?: string | null;
+}
+
+/** Put a cleared or waived condition back to open. The old verdict stays in the history. */
+export interface ReopenInput extends ConcurrentWrite {
+  reason: string;
+}
+
+/** Set or clear the manual owner override (A2). */
+export interface OwnerInput extends ConcurrentWrite {
+  /** `null` means "back to the hint", not "nobody". */
+  owner: OwnerHint | null;
+}
+
+/**
+ * One write applied to many conditions, refusing the rows that may not have it.
+ *
+ * THE FIELDS OF ALL THREE ACTIONS LIVE HERE and the server validates the ones the chosen action
+ * needs, mirroring `BulkRequest`. Three separate types would be tidier and would push onto the client
+ * a split the UI does not want: one dialog sends one dialog's worth of fields for a row set it has no
+ * reason to divide.
+ */
+export interface BulkInput extends ConcurrentWrite {
+  condition_ids: string[];
+  action: BulkAction;
+  to?: ConditionPrepStatus | null;
+  waiting_on?: OwnerHint | null;
+  reason?: string | null;
+  note?: string | null;
+  sent_at?: string | null;
+  status?: ConditionLenderStatus | null;
+  source_kind?: VerdictSourceKind | null;
+  source_date?: string | null;
+  round_id?: string | null;
+  owner?: OwnerHint | null;
+}
+
+/** One row a bulk write would not touch, and the sentence to show for it. */
+export interface BulkRefusal {
+  condition_id: string;
+  code: ConditionRefusalCode;
+  message: string;
+}
+
+/**
+ * What a bulk write did — "4 marked cleared · 1 skipped: information only".
+ *
+ * IT ARRIVES AS 200 WITH REFUSALS AS DATA, not as a 409. Partial success is the expected outcome, so
+ * a 409 would throw away the rows that worked, and a body listing only successes would leave a
+ * processor to work out for themselves which row did not move.
+ */
+export interface BulkResult {
+  applied: string[];
+  refused: BulkRefusal[];
 }
 
 /** What an import did — the toast and the timeline entry. */

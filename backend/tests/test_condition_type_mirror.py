@@ -47,7 +47,8 @@ from app.models.condition_round import (
     ConditionSheetFormat,
     ConditionSourceKind,
 )
-from app.schemas.condition import MAX_PASTE_CHARS, ConditionSort
+from app.schemas.condition import MAX_PASTE_CHARS, BulkAction, ConditionSort, VerdictSourceKind
+from app.services.condition_status import RefusalCode
 
 #: `backend/tests/x.py` → `backend/tests` → `backend` → the repo root.
 _TYPES_FILE = Path(__file__).resolve().parents[2] / "frontend" / "lib" / "types" / "conditions.ts"
@@ -90,6 +91,24 @@ _MIRRORED: dict[str, type[StrEnum]] = {
     #: them because the column accepts them.
     "ConditionPrepStatus": ConditionPrepStatus,
     "ConditionLenderStatus": ConditionLenderStatus,
+    #: LP-912's two request enums. Neither is a database column — a verdict lives in JSONB and the bulk
+    #: action is a request field — so no CHECK watches them and this guard is the only thing that does.
+    #:
+    #: `VerdictSourceKind` IS THE ONE THAT MATTERS MOST HERE. `came_back` branches on
+    #: `underwriter_note`, so a member the client cannot type is a came-back the UI renders as an
+    #: unrecognised value, and a member the client types that the server never sends is a filter nobody
+    #: can trip. Both directions of the equality below are load-bearing.
+    "VerdictSourceKind": VerdictSourceKind,
+    "BulkAction": BulkAction,
+    #: THE REFUSAL CODES, AND THIS IS THE ENUM WITH THE LEAST ELSE WATCHING IT. It is neither a column
+    #: nor a request field — it is produced by `services/condition_status.py` and read by the client to
+    #: group refused rows ("1 skipped: information only"), so nothing but this guard connects the two
+    #: lists. A code the server grows and the client cannot type is a row the UI cannot group; a code
+    #: the client branches on that the server never sends is a branch that silently never runs.
+    #:
+    #: The SENTENCES are pinned separately, against the tickets file's own bytes
+    #: (`tests/conditions/test_refusal_sentences.py`), because the UI shows them as-is.
+    "ConditionRefusalCode": RefusalCode,
 }
 
 #: `export type Name = "a" | "b";` — on one line when short, wrapped across many when biome decides

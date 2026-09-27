@@ -54,6 +54,9 @@ from app.models.condition_round import (
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.schemas.condition import (
+    BulkRefusalPublic,
+    BulkRequest,
+    BulkResultPublic,
     ConditionCreateRequest,
     ConditionDetailPublic,
     ConditionDraftUpdate,
@@ -66,7 +69,11 @@ from app.schemas.condition import (
     ConditionRoundPublic,
     ConditionSort,
     ConditionSummaryPublic,
+    OwnerRequest,
+    PrepStatusRequest,
+    ReopenRequest,
     UnderwriterNotePublic,
+    VerdictRequest,
 )
 from app.services.condition_enrich import RoundNotEnrichable, enrich_round_with_pdf
 from app.services.condition_import import (
@@ -86,6 +93,14 @@ from app.services.condition_rounds import (
     discard_round,
     reparse_round,
     update_draft,
+)
+from app.services.condition_status import (
+    ConditionRefused,
+    apply_bulk,
+    move_prep_status,
+    record_verdict,
+    reopen,
+    set_owner,
 )
 from app.services.conditions import (
     MAX_CONDITIONS,
@@ -987,6 +1002,164 @@ async def add_condition_by_hand(
         condition,
         round_numbers=numbers.get(condition.id, []),
         today=datetime.now(UTC).date(),
+    )
+
+
+def _refused(exc: ConditionRefused) -> HTTPException:
+    """A refusal as the 409 the client reads, carrying the code AND the sentence.
+
+    409, LIKE EVERY OTHER REFUSAL ON THIS FEATURE. Nothing about the request is malformed — a backward
+    move without a reason is a well-formed request the condition's STATE declines, which is the same
+    translation `import`, `discard`, `enrich` and `reparse` already make. A 422 would say the caller
+    sent the wrong shape, and the caller did not.
+
+    A DICT DETAIL, BECAUSE THE CODE HAS TO SURVIVE THE BOUNDARY. `http_exception_handler` passes a dict
+    `detail` through as `error.data` and uses its `message` as the envelope's message — the mechanism
+    LP-850 added when it found a structured refusal being flattened to "Request failed" and every test
+    asserting on the exception object rather than the response. So the UI gets the sentence to show
+    (spec §6 rule 5) and the code to branch on, without a second error shape being invented.
+    """
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"message": exc.message, "code": exc.code.value},
+    )
+
+
+async def _condition_response(
+    db: DbSession, condition: Condition, *, commit: bool = True
+) -> ConditionPublic:
+    """Commit the write and answer with the condition as the list renders it.
+
+    THE WHOLE ROW COMES BACK, not a bare 204, so the client can replace its copy without a second
+    request — and `updated_at` moves on every write, which is the value the NEXT optimistic write has
+    to echo. Answering 204 would leave a client holding a stale timestamp and unable to write again
+    without refetching.
+    """
+    if commit:
+        await db.commit()
+        await db.refresh(condition)
+    numbers, _ = await appearances_for_file(db, loan_file_id=condition.loan_file_id)
+    return _condition_public(
+        condition,
+        round_numbers=numbers.get(condition.id, []),
+        today=datetime.now(UTC).date(),
+    )
+
+
+@conditions_by_id_router.post("/{condition_id}/prep-status", response_model=ConditionPublic)
+async def move_condition_prep_status(
+    condition: ScopedCondition,
+    payload: PrepStatusRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionPublic:
+    """Move our track (ADR-408, screen S2-05 for the backward case).
+
+    Forward needs nothing; backward needs a reason, and the refusal says so in the spec's own words.
+    """
+    try:
+        await move_prep_status(
+            db, condition=condition, payload=payload, actor_user_id=current_user.id
+        )
+    except ConditionRefused as exc:
+        raise _refused(exc) from exc
+    return await _condition_response(db, condition)
+
+
+@conditions_by_id_router.post("/{condition_id}/verdict", response_model=ConditionPublic)
+async def record_condition_verdict(
+    condition: ScopedCondition,
+    payload: VerdictRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionPublic:
+    """Record what the lender said (screen S2-04). The ONLY route to `cleared` or `waived`.
+
+    `source_date` IS THE LENDER'S DATE and the schema gives it no default, so a client that omits it is
+    refused rather than silently credited with today. That is the one thing this endpoint exists to
+    make impossible (ADR-404).
+    """
+    try:
+        await record_verdict(
+            db, condition=condition, payload=payload, actor_user_id=current_user.id
+        )
+    except ConditionRefused as exc:
+        raise _refused(exc) from exc
+    return await _condition_response(db, condition)
+
+
+@conditions_by_id_router.post("/{condition_id}/reopen", response_model=ConditionPublic)
+async def reopen_condition(
+    condition: ScopedCondition,
+    payload: ReopenRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionPublic:
+    """Put a cleared or waived condition back to open, with a reason (S2-05, retitled).
+
+    The old verdict stays in the history — this records that it was overruled, not that it never
+    happened, which is what makes the endpoint safe for both a misclick and a re-issue.
+    """
+    try:
+        await reopen(db, condition=condition, payload=payload, actor_user_id=current_user.id)
+    except ConditionRefused as exc:
+        raise _refused(exc) from exc
+    return await _condition_response(db, condition)
+
+
+@conditions_by_id_router.put("/{condition_id}/owner", response_model=ConditionPublic)
+async def set_condition_owner(
+    condition: ScopedCondition,
+    payload: OwnerRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionPublic:
+    """Set or clear who it is waiting on (A2).
+
+    PUT RATHER THAN POST, AND THE SPEC WRITES IT THAT WAY FOR A REASON: this is the only one of the
+    five that SETS a value rather than recording an event about a transition, and sending it twice
+    leaves the same state. `owner: null` means "back to the hint", not "nobody".
+    """
+    try:
+        await set_owner(db, condition=condition, payload=payload, actor_user_id=current_user.id)
+    except ConditionRefused as exc:
+        raise _refused(exc) from exc
+    return await _condition_response(db, condition)
+
+
+@router.post("/{loan_file_id}/conditions/bulk", response_model=BulkResultPublic)
+async def bulk_update_conditions(
+    loan_file: ScopedLoanFileById,
+    payload: BulkRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> BulkResultPublic:
+    """One write applied to many conditions, refusing the rows that may not have it.
+
+    200 WITH BOTH HALVES, NOT A 409. Partial success is the expected outcome here rather than an error:
+    the UI's line is "4 marked cleared · 1 skipped: information only", so the refusals are DATA. A 409
+    would throw away the four that worked, and a 200 listing only the successes would leave a processor
+    to work out which row did not move — which is the silent skip this shape exists to prevent.
+
+    THE LOCK IS TAKEN HERE AND IT IS NOT MUTUAL EXCLUSION. `import` takes it at the boundary so it
+    spans the commit, and this follows that placement for the same reason. But it yields
+    `bool(acquired)`, every caller in this repo proceeds either way, and its 30-second timeout
+    auto-expires a HELD lock — so what actually protects a row from a concurrent write is the
+    optimistic check on `updated_at`, per row. The lock narrows the window; nothing here may read it as
+    closing one.
+    """
+    async with loan_file_needs_lock(loan_file.id):
+        outcome = await apply_bulk(
+            db, loan_file_id=loan_file.id, payload=payload, actor_user_id=current_user.id
+        )
+        await db.commit()
+
+    return BulkResultPublic(
+        applied=outcome.applied,
+        refused=[
+            BulkRefusalPublic(condition_id=condition_id, code=code.value, message=message)
+            for condition_id, code, message in outcome.refused
+        ],
     )
 
 

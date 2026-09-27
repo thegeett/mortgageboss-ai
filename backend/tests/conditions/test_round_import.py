@@ -331,10 +331,15 @@ async def test_a_new_underwriter_note_is_appended_once(db_session: AsyncSession)
     (condition,) = await _conditions(db_session, loan_file.id)
     assert [n["text"] for n in condition.underwriter_notes] == ["8/28 Not in Upload"]
     assert condition.underwriter_notes[0]["first_seen_round_id"] == str(second.id)
-    assert any(
-        e.kind is ConditionEventKind.CONDITION_NOTE_ADDED
-        for e in await _events(db_session, second.id)
-    )
+    # ADR-408 CHANGED WHICH EVENT THIS IS, AND THIS ASSERTION USED TO NAME THE OLD ONE.
+    # A dated note is the lender reopening the condition — this test's own docstring says so — and
+    # ADR-408 settles that as ONE event carrying both from→to pairs, with `CONDITION_NOTE_ADDED` folded
+    # in rather than written beside it: the note IS the reopening, and two lines in the history for one
+    # thing the lender did reads as two notes. `tests/conditions/test_came_back.py` pins the same fold
+    # from the other side.
+    kinds = [e.kind for e in await _events(db_session, second.id)]
+    assert ConditionEventKind.CONDITION_CAME_BACK in kinds
+    assert ConditionEventKind.CONDITION_NOTE_ADDED not in kinds
 
     third = await _second_round(db_session, first=first, rows=[_row(underwriter_notes=[note])])
     await import_round(db_session, round_=third)

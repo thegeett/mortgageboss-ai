@@ -47,7 +47,7 @@ from enum import StrEnum
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, Select, case, or_, select
+from sqlalchemy import ColumnElement, Select, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
@@ -330,22 +330,35 @@ OPEN_LENDER_STATUSES = (ConditionLenderStatus.OPEN, ConditionLenderStatus.NOT_CL
 def effective_owner(condition: Condition) -> OwnerHint:
     """Who the list groups and filters on.
 
-    ONE PLACE, BECAUSE LP-912 CHANGES IT. That ticket adds `owner_override`, set by hand, which wins
-    over the hint — A2's point that "the code map and prefixes are a good first guess, not the truth".
-    Until the column exists the hint IS the effective owner, and this function is what LP-912 edits
-    rather than every caller.
+    ONE PLACE, AND LP-912 IS THE TICKET THAT CHANGED IT. `owner_override` is set by hand and wins over
+    the hint — A2's point that "the code map and prefixes are a good first guess, not the truth".
+
+    IT WAS STILL RETURNING THE HINT AFTER THE COLUMN LANDED, which is the defect the endpoint test
+    caught: `PUT /owner` answered 200, wrote the override, and the response named the hint's owner
+    anyway. This docstring had already said the function was the one to edit — saying so is not the
+    same as editing it, and only a test that read the response body could tell the difference.
     """
+    if condition.owner_override is not None:
+        return condition.owner_override
     return condition.owner_hint
 
 
 def effective_owner_source(condition: Condition) -> OwnerHintSource:
     """Where the effective owner came from, so the screen can weigh it.
 
-    LP-912 returns `MANUAL` here once an override is set. The pair travels together because a source
-    without its owner says nothing, and a UI that rendered a code-map guess and a processor's decision
-    identically would invite trusting the weaker one — which is the argument `OwnerHintSource`'s own
-    docstring makes for carrying the field at all.
+    `MANUAL` ONCE AN OVERRIDE IS SET. The pair travels together because a source without its owner says
+    nothing, and a UI that rendered a code-map guess and a processor's decision identically would invite
+    trusting the weaker one — which is the argument `OwnerHintSource`'s own docstring makes for carrying
+    the field at all.
+
+    DERIVED HERE, NOT STORED ON THE ROW. An earlier draft of `set_owner` overwrote `owner_hint_source`
+    with `manual`, which destroyed the true fact that the code map said `processor` and then rebuilt it
+    by guesswork when the override was cleared. `owner_hint_source` is provenance for the HINT and stays
+    that; deriving the effective source keeps it intact and leaves clearing an override with nothing to
+    reconstruct.
     """
+    if condition.owner_override is not None:
+        return OwnerHintSource.MANUAL
     return condition.owner_hint_source
 
 
@@ -428,19 +441,21 @@ class ConditionFilters:
 def _effective_owner_column() -> ColumnElement[OwnerHint]:
     """The SQL twin of :func:`effective_owner`, for filtering and ordering in the database.
 
-    TWO STATEMENTS OF ONE RULE, AND THEY MUST CHANGE TOGETHER. LP-912 makes both of them
-    `coalesce(owner_override, owner_hint)`. Changing only one would leave the filter selecting rows by
-    a different owner than the row displays — a split that nothing fails on, because both answers are
-    individually valid.
+    TWO STATEMENTS OF ONE RULE, AND THEY MUST CHANGE TOGETHER. Both are now
+    `coalesce(owner_override, owner_hint)`. Changing only one leaves the filter selecting rows by a
+    different owner than the row displays — a split that nothing fails on, because both answers are
+    individually valid, and LP-912 shipped exactly that split for a while: the Python side was fixed
+    first and this one still read the bare hint, so a condition reassigned to Title displayed as Title
+    and did not come back under `owner=title`.
     """
-    # CAST RATHER THAN A NARROWER ANNOTATION, AND LP-912 IS THE REASON. `Condition.owner_hint` is an
-    # `InstrumentedAttribute`, which IS a `ColumnElement` at runtime but which mypy will not accept
-    # against the wider declared type. Annotating the narrow type would type-check today and break the
-    # moment LP-912 makes this `func.coalesce(owner_override, owner_hint)` — a `ColumnElement` and not
-    # an attribute — which would defeat the point of having one function to edit. So the signature
-    # states the type that will still be true then, and the cast carries today's value to it.
-    # `models/helpers.py::scope_to_company` casts for exactly this reason and says so.
-    return cast("ColumnElement[OwnerHint]", Condition.owner_hint)
+    # CAST RATHER THAN A NARROWER ANNOTATION. `func.coalesce(...)` is a `ColumnElement` and not an
+    # `InstrumentedAttribute`, and the declared type is the wider one so that this function can hold
+    # either without its signature moving. `models/helpers.py::scope_to_company` casts for exactly this
+    # reason and says so.
+    return cast(
+        "ColumnElement[OwnerHint]",
+        func.coalesce(Condition.owner_override, Condition.owner_hint),
+    )
 
 
 def _apply_filters(

@@ -15,6 +15,8 @@ import { apiClient } from "@/lib/api/client";
 import type {
   AddConditionInput,
   BucketKind,
+  BulkInput,
+  BulkResult,
   Condition,
   ConditionDetail,
   ConditionEnrichResult,
@@ -29,7 +31,11 @@ import type {
   ConditionSummary,
   DraftUpdateInput,
   OwnerHint,
+  OwnerInput,
   PasteConditionsInput,
+  PrepStatusInput,
+  ReopenInput,
+  VerdictInput,
 } from "@/lib/types/conditions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -527,6 +533,99 @@ export function useAddCondition(fileId: string) {
     mutationFn: async (input: AddConditionInput) =>
       (await apiClient.post<Condition>(`${filePath(fileId)}/conditions`, input)).data,
     onSuccess: (condition) => invalidateRound(queryClient, fileId, condition.last_seen_round_id),
+  });
+}
+
+/**
+ * Everything ONE condition's write can change (LP-912).
+ *
+ * NARROWER THAN `invalidateRound` ON PURPOSE. A status move does not touch the round strip, the
+ * round's own card, or the file's activity timeline, and invalidating those would refetch the whole
+ * tab on every click of a status control. What it does change is the row, the summary bar's counts,
+ * and — if a sheet is open on this condition — its detail and its history.
+ *
+ * THE SUMMARY IS NOT OPTIONAL HERE. Every count on S2-01's bar is derived from status, so a processor
+ * who marks a condition cleared and sees "Open 6" unchanged has been shown a stale number about the
+ * exact thing they just did.
+ */
+function invalidateCondition(
+  queryClient: ReturnType<typeof useQueryClient>,
+  fileId: string,
+  conditionId: string,
+) {
+  void queryClient.invalidateQueries({ queryKey: conditionsQueryPrefix(fileId) });
+  void queryClient.invalidateQueries({ queryKey: conditionsSummaryQueryKey(fileId) });
+  void queryClient.invalidateQueries({ queryKey: conditionQueryKey(conditionId) });
+  void queryClient.invalidateQueries({ queryKey: conditionEventsQueryKey(conditionId) });
+}
+
+/** Move our preparation track (S2-05). */
+export function usePrepStatus(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ conditionId, ...body }: { conditionId: string } & PrepStatusInput) =>
+      (await apiClient.post<Condition>(`${conditionPath(conditionId)}/prep-status`, body)).data,
+    onSuccess: (condition) => invalidateCondition(queryClient, fileId, condition.id),
+  });
+}
+
+/**
+ * Record what the lender said — the only way to `cleared` or `waived` (S2-06, ADR-404).
+ *
+ * IT CAN LEGITIMATELY 409 AND THE CALLER MUST SHOW THE SENTENCE. A derived source without its round
+ * is refused, and so is a stale write; each carries its own wording, and "Someone else changed this
+ * condition" tells a processor something entirely different from a missing round.
+ */
+export function useVerdict(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ conditionId, ...body }: { conditionId: string } & VerdictInput) =>
+      (await apiClient.post<Condition>(`${conditionPath(conditionId)}/verdict`, body)).data,
+    onSuccess: (condition) => invalidateCondition(queryClient, fileId, condition.id),
+  });
+}
+
+/** Undo a verdict — a misclick, or the lender re-issuing. The old verdict stays in the history. */
+export function useReopen(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ conditionId, ...body }: { conditionId: string } & ReopenInput) =>
+      (await apiClient.post<Condition>(`${conditionPath(conditionId)}/reopen`, body)).data,
+    onSuccess: (condition) => invalidateCondition(queryClient, fileId, condition.id),
+  });
+}
+
+/** Set or clear who it is waiting on (S2-04). PUT, because it replaces one value. */
+export function useOwner(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ conditionId, ...body }: { conditionId: string } & OwnerInput) =>
+      (await apiClient.put<Condition>(`${conditionPath(conditionId)}/owner`, body)).data,
+    onSuccess: (condition) => invalidateCondition(queryClient, fileId, condition.id),
+  });
+}
+
+/**
+ * One write applied to many conditions (S2-07). 200 even when it refused rows.
+ *
+ * REFUSALS ARE IN THE BODY, NOT IN AN ERROR, so `onSuccess` runs for a partly-applied write and the
+ * caller must read `refused` rather than assume everything moved. A dialog that closed on success
+ * without reading it would tell a processor eleven rows were cleared when one was skipped.
+ *
+ * IT INVALIDATES THE WHOLE CONDITION AND HISTORY FAMILIES rather than each id it touched: the request
+ * carries up to 500 ids, and any of their sheets may be open.
+ */
+export function useBulkConditions(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: BulkInput) =>
+      (await apiClient.post<BulkResult>(`${filePath(fileId)}/conditions/bulk`, input)).data,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: conditionsQueryPrefix(fileId) });
+      void queryClient.invalidateQueries({ queryKey: conditionsSummaryQueryKey(fileId) });
+      void queryClient.invalidateQueries({ queryKey: ["condition"] });
+      void queryClient.invalidateQueries({ queryKey: ["condition-events"] });
+    },
   });
 }
 

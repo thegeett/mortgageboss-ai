@@ -399,9 +399,19 @@ Collected so it is not re-derived six times.
   `ck_conditions_ownerhintsource` swap (D-4; `_CASES` already watches it), plus the
   `readonly.conditions` rebuild above `def downgrade(`; every new enum mirrored into
   `frontend/lib/types/conditions.ts` and registered in `_MIRRORED`
-  (`tests/test_condition_type_mirror.py:55`), or the TS side silently lacks it; the refusal sentences
-  taken verbatim from S2-04 / S2-05 (below); bulk inside `loan_file_needs_lock`, which is **advisory
-  and not mutual exclusion** — the lock narrows a window, it does not close it.
+  (`tests/test_condition_type_mirror.py:55`), or the TS side silently lacks it; bulk inside
+  `loan_file_needs_lock`, which is **advisory and not mutual exclusion** — the lock narrows a window,
+  it does not close it.
+
+  **THE REFUSAL SENTENCES ARE NOT IN THE DESIGN PACK, and this line said they were.** Corrected while
+  building: all eleven Stage 2 screens were grepped and none of the four appears. The only related
+  wording is S2-05's *hint* ("Moving back keeps the history. Moving forward never needs a reason."),
+  which is not a refusal, and there is no "skipped" wording either. **§LP-912 of the tickets file is
+  their single source of truth**, and the bulk report line ("4 updated · 1 skipped: information only")
+  lives only in the spec's LP-913 text. That is consistent rather than an omission — every mockup is a
+  happy-path state, and a refusal only appears once a processor trips it. A test compares each sentence
+  against the tickets file's own bytes rather than a second hand-typed copy, which is what makes
+  "character for character" a property instead of a claim (em dash included).
 
   **Three things LP-911's review hands forward** (LP-911 §Review, R1/R6/R8):
   - **Narrow `came_back` in the commit that allows a manual verdict.** LP-911 ships it as "the lender
@@ -448,6 +458,17 @@ Collected so it is not re-derived six times.
     the right default for LP-913, because it is cheap and every other filter stays shareable. But
     record it as an ADR-405 amendment that names the pipeline as the same exposure, or the app ends
     up with one rule for conditions and the opposite for borrowers.)*
+- **Two follow-ups LP-912's review found, neither belonging to any Stage 2 ticket** *(recorded here
+  because LP-911's forward items were nearly lost inside a Review section)*:
+  - **24 CHECK constraint names disagree between a migrated database and `create_all`**, on 12 tables —
+    19 doubled by the naming convention (all eleven of LP-904's, plus `communication_evidence`,
+    `finding_events` ×2, `lender_contacts`, `mailbox_connections` ×3, `reminder_snoozes`) and five
+    differing outright. Not urgent: `tests/test_migrated_checks_match_models.py` now compares by COLUMN
+    rather than by name, so the landmine fails the suite instead of shipping. The rename is a tidy-up.
+  - **Three CHECKs the models declare were NEVER migrated** — `communications.body_format`,
+    `users.mail_client`, `validation_verdicts.kind`. A migrated database accepts any string in those
+    columns today. Older than this stage, listed in that test's `_KNOWN_MISSING`, and the fix is one
+    migration adding the three.
 - **LP-915:** `condition_rounds.comparison` is a new column and therefore a `readonly` decision (D-1);
   the `possible_match` id the "Reworded?" rule reads is written only for same-code /
   different-fingerprint, and points at the **oldest** such condition.

@@ -26,6 +26,7 @@ events is only as good as its enumeration of the writers.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 from uuid import UUID
 
@@ -38,7 +39,15 @@ from app.conditions.fingerprint import fingerprint
 from app.conditions.lender_codes.status import resolved_status
 from app.models.activity_log import ActivityType
 from app.models.base import utcnow
-from app.models.condition import BucketKind, Condition, ConditionOrigin, OwnerHint, OwnerHintSource
+from app.models.condition import (
+    BucketKind,
+    Condition,
+    ConditionLenderStatus,
+    ConditionOrigin,
+    ConditionPrepStatus,
+    OwnerHint,
+    OwnerHintSource,
+)
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_round import (
     ConditionRound,
@@ -49,8 +58,9 @@ from app.models.condition_round import (
 from app.models.helpers import only_active
 from app.models.lender_condition_code import LenderCodeStatus, LenderConditionCode
 from app.models.loan_file import LoanFile
-from app.schemas.condition import ConditionCreateRequest, DraftRowPublic
+from app.schemas.condition import ConditionCreateRequest, DraftRowPublic, VerdictSourceKind
 from app.services.activity_log import log_activity
+from app.services.condition_status import came_back_verdict, normalise_note_text
 from app.services.conditions import latest_imported_round
 
 logger = structlog.get_logger(__name__)
@@ -226,8 +236,144 @@ def _notes_from_row(row: dict[str, Any], *, round_id: UUID) -> list[dict[str, An
 def _new_notes(
     existing: list[dict[str, Any]], incoming: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
+    """The RAW comparison: a note is new unless its exact `(date, text)` is already saved.
+
+    KEPT AS IT WAS, AND IT IS NOT WHAT A1 DECIDES ON. `_resolve_notes` below is the rule LP-912 acts
+    on, because two things this cannot see are load-bearing: whitespace inside a note (a paste and a
+    PDF space the same note differently) and whether an undated saved note could possibly predate an
+    incoming dated one. This function has no access to the file's rounds and therefore cannot answer
+    the second at all.
+
+    It stays because it states the narrow question honestly and `test_note_identity.py` measures the
+    gap between the two.
+    """
     seen = {_note_key(note) for note in existing if isinstance(note, dict)}
     return [note for note in incoming if _note_key(note) not in seen]
+
+
+async def _round_dates(db: AsyncSession, *, loan_file_id: UUID) -> dict[UUID, date]:
+    """`{round_id: round_date}` for the file — what bounds an undated saved note.
+
+    ONE QUERY FOR THE WHOLE IMPORT, not one per note. `round_date` is "`date_printed` when known, else
+    the date received", so a note first saved from a paste received on 08/29 cannot have been written
+    after 08/29 — which is exactly the bound that tells a re-issue from the same note seen twice.
+    """
+    rows = await db.execute(
+        select(ConditionRound.id, ConditionRound.round_date).where(
+            ConditionRound.loan_file_id == loan_file_id
+        )
+    )
+    # `.tuples()` RATHER THAN `.all()`, AND THE DIFFERENCE IS THE TYPE AND NOT THE VALUES. A plain
+    # `.all()` is a `Sequence[Row[...]]`, which `dict()` accepts at runtime and mypy refuses — the
+    # first version of this line was a dict comprehension, "simplified" to `dict(rows.all())` to
+    # satisfy ruff's C416, which traded a lint error for a type error. This satisfies both.
+    return dict(rows.tuples().all())
+
+
+@dataclass(frozen=True)
+class _NotesOutcome:
+    """What this import did to one condition's notes, and whether the lender reopened it."""
+
+    #: The full list to store, including any date filled in place.
+    notes: list[dict[str, Any]]
+    #: How many notes are genuinely new.
+    added: int
+    #: The normalised texts whose date was filled in place — recorded in `CONDITION_SEEN_AGAIN`
+    #: (survey §5.2, R10), because a fill changes what the chip shows and writes no event of its own.
+    dated: list[str]
+    #: The new DATED note that reopened the condition, or None. At most one: the latest.
+    reopened_by: dict[str, Any] | None
+
+
+def _note_date(note: dict[str, Any]) -> date | None:
+    raw = note.get("date")
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _resolve_notes(
+    condition: Condition,
+    row: dict[str, Any],
+    *,
+    round_: ConditionRound,
+    round_dates: dict[UUID, date],
+) -> _NotesOutcome:
+    """Decide, for each incoming note, whether it is new — and whether it reopens the condition (A1).
+
+    THREE OUTCOMES PER NOTE, and the middle one is the whole subtlety (survey §5.2 as amended):
+
+    1. **Already saved** — same normalised text and same date, or both undated. Nothing happens.
+    2. **The same note, now dated.** The saved copy has no date because it came from a paste, which has
+       no `date_printed` to resolve a year against. If the incoming date is on or before the saved
+       note's BOUND — the `round_date` of the round it was first seen on — it cannot be a later
+       statement, so it is the same note: its date is filled in place, recorded in the seen-again
+       event, and **no status moves**.
+    3. **A re-issue, or a genuinely new note.** Either the text is new, or the same text arrives dated
+       AFTER the bound. If it carries a date, the lender has reopened the condition and A1 fires. If it
+       does not, it is recorded and nothing moves, because a verdict needs a date.
+
+    MATCHED ON NORMALISED TEXT, NEVER RAW (R8). The reader keeps whatever spacing arrives — measured:
+    a paste gives `'Not in  Upload'` where the PDF gives `'Not in Upload'` — so raw equality fails to
+    recognise the same note and fires a false *Came back*, reopening a condition on the lender's behalf.
+
+    WITHOUT A BOUND, NOTHING REOPENS. A saved note whose `first_seen_round_id` names no round we can
+    date cannot be compared, and the safe reading is that it is the same note: the date is filled and no
+    status moves. The cost is a missed *Came back* the processor can still record by hand; the
+    alternative cost is reopening a condition on a guess.
+    """
+    existing: list[dict[str, Any]] = [
+        dict(note) for note in (condition.underwriter_notes or []) if isinstance(note, dict)
+    ]
+    by_text: dict[str, int] = {}
+    for index, note in enumerate(existing):
+        by_text.setdefault(normalise_note_text(str(note.get("text") or "")), index)
+
+    added: list[dict[str, Any]] = []
+    dated: list[str] = []
+    reopened: dict[str, Any] | None = None
+
+    for incoming in _notes_from_row(row, round_id=round_.id):
+        text = normalise_note_text(str(incoming.get("text") or ""))
+        incoming_date = _note_date(incoming)
+        saved_index = by_text.get(text)
+
+        if saved_index is not None:
+            saved = existing[saved_index]
+            if _note_date(saved) is not None or incoming_date is None:
+                # Outcome 1: already saved, with or without a date on both sides.
+                continue
+
+            bound_source = saved.get("first_seen_round_id")
+            bound = None
+            if isinstance(bound_source, str):
+                try:
+                    bound = round_dates.get(UUID(bound_source))
+                except ValueError:
+                    bound = None
+
+            if bound is None or incoming_date <= bound:
+                # Outcome 2: the same note, now dated. Fill it; move nothing.
+                saved["date"] = incoming_date.isoformat()
+                dated.append(text)
+                continue
+
+        # Outcome 3: new text, or the same text dated after the bound.
+        added.append(incoming)
+        if incoming_date is not None and (
+            reopened is None or incoming_date > (_note_date(reopened) or incoming_date)
+        ):
+            reopened = incoming
+
+    return _NotesOutcome(
+        notes=[*existing, *added],
+        added=len(added),
+        dated=dated,
+        reopened_by=reopened,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -615,6 +761,9 @@ async def import_round(
     # meaningless without the lender (ADR-407), so the code-map step is SKIPPED rather than guessed
     # at — the conditions still land, carrying their codes as printed. LP-905 already treats a
     # lender-less file as a real state rather than an error.
+    # Loaded once for the whole import: what bounds an undated saved note (see `_resolve_notes`).
+    round_dates = await _round_dates(db, loan_file_id=round_.loan_file_id)
+
     codes = _codes_on_sheet(rows)
     code_map: dict[str, LenderConditionCode] = {}
     if round_.lender_id is not None:
@@ -662,6 +811,12 @@ async def import_round(
             continue
 
         changed = _update_seen_again(match, row, round_=round_)
+        # RESOLVED BEFORE THE SEEN-AGAIN EVENT IS WRITTEN, because a date fill is recorded INSIDE that
+        # event (survey §5.2, R10) — there is no second event for it. The old order added the event
+        # first and then handled notes, which made that impossible.
+        notes_outcome = _resolve_notes(match, row, round_=round_, round_dates=round_dates)
+        if notes_outcome.dated:
+            changed["notes_dated"] = notes_outcome.dated
         if match.lender_id is None and round_.lender_id is not None:
             # ADOPTION, AND WITHOUT IT THE BENIGN CASE QUIETLY DEGRADES. A condition recorded
             # before the file had a lender matched this round by wording — but leaving it at `None`
@@ -687,12 +842,58 @@ async def import_round(
         )
         seen_again_count += 1
 
-        incoming = _notes_from_row(row, round_id=round_.id)
-        fresh = _new_notes(list(match.underwriter_notes or []), incoming)
-        if fresh:
+        if notes_outcome.added:
             # Reassigned rather than appended in place: JSONB tracks by identity, and mutating the
             # list would not mark the attribute dirty.
-            match.underwriter_notes = [*(match.underwriter_notes or []), *fresh]
+            match.underwriter_notes = notes_outcome.notes
+
+        if notes_outcome.reopened_by is not None:
+            # A1, AND THIS IS THE ONE EVENT FOR IT (ADR-408, spec §6 rule 4). It carries BOTH from→to
+            # pairs, because the lender's answer and its consequence for our work are one statement —
+            # and `CONDITION_NOTE_ADDED` folds into it rather than being written beside it, since the
+            # note IS the reopening.
+            note = notes_outcome.reopened_by
+            note_date = date.fromisoformat(str(note["date"]))
+            now = utcnow()
+            prep_from = match.prep_status
+            match.lender_status = ConditionLenderStatus.NOT_CLEARED
+            match.lender_status_changed_at = now
+            match.verdict = came_back_verdict(note_date=note_date, round_id=round_.id, at=now)
+            # OUR TRACK GOES BACK ONLY IF IT HAD MOVED ON. A condition still at `to_do` or `waiting`
+            # needs no correction — it was already being worked — and resetting it would wipe the
+            # owner a processor had chosen. `ready` and `with_underwriter` are the two that became
+            # untrue the moment the lender refused it.
+            if prep_from in (ConditionPrepStatus.READY, ConditionPrepStatus.WITH_UNDERWRITER):
+                match.prep_status = ConditionPrepStatus.TO_DO
+                match.prep_status_changed_at = now
+                match.waiting_on = None
+            db.add(
+                ConditionEvent(
+                    company_id=round_.company_id,
+                    loan_file_id=round_.loan_file_id,
+                    round_id=round_.id,
+                    condition_id=match.id,
+                    kind=ConditionEventKind.CONDITION_CAME_BACK,
+                    actor_user_id=actor_user_id,
+                    # ITS PROVENANCE IS WHAT MAKES THIS EVENT LEGITIMATE. The append-only guard's
+                    # question is "could a reader infer the lender answered WITHOUT the row saying
+                    # where the lender said it" — this row DOES state an answer, so it is allowed only
+                    # because it names the source and the note's date. A test asserts exactly that.
+                    detail={
+                        "lender_code": match.lender_code,
+                        "lender_status_from": ConditionLenderStatus.OPEN.value,
+                        "lender_status_to": ConditionLenderStatus.NOT_CLEARED.value,
+                        "prep_status_from": prep_from.value,
+                        "prep_status_to": match.prep_status.value,
+                        "source_kind": VerdictSourceKind.UNDERWRITER_NOTE.value,
+                        "source_date": note_date.isoformat(),
+                    },
+                )
+            )
+        elif notes_outcome.added:
+            # A new note that reopens NOTHING — an undated one. It is recorded, and no status moves:
+            # a verdict needs a date, and a note we cannot date is not the lender answering on a day
+            # (survey §5.2). Stage 1's behaviour, kept deliberately.
             db.add(
                 ConditionEvent(
                     company_id=round_.company_id,
@@ -701,7 +902,7 @@ async def import_round(
                     condition_id=match.id,
                     kind=ConditionEventKind.CONDITION_NOTE_ADDED,
                     actor_user_id=actor_user_id,
-                    detail={"notes_added": len(fresh), "lender_code": match.lender_code},
+                    detail={"notes_added": notes_outcome.added, "lender_code": match.lender_code},
                 )
             )
 
