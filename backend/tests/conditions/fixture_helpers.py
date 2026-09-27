@@ -80,4 +80,11 @@ def portal_excerpt() -> str:
 
 UWM_ROUND_1 = "uwm_round1_2026-08-28.txt"
 UWM_ROUND_2 = "uwm_round2_2026-09-10.txt"
+#: §7.3, NEW AND SYNTHETIC — the round that makes the comparison's four outcomes reachable at once:
+#: `1228` came back (same wording, a new dated note), `6378` reworded, `7383` new, `0006`/`0007`
+#: absent and therefore probably cleared. Round 2 alone can only show "probably cleared".
+#:
+#: EVERY VALUE IN IT IS FICTIONAL, including `7383`'s account ending and amount. Real sheets never
+#: enter the repo (ADR-405), so the wording was written for the fixture rather than taken from one.
+UWM_ROUND_3 = "uwm_round3_2026-09-18.txt"
 UWM_PAGEBREAK = "uwm_master_pagebreak.txt"

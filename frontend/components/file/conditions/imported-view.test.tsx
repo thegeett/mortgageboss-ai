@@ -150,6 +150,7 @@ function round(
       failure_detail: null,
     },
     header: { lender_team: [], loan_facts: {} },
+    comparison: null,
     condition_count: 11,
     // Null rather than a number: these fixtures pin what the card says WITHOUT the counts, and a
     // value here would append "· N new" to the "11 on sheet" line every existing assertion reads.

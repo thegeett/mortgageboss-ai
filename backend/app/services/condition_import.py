@@ -952,6 +952,24 @@ async def import_round(
 
     await db.flush()
 
+    # --- LP-915: what changed, computed once and saved on the round ------------------------------
+    #
+    # AFTER THE FLUSH, BECAUSE IT READS THE EVENTS THIS IMPORT JUST WROTE. Every outcome it produces
+    # is derived from `CONDITION_CREATED` / `SEEN_AGAIN` / `CAME_BACK` rows carrying this round's id,
+    # so running it before the flush would compare against an import that had not happened yet.
+    #
+    # ROUND 1 IS SKIPPED, and not as an optimisation: there is nothing it could be compared against,
+    # and a comparison saying "11 new, 0 still open" would dress the first sheet up as a change.
+    # `compared_with` would be 0 and every condition would be "new", which is true and useless.
+    #
+    # IMPORTED HERE RATHER THAN AT MODULE LEVEL. `condition_compare` imports `services.conditions`,
+    # as this module does, and neither imports the other — so the edge is acyclic today. The local
+    # import keeps it that way by construction rather than by everyone remembering.
+    if number >= 2:
+        from app.services.condition_compare import compare_round
+
+        await compare_round(db, round_=round_, actor_user_id=actor_user_id)
+
     # IDS, COUNTS AND CODES ONLY — never a condition's wording, never a borrower fact (spec §9.5).
     logger.info(
         "condition_round_imported",

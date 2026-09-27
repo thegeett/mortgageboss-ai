@@ -610,7 +610,9 @@ class ConditionSummary:
     pending_suggestions: int
 
 
-def summarise_conditions(conditions: list[Condition]) -> ConditionSummary:
+def summarise_conditions(
+    conditions: list[Condition], *, pending_suggestions: int
+) -> ConditionSummary:
     """Count one file's conditions. Pure, so a test can state the rows and read the numbers.
 
     THE THREE BREAKDOWNS COUNT **OPEN** CONDITIONS ONLY, and that is a decision rather than an
@@ -649,10 +651,12 @@ def summarise_conditions(conditions: list[Condition]) -> ConditionSummary:
         by_bucket_kind=dict(by_bucket_kind),
         open_prior_to_docs=by_bucket_kind.get(BucketKind.PRIOR_TO_DOCS.value, 0),
         open_prior_to_funding=by_bucket_kind.get(BucketKind.PRIOR_TO_FUNDING.value, 0),
-        # 0 UNTIL LP-915 WRITES ONE. Named with its producer rather than left to look measured: that
-        # ticket's comparison is the only thing that may propose "probably cleared", and until it
-        # lands this number is honestly nothing rather than possibly something.
-        pending_suggestions=0,
+        # PASSED IN, BECAUSE THIS FUNCTION CANNOT KNOW IT. A pending suggestion belongs to a ROUND's
+        # saved comparison, not to any condition — nothing on a row says "round 2 thinks this cleared"
+        # — and this function is pure over conditions so a test can state the rows and read the
+        # numbers. It is a REQUIRED keyword rather than a defaulted one for the reason the dataclass
+        # gives above: a default here is how `condition_count` came to read "0 on sheet".
+        pending_suggestions=pending_suggestions,
     )
 
 
@@ -664,7 +668,39 @@ async def condition_summary(db: AsyncSession, *, loan_file_id: UUID) -> Conditio
     place for "open" to be spelled differently from :func:`is_open`, which is the one definition the
     row and the bar must share.
     """
-    return summarise_conditions(await list_conditions(db, loan_file_id=loan_file_id))
+    return summarise_conditions(
+        await list_conditions(db, loan_file_id=loan_file_id),
+        pending_suggestions=await pending_suggestion_count(db, loan_file_id=loan_file_id),
+    )
+
+
+async def pending_suggestion_count(db: AsyncSession, *, loan_file_id: UUID) -> int:
+    """How many "probably cleared" questions are still waiting on this file (LP-915).
+
+    EVERY IMPORTED ROUND, NOT ONLY THE NEWEST. A processor can press *Not now* on round 2 and then
+    import round 3; round 2's questions are still unanswered and the summary bar still owes her the
+    number. Summing the rounds is also what makes the count fall to zero on its own — confirming or
+    declining both empty that round's `probably_cleared`.
+
+    A SUGGESTION IS NOT A STATUS, so this is deliberately not derivable from the conditions
+    themselves: the five rows it refers to are all plainly `open`, and that is the point (ADR-404).
+
+    THE STORED SHAPE IS CHECKED RATHER THAN TRUSTED. `comparison` is JSONB written by this
+    application, but it is still a column a migration or an older row could leave in another shape,
+    and a summary that raises would take down the whole conditions tab over a count.
+    """
+    stmt = select(ConditionRound.comparison).where(
+        ConditionRound.loan_file_id == loan_file_id,
+        ConditionRound.status == ConditionRoundStatus.IMPORTED,
+    )
+    total = 0
+    for comparison in (await db.execute(only_active(stmt, ConditionRound))).scalars().all():
+        if not isinstance(comparison, dict):
+            continue
+        pending = comparison.get("probably_cleared")
+        if isinstance(pending, list):
+            total += len(pending)
+    return total
 
 
 async def imported_rounds_oldest_first(

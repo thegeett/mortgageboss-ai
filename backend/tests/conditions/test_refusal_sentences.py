@@ -22,11 +22,11 @@ TWO DIFFERENCES ARE PERMITTED, AND BOTH ARE STATED RATHER THAN QUIETLY ALLOWED:
    simply wrong — so the code carries a `{target}` placeholder and the To-do instance is what is
    pinned.
 
-Four more codes exist (`waiting_needs_owner`, `nothing_to_reopen`, `verdict_needs_round`,
-`status_not_offered`) and are deliberately NOT checked here: the spec gives its four "for example", the
-others are mine, and a test comparing my sentences against my own constants would be a tautology. What
-IS asserted about them is that every code has a non-empty sentence, and that the set of codes and the
-set of sentences cannot drift apart.
+Five more codes exist (`waiting_needs_owner`, `nothing_to_reopen`, `verdict_needs_round`,
+`status_not_offered`, `condition_was_replaced`) and are deliberately NOT checked here: the spec gives
+its four "for example", the others are mine, and a test comparing my sentences against my own constants
+would be a tautology. What IS asserted about them is that every code has a non-empty sentence, and that
+the set of codes and the set of sentences cannot drift apart.
 """
 
 from __future__ import annotations
@@ -125,7 +125,7 @@ def test_the_interpolated_target_is_actually_interpolated() -> None:
 
 
 def test_every_refusal_code_has_a_sentence_and_none_is_orphaned() -> None:
-    """The four authored codes are not compared against the spec — this is what covers them instead.
+    """The five authored codes are not compared against the spec — this is what covers them instead.
 
     Every code must resolve to a non-empty sentence, and every sentence constant must belong to a code.
     A code added without wording would otherwise refuse a write with an empty string, which is the one
@@ -140,6 +140,7 @@ def test_every_refusal_code_has_a_sentence_and_none_is_orphaned() -> None:
         RefusalCode.NOTHING_TO_REOPEN: status._NOTHING_TO_REOPEN,
         RefusalCode.VERDICT_NEEDS_ROUND: status._VERDICT_NEEDS_ROUND,
         RefusalCode.STATUS_NOT_OFFERED: status._STATUS_NOT_OFFERED,
+        RefusalCode.CONDITION_WAS_REPLACED: status._CONDITION_WAS_REPLACED,
     }
 
     uncovered = sorted(code.value for code in RefusalCode if code not in sentences)

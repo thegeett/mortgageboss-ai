@@ -122,6 +122,9 @@ export function ConditionDetailSheet({
   onSetOwner,
   onRecordAnswer,
   onReopen,
+  suggestedIds,
+  suggestedRoundNumber,
+  onConfirmSuggestion,
 }: {
   /** The list's rows, in the list's order — the filter and sort come with them. */
   conditions: Condition[];
@@ -133,6 +136,16 @@ export function ConditionDetailSheet({
   onSetOwner: (condition: Condition, owner: OwnerHint | null) => void;
   onRecordAnswer: (condition: Condition) => void;
   onReopen: (condition: Condition) => void;
+  /**
+   * Conditions the newest comparison suggests probably cleared (LP-915).
+   *
+   * LP-916 LEFT THIS BLOCK OUT ON PURPOSE and said why: `pending_suggestion` had no producer, so the
+   * block would have been a branch nobody could reach. LP-915 is the producer, so it arrives with it.
+   */
+  suggestedIds?: ReadonlySet<string>;
+  suggestedRoundNumber?: number | null;
+  /** Confirm this ONE condition — the spec's "she can also confirm one from the detail sheet". */
+  onConfirmSuggestion?: (condition: Condition) => void;
 }) {
   const index = conditions.findIndex((row) => row.id === openId);
   const row = index >= 0 ? conditions[index] : undefined;
@@ -176,6 +189,7 @@ export function ConditionDetailSheet({
         {row ? (
           <SheetBody
             row={row}
+            conditions={conditions}
             hasPrevious={index > 0}
             hasNext={index >= 0 && index < conditions.length - 1}
             onStep={step}
@@ -183,6 +197,9 @@ export function ConditionDetailSheet({
             onSetOwner={onSetOwner}
             onRecordAnswer={onRecordAnswer}
             onReopen={onReopen}
+            onSelect={onSelect}
+            suggestedInRound={suggestedIds?.has(row.id) ? (suggestedRoundNumber ?? null) : null}
+            onConfirmSuggestion={onConfirmSuggestion}
           />
         ) : null}
       </SheetContent>
@@ -199,8 +216,14 @@ function SheetBody({
   onSetOwner,
   onRecordAnswer,
   onReopen,
+  onSelect,
+  suggestedInRound,
+  onConfirmSuggestion,
+  conditions,
 }: {
   row: Condition;
+  /** The list's rows — used to resolve the replaced/replaces pair without a second request. */
+  conditions: Condition[];
   hasPrevious: boolean;
   hasNext: boolean;
   onStep: (delta: number) => void;
@@ -208,6 +231,9 @@ function SheetBody({
   onSetOwner: (condition: Condition, owner: OwnerHint | null) => void;
   onRecordAnswer: (condition: Condition) => void;
   onReopen: (condition: Condition) => void;
+  onSelect: (conditionId: string) => void;
+  suggestedInRound?: number | null;
+  onConfirmSuggestion?: (condition: Condition) => void;
 }) {
   const detail = useCondition(row.id);
   const events = useConditionEvents(row.id);
@@ -219,6 +245,28 @@ function SheetBody({
   const kindChip = BUCKET_KIND_CHIP[condition.bucket_kind];
   const reopenable = condition.lender_status === "cleared" || condition.lender_status === "waived";
   const roundById = new Map((detail.data?.rounds ?? []).map((r) => [r.round_id, r]));
+
+  /**
+   * A REPLACED CONDITION TAKES NO WRITES, so this screen must not offer any (LP-915).
+   *
+   * The server refuses every one of them with `condition_was_replaced` — a status move, a verdict, a
+   * reopen and an owner change alike — because the successor carries the work from the moment a
+   * reworded pair is confirmed. Leaving the selects live would put four controls on screen whose only
+   * possible outcome is a 409, which is the same dead-branch trade LP-916 refused for this sheet's
+   * unreachable blocks. What replaces them is the link to the row that DOES take the work.
+   *
+   * Read from `superseded_by_id` rather than from the status, for the reason the service guard gives:
+   * the pointer is the fact, and `lender_status == superseded` is a rendering of it.
+   */
+  const replacedById = condition.superseded_by_id;
+  // THE REVERSE DIRECTION, out of the rows the list already handed over: the condition THIS one
+  // replaced is the one pointing at it. No extra request, and it is the same pair read from the other
+  // end — `superseded_by_id` is the single fact, so the two directions cannot disagree.
+  const replaces = conditions.filter((other) => other.superseded_by_id === condition.id);
+  // The link is offered only when the successor is among those rows. A filter can hide it, and a
+  // button that opens nothing is worse than the sentence beside it.
+  const successorKnown =
+    replacedById !== null && conditions.some((other) => other.id === replacedById);
 
   return (
     <>
@@ -305,6 +353,7 @@ function SheetBody({
             </span>
             <Select
               aria-label="Our status"
+              disabled={replacedById !== null}
               value={condition.prep_status}
               // `review` is not offered (A4), so a row already carrying it keeps it as an extra
               // option rather than being silently rewritten by the control that renders it.
@@ -333,6 +382,7 @@ function SheetBody({
             <div className="flex items-center gap-2">
               <Select
                 aria-label="Owner"
+                disabled={replacedById !== null}
                 value={condition.effective_owner}
                 onChange={(event) => onSetOwner(condition, event.target.value as OwnerHint)}
               >
@@ -364,7 +414,7 @@ function SheetBody({
             </span>
             <div className="flex items-center justify-between gap-2">
               <StatusToken meta={lenderMeta} />
-              {reopenable ? (
+              {replacedById !== null ? null : reopenable ? (
                 <Button variant="outline" size="sm" onClick={() => onReopen(condition)}>
                   <Undo2 className="h-3 w-3" aria-hidden />
                   Reopen
@@ -378,7 +428,63 @@ function SheetBody({
           </div>
 
           {condition.verdict ? <VerdictCallout verdict={condition.verdict} /> : null}
+
+          {/* REPLACED: WHERE THE WORK WENT (S2-03's content list, item 8). Nothing disappeared — this
+              row and its whole history are still here — but the next action is on the other one, so
+              the screen points at it instead of offering writes that cannot succeed. */}
+          {replacedById !== null ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-input bg-muted/40 p-2 text-xs text-foreground-2">
+              <span>
+                This condition was replaced by a later one. Nothing was deleted — the work moved.
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                // Navigable only when the successor is among the rows the list handed over; a filter
+                // can hide it, and a button that opens nothing is worse than a sentence.
+                disabled={!successorKnown}
+                onClick={() => onSelect(replacedById)}
+              >
+                Open the one that replaced it
+              </Button>
+            </div>
+          ) : null}
+          {replaces.length > 0 ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Replaces {replaces.map((row) => row.lender_code ?? "a condition").join(", ")}.
+            </p>
+          ) : null}
         </section>
+
+        {/* PENDING SUGGESTION (S2-03's content list, item 6) — the per-condition half of S2-06's
+            panel. A QUESTION WITH A BUTTON, never a status: the Lender row above still reads Open,
+            and it is this click that records the verdict. */}
+        {suggestedInRound !== null && suggestedInRound !== undefined ? (
+          <section className="flex flex-col gap-2 rounded-lg border border-primary/35 bg-primary/5 p-3">
+            <p className="text-sm font-medium text-foreground">
+              Round {suggestedInRound} suggests this probably cleared
+            </p>
+            <p className="text-xs text-foreground-2">
+              It was open before round {suggestedInRound} and is not on that sheet, which was the
+              lender’s full list. Nothing changes until you confirm.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                disabled={onConfirmSuggestion === undefined}
+                onClick={() => onConfirmSuggestion?.(condition)}
+              >
+                Confirm as cleared
+              </Button>
+              {/* NO "Keep open" BUTTON. Keeping it open is what happens if she does nothing, and a
+                  button that dismisses the question would withdraw a suggestion from this one row
+                  while the panel still offers it — two places disagreeing about one question. */}
+              <span className="text-xs text-muted-foreground">
+                Or leave it — it stays Open until you decide.
+              </span>
+            </div>
+          </section>
+        ) : null}
 
         {condition.underwriter_notes.length > 0 ? (
           <section>

@@ -69,11 +69,20 @@ from app.schemas.condition import (
     ConditionRoundPublic,
     ConditionSort,
     ConditionSummaryPublic,
+    ConfirmClearedRequest,
     OwnerRequest,
     PrepStatusRequest,
     ReopenRequest,
+    RewordedDecisionRequest,
+    RoundCompletenessUpdate,
     UnderwriterNotePublic,
     VerdictRequest,
+)
+from app.services.condition_compare import (
+    RoundComparisonRefused,
+    confirm_probably_cleared,
+    confirm_reworded,
+    switch_completeness,
 )
 from app.services.condition_enrich import RoundNotEnrichable, enrich_round_with_pdf
 from app.services.condition_import import (
@@ -960,6 +969,124 @@ async def update_condition_draft(
     try:
         await update_draft(db, round_=round_, payload=payload)
     except RoundNotEditable as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+
+    await db.commit()
+    await db.refresh(round_)
+    return await _round_card(db, round_)
+
+
+@rounds_router.post(
+    "/{round_id}/confirm-cleared",
+    response_model=ConditionRoundPublic,
+    status_code=status.HTTP_200_OK,
+)
+async def confirm_round_suggestions(
+    round_: ScopedRound,
+    payload: ConfirmClearedRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionRoundPublic:
+    """Record the ticked suggestions as cleared (screens S2-06 and S2-07).
+
+    THE PATH IS MINE: §LP-915 describes the button and the verdict it writes but names no endpoint.
+    `confirm-cleared` sits on the round because the suggestion belongs to the round — it is that
+    sheet's evidence — and because the panel already holds the round id it is looking at.
+
+    TWO REFUSAL SHAPES, BECAUSE TWO DIFFERENT THINGS CAN SAY NO. `RoundComparisonRefused` is the
+    round's state (nothing pending among those ids) and carries a sentence; `ConditionRefused` comes
+    from `record_verdict` deeper down and carries a sentence AND a typed code — an information-only
+    line, or a condition that was replaced since the panel was drawn. Both are 409, and `_refused`
+    keeps the second one's code intact rather than flattening it to prose.
+
+    IT ANSWERS WITH THE ROUND, so the panel can redraw itself: after a confirm the round has no
+    pending suggestions at all, and that emptiness is the state the client has to see.
+    """
+    try:
+        await confirm_probably_cleared(
+            db,
+            round_=round_,
+            condition_ids=payload.condition_ids,
+            actor_user_id=current_user.id,
+        )
+    except RoundComparisonRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    except ConditionRefused as exc:
+        raise _refused(exc) from exc
+
+    await db.commit()
+    await db.refresh(round_)
+    return await _round_card(db, round_)
+
+
+@rounds_router.post(
+    "/{round_id}/reworded",
+    response_model=ConditionRoundPublic,
+    status_code=status.HTTP_200_OK,
+)
+async def resolve_reworded_pair(
+    round_: ScopedRound,
+    payload: RewordedDecisionRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionRoundPublic:
+    """Answer S2-08's *Same condition* / *Different conditions*.
+
+    ONE ENDPOINT WITH A BOOLEAN, NOT TWO PATHS. The two buttons answer one question about one pair,
+    and the interesting half of the request is WHICH pair — so `same` is a field rather than a verb in
+    the URL. "Nothing happens until you choose" is the screen's own line, and this is the choosing.
+
+    THE PATH IS MINE, as with `confirm-cleared`: the spec names the buttons and their effects, not a
+    route.
+    """
+    try:
+        await confirm_reworded(
+            db,
+            round_=round_,
+            old_id=payload.old_id,
+            new_id=payload.new_id,
+            same=payload.same,
+            actor_user_id=current_user.id,
+        )
+    except RoundComparisonRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+
+    await db.commit()
+    await db.refresh(round_)
+    return await _round_card(db, round_)
+
+
+@rounds_router.put(
+    "/{round_id}/completeness",
+    response_model=ConditionRoundPublic,
+    status_code=status.HTTP_200_OK,
+)
+async def switch_round_completeness(
+    round_: ScopedRound,
+    payload: RoundCompletenessUpdate,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionRoundPublic:
+    """Switch an imported round between *Full list* and *Just some* (A7, screen S2-10).
+
+    THE ONE PATH THE SPEC DOES GIVE: `PUT /api/condition-rounds/{id}/completeness`. Its body is
+    written there as `{completeness, updated_at}`; the field is `expected_updated_at` here, for the
+    reason `RoundCompletenessUpdate` records — every other concurrent write in this feature spells it
+    that way.
+
+    THIS IS THE DOOR S2-10'S **Switch to Full list** KNOCKS ON, and switching is what makes absence
+    mean something: the comparison is recomputed on the way to *Full list*, and on the way back the
+    unconfirmed suggestions are withdrawn while recorded verdicts stay.
+    """
+    try:
+        await switch_completeness(
+            db,
+            round_=round_,
+            completeness=payload.completeness,
+            expected_updated_at=payload.expected_updated_at,
+            actor_user_id=current_user.id,
+        )
+    except RoundComparisonRefused as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
 
     await db.commit()

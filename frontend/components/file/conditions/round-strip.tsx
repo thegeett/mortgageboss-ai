@@ -66,6 +66,7 @@ export function RoundStrip({
           So the display order is reversed inside the render and the prop contract is untouched. */}
       {[...rounds].reverse().map((round) => {
         const attachable = canAttachPdf(round);
+        const pendingSuggestions = round.comparison?.probably_cleared.length ?? 0;
         return (
           <div
             key={round.id}
@@ -110,6 +111,16 @@ export function RoundStrip({
               {round.seen_again ? ` · ${round.seen_again} seen again` : null}
               {round.status === "discarded" ? " · discarded" : null}
             </span>
+
+            {/* "5 probably cleared — review" (S2-06's Must-match for this card). A QUESTION, NOT A
+                STATUS: the mark says something is waiting to be decided, and it disappears the moment
+                she decides either way — confirming or declining both empty `probably_cleared`.
+                A round with nothing pending carries no mark at all, which is S2-10's card exactly. */}
+            {pendingSuggestions > 0 ? (
+              <span className="text-xs font-medium text-primary">
+                {pendingSuggestions} probably cleared — review
+              </span>
+            ) : null}
 
             <div className="flex flex-wrap items-center gap-2">
               <button

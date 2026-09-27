@@ -412,7 +412,20 @@ EXCLUDED: dict[str, frozenset[str]] = {
     #
     # `text_fingerprint` is deliberately NOT excluded: it is a sha256, and it is what lets the
     # readonly layer answer "did this condition come back?" without reproducing a word of it.
-    "condition_rounds": frozenset({"raw_text", "header", "draft_rows", "parse_report"}),
+    # LP-915 adds `comparison`: what changed when the round was imported. Mostly analytic — codes,
+    # counts, round ids, dates — but the **Reworded?** pairs carry the lender's wording on both sides
+    # of the question, and the letter-changes block is derived from `header`, which is already
+    # dropped. A JSONB column cannot be half-exposed, so the whole column is.
+    #
+    # EXCLUDED ONLY, NOT `NEVER_EXPOSED`, AND THAT IS THE `verdict` PRECEDENT RATHER THAN AN
+    # OVERSIGHT. `prep_note` earns the stronger guard because it appears in no view's text at all.
+    # This one does: the view projects `(comparison IS NOT NULL) AS has_comparison`, the same shape
+    # as `has_header` and `has_raw_text` beside it, so a `\bcomparison\b` search of the select list
+    # would trip on that boolean. The blob itself is what must never travel, and `has_comparison`
+    # carries no word of it — it answers "was this round compared", which is the analytic question.
+    "condition_rounds": frozenset(
+        {"raw_text", "header", "draft_rows", "parse_report", "comparison"}
+    ),
     # LP-912 adds `prep_note` and `verdict`. `prep_note` is a short line a processor typed about one
     # borrower's file, which is where a name arrives in a shape no scrubber predicts — it is in
     # `NEVER_EXPOSED` as well, because it appears in no view's text and the stronger guard therefore

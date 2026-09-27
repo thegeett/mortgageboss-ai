@@ -204,7 +204,8 @@ export type ConditionRefusalCode =
   | "waiting_needs_owner"
   | "nothing_to_reopen"
   | "verdict_needs_round"
-  | "status_not_offered";
+  | "status_not_offered"
+  | "condition_was_replaced";
 
 /**
  * OUR preparation track: what we are doing (ADR-404, ADR-408). Four steps on screen.
@@ -566,6 +567,60 @@ export interface Condition {
   created_at: string;
 }
 
+/**
+ * One value the lender changed between two sheets — S2-06's "note rate 6.374% → 6.490%".
+ *
+ * BOTH SIDES ARE NULLABLE AND NEITHER IS EVER GUESSED. Round 1's rate lock is genuinely blank, so
+ * the table draws "— → 09/30/2026": a value appearing, not changing.
+ */
+export interface LetterChange {
+  label: string;
+  old: string | null;
+  new: string | null;
+}
+
+/**
+ * A condition this sheet may have reworded, and the one it created (S2-08's *Was* / *Now*).
+ *
+ * TWO IDS, NOT TWO WORDINGS. The panel resolves both from rows it already holds, which is what keeps
+ * the lender's text out of the saved comparison entirely.
+ */
+export interface RewordedPair {
+  old_id: string;
+  new_id: string;
+}
+
+/**
+ * What one import changed (LP-915) — everything S2-06, S2-07, S2-08 and S2-10 draw.
+ *
+ * COMPUTED ONCE AND SAVED, so opening the panel later shows the same result. `compared_with` in
+ * particular is a fact about the past — "compared with the 11 conditions that were open before it" —
+ * and does not shrink as those conditions are answered.
+ *
+ * EVERY LIST IS CONDITION IDS. The panel looks each one up in the rows it already has; a suggestion
+ * whose condition is not on the current page simply is not drawn rather than being half-rendered.
+ */
+export interface RoundComparison {
+  round_id: string;
+  round_number: number | null;
+  /** The panel's "Compared with the N conditions that were open before it." */
+  compared_with: number;
+  new: string[];
+  still_open: string[];
+  came_back: string[];
+  reworded: RewordedPair[];
+  /**
+   * Pending suggestions — a QUESTION WITH A BUTTON, never a status (design rule 4).
+   *
+   * Empty once she has answered, whichever way she answered: confirming records verdicts for the
+   * ticked ones and the unticked ones lose the suggestion, so the panel never asks twice.
+   */
+  probably_cleared: string[];
+  letter_changes: LetterChange[];
+  /** Why nothing is suggested, shown as S2-10's callout exactly as the server words it. */
+  no_suggestions_reason: string | null;
+}
+
 export interface ConditionRound {
   id: string;
   /** Assigned on IMPORT. Null on a draft — S1-05's strip must render a numberless card. */
@@ -586,6 +641,15 @@ export interface ConditionRound {
   parse_report: ParseReport;
   /** The letter's own details for the side panel. Absent for a paste, which has no letter. */
   header: Record<string, unknown> | null;
+  /**
+   * What this import changed (LP-915). Null until a round has been compared — every round 1, and
+   * every round not yet imported.
+   *
+   * NULL IS NOT AN EMPTY COMPARISON, for the same reason `created` is null rather than 0 below: a
+   * first sheet is compared against nothing, and "0 probably cleared · compared with 0" would be a
+   * claim nobody made.
+   */
+  comparison: RoundComparison | null;
   condition_count: number;
   /**
    * What the import recorded, or null when the question does not apply.

@@ -61,6 +61,8 @@ export function ConditionsList({
   onOpen,
   onMovePrepStatus,
   onClearFilters,
+  suggestedIds,
+  suggestedRoundNumber,
 }: {
   /** The rows the server returned for the CURRENT filters. Grouped here, in sheet order. */
   conditions: Condition[];
@@ -84,6 +86,16 @@ export function ConditionsList({
   onOpen: (conditionId: string) => void;
   onMovePrepStatus: (condition: Condition, to: ConditionPrepStatus) => void;
   onClearFilters: () => void;
+  /**
+   * Conditions a round's comparison suggests probably cleared (LP-915, S2-06).
+   *
+   * THE ROW SAYS "REVIEW", NOT "CLEARED". These rows are still `open` and their status chip still
+   * reads Open — the line is a pointer to the panel's question, and it disappears the moment she
+   * answers it either way.
+   */
+  suggestedIds?: ReadonlySet<string>;
+  /** Which round suggested them — "Probably cleared in round 2 — review". */
+  suggestedRoundNumber?: number | null;
 }) {
   // SHEET ORDER, WHATEVER THE GROUPING. `sequence` is the order the lender printed them, which is
   // the order the processor sees in the lender's own portal.
@@ -214,6 +226,8 @@ export function ConditionsList({
             onToggle={toggle}
             onOpen={onOpen}
             onMovePrepStatus={onMovePrepStatus}
+            suggestedIds={suggestedIds}
+            suggestedRoundNumber={suggestedRoundNumber}
           />
         ))
       )}
@@ -240,6 +254,8 @@ function ConditionGroup({
   onToggle,
   onOpen,
   onMovePrepStatus,
+  suggestedIds,
+  suggestedRoundNumber,
 }: {
   heading: string;
   groupBy: ConditionGroupBy;
@@ -248,6 +264,8 @@ function ConditionGroup({
   onToggle: (id: string) => void;
   onOpen: (id: string) => void;
   onMovePrepStatus: (condition: Condition, to: ConditionPrepStatus) => void;
+  suggestedIds?: ReadonlySet<string>;
+  suggestedRoundNumber?: number | null;
 }) {
   const first = rows[0];
   // The kind chip belongs to a LENDER HEADING. Grouped by owner or status the heading is ours, and a
@@ -284,6 +302,7 @@ function ConditionGroup({
           onToggle={() => onToggle(condition.id)}
           onOpen={() => onOpen(condition.id)}
           onMovePrepStatus={onMovePrepStatus}
+          suggestedInRound={suggestedIds?.has(condition.id) ? (suggestedRoundNumber ?? null) : null}
         />
       ))}
     </div>
@@ -296,12 +315,15 @@ function ConditionRow({
   onToggle,
   onOpen,
   onMovePrepStatus,
+  suggestedInRound,
 }: {
   condition: Condition;
   checked: boolean;
   onToggle: () => void;
   onOpen: () => void;
   onMovePrepStatus: (condition: Condition, to: ConditionPrepStatus) => void;
+  /** The round that suggests this one probably cleared, or null when none does. */
+  suggestedInRound?: number | null;
 }) {
   const lenderMeta = resolveStatus(CONDITION_LENDER_STATUS, condition.lender_status);
 
@@ -369,6 +391,14 @@ function ConditionRow({
                 </span>
               ) : null}
               <span className="line-clamp-1 text-foreground-2">{condition.latest_note.text}</span>
+            </span>
+          ) : null}
+          {/* "Probably cleared in round 2 — review" (S2-06). A QUESTION ON THE ROW, and the status
+              column beside it still reads Open — which is the whole distinction between a suggestion
+              and a verdict (design rule 4). */}
+          {suggestedInRound !== null && suggestedInRound !== undefined ? (
+            <span className="inline-flex w-fit items-center gap-1 text-xs font-medium text-primary">
+              Probably cleared in round {suggestedInRound} — review
             </span>
           ) : null}
         </span>

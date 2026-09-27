@@ -83,6 +83,7 @@ function round(overrides: Partial<ConditionRound> = {}): ConditionRound {
     draft_rows: null,
     parse_report: report(),
     header: null,
+    comparison: null,
     condition_count: 0,
     created: null,
     seen_again: null,

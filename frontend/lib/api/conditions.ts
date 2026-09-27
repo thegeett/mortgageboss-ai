@@ -653,6 +653,80 @@ export function useBulkConditions(fileId: string) {
   });
 }
 
+export interface ConfirmClearedInput {
+  roundId: string;
+  /** The TICKED ids. S2-07's whole content is that one is unticked and the count is live. */
+  condition_ids: string[];
+}
+
+/**
+ * Record the ticked suggestions as cleared (S2-06, S2-07).
+ *
+ * IT GOES THROUGH `invalidateRound` RATHER THAN `invalidateCondition`, because it changes far more
+ * than one row: up to five verdicts, the summary bar's Open and Cleared counts, the round card's
+ * pending mark, every touched condition's history, and the file's activity timeline.
+ *
+ * IT CAN LEGITIMATELY 409 AND THE CALLER MUST SHOW THE SENTENCE. Two different refusals arrive here:
+ * the round having nothing pending among those ids (a second press, or another tab got there first),
+ * and a condition that may not take a verdict — information-only, or replaced since the panel was
+ * drawn. The server words both; we show them as-is (spec §6 rule 5).
+ */
+export function useConfirmCleared(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ roundId, ...body }: ConfirmClearedInput) =>
+      (await apiClient.post<ConditionRound>(`${roundPath(roundId)}/confirm-cleared`, body)).data,
+    onSuccess: (round) => invalidateRound(queryClient, fileId, round.id),
+  });
+}
+
+export interface RewordedDecisionInput {
+  roundId: string;
+  old_id: string;
+  new_id: string;
+  /** True for *Same condition — replace the old one*. False for *Different conditions — keep both*. */
+  same: boolean;
+}
+
+/**
+ * Answer S2-08's reworded pair.
+ *
+ * *Same* marks the old condition **Replaced** and points it at its successor, which moves it out of
+ * the working groups and into the collapsed "Replaced" section — so the list, the summary and the old
+ * row's own sheet all move. *Different* changes no condition at all and only answers the question.
+ */
+export function useResolveReworded(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ roundId, ...body }: RewordedDecisionInput) =>
+      (await apiClient.post<ConditionRound>(`${roundPath(roundId)}/reworded`, body)).data,
+    onSuccess: (round) => invalidateRound(queryClient, fileId, round.id),
+  });
+}
+
+export interface SwitchCompletenessInput {
+  roundId: string;
+  completeness: ConditionRoundCompleteness;
+  /** The `updated_at` the caller read, so a round switched in another tab is refused (A7). */
+  expected_updated_at?: string | null;
+}
+
+/**
+ * Switch an imported round between *Full list* and *Just some* — S2-10's **Switch to Full list** (A7).
+ *
+ * THIS IS THE ONE EDIT THAT CHANGES WHAT ABSENCE MEANS, so it recomputes the comparison on the way to
+ * *Full list* and withdraws the unconfirmed suggestions on the way back. Recorded verdicts are never
+ * unpicked by it: only the lender clears (ADR-404).
+ */
+export function useSwitchCompleteness(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ roundId, ...body }: SwitchCompletenessInput) =>
+      (await apiClient.put<ConditionRound>(`${roundPath(roundId)}/completeness`, body)).data,
+    onSuccess: (round) => invalidateRound(queryClient, fileId, round.id),
+  });
+}
+
 export interface AttachPdfInput {
   roundId: string;
   file: File;

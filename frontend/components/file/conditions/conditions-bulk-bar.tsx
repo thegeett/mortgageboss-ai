@@ -196,4 +196,5 @@ const REFUSAL_SUMMARY: Record<string, string> = {
   verdict_needs_round: "needs a round",
   status_not_offered: "status not offered",
   stale: "changed by someone else",
+  condition_was_replaced: "replaced by a later condition",
 };

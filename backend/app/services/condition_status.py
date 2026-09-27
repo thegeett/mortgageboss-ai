@@ -80,6 +80,11 @@ class RefusalCode(StrEnum):
     NOTHING_TO_REOPEN = "nothing_to_reopen"
     VERDICT_NEEDS_ROUND = "verdict_needs_round"
     STATUS_NOT_OFFERED = "status_not_offered"
+    #: LP-915. A replaced condition's successor carries the work, so a write here would move a row
+    #: nobody is looking at — and a verdict on it would record the lender's answer against the wrong
+    #: condition. Carried forward from LP-916's review, which asked for the guard to land WITH the
+    #: producer rather than before it: nothing wrote `superseded` until the reworded pair existed.
+    CONDITION_WAS_REPLACED = "condition_was_replaced"
 
 
 #: The spec's sentences, character for character (spec §LP-912). The em dashes are U+2014.
@@ -103,6 +108,9 @@ _VERDICT_NEEDS_ROUND = (
     "came from."
 )
 _STATUS_NOT_OFFERED = "That status is not one this screen offers."
+_CONDITION_WAS_REPLACED = (
+    "This condition was replaced by a later one. Open the condition that replaced it instead."
+)
 
 #: Our track in order, which is what makes a move "backward". `review` IS ABSENT ON PURPOSE (A4): it
 #: stays in the database and is offered nowhere, so it has no rank and a move to it is refused by
@@ -204,6 +212,27 @@ def _guard_trackable(condition: Condition) -> None:
         raise _refuse(RefusalCode.INFO_ONLY_HAS_NO_STATUS, _INFO_ONLY_HAS_NO_STATUS)
 
 
+def _guard_not_replaced(condition: Condition) -> None:
+    """A replaced condition is not the one to write to (LP-915, ADR-404).
+
+    WHEN A REWORDED PAIR IS CONFIRMED AS "Same condition", the old row is marked `superseded` and
+    points at its successor — and the successor is what carries the work from then on. A status moved
+    here would move a row the list shows collapsed under "Replaced", and a VERDICT here would record
+    what the lender said against a condition they have stopped asking about.
+
+    NOTHING DISAPPEARS, WHICH IS WHY THIS IS A REFUSAL AND NOT A DELETION (spec §6 rule 3). The row
+    stays, its history stays, and the sentence points at the row that replaced it — so a processor who
+    reaches the old one by an old link or a stale tab is told where the work went rather than being
+    allowed to do it twice.
+
+    CHECKED ON THE COLUMN, NOT ON THE STATUS. `superseded_by_id` is the fact — it names the successor —
+    where `lender_status == superseded` is a rendering of it. A row could in principle carry one
+    without the other, and the pointer is the one that makes the sentence answerable.
+    """
+    if condition.superseded_by_id is not None:
+        raise _refuse(RefusalCode.CONDITION_WAS_REPLACED, _CONDITION_WAS_REPLACED)
+
+
 def _event(
     condition: Condition,
     kind: ConditionEventKind,
@@ -251,6 +280,7 @@ async def move_prep_status(
     """
     await _lock_fresh(db, condition, payload.expected_updated_at)
     _guard_trackable(condition)
+    _guard_not_replaced(condition)
 
     target = payload.to
     if target not in _PREP_RANK:
@@ -395,6 +425,11 @@ async def record_verdict(
     # An information-only line has no lender answer either: nothing was asked, so nothing can be
     # cleared. Same sentence as the prep track, because it is the same fact about the row.
     _guard_trackable(condition)
+    # AND A REPLACED CONDITION IS NOT THE ONE THE LENDER ANSWERED (LP-915). The successor carries the
+    # work from the moment a reworded pair is confirmed, so a verdict here would file what the lender
+    # said against the row they stopped asking about — and `cleared` is the one status that cannot be
+    # filed twice.
+    _guard_not_replaced(condition)
 
     if payload.status not in _VERDICT_STATUSES:
         raise _refuse(RefusalCode.STATUS_NOT_OFFERED, _STATUS_NOT_OFFERED)
@@ -495,6 +530,10 @@ async def reopen(
     somebody pick it up.
     """
     await _lock_fresh(db, condition, payload.expected_updated_at)
+    # ABOVE THE `_REOPENABLE` CHECK ON PURPOSE. A replaced row's `lender_status` is `superseded`, which
+    # is already outside `_REOPENABLE`, so without this the refusal would be "there is nothing to
+    # reopen" — true but unhelpful, where this one names the row to work instead.
+    _guard_not_replaced(condition)
 
     if condition.lender_status not in _REOPENABLE:
         raise _refuse(RefusalCode.NOTHING_TO_REOPEN, _NOTHING_TO_REOPEN)
@@ -563,6 +602,10 @@ async def set_owner(
     reconstruct.
     """
     await _lock_fresh(db, condition, payload.expected_updated_at)
+    # AN OWNER ON A REPLACED ROW OUTLIVES ITS MEANING. "Waiting on Title" is a statement about work,
+    # and the work is on the successor — so the override would only keep the old row showing up in the
+    # Owner filter's Title group after everyone moved on from it.
+    _guard_not_replaced(condition)
 
     before = condition.owner_override
     if payload.owner == before:

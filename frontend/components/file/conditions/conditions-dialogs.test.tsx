@@ -72,6 +72,7 @@ function round(overrides: Partial<ConditionRound> = {}): ConditionRound {
       failure_detail: null,
     },
     header: null,
+    comparison: null,
     condition_count: 11,
     created: null,
     seen_again: null,

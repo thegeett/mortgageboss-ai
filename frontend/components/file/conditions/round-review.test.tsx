@@ -97,6 +97,7 @@ function round(overrides: Partial<ConditionRound> = {}): ConditionRound {
       failure_detail: null,
     },
     header: { lender_team: [], loan_facts: {} },
+    comparison: null,
     condition_count: 0,
     created: null,
     seen_again: null,

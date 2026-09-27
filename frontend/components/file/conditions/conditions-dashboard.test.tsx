@@ -139,6 +139,7 @@ function round(
     draft_rows: [],
     parse_report: report(),
     header: null,
+    comparison: null,
     condition_count: 0,
     created: null,
     seen_again: null,

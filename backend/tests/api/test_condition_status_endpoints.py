@@ -890,12 +890,151 @@ async def test_another_company_gets_404_on_every_write(
     assert await _events(db_session, condition.id) == []
 
 
+# --------------------------------------------------------------------------- #
+# A replaced condition (LP-915)
+# --------------------------------------------------------------------------- #
+
+#: The sentence as a processor reads it. Written out rather than imported from the service, because the
+#: point of asserting it is that the words cannot change unnoticed — comparing the constant to itself
+#: would pass for any wording at all. It is one of the authored five, so `test_refusal_sentences.py`
+#: does not pin it against the spec; this is what pins it.
+_REPLACED_SENTENCE = (
+    "This condition was replaced by a later one. Open the condition that replaced it instead."
+)
+
+
+async def _replaced_pair(db: AsyncSession) -> tuple[Condition, Condition, dict[str, str], Any]:
+    """An old condition pointing at the one that replaced it, both on the same file.
+
+    A REAL SUCCESSOR ROW, NOT AN INVENTED UUID. `superseded_by_id` is a foreign key to
+    `conditions.id` with `ondelete="RESTRICT"`, so a made-up id fails at flush and the test dies in
+    setup rather than asserting anything — the shape of failure `make_loan_file`'s docstring records
+    from LP-904.
+    """
+    company = await make_company(db)
+    loan_file = await make_loan_file(db, company=company)
+    round_one = await make_round(db, company=company, loan_file=loan_file, round_number=1)
+    round_two = await make_round(db, company=company, loan_file=loan_file, round_number=2)
+    old = await make_condition(db, company=company, loan_file=loan_file, round_=round_one)
+    new = await make_condition(
+        db,
+        company=company,
+        loan_file=loan_file,
+        round_=round_two,
+        verbatim_text="Provide the paid invoice for the credit report.",
+    )
+    old.superseded_by_id = new.id
+    old.lender_status = ConditionLenderStatus.SUPERSEDED
+    await db.flush()
+    return old, new, await _auth_for(db, company), loan_file
+
+
+async def test_every_write_is_refused_on_a_condition_that_was_replaced(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """The successor carries the work, so none of the four writes belongs on the old row (ADR-404).
+
+    ALL FOUR, NOT JUST THE VERDICT. The verdict is the dangerous one — it would file what the lender
+    said against the condition they stopped asking about — but a prep move on a row the list shows
+    collapsed under "Replaced" is invisible work, and an owner there keeps the old row in the Owner
+    filter's Title group after everyone moved on. A guard on one write and not the others is the shape
+    of hole that makes the unguarded route the way in.
+    """
+    old, new, auth, _file = await _replaced_pair(db_session)
+
+    for method, path, body in (
+        ("POST", f"/conditions/{old.id}/prep-status", {"to": "ready"}),
+        (
+            "POST",
+            f"/conditions/{old.id}/verdict",
+            {"status": "cleared", "source_kind": "portal", "source_date": "2026-09-12"},
+        ),
+        ("POST", f"/conditions/{old.id}/reopen", {"reason": "Cleared by mistake."}),
+        ("PUT", f"/conditions/{old.id}/owner", {"owner": "title"}),
+    ):
+        response = await client.request(method, f"{API}{path}", headers=auth, json=body)
+
+        assert response.status_code == 409, (method, path, response.text)
+        assert _error(response)["data"]["code"] == "condition_was_replaced", (method, path)
+        assert _error(response)["data"]["message"] == _REPLACED_SENTENCE, (method, path)
+
+    # AND NOTHING MOVED ON EITHER ROW. A 409 that has already written is worse than no guard at all;
+    # the successor is checked too, because a guard that refused by acting on the wrong row would look
+    # identical from the response.
+    await db_session.refresh(old)
+    await db_session.refresh(new)
+    assert old.lender_status is ConditionLenderStatus.SUPERSEDED
+    assert old.prep_status is ConditionPrepStatus.TO_DO
+    assert old.verdict is None
+    assert old.owner_override is None
+    assert new.lender_status is ConditionLenderStatus.OPEN
+    assert new.prep_status is ConditionPrepStatus.TO_DO
+    assert await _events(db_session, old.id) == []
+    assert await _events(db_session, new.id) == []
+
+
+async def test_a_replaced_row_in_a_bulk_write_is_one_refused_row(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Bulk refuses the replaced row and applies the rest — the same partial-success shape as the
+    others, so selecting a collapsed row does not lose the ten that were fine."""
+    old, new, auth, loan_file = await _replaced_pair(db_session)
+
+    response = await client.post(
+        f"{API}/loan-files/{loan_file.id}/conditions/bulk",
+        headers=auth,
+        json={"condition_ids": [str(old.id), str(new.id)], "action": "owner", "owner": "title"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["applied"] == [str(new.id)]
+    (refusal,) = body["refused"]
+    assert refusal["condition_id"] == str(old.id)
+    assert refusal["code"] == "condition_was_replaced"
+    assert refusal["message"] == _REPLACED_SENTENCE
+
+
+async def test_the_replaced_guard_reads_the_pointer_and_outranks_nothing_to_reopen(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Two claims the service's own comments make, neither visible from the other tests.
+
+    THE POINTER IS THE FACT, NOT THE STATUS. `superseded_by_id` names the successor, where
+    `lender_status == superseded` is a rendering of it — so this row carries the pointer with the
+    status left `open`, and the write is still refused. A guard written against the status would pass
+    every other test in this file and let this one through.
+
+    AND IT IS ORDERED ABOVE `_REOPENABLE`. A properly replaced row's status is already outside the
+    reopenable set, so a guard placed after that check would answer "there is nothing to reopen" —
+    true, but it does not tell the processor where the work went.
+    """
+    company = await make_company(db_session)
+    loan_file = await make_loan_file(db_session, company=company)
+    round_ = await make_round(db_session, company=company, loan_file=loan_file, round_number=1)
+    old = await make_condition(db_session, company=company, loan_file=loan_file, round_=round_)
+    new = await make_condition(
+        db_session, company=company, loan_file=loan_file, round_=round_, verbatim_text="Reworded."
+    )
+    old.superseded_by_id = new.id
+    await db_session.flush()
+    auth = await _auth_for(db_session, company)
+    assert old.lender_status is ConditionLenderStatus.OPEN, "the pointer alone must be enough"
+
+    response = await client.post(
+        f"{API}/conditions/{old.id}/reopen", headers=auth, json={"reason": "Mistake."}
+    )
+
+    assert response.status_code == 409, response.text
+    assert _error(response)["data"]["code"] == "condition_was_replaced"
+
+
 async def test_every_refusal_code_the_service_can_raise_has_been_exercised() -> None:
     """A CENSUS, SO A NEW CODE IS NOT SHIPPED UNTESTED.
 
-    Four of the eight are asserted above with their sentences; the other four are covered elsewhere or
-    are unreachable from these endpoints. This lists which is which, so adding a code forces a decision
-    rather than sliding in with no test at all.
+    All nine are triggered by a test in this file that sends the request — `known_elsewhere` is empty
+    and should stay that way. This lists them, so adding a code forces a decision rather than sliding
+    in with no test at all.
     """
     covered_here = {
         "backward_move_needs_reason",
@@ -909,6 +1048,10 @@ async def test_every_refusal_code_the_service_can_raise_has_been_exercised() -> 
         # request. `status_not_offered` was never unreachable — any client can post `review`.
         "verdict_needs_source",
         "status_not_offered",
+        # LP-915, and it arrived WITH its producer rather than before it: nothing set
+        # `superseded_by_id` until the reworded pair could be confirmed, which is why LP-916's review
+        # handed the guard forward to this ticket instead of asking for it then.
+        "condition_was_replaced",
     }
     known_elsewhere: set[str] = set()
 

@@ -9,9 +9,12 @@ import {
   useBulkConditions,
   useConditions,
   useConditionsSummary,
+  useConfirmCleared,
   useOwner,
   usePrepStatus,
   useReopen,
+  useResolveReworded,
+  useSwitchCompleteness,
   useVerdict,
 } from "@/lib/api/conditions";
 import type { ConditionListUrlState } from "@/lib/conditions/list-url";
@@ -34,6 +37,7 @@ import { ConditionsBulkBar, bulkResultSummary } from "./conditions-bulk-bar";
 import { ConditionsFilterRow } from "./conditions-filter-row";
 import { ConditionsList } from "./conditions-list";
 import { ConditionsSummaryBar } from "./conditions-summary-bar";
+import { RoundComparisonPanel } from "./round-comparison-panel";
 import { RoundDetailsSheet } from "./round-details-sheet";
 import { RoundStrip } from "./round-strip";
 
@@ -99,6 +103,9 @@ export function ConditionsListView({
   const verdict = useVerdict(fileId);
   const reopen = useReopen(fileId);
   const bulk = useBulkConditions(fileId);
+  const confirmCleared = useConfirmCleared(fileId);
+  const resolveReworded = useResolveReworded(fileId);
+  const switchCompleteness = useSwitchCompleteness(fileId);
 
   const [openRoundId, setOpenRoundId] = useState<string | null>(null);
   const [enrichment, setEnrichment] = useState<ConditionEnrichResult | null>(null);
@@ -111,6 +118,11 @@ export function ConditionsListView({
     mode: "move-back" | "reopen";
   } | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
+  // HIDDEN BY ROUND ID, NOT BY A BOOLEAN. *Not now* and *Hide* dismiss the panel for the round she
+  // dismissed; importing a newer sheet brings the new round's panel up rather than staying hidden
+  // because she closed the previous one.
+  const [hiddenPanelRoundId, setHiddenPanelRoundId] = useState<string | null>(null);
+  const [panelRefusal, setPanelRefusal] = useState<string | null>(null);
 
   const openRound = rounds.find((round) => round.id === openRoundId) ?? null;
   const rows = filtered.data?.rows ?? [];
@@ -118,6 +130,24 @@ export function ConditionsListView({
   const roundNumbers = rounds
     .filter((round) => round.round_number !== null && round.status === "imported")
     .map((round) => round.round_number as number);
+
+  // THE NEWEST IMPORTED ROUND THAT WAS COMPARED. Round 1 carries no comparison — it was compared
+  // against nothing — so on a one-round file there is no panel at all, which is correct rather than
+  // an empty state.
+  const importedAscending = rounds
+    .filter((round) => round.status === "imported" && round.round_number !== null)
+    .sort((a, b) => (a.round_number as number) - (b.round_number as number));
+  const comparisonRound =
+    [...importedAscending].reverse().find((round) => round.comparison !== null) ?? null;
+  const previousRoundNumber =
+    comparisonRound === null
+      ? null
+      : ([...importedAscending]
+          .reverse()
+          .find(
+            (round) => (round.round_number as number) < (comparisonRound.round_number as number),
+          )?.round_number ?? null);
+  const suggestedIds = new Set(comparisonRound?.comparison?.probably_cleared ?? []);
 
   // The selection is by ID, so a row that a filter hides stays selected and still gets the bulk
   // action — which is what a processor who ticked it then narrowed the view would expect.
@@ -208,6 +238,74 @@ export function ConditionsListView({
         }
       />
 
+      {/* ABOVE THE SUMMARY BAR (S2-06's Must-match). It opens by itself after an import that has
+          something to say, and closing it is per round — see `hiddenPanelRoundId`. */}
+      {comparisonRound !== null && hiddenPanelRoundId !== comparisonRound.id ? (
+        <RoundComparisonPanel
+          round={comparisonRound}
+          previousRoundNumber={previousRoundNumber}
+          conditions={allRows}
+          rounds={rounds}
+          pending={
+            confirmCleared.isPending || resolveReworded.isPending || switchCompleteness.isPending
+          }
+          refusal={panelRefusal}
+          onConfirm={(conditionIds) => {
+            setPanelRefusal(null);
+            confirmCleared.mutate(
+              { roundId: comparisonRound.id, condition_ids: conditionIds },
+              {
+                onSuccess: () =>
+                  notifySuccess({
+                    title: `${conditionIds.length} recorded as cleared`,
+                    consequence: `Each one says it came from round ${comparisonRound.comparison?.round_number} on ${comparisonRound.date_printed ?? comparisonRound.round_date}.`,
+                  }),
+                // THE SERVER'S SENTENCE, SHOWN IN THE PANEL rather than as a toast that vanishes —
+                // the refusal is about the list she is looking at, and she has to act on it.
+                onError: (error) => setPanelRefusal(getErrorMessage(error)),
+              },
+            );
+          }}
+          onNotNow={() => setHiddenPanelRoundId(comparisonRound.id)}
+          onResolveReworded={(oldId, newId, same) => {
+            setPanelRefusal(null);
+            resolveReworded.mutate(
+              { roundId: comparisonRound.id, old_id: oldId, new_id: newId, same },
+              {
+                onSuccess: () =>
+                  notifySuccess({
+                    title: same ? "Marked as the same condition" : "Kept as two conditions",
+                    consequence: same
+                      ? "The old one is Replaced and points at the one that replaced it. Nothing was deleted."
+                      : "Both stay exactly as they are.",
+                  }),
+                onError: (error) => setPanelRefusal(getErrorMessage(error)),
+              },
+            );
+          }}
+          onSwitchToFull={() => {
+            setPanelRefusal(null);
+            switchCompleteness.mutate(
+              {
+                roundId: comparisonRound.id,
+                completeness: "full",
+                expected_updated_at: comparisonRound.updated_at,
+              },
+              {
+                onSuccess: () =>
+                  notifySuccess({
+                    title: "Switched to Full list",
+                    consequence:
+                      "Conditions missing from this sheet are now suggested as cleared. Nothing is cleared until you confirm.",
+                  }),
+                onError: (error) => setPanelRefusal(getErrorMessage(error)),
+              },
+            );
+          }}
+          onHide={() => setHiddenPanelRoundId(comparisonRound.id)}
+        />
+      ) : null}
+
       {summary.data ? (
         <ConditionsSummaryBar summary={summary.data} state={urlState} onFilter={applyUrl} />
       ) : (
@@ -245,6 +343,8 @@ export function ConditionsListView({
         <ConditionsList
           conditions={rows}
           settledFrom={allRows}
+          suggestedIds={suggestedIds}
+          suggestedRoundNumber={comparisonRound?.comparison?.round_number ?? null}
           state={urlState}
           search={searchInput}
           capped={filtered.data?.capped ?? false}
@@ -322,6 +422,34 @@ export function ConditionsListView({
           setRefusal(null);
           setMoveBack({ condition, to: null, mode: "reopen" });
         }}
+        suggestedIds={suggestedIds}
+        suggestedRoundNumber={comparisonRound?.comparison?.round_number ?? null}
+        // ONE CONDITION THROUGH THE SAME DOOR THE PANEL USES — "the suggestion is per condition, so
+        // she can also confirm one from the detail sheet" (spec §LP-915). It is the round's endpoint
+        // either way, because the round's saved comparison is what authorises the verdict at all.
+        //
+        // UNDEFINED WHEN NO ROUND HAS BEEN COMPARED, so the sheet renders no block rather than a
+        // button with nowhere to send the click.
+        onConfirmSuggestion={
+          comparisonRound === null
+            ? undefined
+            : (condition) =>
+                confirmCleared.mutate(
+                  { roundId: comparisonRound.id, condition_ids: [condition.id] },
+                  {
+                    onSuccess: () =>
+                      notifySuccess({
+                        title: `${condition.lender_code ?? "That condition"} recorded as cleared`,
+                        consequence: `It says it came from round ${comparisonRound.comparison?.round_number}. The other suggestions on that round are resolved too.`,
+                      }),
+                    onError: (error) =>
+                      notifyError({
+                        title: "That could not be recorded",
+                        whatToDo: getErrorMessage(error),
+                      }),
+                  },
+                )
+        }
       />
 
       <RecordAnswerDialog

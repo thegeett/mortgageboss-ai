@@ -878,6 +878,94 @@ class ConditionDetailPublic(ConditionPublic):
     rounds: list[ConditionRoundAppearancePublic] = Field(default_factory=list)
 
 
+class LetterChangePublic(BaseModel):
+    """One value the lender changed between two sheets — "note rate 6.374% → 6.490%" (S2-06).
+
+    BOTH SIDES ARE OPTIONAL AND A MISSING ONE IS NEVER GUESSED. Round 1's rate lock is genuinely
+    blank, so the panel draws "— → 09/30/2026"; inventing a prior value would put a date in front of
+    a processor that no sheet ever carried.
+    """
+
+    label: str
+    old: str | None = None
+    new: str | None = None
+
+
+class RewordedPairPublic(BaseModel):
+    """A condition this sheet may have reworded, and the one it created (S2-08).
+
+    TWO IDS, NEVER THE TWO WORDINGS. The screen draws *Was* above *Now*, and it resolves both from
+    condition rows it already holds — so this pair carries no word the lender wrote.
+    """
+
+    old_id: UUID
+    new_id: UUID
+
+
+class RoundComparisonPublic(BaseModel):
+    """What one import changed, as the panel reads it (S2-06 / S2-07 / S2-08 / S2-10).
+
+    TYPED RATHER THAN A RAW BLOB, following `ParseReportPublic` above. The column is JSONB, but a
+    `dict[str, Any]` on the wire would make every count and every id untyped at the boundary the
+    frontend generates its own types from — and `reworded` in particular is stored as `[[old, new]]`,
+    a shape no client should be left to interpret.
+
+    EXPOSING IT ADDS NO NPI THAT THIS RESPONSE DID NOT ALREADY CARRY. `comparison` is classified NPI
+    and `readonly.condition_rounds` reduces it to `has_comparison`, because `letter_changes` derives
+    from `header` — but ADR-405 governs the READONLY layer, and `ConditionRoundPublic.header` is
+    already served whole to the authenticated processor working the file. The ids likewise resolve to
+    conditions this same caller may read. What must not happen is this blob reaching a log line or a
+    `readonly.*` view, and neither is this schema's door.
+    """
+
+    round_id: UUID
+    round_number: int | None = None
+    #: The panel's "Compared with the N conditions that were open before it."
+    compared_with: int = 0
+    new: list[UUID] = Field(default_factory=list)
+    still_open: list[UUID] = Field(default_factory=list)
+    came_back: list[UUID] = Field(default_factory=list)
+    reworded: list[RewordedPairPublic] = Field(default_factory=list)
+    probably_cleared: list[UUID] = Field(default_factory=list)
+    letter_changes: list[LetterChangePublic] = Field(default_factory=list)
+    #: Why nothing is suggested, or None when something is. S2-10's callout shows it as-is.
+    no_suggestions_reason: str | None = None
+
+    @classmethod
+    def from_stored(cls, stored: dict[str, Any] | None) -> "RoundComparisonPublic | None":
+        """Read the saved JSONB. `None` for a round that was never compared — round 1, or a draft.
+
+        `None` RATHER THAN AN EMPTY COMPARISON, for the reason `created` and `seen_again` above give
+        at length: an all-zero comparison is a confident wrong answer where "the question does not
+        apply" is the true one. Round 1 compares against nothing, and a panel reading "0 probably
+        cleared · compared with 0" would be a claim nobody made.
+        """
+        if not stored:
+            return None
+        pairs = [
+            RewordedPairPublic(old_id=UUID(str(pair[0])), new_id=UUID(str(pair[1])))
+            for pair in stored.get("reworded") or []
+            # A pair is written as exactly two ids. Anything else is skipped rather than raised on:
+            # this is a stored blob being rendered, and one malformed entry must not 500 the panel.
+            if isinstance(pair, (list, tuple)) and len(pair) == 2
+        ]
+        return cls(
+            round_id=UUID(str(stored["round_id"])),
+            round_number=stored.get("round_number"),
+            compared_with=stored.get("compared_with") or 0,
+            new=[UUID(str(value)) for value in stored.get("new") or []],
+            still_open=[UUID(str(value)) for value in stored.get("still_open") or []],
+            came_back=[UUID(str(value)) for value in stored.get("came_back") or []],
+            reworded=pairs,
+            probably_cleared=[UUID(str(value)) for value in stored.get("probably_cleared") or []],
+            letter_changes=[
+                LetterChangePublic.model_validate(change)
+                for change in stored.get("letter_changes") or []
+            ],
+            no_suggestions_reason=stored.get("no_suggestions_reason"),
+        )
+
+
 class ConditionRoundPublic(BaseModel):
     """One round, for the round strip and the review screen."""
 
@@ -908,6 +996,13 @@ class ConditionRoundPublic(BaseModel):
     #: The letter's own details, shown in the side panel and the round-details sheet. Absent for a
     #: paste, which has no letter — the panel then says so rather than rendering empty fields.
     header: dict[str, Any] | None = None
+    #: What this import changed (LP-915). `None` until a round has been compared, which is every
+    #: round 1 and every round that is not yet imported — see `RoundComparisonPublic.from_stored`.
+    #:
+    #: WITHOUT THIS FIELD S2-06 HAS NO DATA AT ALL. The comparison was computed and saved by the
+    #: import, and nothing carried it to a client: the panel, its count pills, its letter changes and
+    #: its confirm list are all this one object.
+    comparison: RoundComparisonPublic | None = None
     condition_count: int = 0
     #: What the import recorded — "11 on sheet · 11 new", "· 0 new · 6 seen again" (S1-05, S1-08).
     #:
@@ -963,6 +1058,7 @@ class ConditionRoundPublic(BaseModel):
             ),
             parse_report=ParseReportPublic.model_validate(round_.parse_report or {}),
             header=round_.header,
+            comparison=RoundComparisonPublic.from_stored(round_.comparison),
             condition_count=condition_count,
             created=created,
             seen_again=seen_again,
@@ -1196,6 +1292,51 @@ class ConditionDraftUpdate(BaseModel):
     completeness: ConditionRoundCompleteness | None = None
     round_date: date_type | None = None
     expected_updated_at: datetime | None = None
+
+
+class ConfirmClearedRequest(BaseModel):
+    """Which of a round's suggestions to record as cleared (LP-915, screens S2-06 and S2-07).
+
+    THE TICKED IDS, NEVER "ALL". S2-07's whole content is that `0132` is unticked and the button reads
+    *Confirm 4 as cleared* — so the client sends what she ticked. A request meaning "all of them"
+    would make the panel's state unrepresentable and would clear a condition she had just untied.
+
+    AT LEAST ONE, WHICH IS A GUARD RATHER THAN VALIDATION FOR ITS OWN SAKE. Confirming resolves the
+    round's suggestions either way — the unticked ones stay open and lose the suggestion — so an empty
+    list would withdraw every suggestion while recording no verdict at all. That is *Not now*'s
+    opposite and it is reachable by accident; *Not now* sends no request.
+    """
+
+    condition_ids: list[UUID] = Field(min_length=1)
+
+
+class RewordedDecisionRequest(BaseModel):
+    """S2-08's two buttons: *Same condition — replace the old one* / *Different conditions — keep
+    both*.
+
+    BOTH IDS TRAVEL, NOT A PAIR INDEX. The saved comparison is a list, and an index would name a
+    different pair the moment another pair in the same round was resolved — two processors on one
+    file is exactly the case that produces.
+    """
+
+    old_id: UUID
+    new_id: UUID
+    #: True for *Same condition*. False for *Different conditions*, which changes no condition at all
+    #: and only answers the question.
+    same: bool
+
+
+class RoundCompletenessUpdate(_ConcurrentWrite):
+    """Switch an imported round between *Full list* and *Just some* (A7, screen S2-10).
+
+    `expected_updated_at`, NOT THE SPEC'S `updated_at`. §LP-915 writes the body as
+    `{completeness, updated_at}`, and every other concurrent write in this feature ships
+    `expected_updated_at` — the name says it is the value the caller READ, not one it is setting.
+    `_ConcurrentWrite`'s own comment records the same choice being made once already; a second
+    spelling inside one feature is the drift this file keeps correcting.
+    """
+
+    completeness: ConditionRoundCompleteness
 
 
 class ConditionCreateRequest(BaseModel):

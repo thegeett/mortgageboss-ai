@@ -17,9 +17,16 @@ discarded. Null until imported, unique per file among imported rows.
 into that round (LP-907) rather than creating a second one, so the round carries every way it arrived
 rather than one.
 
-NPI (ADR-405): `raw_text`, `header`, `draft_rows`, and `parse_report.unassigned_lines`. All are
-dropped from `readonly.condition_rounds`. `expiry_dates` is NOT NPI — it is a table of dates the
-lender publishes about the loan, naming nobody.
+NPI (ADR-405): `raw_text`, `header`, `draft_rows`, `comparison`, and `parse_report.unassigned_lines`.
+All are dropped from `readonly.condition_rounds`. `expiry_dates` is NOT NPI — it is a table of dates
+the lender publishes about the loan, naming nobody.
+
+`comparison` IS NPI FOR TWO REASONS AT ONCE, and neither is obvious from its name (LP-915). Most of
+what it holds is safe — codes, counts, round ids, dates — but the **Reworded?** pair carries the
+lender's wording on both sides of the "was this reworded" question, and the **letter changes** block
+is derived from `header`, which is already dropped. A blob that is 90% analytic and 10% the lender's
+text is NPI: the readonly layer has no way to expose the safe part of a JSONB column without naming
+the column.
 """
 
 from datetime import date
@@ -189,6 +196,19 @@ class ConditionRound(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     #: — it sits at rest in a column excluded precisely because it already carries sheet text, where
     #: nobody can inspect it to find it. Compose those strings; never quote the sheet (spec §9.5).
     parse_report: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    #: NPI — what changed when this round was imported (LP-915): the five outcomes, the letter
+    #: changes, and the reworded pairs. See the NPI paragraph at the top of this module.
+    #:
+    #: SAVED RATHER THAN RECOMPUTED, which is the spec's own requirement: "It is computed once and
+    #: saved. Opening the panel later shows the same result." A comparison recomputed on each visit
+    #: would answer a different question every time the file moved underneath it — a condition
+    #: cleared after the import would stop appearing as "probably cleared", and the panel a processor
+    #: half-confirmed would silently change shape between visits.
+    #:
+    #: RECOMPUTED ONLY WHEN COMPLETENESS CHANGES (A7). *Just some → Full list* is the one edit that
+    #: legitimately changes what "absent from this sheet" means, because absence is evidence only
+    #: when the thing absent was in a list claiming to be complete.
+    comparison: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     created_by_user_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
