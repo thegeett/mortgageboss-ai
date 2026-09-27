@@ -1,4 +1,4 @@
-# Phase 4.5 progress — Stages 0 and 1 (conditions)
+# Phase 4.5 progress — Stages 0, 1 and 2 (conditions)
 
 **Read this first and write it last.** It is the short state of the conditions work: what shipped,
 what was deferred, and every STOP AND ASK and how it was answered (spec §11). The detail lives in the
@@ -70,8 +70,119 @@ differences records each difference without stopping on any.
   deviation because nothing in the schema can remember a dismissal. S1-13 now asks attach-or-new and links to the round, but lives behind the `receiving`
   switch, which v1 turns off.
 
+---
+
+# Stage 2 — "See and track"
+
+Spec: [`phase4.5-stage2-tickets.md`](phase4.5-stage2-tickets.md) (it wins over the build plan) ·
+Screens: [`../design/phase4.5-conditions/stage2/README.md`](../design/phase4.5-conditions/stage2/README.md)
+
+**STAGE 2 IS NOT FINISHED, AND THE GAP IS ONE THING.** All six tickets are built, reviewed and
+committed, and §5's acceptance scenario passes steps 1–9 through the API. **§5 step 10 has not been
+done at all: not one of the 11 reference screens has been looked at by a person.** Neither this
+session nor the reviewer's had a browser. That is a regression against how Stage 1 finished — its
+STOP AND ASK 7 above records that "a browser was found and all 13 were checked on screen" — and §5
+step 10 says in as many words that "Stage 2 is not done until a person has looked at them".
+
+## Stage 2 — what shipped
+
+| Ticket | What | State as its file records it |
+|---|---|---|
+| [LP-911](../tickets/LP-911.md) | conditions read API: filters, five sorts, summary, detail | done |
+| [LP-912](../tickets/LP-912.md) | ADR-408, the two status tracks, verdicts, reopen, owner, bulk, the came-back hook; migration `f3a9c05d81e7` | done; reviewed twice (part 2 and a follow-up) |
+| [LP-916](../tickets/LP-916.md) | condition detail sheet (S2-03) with S2-04 and S2-05; eight condition-level event scalars | done; two blocks deliberately left for LP-915 and built there |
+| [LP-913](../tickets/LP-913.md) | conditions list view (S2-01, S2-02, S2-09): summary bar, filter row, grouping, bulk bar | done |
+| [LP-915](../tickets/LP-915.md) | round comparison, its three doors, the `condition_was_replaced` guard, the S2-06/07/08/10 panel; migration `a7c31e6d94b2` | done; seven review findings fixed |
+| [LP-917](../tickets/LP-917.md) | the lender's dates in the rail, on the round card, and "Must Fund By" (S2-11) | done; no defects found in review |
+| LP-914 | board view | **deferred by D1** — not built, and nothing here anticipates it |
+
+Migrations added by Stage 2: `f3a9c05d81e7` (LP-912), `a7c31e6d94b2` (LP-915, **head**).
+
+## Stage 2 — the acceptance scenario (§5)
+
+`backend/tests/conditions/test_stage2_acceptance.py` drives **steps 1–9 through the API** on the §7
+fixtures — every sheet through the upload door, every decision through its endpoint, nothing calling a
+service directly. **2 passed.** What it pins, in the spec's own numbers: 11 conditions all *To do /
+Open*; the step-2 moves, with the backward move refused by its typed code and accepted with a reason;
+round 2's probably-cleared being exactly `0132 6132 6178 6637 7086` against 11 compared; confirm 4 →
+**Open 7 · Cleared 4** with no question left pending; `0132` cleared by hand → **Open 6 · Cleared 5**;
+round 3's came back `1228` (our track back to *To do*), new `7383`, reworded `6378` answered *Same
+condition* so the old half reads *Replaced* and points at its successor, and `0006 0007` confirmed →
+**13 total · Cleared 7 · Replaced 1 · Open 5**; the reopen with a reason; the history newest-first; and
+round 3's own letter carrying the dates the rail reads. Step 9's twelve cross-tenant calls all 404 and
+leave the file untouched.
+
+**Step 10 is not done and no assertion in that file should be mistaken for it.** It is the screens.
+
+**Measured after Stage 2:** full backend suite, run alone, **8506 passed, 3 failed, 10 skipped,
+1 xfailed** in 21 m 19 s. The three are the baseline's and none touches conditions
+(`test_cli_refuses_unpaced_bedrock`, and the two `test_page_ocr` tesseract tests — tesseract is absent
+on this machine). Migrations `f3a9c05d81e7` and `a7c31e6d94b2` are both applied in that run.
+
+## Stage 2 — decisions taken without the product owner
+
+The standing instruction was to settle each with the reviewer, take the safest option — the one that
+never clears, removes or changes a condition's status without a person's click — and record it rather
+than stop. Each ticket carries its own table; these are the ones a product owner may still want to
+overturn:
+
+| Where | Question | What was chosen |
+|---|---|---|
+| [LP-915](../tickets/LP-915.md) #3 | "Different conditions — keep both" leaves both rows alone, but the spec does not say what becomes of the QUESTION | The pair is resolved either way, so the panel stops asking. Left pending, "these are different" would be unanswerable |
+| [LP-915](../tickets/LP-915.md) #5 | *Full list → Just some*: recompute, or withdraw? | Withdraw the unconfirmed suggestions, recompute nothing — a recompute would retroactively change "compared with the 11 conditions that were open before it" |
+| [LP-915](../tickets/LP-915.md) #6 | S2-06 and S2-08 order the count pills differently, and neither lists order under *May differ* | Settled in review (R4): the sheet's own news first when there is any, then Probably cleared collapsed with **Review** — one rule that satisfies both screens, so this no longer needs the product owner |
+| [LP-915](../tickets/LP-915.md) #8 | S2-06's "line naming what didn't change" | Not built. The saved comparison stores only the values that MOVED, and widening it would put more of the lender's letter into an NPI column to decorate one line |
+| [LP-917](../tickets/LP-917.md) #1 | The tickets file's example says "Asset docs expire 11/30/2026 · 65 days"; S2-11 draws 11/03/2026 and "· 38 days" | The design and the Done-when, which agree with each other. The prose example appears to predate the fixture |
+| [LP-917](../tickets/LP-917.md) #2 | S2-11 shows Lender dates in the rail without naming a tab; the rail never fetches anything of its own | Behind a Conditions-tab check, like its two siblings. Showing it everywhere is a BACKEND change (the dates reaching the file read), not a placement one |
+
+Also recorded and not fixed: a reworded pair answered *Different* is asked again if the round is
+switched *Full → Just some → Full*, because keeping that answer would need it stored on the round
+(LP-915 review).
+
+## Stage 2 — every screen, and how to open it
+
+**None of these has been checked on screen.** Seed a UWM file whose lender has
+`canonical_lender_key = "uwm"` and whose code map is seeded (`seed_lender_codes`), then import the §7
+fixtures as PDFs through the upload door: `uwm_round1_2026-08-28.txt`, then
+`uwm_round2_2026-09-10.txt`, then `uwm_round3_2026-09-18.txt`. Open at **1600 px** (the file rail is
+`hidden xl:block`, so below 1280 px it becomes the File context drawer).
+
+| Screen | Ticket | The state that opens it | Result |
+|---|---|---|---|
+| S2-01 list after round 1 | LP-913 | after round 1 only | **UNVERIFIED ON SCREEN** |
+| S2-02 list mid-work, bulk | LP-913, LP-912 | after §5 step 5, with 3 rows ticked | **UNVERIFIED ON SCREEN** |
+| S2-03 condition detail | LP-916 | click `6637` once round 2 has cleared it | **UNVERIFIED ON SCREEN** |
+| S2-04 record the lender's answer | LP-912 | select 3 rows → **Record lender's answer** | **UNVERIFIED ON SCREEN** |
+| S2-05 move back needs a reason | LP-912 | move `0006` from *Ready to send* back to *To do* | **UNVERIFIED ON SCREEN** |
+| S2-06 what changed in round 2 | LP-915 | immediately after importing round 2 (full) | **UNVERIFIED ON SCREEN** |
+| S2-07 confirm with one unticked | LP-915 | the same panel, `0132` unticked | **UNVERIFIED ON SCREEN** |
+| S2-08 round 3: came back, reworded, new | LP-915, LP-912 | confirm round 2's five, send `1228` to the lender, import round 3 | **UNVERIFIED ON SCREEN** |
+| S2-09 filtered to nothing | LP-913 | filter Owner: Insurance + Our status: Waiting | **UNVERIFIED ON SCREEN** |
+| S2-10 partial round, nothing suggested | LP-915 | import round 2 as *Just some* instead | **UNVERIFIED ON SCREEN** |
+| S2-11 lender dates | LP-917 | the Conditions tab after round 2 or 3 | **UNVERIFIED ON SCREEN** |
+
+Two items in those tickets are **NOT BUILT** rather than merely unverified, and are named so the label
+is not used to cover an absence: S2-06's "line naming what didn't change" (LP-915 #8), and the second
+clause of S2-08's came-back line, which the review then built from the round's own events (R5).
+
+## Stage 2 — deferred, on purpose
+
+- **LP-914 (board view)** — D1, kept in the plan and moved after Stage 3.
+- **Stage 3 and later:** needs from conditions, the lender's verified figures against the file's own
+  (LP-915 leaves it out with a note), "Email borrower" / "Request document" actions.
+- **Stage 4:** contract closing / signing / funding dates a processor enters, "soon" warnings and
+  colours on the lender dates, the Today queue (LP-917 keeps the section plain text for this reason).
+- **Never exercised in Stage 2:** LP-915's migration downgrade against a database with data; the
+  `GRANT` in that migration (the role `mbai_readonly` does not exist on this machine, so the guard
+  takes its no-op branch).
+
 ## CI
 
-**Not known to have run.** The branch is pushed through `050d5db0`, but both workflows trigger only
-on `push` and `pull_request` to `main` — a push of this branch runs nothing, so CI needs a PR against
-`main`. Local results and their limits are in LP-909 §5.
+**Not known to have run,** for Stage 1 or Stage 2. Both workflows trigger only on `push` and
+`pull_request` to `main` — a push of this branch runs nothing, so CI needs a PR against `main`, and
+this branch is not to be merged (LP-909).
+
+Measured rather than asserted: `origin/phase4.5-conditions` is at `76d1ef80` and `HEAD` is
+`d39670c4`, so **three commits are local and unpushed** — LP-915's review, LP-917, and LP-917's
+review. Local results and their limits are in LP-909 §5 for Stage 1, and in each Stage 2 ticket's
+own Verification section.
