@@ -63,17 +63,11 @@ _CHECKS = text(
     """
 )
 
-#: CHECKs the models declare that NO migration ever created, found by this test on its first run.
-#: Pre-existing, not LP-912's: each column accepts any string on a migrated database today. Listed so
-#: the gap is a recorded decision with a follow-up rather than a silent one, and so that the NEXT
-#: missing CHECK fails. Remove an entry when its migration lands; the test fails on a stale entry.
-_KNOWN_MISSING: frozenset[tuple[str, tuple[str, ...]]] = frozenset(
-    {
-        ("communications", ("body_format",)),
-        ("users", ("mail_client",)),
-        ("validation_verdicts", ("kind",)),
-    }
-)
+#: CHECKs the models declare that NO migration ever created. Empty since LP-931, which created the
+#: three this test found on its first run (`communications.body_format`, `users.mail_client`,
+#: `validation_verdicts.kind`). Kept as the place to record the next one as a decision rather than a
+#: silent gap; the test fails on a stale entry.
+_KNOWN_MISSING: frozenset[tuple[str, tuple[str, ...]]] = frozenset()
 
 
 def _shape(definition: str) -> object:
