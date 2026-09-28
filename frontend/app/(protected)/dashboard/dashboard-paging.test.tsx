@@ -48,9 +48,13 @@ vi.mock("@/lib/api/loan-files", () => ({
     isError: false,
   }),
 }));
-// `subscribe` because the pipeline search store listens for sign-out (LP-933).
+// `subscribe` and `getState` because the pipeline search store listens for sign-out and stamps a
+// search with the signed-in user (LP-933). The selector result "Pat" also serves as the user id.
 vi.mock("@/lib/stores/auth-store", () => ({
-  useAuthStore: Object.assign(() => "Pat", { subscribe: () => () => {} }),
+  useAuthStore: Object.assign(() => "Pat", {
+    subscribe: () => () => {},
+    getState: () => ({ user: { id: "Pat" } }),
+  }),
 }));
 // The page looks a selected view's search term up from the saved views (LP-933).
 vi.mock("@/lib/api/saved-views", () => ({

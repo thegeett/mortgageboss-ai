@@ -40,9 +40,8 @@ export default function DashboardPage() {
   // and never reaches the URL (ADR-405 as amended). The box keeps local state
   // for what has been typed but not yet committed.
   const urlState = usePipelineUrl();
-  const search = usePipelineSearchStore((state) => state.search);
-  const hydrated = useHydratedPipelineSearch();
-  useApplyViewSearch(urlState.viewId, hydrated);
+  const { search, trusted } = useTrustedPipelineSearch();
+  useApplyViewSearch(urlState.viewId, trusted);
   useStripSearchTermFromUrl(urlState);
 
   const [searchInput, setSearchInput] = useState(search);
@@ -86,11 +85,12 @@ export default function DashboardPage() {
 
   const statuses = urlState.statuses;
 
-  // Not before the stored search is read: the first request would otherwise
-  // ask for the unsearched list and render it for a frame after a refresh.
+  // Not before the stored search is read AND known to be this user's: the
+  // first request would otherwise ask for the unsearched list after a refresh,
+  // or for the previous user's term after a reload (LP-933 review).
   const { data, isPending, isError } = useLoanFiles(
     { page, pageSize: PAGE_SIZE, statuses, search },
-    { enabled: hydrated },
+    { enabled: trusted },
   );
   // Default order is "what needs me first" (LP-UI-013), not most-recently-
   // touched. Memoised so the table is not handed a new array every render.
@@ -214,19 +214,32 @@ export default function DashboardPage() {
 }
 
 /**
- * Read the stored search once, on mount, and say when it has been read.
+ * The stored search, once it can be trusted: read from sessionStorage AND
+ * known to belong to whoever is signed in now. Until then `search` is "" and
+ * `trusted` is false, and nothing may use the stored term.
  *
- * The store skips hydration so the server's empty render and the first client
- * render agree; this is the one place that hydrates it.
+ * Two waits, both needed. The store skips hydration so the server's empty
+ * render and the first client render agree; this is the one place that
+ * hydrates it. And after a reload the in-memory auth store starts signed out
+ * (it is re-established by a silent refresh), so the user is not known at
+ * hydration. The term is stamped with the user who set it, and `adopt`
+ * discards it unless that is the user now signed in (LP-933 review: a sign-out
+ * this tab never witnessed otherwise handed the term to the next person).
  */
-function useHydratedPipelineSearch(): boolean {
+function useTrustedPipelineSearch(): { search: string; trusted: boolean } {
   const [hydrated, setHydrated] = useState(false);
+  const userId = useAuthStore((state) => state.user?.id ?? null);
+  const stored = usePipelineSearchStore((state) => state);
   useEffect(() => {
     void Promise.resolve(usePipelineSearchStore.persist.rehydrate()).finally(() =>
       setHydrated(true),
     );
   }, []);
-  return hydrated;
+  useEffect(() => {
+    if (hydrated && userId !== null) usePipelineSearchStore.getState().adopt(userId);
+  }, [hydrated, userId]);
+  const trusted = hydrated && userId !== null && stored.userId === userId;
+  return { search: trusted ? stored.search : "", trusted };
 }
 
 /**
@@ -240,11 +253,11 @@ function useHydratedPipelineSearch(): boolean {
  * rather than keeping the last one: a leftover search would filter a view its
  * owner never set up that way.
  */
-function useApplyViewSearch(viewId: string | null, hydrated: boolean): void {
+function useApplyViewSearch(viewId: string | null, trusted: boolean): void {
   const storedViewId = usePipelineSearchStore((state) => state.viewId);
   const { data: views, isError } = useSavedViews({ withCounts: true });
   useEffect(() => {
-    if (!hydrated || storedViewId === viewId) return;
+    if (!trusted || storedViewId === viewId) return;
     const { applyView } = usePipelineSearchStore.getState();
     if (viewId === null) {
       applyView(null, "");
@@ -253,7 +266,7 @@ function useApplyViewSearch(viewId: string | null, hydrated: boolean): void {
     if (!views && !isError) return;
     const view = views?.find((candidate) => candidate.id === viewId);
     applyView(viewId, view?.filters.search ?? "");
-  }, [hydrated, storedViewId, viewId, views, isError]);
+  }, [trusted, storedViewId, viewId, views, isError]);
 }
 
 /**

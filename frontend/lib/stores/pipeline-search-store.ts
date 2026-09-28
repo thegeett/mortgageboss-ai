@@ -23,6 +23,13 @@
  *
  * CLEARED WHEN THE SIGNED-IN USER GOES AWAY OR CHANGES. The tab outlives a sign-out, so without this the
  * next person to sign in there would open the pipeline already searching the last person's borrower.
+ *
+ * AND STAMPED WITH WHO TYPED IT, because the subscription below only sees a sign-out THIS JS context
+ * witnesses (LP-933 review). The auth store is in memory, so after a reload it starts signed out without
+ * any transition: a sign-out in another tab, a session expiry, or a reload while signed out all leave
+ * the old term in sessionStorage unseen. `userId` records whose term it is, and `adopt` discards it
+ * unless it belongs to whoever is signed in now. Nothing may use the term before `adopt` has run for a
+ * known user; the dashboard's `useTrustedPipelineSearch` is that gate.
  */
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { create } from "zustand";
@@ -59,25 +66,35 @@ interface PipelineSearchState {
   search: string;
   /** The saved view `search` was applied under; `null` for "All files". */
   viewId: string | null;
+  /** Who was signed in when `search` was set. A term is only ever used for this user. */
+  userId: string | null;
   setSearch: (search: string) => void;
   /** Select a view (or "All files", `null`) and the search that comes with it. */
   applyView: (viewId: string | null, search: string) => void;
+  /** Keep the stored term only if it was set by `userId`; otherwise start empty, for them. */
+  adopt: (userId: string) => void;
   clear: () => void;
 }
 
+const signedInUserId = (): string | null => useAuthStore.getState().user?.id ?? null;
+
 export const usePipelineSearchStore = create<PipelineSearchState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       search: "",
       viewId: null,
-      setSearch: (search) => set({ search }),
-      applyView: (viewId, search) => set({ viewId, search }),
-      clear: () => set({ search: "", viewId: null }),
+      userId: null,
+      setSearch: (search) => set({ search, userId: signedInUserId() }),
+      applyView: (viewId, search) => set({ viewId, search, userId: signedInUserId() }),
+      adopt: (userId) => {
+        if (get().userId !== userId) set({ search: "", viewId: null, userId });
+      },
+      clear: () => set({ search: "", viewId: null, userId: null }),
     }),
     {
       name: PIPELINE_SEARCH_STORAGE_KEY,
       storage: createJSONStorage(() => tabStorage),
-      partialize: ({ search, viewId }) => ({ search, viewId }),
+      partialize: ({ search, viewId, userId }) => ({ search, viewId, userId }),
       skipHydration: true,
     },
   ),

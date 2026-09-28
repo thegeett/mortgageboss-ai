@@ -60,6 +60,8 @@ const TERM = "Ellis";
 
 beforeEach(() => {
   vi.useFakeTimers();
+  // Signed in: the page does not trust a stored search until it knows who is signed in.
+  useAuthStore.setState({ user: { id: "u1" } as never, accessToken: "t" });
 });
 
 afterEach(() => {
@@ -70,8 +72,9 @@ afterEach(() => {
   nav.urls = [];
   requested.searches = [];
   views.data = [];
+  useAuthStore.setState({ user: null, accessToken: null });
   window.sessionStorage.clear();
-  usePipelineSearchStore.setState({ search: "", viewId: null });
+  usePipelineSearchStore.setState({ search: "", viewId: null, userId: null });
 });
 
 /** Render and let the store hydrate (a resolved promise) and effects settle. */
@@ -97,7 +100,20 @@ async function type(value: string) {
 function refresh(previous: { unmount: () => void }) {
   previous.unmount();
   const saved = window.sessionStorage.getItem(PIPELINE_SEARCH_STORAGE_KEY);
-  usePipelineSearchStore.setState({ search: "", viewId: null });
+  usePipelineSearchStore.setState({ search: "", viewId: null, userId: null });
+  if (saved !== null) window.sessionStorage.setItem(PIPELINE_SEARCH_STORAGE_KEY, saved);
+}
+
+/**
+ * A full page reload: a new JS context, so the in-memory auth store starts signed out WITHOUT the
+ * tab ever seeing a sign-out, and sessionStorage is all that carries over. Both stores are reset
+ * (each writes through its subscribers), then the saved entry is put back as the reload finds it.
+ */
+function reload(previous: { unmount: () => void }) {
+  previous.unmount();
+  const saved = window.sessionStorage.getItem(PIPELINE_SEARCH_STORAGE_KEY);
+  useAuthStore.setState({ user: null, accessToken: null });
+  usePipelineSearchStore.setState({ search: "", viewId: null, userId: null });
   if (saved !== null) window.sessionStorage.setItem(PIPELINE_SEARCH_STORAGE_KEY, saved);
 }
 
@@ -208,7 +224,6 @@ describe("the pipeline search stays out of the URL", () => {
   });
 
   it("forgets the search when the signed-in user signs out", async () => {
-    useAuthStore.setState({ user: { id: "u1" } as never, accessToken: "t" });
     await renderDashboard();
     await type(TERM);
     expect(usePipelineSearchStore.getState().search).toBe(TERM);
@@ -219,5 +234,55 @@ describe("the pipeline search stays out of the URL", () => {
 
     expect(usePipelineSearchStore.getState().search).toBe("");
     expect(stored()).not.toContain(TERM);
+  });
+
+  it("does not hand one user's search to the next after a reload (LP-933 review)", async () => {
+    // The sign-out this tab never saw: another tab, a session expiry, or a reload while signed
+    // out. The in-memory auth store starts empty after a reload, so "someone -> no one" is never
+    // observed here, and only the stamp on the stored term can tell whose it is.
+    const first = await renderDashboard();
+    await type(TERM);
+    expect(stored()).toContain(TERM);
+    reload(first);
+    requested.searches = [];
+
+    const second = render(<DashboardPage />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // Not signed in yet: nothing may be requested with a term that could be someone else's.
+    expect(requested.searches).not.toContain(TERM);
+
+    act(() => {
+      useAuthStore.setState({ user: { id: "u2" } as never, accessToken: "t2" });
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(searchBox().value).toBe("");
+    expect(requested.searches).not.toContain(TERM);
+    expect(stored()).not.toContain(TERM);
+    second.unmount();
+  });
+
+  it("keeps the search across a reload when the same user signs back in", async () => {
+    const first = await renderDashboard();
+    await type(TERM);
+    reload(first);
+
+    render(<DashboardPage />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => {
+      useAuthStore.setState({ user: { id: "u1" } as never, accessToken: "t" });
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(searchBox().value).toBe(TERM);
+    expect(requested.searches.at(-1)).toBe(TERM);
   });
 });
