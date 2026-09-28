@@ -49,6 +49,17 @@ _CONSTRAINTS: dict[str, tuple[str, ...]] = {
 }
 
 
+#: `_OUTCOMES = (...)`, with or without a type annotation. ONE pattern, shared by the two readers
+#: below: the first decides whether a migration DEFINES a constraint and the second reads the values
+#: out of it, so a pattern they do not share can drift into a file the first accepts and the second
+#: cannot read — which fails as "defines no _OUTCOMES tuple this guard can read", LP-932's own symptom
+#: one layer down. The annotation is optional because this repo annotates its migration constants
+#: (LP-931's `_CHECKS`, LP-932's `_RENAMES`); the live definition happens to write the bare form.
+#: The annotation cannot span a newline, so prose that merely mentions `_OUTCOMES:` above an
+#: unrelated tuple is not mistaken for a declaration.
+_OUTCOMES_DECL = r"_OUTCOMES\s*(?::[^=\n]*)?=\s*\("
+
+
 def _defining_migration(constraint: str) -> Path:
     """The NEWEST migration that defines this constraint — the one whose definition is live.
 
@@ -64,7 +75,7 @@ def _defining_migration(constraint: str) -> Path:
     for path in sorted(_VERSIONS.glob("*.py")):
         text = path.read_text()
         names_it = any(name in text for name in _CONSTRAINTS[constraint])
-        if names_it and re.search(r"_OUTCOMES\s*=\s*\(", text):
+        if names_it and re.search(_OUTCOMES_DECL, text):
             defining.append(path)
     assert defining, f"no migration defines {constraint}"
     return defining[-1]
@@ -77,7 +88,7 @@ def _declared_values(path: Path) -> set[str]:
     migration that builds its list dynamically fails this test loudly instead of being trusted.
     """
     text = path.read_text()
-    tuples = re.findall(r"_OUTCOMES\s*=\s*\(([^)]*)\)", text, flags=re.DOTALL)
+    tuples = re.findall(_OUTCOMES_DECL + r"([^)]*)\)", text, flags=re.DOTALL)
     assert tuples, f"{path.name} defines no _OUTCOMES tuple this guard can read"
     return {v.strip().strip("\"'") for v in tuples[0].replace("\n", "").split(",") if v.strip()}
 
@@ -123,3 +134,25 @@ def test_pending_automation_is_reachable_from_the_engine() -> None:
     from app.verification.rule_engine.result import Verdict
 
     assert Verdict.PENDING_AUTOMATION.value == EvaluationOutcome.PENDING_AUTOMATION.value
+
+
+def test_the_defines_rule_reads_an_annotated_outcomes_tuple() -> None:
+    """An annotated `_OUTCOMES` counts as a declaration, and both readers agree on what one is.
+
+    The live definition writes the bare form, so this costs nothing today. It matters for the NEXT
+    outcome swap: this repo annotates its migration constants — LP-931's `_CHECKS` and LP-932's
+    `_RENAMES` both do — and under a pattern that only knows the bare form that file would define
+    nothing. `_defining_migration` would fall back to an older migration and the failure would name
+    the wrong file. The negative case is the reason the annotation stops at a newline: prose that
+    mentions `_OUTCOMES:` above an unrelated tuple must not read as a declaration.
+    """
+    for form in (
+        '_OUTCOMES = ("a",)',
+        '_OUTCOMES: tuple[str, ...] = ("a",)',
+        '_OUTCOMES: Final = ("a",)',
+    ):
+        assert re.search(_OUTCOMES_DECL, form), form
+        assert re.findall(_OUTCOMES_DECL + r"([^)]*)\)", form, flags=re.DOTALL) == ['"a",'], form
+
+    assert not re.search(_OUTCOMES_DECL, '_OUTCOMES_BY_KIND = {"a": 1}')
+    assert not re.search(_OUTCOMES_DECL, 'mentions _OUTCOMES: see below\n_UNRELATED = ("x",)')
