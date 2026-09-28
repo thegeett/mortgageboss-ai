@@ -251,3 +251,74 @@ ahead of every review. The reviews found one real defect, in LP-933, and its fix
 that push, so nothing unreviewed-and-wrong reached origin that the review had caught. The review commits
 and the review follow-ups come after. Pushing still runs no CI, for the reason above. Local results
 and their limits are in LP-909 §5 for Stage 1, and in each ticket's own Verification section.
+
+---
+
+# Stage 3 — Work the conditions
+
+**Spec:** [`phase4.5-stage3-plan.md`](phase4.5-stage3-plan.md) (behaviour, data, numbers) and
+[`../design/phase4.5-conditions/stage3/README.md`](../design/phase4.5-conditions/stage3/README.md) (look
+and wording, S3-01 to S3-12). **Loop:** [`phase4-execution-protocol.md`](phase4-execution-protocol.md),
+builder `mortgageboss-ai-be`, reviewer `mortgageboss-ai-cf` (the brief names it "Reaspberry-review"; no
+session of that name exists, and the product owner named `mortgageboss-ai-cf`). A ticket is done when its
+row says **REVIEWED** with a review SHA; the branch is pushed only after that.
+
+**Screens are checked with `scripts/visual-check/`** (LP-934): a scratch database, 1600 px, light theme,
+the "Today" table's clock. Actual and review shots are committed under
+`docs/design/phase4.5-conditions/stage3/checks/`.
+
+## Stage 3 — tickets
+
+| Ticket | Status | Build SHA | Review SHA | Visual check | Notes |
+|---|---|---|---|---|---|
+| LP-934 Pre-flight: screens against the plan, visual-check harness | AWAITING_REVIEW | the commit titled `LP-934:` | | harness verified on the base state | 7 mismatches, 4 screen deviations (LP-934.md) |
+| LP-918 Condition library v1 (data) | PENDING | | | none of its own | owner's top-20 sign-off tracked separately (decision 6) |
+| LP-919 Reading each condition | PENDING | | | S3-01, S3-03 | |
+| LP-920 The action plan | PENDING | | | S3-01, S3-02 | |
+| LP-921 Next-step options | PENDING | | | S3-01, S3-02, S3-12 | |
+| LP-922 Asking people (drafts only) | PENDING | | | S3-04, S3-05, S3-06 | then the Stage 3A acceptance test |
+| LP-923 Evidence arrives and is checked | PENDING | | | S3-07, S3-08 | |
+| LP-924 The figures check | PENDING | | | S3-09 | |
+| LP-925 Package, submit, lender settings | PENDING | | | S3-10, S3-11 | then the Stage 3B acceptance test |
+| LP-935 Stage 3 close | PENDING | | | every screen | |
+
+## Stage 3 — decisions pre-made (plan §8), so nothing blocks
+
+Each is reversible and stored as data where it can be. The reviewer does not reopen them.
+
+| §8 question | Build against this |
+|---|---|
+| 1 Who orders what at UWM | Per-lender setting (S3-11 "Who does what"). UWM seed: the final inspection or appraisal update is ordered by the lender (so 1228 is "Lender is doing it"). Title updates, insurance and payoffs: we ask the party. Other lenders: nothing ticked. |
+| 2 Does the LO approve borrower emails? | No in V1. The draft goes straight to the processor. Leave room for a later "LO reviews first" step, but don't build it. |
+| 3 Processor certifications | Not in V1. "I'll do it" is done only when she marks the task done, and a document item also needs a linked document. No certification text is generated. |
+| 4 Where does the note per condition go? | Both: it is editable in the package (S3-10), included in the download, and copied with "Copy all notes". Per-lender fields: UWM note; Sun West comment + Name of Source + Date Verified. |
+| 5 UWM Underwriting+ | The file-level switch "Lender is processing this file" is built. It defaults to off for every lender. The UWM "new files default" setting is unticked (S3-11). |
+| 6 Library review | Build LP-918 as data, and also write `docs/phases/phase4.5-library-review.md`: the top 20 types as a table the product owner can mark up (type, items, who, documents, checks, rule, default plan). The ticket is REVIEWED when the code and data pass review. The owner's sign-off is tracked as a separate open item. It does not block later tickets, which use the library as it stands. |
+
+Also fixed, from the screens:
+
+- The reading confidence bar is **0.75**, stored as a setting (0.64 is below it; 0.86 and above pass).
+- The borrower email is due **4 business days** after the plan is confirmed: 08/28 gives Thursday 09/03.
+  It is editable in the draft.
+- The Stage 3 package lives on the **Conditions tab**. The Lender package tab stays Phase 6's placeholder.
+- "Lender is doing it" and "Information only" are **plan options** shown with Stage 2's display rule. They
+  are not new `prep_status` values (plan §4a change 12).
+
+## Stage 3 — tests that already failed before Stage 3
+
+Named so a later ticket is not blamed for them (baseline at `840df131`):
+
+- `backend/tests/ai/test_provider_selection_b1.py::test_a_sonnet_reasoning_id_cannot_survive_boot` —
+  this machine's `backend/.env` sets its own `ANTHROPIC_MODEL_*` values, so the test's premise fails here.
+- `frontend/components/file/conditions/conditions-screens.test.tsx` › "offers a way out once the round
+  is stranded" — fixture on the threshold (Stage 2 follow-ups).
+
+## Stage 3 — STOP AND ASK
+
+None yet.
+
+## Stage 3 — open items (not blocking)
+
+- **The product owner's sign-off on the library's top 20 types** (decision 6), once LP-918 has written
+  `phase4.5-library-review.md`.
+- **Screen deviations for the product owner to redraw:** D1 to D4 in [LP-934](../tickets/LP-934.md).

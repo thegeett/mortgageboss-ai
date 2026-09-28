@@ -42,3 +42,5 @@ next-env.d.ts
 
 # Reviewer verification builds (see next.config.ts distDir).
 .next-review/
+# The visual-check harness's dev server (scripts/visual-check/run.sh).
+.next-visual/
