@@ -13,14 +13,18 @@ Neither ever sees a database that `alembic upgrade head` produced. LP-912 found 
   two CHECKs and only one of them admits that value.
 
 So this migrates a scratch database for real and compares it with the suite's own `create_all`
-database, COLUMN BY COLUMN rather than by constraint name. Names are known to differ (24 of them on the
-day this was written), and a name is not what a write fails on:
+database, COLUMN BY COLUMN, and since LP-932 by NAME as well. When this was written, 24 names differed,
+and the value comparison was deliberately keyed on the column rather than the name. LP-932 renamed
+all 24, so the third check below now holds too:
 
 1. **No column carries two CHECKs** in the migrated database. That is the LP-909 shape exactly, and it
    is also what the next swap by the "wrong" spelling of a doubled name would produce.
 2. **Every column the models constrain is constrained the same way** after migrating, and vice versa:
    the same value set for an enum CHECK, the same expression otherwise. A missing migration, a swap
    that revoked a value, or a CHECK that exists only in the suite all fail here.
+3. **Every CHECK carries the name the models give it** (LP-932). A swap is written against a name, so
+   a name that differs between the two databases is where the next LP-909 comes from: dropping the
+   model's name on a migrated database drops nothing, and the new CHECK lands beside the old one.
 
 It costs one `alembic upgrade head` (about 13 s on the slowest machine this runs on). That is the price
 of the only check in the suite that reads what production actually has.
@@ -176,6 +180,34 @@ async def test_every_check_the_models_declare_is_what_migrating_installs(
     )
     assert not differ, f"(column, models permit, migrated permits) disagree: {differ}"
     assert not stale, f"_KNOWN_MISSING lists entries that are no longer missing: {stale}"
+
+
+async def test_every_check_carries_the_name_the_models_give_it(
+    migrated_engine: AsyncEngine, test_engine: AsyncEngine
+) -> None:
+    """Column by column, the migrated CHECK is NAMED what `create_all` names it (LP-932).
+
+    Compared per column rather than as two sets of names, so a failure says which column and both
+    names, which is what a fixing migration needs. A column constrained on one side only is left to
+    the test above, which already reports it as missing or extra.
+    """
+    migrated = _by_column(await _checks(migrated_engine))
+    modelled = _by_column(await _checks(test_engine))
+
+    misnamed = []
+    for (table, columns), found in sorted(modelled.items()):
+        if (table, columns) not in migrated:
+            continue
+        model_names = sorted(name for name, _ in found)
+        migrated_names = sorted(name for name, _ in migrated[(table, columns)])
+        if migrated_names != model_names:
+            misnamed.append((table, columns, migrated_names, model_names))
+
+    assert not misnamed, (
+        "(table, column, migrated name, model name) differ, so a swap written against the model's name "
+        f"would miss the migrated constraint and add a second CHECK beside it: {misnamed}. Rename it "
+        "with raw ALTER TABLE ... RENAME CONSTRAINT, as LP-932 did."
+    )
 
 
 @pytest.mark.parametrize(

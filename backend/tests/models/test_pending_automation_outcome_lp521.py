@@ -32,11 +32,21 @@ _VERSIONS = Path(__file__).resolve().parents[2] / "alembic" / "versions"
 # `create_table`, and the metadata naming convention prefixed it again. `findings` escaped it because
 # LP-316 created that one with raw ALTER TABLE. Using the source names made LP-521's first deploy fail
 # with UndefinedObjectError.
-_CONSTRAINTS = (
-    "ck_findings_evaluationoutcome",
-    "ck_finding_events_ck_finding_events_finding_event_from_outcome",
-    "ck_finding_events_ck_finding_events_finding_event_to_outcome",
-)
+#
+# LP-932 RENAMED THE TWO finding_events CONSTRAINTS to the names the models give them, so each has had
+# two names. Each entry lists every name the constraint has held: a later outcome swap will use the
+# new one, and LP-521's swap (the live definition today) used the old one.
+_CONSTRAINTS: dict[str, tuple[str, ...]] = {
+    "ck_findings_evaluationoutcome": ("ck_findings_evaluationoutcome",),
+    "ck_finding_events_finding_event_from_outcome": (
+        "ck_finding_events_finding_event_from_outcome",
+        "ck_finding_events_ck_finding_events_finding_event_from_outcome",
+    ),
+    "ck_finding_events_finding_event_to_outcome": (
+        "ck_finding_events_finding_event_to_outcome",
+        "ck_finding_events_ck_finding_events_finding_event_to_outcome",
+    ),
+}
 
 
 def _defining_migration(constraint: str) -> Path:
@@ -44,8 +54,18 @@ def _defining_migration(constraint: str) -> Path:
 
     Newest wins because a later migration rebuilds what an earlier one created. Ordering is by
     filename, which is date-prefixed by this repo's convention.
+
+    A migration DEFINES the constraint when it names it (by any name it has held) AND declares an
+    `_OUTCOMES` tuple. Naming alone is not enough since LP-932: its rename migration names both
+    finding_events constraints and changes no value, and taking it as the definition would make
+    `_declared_values` fail on a file that has no outcome list to read.
     """
-    defining = sorted(p for p in _VERSIONS.glob("*.py") if constraint in p.read_text())
+    defining = []
+    for path in sorted(_VERSIONS.glob("*.py")):
+        text = path.read_text()
+        names_it = any(name in text for name in _CONSTRAINTS[constraint])
+        if names_it and re.search(r"_OUTCOMES\s*=\s*\(", text):
+            defining.append(path)
     assert defining, f"no migration defines {constraint}"
     return defining[-1]
 
