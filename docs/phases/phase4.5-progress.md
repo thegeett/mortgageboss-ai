@@ -231,8 +231,10 @@ Found while doing them, not done:
   run** and passes alone; it fails the same way at `dc87234e`, before these tickets. Its fixture sets
   `created_at` to exactly `now - STRANDED_AFTER_MS` and `isStranded` needs strictly more, so the
   fixture sits on the threshold and answers "is a round stranded at exactly 10 minutes?" by accident,
-  depending on which clock the file leaves running. The fixture should be one millisecond to whichever
-  side the product means.
+  depending on which clock the file leaves running. Measured two ways: **deterministic at file scope**
+  (four runs of the file, four failures), **green in some whole-suite runs** (the LP-933 review's run
+  passed 2048 of 2048), so a whole-suite green does not close it. The fixture should be one millisecond
+  to whichever side the product means.
 
 ## CI
 
@@ -240,7 +242,12 @@ Found while doing them, not done:
 `pull_request` to `main` — a push of this branch runs nothing, so CI needs a PR against `main`, and
 this branch is not to be merged (LP-909).
 
-Measured rather than asserted: the Stage 2 review's commit (`ad2dc2aa`) is pushed;
-`origin/phase4.5-conditions` was at `ad2dc2aa` on 2026-09-28 before the follow-ups above, and each
-follow-up is pushed only after its review commit. Pushing still runs no CI, for the reason above. Local results
+Measured rather than asserted: the Stage 2 review's commit (`ad2dc2aa`) is pushed.
+`origin/phase4.5-conditions` was at `ad2dc2aa` on 2026-09-28 before the follow-ups above. **The plan was
+to push each follow-up only after its review commit, and that is not what happened:** at 17:46 that day
+a push from this clone (not from the session building them) moved origin to `1e2d97c1`, carrying all
+five follow-up commits (`8b26c76b`, `45f722d8`, `4c58e6a7`, `70b87c8e`, `1e2d97c1`) and `dc87234e`
+ahead of every review. The reviews found one real defect, in LP-933, and its fix (`1e2d97c1`) was in
+that push, so nothing unreviewed-and-wrong reached origin that the review had caught. The review commits
+and the review follow-ups come after. Pushing still runs no CI, for the reason above. Local results
 and their limits are in LP-909 §5 for Stage 1, and in each ticket's own Verification section.
