@@ -2,6 +2,7 @@
 
 import { type SavedView, useSavedViews } from "@/lib/api/saved-views";
 import { writePipelineUrl } from "@/lib/loan-files/view-url";
+import { usePipelineSearchStore } from "@/lib/stores/pipeline-search-store";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 
@@ -21,6 +22,12 @@ import Link from "next/link";
  * Counts come from the server in the same response. Counting in the browser
  * would mean one `pageSize: 1` request per view — the StatsCards pattern
  * LP-UI-013 deleted, reintroduced through a different door.
+ *
+ * A VIEW'S SEARCH TERM IS NOT IN ITS LINK (LP-933). A view can store one, and
+ * it matches borrower names, so the link carries the statuses and the view id
+ * only. Clicking applies the term to the per-tab search store; arriving any
+ * other way (back button, pasted link) is handled by the dashboard, which looks
+ * the term up from the server's copy of the view.
  */
 export function SavedViews({
   activeViewId,
@@ -45,6 +52,7 @@ export function SavedViews({
         label="All files"
         count={null}
         active={activeViewId === null && !filtered}
+        onSelect={() => usePipelineSearchStore.getState().applyView(null, "")}
       />
 
       {isPending ? <Hint>Loading…</Hint> : null}
@@ -78,12 +86,14 @@ function Group({
           key={view.id}
           href={`/dashboard${writePipelineUrl({
             statuses: view.filters.statuses,
-            search: view.filters.search ?? "",
             viewId: view.id,
           })}`}
           label={view.name}
           count={view.count}
           active={view.id === activeViewId}
+          onSelect={() =>
+            usePipelineSearchStore.getState().applyView(view.id, view.filters.search ?? "")
+          }
         />
       ))}
     </>
@@ -95,15 +105,19 @@ function ViewLink({
   label,
   count,
   active,
+  onSelect,
 }: {
   href: string;
   label: string;
   count: number | null;
   active: boolean;
+  /** Applies the view's search before navigating; it has no place in `href`. */
+  onSelect: () => void;
 }) {
   return (
     <Link
       href={href}
+      onClick={onSelect}
       aria-current={active ? "page" : undefined}
       className={cn(
         "flex h-7 items-center gap-2 rounded-md px-2 text-sm transition-colors",

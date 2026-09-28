@@ -6,7 +6,7 @@
  * to cover: LP-UI-011's mutation showed a helper can stay green while the
  * component stops calling it. These assert on the rendered nav.
  */
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const views = vi.hoisted(() => ({
@@ -23,6 +23,7 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+import { usePipelineSearchStore } from "@/lib/stores/pipeline-search-store";
 import { SavedViews } from "./saved-views";
 
 const view = (over: Partial<Record<string, unknown>> = {}) => ({
@@ -38,6 +39,8 @@ const view = (over: Partial<Record<string, unknown>> = {}) => ({
 
 afterEach(() => {
   cleanup();
+  usePipelineSearchStore.setState({ search: "", viewId: null });
+  window.sessionStorage.clear();
   views.data = undefined;
   views.isPending = false;
   views.isError = false;
@@ -82,6 +85,29 @@ describe("SavedViews", () => {
     const href = link.getAttribute("href") ?? "";
     expect(href).toContain("status=in_conditions");
     expect(href).toContain("view=v1");
+  });
+
+  it("keeps a view's search term out of its link, and applies it on click (LP-933)", () => {
+    // A view can store a search, and it matches borrower NAMES. Until LP-933 the
+    // link wrote it as `?q=`, so a view's link carried a name wherever it went.
+    views.data = [view({ filters: { statuses: ["in_conditions"], search: "Ellis" } })];
+    render(<SavedViews activeViewId={null} filtered={false} />);
+    const link = screen.getByRole("link", { name: /blocked to submit/i });
+
+    expect(link.getAttribute("href")).toBe("/dashboard?status=in_conditions&view=v1");
+
+    fireEvent.click(link);
+    expect(usePipelineSearchStore.getState()).toMatchObject({ search: "Ellis", viewId: "v1" });
+  });
+
+  it("clears the search when 'All files' is chosen", () => {
+    usePipelineSearchStore.setState({ search: "Ellis", viewId: "v1" });
+    views.data = [view()];
+    render(<SavedViews activeViewId="v1" filtered />);
+
+    fireEvent.click(screen.getByRole("link", { name: /all files/i }));
+
+    expect(usePipelineSearchStore.getState()).toMatchObject({ search: "", viewId: null });
   });
 
   it("separates my views from shared ones", () => {

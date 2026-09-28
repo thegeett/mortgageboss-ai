@@ -16316,7 +16316,16 @@ recorded rather than fixed: nothing in the app logs a term (`uvicorn.access` is 
 logs the path only), and ALB access logs are off, so if they are ever enabled the terms reach S3 —
 which is a deployment decision this ADR now names.
 
-*Status.* Accepted (LP-903). Amended (LP-912).
+**The pipeline now follows it (LP-933).** Its borrower-name search is out of the URL: `writePipelineUrl`
+has no search field to write, `readPipelineUrl` ignores `q`, and a link that still carries one is
+stripped by the dashboard rather than obeyed. Statuses and the selected view stay in the URL. The term
+is kept in a per-tab store (`lib/stores/pipeline-search-store.ts`) persisted to `sessionStorage`, never
+`localStorage`, so it survives a refresh in the same tab and a link opened in a new tab shows the
+filters without it. A saved view may store a search term; its link no longer carries it, and the
+dashboard applies it from the server's copy of the view. The store is cleared when the signed-in user
+signs out or changes.
+
+*Status.* Accepted (LP-903). Amended (LP-912, LP-933).
 
 ---
 

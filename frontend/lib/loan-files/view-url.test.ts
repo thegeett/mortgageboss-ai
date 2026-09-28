@@ -1,5 +1,6 @@
 import {
   EMPTY_STATE,
+  carriesSearchTerm,
   isFiltered,
   readPipelineUrl,
   writePipelineUrl,
@@ -11,21 +12,17 @@ describe("pipeline URL state (LP-UI-014)", () => {
   it("round-trips a full filter state", () => {
     const state = {
       statuses: ["in_processing", "draft"] as const,
-      search: "smith",
       viewId: "abc-123",
     };
     const url = writePipelineUrl({ ...state, statuses: [...state.statuses] });
     expect(readPipelineUrl(new URLSearchParams(url))).toEqual({
       statuses: ["in_processing", "draft"],
-      search: "smith",
       viewId: "abc-123",
     });
   });
 
   it("omits empty values rather than writing blanks", () => {
-    // `?q=` and no `q` mean the same thing; only one survives a paste unchanged.
     expect(writePipelineUrl(EMPTY_STATE)).toBe("");
-    expect(writePipelineUrl({ ...EMPTY_STATE, search: "   " })).toBe("");
   });
 
   it("reads an empty query as no filter", () => {
@@ -33,14 +30,13 @@ describe("pipeline URL state (LP-UI-014)", () => {
   });
 
   it("ignores keys it does not own", () => {
-    const state = readPipelineUrl(new URLSearchParams("?page=3&sort=whatever&q=ellis"));
-    expect(state).toEqual({ statuses: [], search: "ellis", viewId: null });
+    const state = readPipelineUrl(new URLSearchParams("?page=3&sort=whatever"));
+    expect(state).toEqual({ statuses: [], viewId: null });
   });
 
   it("keeps every repeated status, in order", () => {
     const url = writePipelineUrl({
       statuses: ["draft", "submitted", "closed"],
-      search: "",
       viewId: null,
     });
     expect(url).toBe("?status=draft&status=submitted&status=closed");
@@ -54,9 +50,42 @@ describe("pipeline URL state (LP-UI-014)", () => {
   it("does not count a selected view as a filter", () => {
     // Selecting a view named "Everything" filters nothing; the empty state
     // message should say "no files yet", not "no matches".
-    expect(isFiltered({ statuses: [], search: "", viewId: "abc" })).toBe(false);
-    expect(isFiltered({ statuses: ["draft"], search: "", viewId: null })).toBe(true);
-    expect(isFiltered({ statuses: [], search: "smith", viewId: null })).toBe(true);
+    expect(isFiltered({ statuses: [], viewId: "abc" })).toBe(false);
+    expect(isFiltered({ statuses: ["draft"], viewId: null })).toBe(true);
+  });
+
+  it("counts the search as a filter although it is not in the URL", () => {
+    // LP-933: the search lives in the per-tab store, so it is passed in.
+    // Without it "All files" would be marked current while a search narrowed
+    // the list.
+    expect(isFiltered({ statuses: [], viewId: null }, "smith")).toBe(true);
+    expect(isFiltered({ statuses: [], viewId: null }, "   ")).toBe(false);
+  });
+});
+
+describe("the search never reaches the pipeline URL (LP-933, ADR-405)", () => {
+  // It matches borrower NAMES. A copied pipeline link carried one as `?q=`
+  // until LP-933; the rule is that a filter matching NPI stays out of the
+  // shareable URL.
+  it("does not read `q`", () => {
+    const state = readPipelineUrl(new URLSearchParams("status=draft&q=ellis&view=abc"));
+    expect(state).toEqual({ statuses: ["draft"], viewId: "abc" });
+    expect(JSON.stringify(state)).not.toContain("ellis");
+  });
+
+  it("drops `q` from a link that still carries one when it is rewritten", () => {
+    const state = readPipelineUrl(new URLSearchParams("status=draft&q=ellis&view=abc"));
+    const url = writePipelineUrl(state);
+    expect(url).toBe("?status=draft&view=abc");
+    expect(url).not.toContain("q=");
+  });
+
+  it("recognises a link that still carries a term, so the dashboard can strip it", () => {
+    expect(carriesSearchTerm(new URLSearchParams("q=ellis"))).toBe(true);
+    // An EMPTY `q` still counts: it is the parameter in the address bar that is
+    // stripped, and `?q=` left behind invites the next writer to fill it.
+    expect(carriesSearchTerm(new URLSearchParams("q="))).toBe(true);
+    expect(carriesSearchTerm(new URLSearchParams("status=draft"))).toBe(false);
   });
 });
 

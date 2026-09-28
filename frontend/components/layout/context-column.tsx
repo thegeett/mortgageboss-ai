@@ -3,6 +3,7 @@
 import { SavedViews } from "@/components/dashboard/saved-views";
 import { isFiltered, usePipelineUrl } from "@/lib/loan-files/view-url";
 import { activeItemHref, contextSection } from "@/lib/navigation";
+import { usePipelineSearchStore } from "@/lib/stores/pipeline-search-store";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -24,6 +25,9 @@ export const CONTEXT_COLUMN_ID = "context-column";
 export function ContextColumn() {
   const pathname = usePathname();
   const urlState = usePipelineUrl();
+  // The search is a filter that is not in the URL (LP-933); without it, "All
+  // files" would be marked current while a search narrowed the list.
+  const search = usePipelineSearchStore((state) => state.search);
   const section = contextSection(pathname);
   // The pipeline's column is saved views (LP-UI-014), not a link list — it is
   // the one section whose contents are data rather than routes.
@@ -42,7 +46,7 @@ export function ContextColumn() {
         className="hidden w-nav shrink-0 overflow-hidden border-r border-border bg-card transition-[width] duration-150 md:block"
         data-context-column
       >
-        <SavedViews activeViewId={urlState.viewId} filtered={isFiltered(urlState)} />
+        <SavedViews activeViewId={urlState.viewId} filtered={isFiltered(urlState, search)} />
       </div>
     );
   }

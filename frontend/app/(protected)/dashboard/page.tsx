@@ -6,14 +6,21 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useLoanFiles } from "@/lib/api/loan-files";
+import { useSavedViews } from "@/lib/api/saved-views";
 import { byAttention } from "@/lib/loan-files/attention";
-import { isFiltered, usePipelineUrl, writePipelineUrl } from "@/lib/loan-files/view-url";
+import {
+  carriesSearchTerm,
+  isFiltered,
+  usePipelineUrl,
+  writePipelineUrl,
+} from "@/lib/loan-files/view-url";
 import { LOAN_FILE_STATUS } from "@/lib/status";
 import { useAuthStore } from "@/lib/stores/auth-store";
+import { usePipelineSearchStore } from "@/lib/stores/pipeline-search-store";
 import type { LoanFileSummary } from "@/lib/types/loan-file";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const PAGE_SIZE = 20;
 
@@ -28,19 +35,25 @@ export default function DashboardPage() {
   const firstName = useAuthStore((state) => state.user?.first_name);
 
   // Filter state lives in the URL (LP-UI-014), not in component state, so a
-  // processor can paste what they are looking at to a colleague. The search box
-  // keeps local state only for what has been typed but not yet committed —
-  // pushing a route on every keystroke would fill the history with fragments.
+  // processor can paste what they are looking at to a colleague. EXCEPT the
+  // search (LP-933): it matches borrower names, so it lives in a per-tab store
+  // and never reaches the URL (ADR-405 as amended). The box keeps local state
+  // for what has been typed but not yet committed.
   const urlState = usePipelineUrl();
+  const search = usePipelineSearchStore((state) => state.search);
+  const hydrated = useHydratedPipelineSearch();
+  useApplyViewSearch(urlState.viewId, hydrated);
+  useStripSearchTermFromUrl(urlState);
 
-  const [searchInput, setSearchInput] = useState(urlState.search);
+  const [searchInput, setSearchInput] = useState(search);
   const [page, setPage] = useState(1);
   const debouncedSearch = useDebouncedValue(searchInput.trim(), 300);
 
-  // The URL is the source of truth; the typed value catches up to it.
+  // The store is the source of truth; the typed value catches up when it
+  // changes from elsewhere (a refresh restoring it, a saved view applying one).
   useEffect(() => {
-    setSearchInput(urlState.search);
-  }, [urlState.search]);
+    setSearchInput(search);
+  }, [search]);
 
   // Page 1 whenever the FILTER changes — any part of it, not just the search.
   // Keyed on the serialised state so statuses and the selected view count too:
@@ -53,33 +66,37 @@ export default function DashboardPage() {
   // corrected one arrives behind it. It also keeps this off the effect graph —
   // the search sync below is then the only effect writing state, so the two
   // cannot feed each other.
-  const filterKey = writePipelineUrl(urlState);
+  const filterKey = `${writePipelineUrl(urlState)}|${search}`;
   const [pagedFilter, setPagedFilter] = useState(filterKey);
   if (pagedFilter !== filterKey) {
     setPagedFilter(filterKey);
     setPage(1);
   }
 
-  // ...and it catches up the other way once typing settles.
+  // ...and it catches up the other way once typing settles. Keyed on the
+  // DEBOUNCED value changing, not on the store differing from it: when a view
+  // applies its own term, the debounced value lags 300ms behind, and comparing
+  // the two would write the stale term straight back over the view's.
+  const committed = useRef(debouncedSearch);
   useEffect(() => {
-    if (debouncedSearch === urlState.search) return;
-    router.replace(`/dashboard${writePipelineUrl({ ...urlState, search: debouncedSearch })}`);
-  }, [debouncedSearch, urlState, router]);
+    if (debouncedSearch === committed.current) return;
+    committed.current = debouncedSearch;
+    usePipelineSearchStore.getState().setSearch(debouncedSearch);
+  }, [debouncedSearch]);
 
   const statuses = urlState.statuses;
-  const search = urlState.search;
 
-  const { data, isPending, isError } = useLoanFiles({
-    page,
-    pageSize: PAGE_SIZE,
-    statuses,
-    search,
-  });
+  // Not before the stored search is read: the first request would otherwise
+  // ask for the unsearched list and render it for a frame after a refresh.
+  const { data, isPending, isError } = useLoanFiles(
+    { page, pageSize: PAGE_SIZE, statuses, search },
+    { enabled: hydrated },
+  );
   // Default order is "what needs me first" (LP-UI-013), not most-recently-
   // touched. Memoised so the table is not handed a new array every render.
   const sorted = useMemo(() => byAttention(data?.items ?? []), [data?.items]);
 
-  const filtered = isFiltered(urlState);
+  const filtered = isFiltered(urlState, search);
 
   // How many files exist with NOTHING filtered — fetched only when the processor
   // is already looking at an empty filtered list, so the extra request happens in
@@ -101,7 +118,10 @@ export default function DashboardPage() {
     unfilteredTotal: unfiltered?.total ?? null,
   };
 
-  const clearFilters = () => router.replace("/dashboard");
+  const clearFilters = () => {
+    usePipelineSearchStore.getState().applyView(null, "");
+    router.replace("/dashboard");
+  };
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
@@ -191,4 +211,62 @@ export default function DashboardPage() {
       </Card>
     </div>
   );
+}
+
+/**
+ * Read the stored search once, on mount, and say when it has been read.
+ *
+ * The store skips hydration so the server's empty render and the first client
+ * render agree; this is the one place that hydrates it.
+ */
+function useHydratedPipelineSearch(): boolean {
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    void Promise.resolve(usePipelineSearchStore.persist.rehydrate()).finally(() =>
+      setHydrated(true),
+    );
+  }, []);
+  return hydrated;
+}
+
+/**
+ * When the URL's view is not the one the stored search belongs to, apply that
+ * view's own search term — from the server's copy of the view, never from the
+ * URL (LP-933). This covers every way of arriving at a view: a click, the back
+ * button, a pasted link. A refresh on the same view changes nothing, so a term
+ * typed on top of a view survives it. "All files" (no view) means no search.
+ *
+ * A view that cannot be found (deleted, or the list failed) applies no term
+ * rather than keeping the last one: a leftover search would filter a view its
+ * owner never set up that way.
+ */
+function useApplyViewSearch(viewId: string | null, hydrated: boolean): void {
+  const storedViewId = usePipelineSearchStore((state) => state.viewId);
+  const { data: views, isError } = useSavedViews({ withCounts: true });
+  useEffect(() => {
+    if (!hydrated || storedViewId === viewId) return;
+    const { applyView } = usePipelineSearchStore.getState();
+    if (viewId === null) {
+      applyView(null, "");
+      return;
+    }
+    if (!views && !isError) return;
+    const view = views?.find((candidate) => candidate.id === viewId);
+    applyView(viewId, view?.filters.search ?? "");
+  }, [hydrated, storedViewId, viewId, views, isError]);
+}
+
+/**
+ * A link from before LP-933 may still carry `?q=`. It is removed from the
+ * address bar and NOT applied: obeying it would keep the name in the history
+ * entry the processor is looking at, and a link opened in a new tab is meant to
+ * show the filters without the search.
+ */
+function useStripSearchTermFromUrl(urlState: ReturnType<typeof usePipelineUrl>): void {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const stray = carriesSearchTerm(searchParams);
+  useEffect(() => {
+    if (stray) router.replace(`/dashboard${writePipelineUrl(urlState)}`);
+  }, [stray, urlState, router]);
 }

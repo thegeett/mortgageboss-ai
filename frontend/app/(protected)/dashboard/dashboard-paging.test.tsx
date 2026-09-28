@@ -48,7 +48,14 @@ vi.mock("@/lib/api/loan-files", () => ({
     isError: false,
   }),
 }));
-vi.mock("@/lib/stores/auth-store", () => ({ useAuthStore: () => "Pat" }));
+// `subscribe` because the pipeline search store listens for sign-out (LP-933).
+vi.mock("@/lib/stores/auth-store", () => ({
+  useAuthStore: Object.assign(() => "Pat", { subscribe: () => () => {} }),
+}));
+// The page looks a selected view's search term up from the saved views (LP-933).
+vi.mock("@/lib/api/saved-views", () => ({
+  useSavedViews: () => ({ data: [], isPending: false, isError: false }),
+}));
 vi.mock("@/components/file/delete-file-dialog", () => ({ DeleteFileDialog: () => null }));
 
 import DashboardPage from "./page";
