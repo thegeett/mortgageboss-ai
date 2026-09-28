@@ -195,21 +195,44 @@ section below rather than expanding it.
   `GRANT` in LP-912's and LP-915's view rebuilds (the role `mbai_readonly` does not exist on this
   machine, so the guard takes its no-op branch).
 
-## Stage 2 — follow-ups the reviews recorded, not done
+## Stage 2 — follow-ups the reviews recorded
 
-- **LP-909's event kind is unwritable on any database migrated through it.** Measured on a scratch
-  database: at `b6d1e93f57ac`, `condition_events.kind` carries two CHECKs and only one admits
-  `round_reparse_requested`. LP-912's migration repairs it. **Staging was not checked:** the query is
-  in LP-912's Review section and needs an AWS SSO login.
-- **Three CHECKs the models declare were never migrated:** `communications.body_format`,
-  `users.mail_client` and `validation_verdicts.kind` accept any string in production. They are held in
-  `_KNOWN_MISSING` in `tests/test_migrated_checks_match_models.py` until a migration adds them.
-- **24 CHECK constraints carry a different name on a migrated database** than in the models (19
-  doubled by the naming convention, 5 named differently). This is harmless while the new guard holds:
-  a swap by the wrong name now fails the suite. Renaming them is optional tidying.
-- **`q` in the URL** is kept out of the conditions list's shareable URL (ADR-405 as amended). The
-  pipeline's borrower-name search still writes to its URL, and the amendment names it as the same
-  exposure for the product owner to decide.
+Four were done on 2026-09-28, each through the same build, review and push loop as Stage 2.
+
+- **Done — LP-909's event kind, checkable on staging** (no ticket; `70b87c8e`). The query is now
+  [`scripts/checks/staging_condition_event_checks.sql`](../../scripts/checks/staging_condition_event_checks.sql),
+  with what a healthy result looks like in its header and a "How to run it" section in
+  [LP-912](../tickets/LP-912.md). Proven on scratch databases (two rows at `b6d1e93f57ac`, one healthy row
+  at head). **Staging is healthy:** run there during D's review on 2026-09-28, it returned exactly one
+  row, `ck_condition_events_conditioneventkind`, admitting `round_reparse_requested`. LP-912's repair is
+  live and `round_reparse_requested` is writable on staging.
+- **Done — the three CHECKs no migration created** ([LP-931](../tickets/LP-931.md), `8b26c76b`).
+  `communications.body_format`, `users.mail_client` and `validation_verdicts.kind` are constrained on a
+  migrated database; a bad existing row stops the migration and changes nothing. `_KNOWN_MISSING` is
+  empty. Staging's `body_format` and verdicts were checked clean through the readonly views;
+  `mail_client` is not exposed there, and the migration's own pre-check covers it.
+- **Done — the 24 misnamed CHECKs** ([LP-932](../tickets/LP-932.md), `45f722d8`). Every CHECK on a
+  migrated database now carries the name the models give it, and the migrated-schema guard checks names
+  as well as values.
+- **Done — `q` out of the pipeline's URL** ([LP-933](../tickets/LP-933.md), `4c58e6a7`). The borrower
+  search is kept per tab in sessionStorage; statuses and the selected view stay in the URL; a saved
+  view's own term is applied without reaching the URL. ADR-405's amendment says the pipeline follows it.
+  Its review found that a stored term could pass to the next user after a reload, since a sign-out the
+  tab never witnessed did not clear it; fixed in `1e2d97c1` by stamping the term with its user.
+
+Found while doing them, not done:
+
+- **Column widths and nullability drift between a migrated database and the models** (found by the
+  LP-931 review: 26 columns). `validation_verdicts.kind` is `varchar(14)` migrated against
+  `VARCHAR(32)` in the models, and `flagged_remove` is exactly 14 characters, so a longer `VerdictKind`
+  member would pass the suite and fail only on a migrated database. No guard compares widths. Deserves
+  its own ticket.
+- **`conditions-screens.test.tsx` › "offers a way out once the round is stranded" fails in a full-file
+  run** and passes alone; it fails the same way at `dc87234e`, before these tickets. Its fixture sets
+  `created_at` to exactly `now - STRANDED_AFTER_MS` and `isStranded` needs strictly more, so the
+  fixture sits on the threshold and answers "is a round stranded at exactly 10 minutes?" by accident,
+  depending on which clock the file leaves running. The fixture should be one millisecond to whichever
+  side the product means.
 
 ## CI
 
@@ -217,7 +240,7 @@ section below rather than expanding it.
 `pull_request` to `main` — a push of this branch runs nothing, so CI needs a PR against `main`, and
 this branch is not to be merged (LP-909).
 
-Measured rather than asserted, at the Stage 2 review: `origin/phase4.5-conditions` is at `ffa3a7d7`,
-which includes every Stage 2 ticket and review up to this page. The Stage 2 review's own commit is
-local until it is pushed. Local results and their limits are in LP-909 §5 for Stage 1, and in each
-Stage 2 ticket's own Verification section.
+Measured rather than asserted: the Stage 2 review's commit (`ad2dc2aa`) is pushed;
+`origin/phase4.5-conditions` was at `ad2dc2aa` on 2026-09-28 before the follow-ups above, and each
+follow-up is pushed only after its review commit. Pushing still runs no CI, for the reason above. Local results
+and their limits are in LP-909 §5 for Stage 1, and in each ticket's own Verification section.
