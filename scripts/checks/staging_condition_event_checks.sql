@@ -14,8 +14,18 @@
 -- BROKEN (LP-909's shape): TWO rows. One is ck_condition_events_ck_condition_events_...
 -- (doubled) without round_reparse_requested in allowed_values, and it wins, because both apply.
 --
--- ALSO WRONG: zero rows (the column accepts any string), or one row with
--- admits_round_reparse_requested = false (a swap revoked the value).
+-- ALSO WRONG: one row with admits_round_reparse_requested = false (a swap revoked the
+-- value).
+--
+-- ZERO ROWS IS AMBIGUOUS, AND IS THE RESULT MOST LIKELY TO BE MISREAD. It means the column
+-- accepts any string, OR that public.condition_events does not exist where this ran (the wrong
+-- environment, or a database from before LP-904). Before reading it as the first, check what
+-- the environment runs (./scripts/deploy staging status) and that the table is there
+-- (select count(*) from readonly.condition_events).
+--
+-- allowed_values is sorted by the DATABASE'S COLLATION, so two environments can list the same
+-- values in a different order (staging and a local container disagree on round_parsed vs
+-- round_parse_failed). Compare the values as a set, never the strings.
 --
 -- Read-only: one SELECT over the system catalogs, which the readonly role can read. It names
 -- no table in public, so it needs no readonly.* view. How to run it: docs/tickets/LP-912.md.

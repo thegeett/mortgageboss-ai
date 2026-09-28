@@ -71,6 +71,10 @@ _CHECKS = text(
 #: three this test found on its first run (`communications.body_format`, `users.mail_client`,
 #: `validation_verdicts.kind`). Kept as the place to record the next one as a decision rather than a
 #: silent gap; the test fails on a stale entry.
+#:
+#: AN ENTRY HERE HIDES THE COLUMN FROM BOTH COMPARISONS, not just the value one (LP-932 review). The
+#: value test subtracts this set, and the name test skips any column constrained on one side only, so a
+#: parked column's name is not checked either. Say so in the entry's comment when adding one.
 _KNOWN_MISSING: frozenset[tuple[str, tuple[str, ...]]] = frozenset()
 
 
