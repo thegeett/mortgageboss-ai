@@ -282,7 +282,7 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-925 Package, submit, lender settings | REVIEWED | `b415c136` | the commit titled `LP-925 review:` | S3-10 and S3-11 shot and walked by the reviewer: both match, with D10 and D11 | no defects; the ungated lender-settings routes judged correct; a note-check boundary recorded |
 | LP-935 Stage 3 close | REVIEWED | `5b1582cf` | the commit titled `LP-935 review:` | every screen (24 shots: both sessions, all twelve) | review found 2, fixed: the mortgagee-clause term asserted unsourced domain claims; a decision she may want to overturn was missing from the table |
 | LP-936 DU tolerance (STOP AND ASK 2) | REVIEWED | `0c8090e6` | the commit titled `LP-936 review:` | S3-09 re-shot by the reviewer: the new callout is true as a rule, not only in this state | no findings; the owner's table and the 50% parenthetical both verified, including 47→51 |
-| LP-937 Superseded failures | AWAITING_REVIEW | (this commit) | | S3-08, S3-12 re-shot: unchanged (no drawn state shows it) | the owner's decision, 2026-09-29 |
+| LP-937 Superseded failures | REVIEWED | `770d2513` | the review section in [LP-937](../tickets/LP-937.md) (written, not yet committed) | S3-08, S3-12 re-shot: unchanged (no drawn state shows it) | review found 1: a superseded row that is still evidence can hold the condition while the sheet hides the finding doing it — the Stage 3B dead end through the other door; plus the "together with" wording is false when both rows are the same account. Counts verified (8702/1, 2125/2125); a second intermittent test recorded |
 | LP-938 Library fixes (AS-04, the review table) | PENDING | | | none | |
 | LP-939 Real-model trial | SKIPPED | | | none | skipped for now by the owner, 2026-09-29 |
 | LP-940 Withdraw a hand-added condition | PENDING | | | detail sheet | amends ADR-404 |
@@ -484,6 +484,16 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   owner (2026-09-29) and built in [LP-937](../tickets/LP-937.md)**. Once a passing document has done
   the item, the earlier failures stop counting in "Failed a check" and stop showing in the Next step.
   They stay in the history, and on the sheet as "Replaced by <document>".
+
+- **A superseded card can hide the finding that is holding its condition** — found by the LP-937 review,
+  open. `_settle` holds a condition on an open finding carried by any row that `counts_as_evidence`,
+  which includes a statement whose only failed check is "Enough for closing"; LP-937 supersedes that
+  same row, and the sheet renders none of a superseded row's findings. So an unexplained deposit on the
+  earlier statement holds the condition at Waiting with no way to answer it, while the list still says
+  "Large deposit needs sourcing". The Stage 3B dead end through the other door. The fix follows from
+  LP-937's own reasoning — hide findings on the "Replaced by" branch only, since a row that is still
+  evidence is a row whose findings still count. Reproduction and detail in
+  [LP-937](../tickets/LP-937.md) "Review".
 
 - **The product owner's sign-off on the library's top 20 types** (decision 6), once LP-918 has written
   `phase4.5-library-review.md`.
