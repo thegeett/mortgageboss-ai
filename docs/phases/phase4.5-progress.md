@@ -274,7 +274,7 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-934 Pre-flight: screens against the plan, visual-check harness | REVIEWED | `97c39491` | the commit titled `LP-934 review:` | harness re-run on `base` by the reviewer; no S3 state buildable yet | 7 mismatches, 4 screen deviations (LP-934.md); review found 1, fixed: the dev-database guard had no test |
 | LP-918 Condition library v1 (data) | REVIEWED | `28ffc2f8` | the commit titled `LP-918 review:` | none of its own | owner's top-20 sign-off tracked separately (decision 6); review found 1, fixed: 5 type ids are also rule ids, now pinned |
 | LP-919 Reading each condition | REVIEWED | `65cb0617` | the commit titled `LP-919 review:` | S3-01 (this ticket's lines) and S3-03 re-shot by the reviewer: both match | no findings; D5 recorded; 6637 and 0132 item splits confirmed on screen |
-| LP-920 The action plan | AWAITING_REVIEW | the commit titled `LP-920:` | | S3-02 matches; S3-01 items lines match | |
+| LP-920 The action plan | REVIEWED | `106de9af` | the commit titled `LP-920 review:` | S3-01, S3-02, S3-03 re-shot by the reviewer; S3-02 matches every line, S3-01 differs on one string (D6) | review found 1, fixed: a Must-match string recorded as a match, now D6 |
 | LP-921 Next-step options | PENDING | | | S3-01, S3-02, S3-12 | |
 | LP-922 Asking people (drafts only) | PENDING | | | S3-04, S3-05, S3-06 | then the Stage 3A acceptance test |
 | LP-923 Evidence arrives and is checked | PENDING | | | S3-07, S3-08 | |
