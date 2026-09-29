@@ -38,6 +38,7 @@ a confidence and the source line numbers it came from, and no identity of its ow
 from collections.abc import Callable
 from datetime import date as date_type
 from datetime import datetime
+from decimal import Decimal
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
@@ -45,12 +46,15 @@ from uuid import UUID
 import structlog
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from app.conditions.library import load_library
 from app.models.condition import (
     BucketKind,
     Condition,
     ConditionLenderStatus,
     ConditionOrigin,
     ConditionPrepStatus,
+    ConditionReadingSource,
+    ConditionReadingStatus,
     OwnerHint,
     OwnerHintSource,
 )
@@ -62,6 +66,7 @@ from app.models.condition_round import (
     ConditionSheetFormat,
     ConditionSourceKind,
 )
+from app.models.condition_vocabulary import EvidenceCheck, Performer, PlanOption
 
 #: The paste endpoint's ceiling (spec §LP-907). Enforced here so an oversized body is refused before
 #: it reaches a reader, rather than after.
@@ -655,6 +660,101 @@ class VerdictPublic(BaseModel):
             return None
 
 
+class ReadingSpecificsPublic(BaseModel):
+    """What the lender's text says about one item. Copied, never computed (LP-919)."""
+
+    amounts: list[str] = Field(default_factory=list)
+    account_bank: str | None = None
+    account_last4: str | None = None
+    month: str | None = None
+    names: list[str] = Field(default_factory=list)
+
+
+class ReadingItemPublic(BaseModel):
+    key: str
+    name: str
+    acceptable: str
+    performers: list[Performer]
+    option: PlanOption
+    documents: list[str] = Field(default_factory=list)
+    checks: list[EvidenceCheck] = Field(default_factory=list)
+    specifics: ReadingSpecificsPublic = Field(default_factory=ReadingSpecificsPublic)
+
+
+class ReadingPushBackPublic(BaseModel):
+    """Two dates CODE read from the letter (S3-06): the condition cannot apply."""
+
+    must_not_close_before: date_type
+    policy_starts: date_type
+
+
+class ReadingShortfallPublic(BaseModel):
+    required: Decimal
+    verified: Decimal
+    amount: Decimal
+
+
+class ReadingFiguresPublic(BaseModel):
+    """Figures code computed from the lender's words. Never the model's (principle 1)."""
+
+    shortfall: ReadingShortfallPublic | None = None
+
+
+class ConditionReadingPublic(BaseModel):
+    """The app's reading of a condition (LP-919). See `services/condition_reading.py` for the rules."""
+
+    source: ConditionReadingSource
+    type_id: str | None
+    summary: str
+    explanation: str | None = None
+    information_only: bool = False
+    lender_doing_it: bool = False
+    note_meaning: str | None = None
+    items: list[ReadingItemPublic] = Field(default_factory=list)
+    figures: ReadingFiguresPublic = Field(default_factory=ReadingFiguresPublic)
+    push_back: ReadingPushBackPublic | None = None
+    confidence: float | None = None
+
+    @classmethod
+    def from_stored(cls, stored: dict[str, Any] | None) -> "ConditionReadingPublic | None":
+        return cls.model_validate(stored) if stored else None
+
+
+class LibraryTypePublic(BaseModel):
+    """The library type a condition maps to, for S3-01's "Library: AS-04 Earnest money" chip and rule line."""
+
+    id: str
+    name: str
+    label: str
+    rule_label: str
+    rule_note: str | None
+
+    @classmethod
+    def for_id(cls, type_id: str | None) -> "LibraryTypePublic | None":
+        condition_type = load_library().get(type_id)
+        if condition_type is None:
+            return None
+        return cls(
+            id=condition_type.id,
+            name=condition_type.name,
+            label=condition_type.label,
+            rule_label=condition_type.rule.label,
+            rule_note=condition_type.rule.note,
+        )
+
+
+class ReadingConfirmItem(BaseModel):
+    key: str | None = Field(default=None, max_length=40)
+    name: str = Field(min_length=1, max_length=200)
+    performers: list[Performer] = Field(min_length=1, max_length=3)
+
+
+class ReadingConfirmRequest(BaseModel):
+    """S3-03's "This is right": the items as she left them."""
+
+    items: list[ReadingConfirmItem] = Field(min_length=1, max_length=8)
+
+
 class ConditionPublic(BaseModel):
     """One imported condition, as the list and the detail sheet render it.
 
@@ -743,6 +843,12 @@ class ConditionPublic(BaseModel):
     #: Read from the row as of LP-912, which added the column; it was hard-coded `None` before.
     superseded_by_id: UUID | None = None
 
+    #: LP-919 — the app's reading of the lender's words, its state, and the library type behind it.
+    reading: ConditionReadingPublic | None = None
+    reading_status: ConditionReadingStatus = ConditionReadingStatus.UNREAD
+    reading_confidence: float | None = None
+    library_type: LibraryTypePublic | None = None
+
     @classmethod
     def from_model(
         cls,
@@ -826,6 +932,14 @@ class ConditionPublic(BaseModel):
                 and verdict.source_kind is VerdictSourceKind.UNDERWRITER_NOTE
             ),
             superseded_by_id=condition.superseded_by_id,
+            reading=ConditionReadingPublic.from_stored(condition.reading),
+            reading_status=condition.reading_status,
+            reading_confidence=(
+                float(condition.reading_confidence)
+                if condition.reading_confidence is not None
+                else None
+            ),
+            library_type=LibraryTypePublic.for_id(condition.canonical_type_id),
         )
 
 

@@ -209,6 +209,9 @@ class ConditionRound(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     #: legitimately changes what "absent from this sheet" means, because absence is evidence only
     #: when the thing absent was in a list claiming to be complete.
     comparison: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    #: LP-919 — the one AI call that read this round's conditions: model, tokens, `cost_estimate`
+    #: (the existing cost tool), how many were read, and whether it fell back to the library. No text.
+    reading_run: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     created_by_user_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True

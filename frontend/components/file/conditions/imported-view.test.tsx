@@ -92,6 +92,10 @@ function condition(overrides: Partial<Condition> = {}): Condition {
     came_back: false,
     verdict: null,
     superseded_by_id: null,
+    reading: null,
+    reading_status: "unread",
+    reading_confidence: null,
+    library_type: null,
     ...overrides,
   };
 }

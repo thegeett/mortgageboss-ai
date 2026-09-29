@@ -16534,3 +16534,38 @@ PA-03 proposes "I'll do it", and the lender setting changes it (LP-920, LP-925).
 sign-off on the top 20 is an open item that does not block later tickets.
 
 *Status.* Accepted (LP-918).
+
+## ADR-410
+
+**A condition's reading is stored on the condition as JSONB, made by ONE model call per round, and the
+order of authority is her confirmed answer, then the library type, then the model; code computes every
+figure and date the reading states.**
+
+*Context.* Stage 3 needs each condition split into items with who acts (plan §5 LP-919), under three
+constraints from the plan: the library beats the AI (principle 5), the AI never computes a number
+(principle 1), and the loan snapshot never goes to the model (principle 7). The round must never wait on
+the model.
+
+*Decision (LP-919).*
+
+- **Storage.** `conditions.reading` (JSONB, NPI, never in a readonly view) with `reading_status`
+  (`unread`, `ready`, `needs_confirmation`, `confirmed`), `reading_source` and `reading_confidence` as
+  columns, because the plan panel and the list filter on them. `condition_rounds.reading_run` records
+  the one call (model, tokens, the existing cost tool's estimate). Items live in the reading until the
+  plan (LP-920) materialises them.
+- **One call per round, only for unread conditions.** A condition seen again keeps its reading.
+- **Authority.** Her S3-03 answer for (lender, code) (`lender_condition_codes.confirmed_reading`, names
+  and performers only) is used without asking the model. Otherwise the library type fixes the items and
+  the model fills specifics; only an untyped condition takes items from the model.
+- **Code, not the model.** Amounts the model returns must be written in the lender's text; last fours
+  are read by code; figures shown as "computed by code" (7086's shortfall) and date comparisons (6178's
+  push-back) come from `app/conditions/facts.py`. The model's input is the condition text, notes, the
+  library's items and a five-field file summary.
+- **The confidence bar is a setting** (`condition_reading_confidence_bar`, 0.75). Below it, and whenever
+  the model is unavailable, the reading is `needs_confirmation`, which the plan treats as "nothing
+  drafted".
+
+*Consequences.* A model outage degrades to the library's plan marked for confirmation; nothing is stuck.
+The reading is reproducible from its inputs except for the model's specifics, which code has checked.
+
+*Status.* Accepted (LP-919).

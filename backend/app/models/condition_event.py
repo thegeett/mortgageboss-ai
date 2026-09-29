@@ -116,6 +116,10 @@ class ConditionEventKind(StrEnum):
     CONDITION_SUPERSEDED = "condition_superseded"
     #: LP-915. A round was compared against what was open before it, and the result was saved.
     ROUND_COMPARED = "round_compared"
+    #: LP-919 — the app read a condition into items (detail: source, type id, confidence, status; no
+    #: text), and she confirmed or replaced that reading (S3-03).
+    CONDITION_READ = "condition_read"
+    CONDITION_READING_CONFIRMED = "condition_reading_confirmed"
     #: LP-915. An imported round was switched between "full list" and "just some" (A7), which is what
     #: makes a comparison runnable — or withdraws its unconfirmed suggestions.
     ROUND_COMPLETENESS_CHANGED = "round_completeness_changed"

@@ -33,6 +33,7 @@ import type {
   OwnerHint,
   OwnerInput,
   PasteConditionsInput,
+  Performer,
   PrepStatusInput,
   ReopenInput,
   VerdictInput,
@@ -581,6 +582,41 @@ function invalidateCondition(
   void queryClient.invalidateQueries({ queryKey: conditionsSummaryQueryKey(fileId) });
   void queryClient.invalidateQueries({ queryKey: conditionQueryKey(conditionId) });
   void queryClient.invalidateQueries({ queryKey: conditionEventsQueryKey(conditionId) });
+}
+
+/** One item as she confirms it on S3-03. */
+export interface ReadingConfirmItem {
+  key: string | null;
+  name: string;
+  performers: Performer[];
+}
+
+/**
+ * S3-03's "This is right" (LP-919): her items become the reading, and are saved for this lender code
+ * so the next file reads it the same way. Can 409 with a sentence (an empty item).
+ */
+export function useConfirmReading(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      conditionId,
+      items,
+    }: { conditionId: string; items: ReadingConfirmItem[] }) =>
+      (await apiClient.post<Condition>(`${conditionPath(conditionId)}/reading/confirm`, { items }))
+        .data,
+    onSuccess: (condition) => invalidateCondition(queryClient, fileId, condition.id),
+  });
+}
+
+/** S3-03's "Use the library default": the library type's own items, confirmed. */
+export function useLibraryDefaultReading(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ conditionId }: { conditionId: string }) =>
+      (await apiClient.post<Condition>(`${conditionPath(conditionId)}/reading/library-default`))
+        .data,
+    onSuccess: (condition) => invalidateCondition(queryClient, fileId, condition.id),
+  });
 }
 
 /** Move our preparation track (S2-05). */

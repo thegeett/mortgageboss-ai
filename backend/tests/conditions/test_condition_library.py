@@ -77,6 +77,10 @@ def test_the_minimal_library_loads() -> None:
         (lambda d: d["types"][0].update(default_option="lender_doing_it"), "takes its options"),
         (lambda d: d["types"][0].update(waits_on_type="ZZ-99"), "waits_on_type"),
         (lambda d: d["types"][0].update(playbook=" "), "playbook"),
+        (
+            lambda d: d["types"][0]["items"][0].update(name_with_amount="Source of the money"),
+            "must be text containing",
+        ),
     ],
 )
 def test_a_malformed_library_is_refused(mutate: Any, message: str) -> None:

@@ -1,5 +1,6 @@
 "use client";
 
+import { ReadingBox, ReadingItems } from "@/components/file/conditions/reading-box";
 import { StatusToken } from "@/components/status-token";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
@@ -125,6 +126,7 @@ export function ConditionDetailSheet({
   suggestedIds,
   suggestedRoundNumber,
   onConfirmSuggestion,
+  onConfirmReading,
 }: {
   /** The list's rows, in the list's order — the filter and sort come with them. */
   conditions: Condition[];
@@ -146,6 +148,8 @@ export function ConditionDetailSheet({
   suggestedRoundNumber?: number | null;
   /** Confirm this ONE condition — the spec's "she can also confirm one from the detail sheet". */
   onConfirmSuggestion?: (condition: Condition) => void;
+  /** Opens S3-03 for a reading that needs her (LP-919). The caller owns the dialog. */
+  onConfirmReading?: (condition: Condition) => void;
 }) {
   const index = conditions.findIndex((row) => row.id === openId);
   const row = index >= 0 ? conditions[index] : undefined;
@@ -185,7 +189,7 @@ export function ConditionDetailSheet({
 
   return (
     <Sheet open={row !== undefined} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
+      <SheetContent className="w-full overflow-y-auto sm:max-w-[38.75rem]">
         {row ? (
           <SheetBody
             row={row}
@@ -200,6 +204,7 @@ export function ConditionDetailSheet({
             onSelect={onSelect}
             suggestedInRound={suggestedIds?.has(row.id) ? (suggestedRoundNumber ?? null) : null}
             onConfirmSuggestion={onConfirmSuggestion}
+            onConfirmReading={onConfirmReading}
           />
         ) : null}
       </SheetContent>
@@ -219,6 +224,7 @@ function SheetBody({
   onSelect,
   suggestedInRound,
   onConfirmSuggestion,
+  onConfirmReading,
   conditions,
 }: {
   row: Condition;
@@ -234,6 +240,7 @@ function SheetBody({
   onSelect: (conditionId: string) => void;
   suggestedInRound?: number | null;
   onConfirmSuggestion?: (condition: Condition) => void;
+  onConfirmReading?: (condition: Condition) => void;
 }) {
   const detail = useCondition(row.id);
   const events = useConditionEvents(row.id);
@@ -271,7 +278,9 @@ function SheetBody({
   return (
     <>
       <SheetHeader>
-        <div className="flex items-center justify-between gap-2">
+        {/* `pr-8` KEEPS ↑ ↓ CLEAR OF THE SHEET'S ×, which is absolutely positioned at the top right.
+            Without it the × sat on top of ↓ (LP-919's S3-01 check; the header is Stage 2's). */}
+        <div className="flex items-center justify-between gap-2 pr-8">
           <SheetTitle className="flex min-w-0 items-baseline gap-2">
             <span className="font-mono text-sm">{condition.lender_code ?? "No code"}</span>
             <span className="truncate text-xs font-normal text-muted-foreground">
@@ -345,6 +354,12 @@ function SheetBody({
             <OwnerCell hint={condition.effective_owner} source={condition.effective_owner_source} />
           </div>
         </section>
+
+        <ReadingBox
+          condition={condition}
+          onConfirm={onConfirmReading ? () => onConfirmReading(condition) : undefined}
+        />
+        {condition.reading ? <ReadingItems items={condition.reading.items} /> : null}
 
         <section className="rounded-lg border border-input bg-card p-3">
           <div className="grid grid-cols-[6rem_1fr] items-center gap-y-2">
@@ -505,6 +520,10 @@ function SheetBody({
                 );
               })}
             </div>
+            {/* What the note means, read by CODE from a fixed list (LP-919), never guessed. */}
+            {condition.reading?.note_meaning ? (
+              <p className="mt-1 text-xs text-muted-foreground">{condition.reading.note_meaning}</p>
+            ) : null}
           </section>
         ) : null}
 

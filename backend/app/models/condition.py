@@ -25,11 +25,12 @@ reproducing a word of it.
 """
 
 from datetime import datetime
+from decimal import Decimal
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -126,6 +127,29 @@ class ConditionOrigin(StrEnum):
     MANUAL = "manual"
 
 
+class ConditionReadingStatus(StrEnum):
+    """Where the app's reading of a condition stands (LP-919).
+
+    `NEEDS_CONFIRMATION` is below the confidence bar, or read without the AI: nothing is drafted for the
+    condition until she confirms (README rule 3). `CONFIRMED` is her answer, which wins over any later
+    reading.
+    """
+
+    UNREAD = "unread"
+    READY = "ready"
+    NEEDS_CONFIRMATION = "needs_confirmation"
+    CONFIRMED = "confirmed"
+
+
+class ConditionReadingSource(StrEnum):
+    """What the reading's items came from: the AI filling in a library type or splitting an unknown
+    condition, the library alone (the AI unavailable), or her confirmed answer."""
+
+    AI = "ai"
+    LIBRARY = "library"
+    CONFIRMED = "confirmed"
+
+
 class Condition(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     """One lender condition on one loan file."""
 
@@ -198,6 +222,21 @@ class Condition(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     info_only: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     #: The canonical condition type, from the code map. Stage 3 fills the rest of the taxonomy.
     canonical_type_id: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
+
+    #: LP-919 — the app's reading of the lender's words: summary, items and who acts on each, specifics,
+    #: figures code computed, and the confidence. NPI (it restates amounts, banks and last fours from
+    #: the text), so no readonly view carries it. Shape: `services/condition_reading.py`.
+    reading: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    reading_status: Mapped[ConditionReadingStatus] = mapped_column(
+        str_enum(ConditionReadingStatus),
+        default=ConditionReadingStatus.UNREAD,
+        server_default=ConditionReadingStatus.UNREAD.value,
+        nullable=False,
+    )
+    reading_source: Mapped[ConditionReadingSource | None] = mapped_column(
+        str_enum(ConditionReadingSource), nullable=True
+    )
+    reading_confidence: Mapped[Decimal | None] = mapped_column(Numeric(3, 2), nullable=True)
 
     #: Both created here and NOT MOVED IN STAGE 1 (ADR-404).
     prep_status: Mapped[ConditionPrepStatus] = mapped_column(

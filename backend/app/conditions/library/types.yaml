@@ -49,6 +49,7 @@ types:
     items:
       - key: source
         name: Source of the earnest money
+        name_with_amount: Source of the {amount}
         acceptable: Statement showing the funds before the check was written
         performer: borrower
         option: ask_borrower

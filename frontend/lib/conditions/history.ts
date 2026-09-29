@@ -175,6 +175,10 @@ export function conditionHistoryLine(
       return `Owner changed${by(event)}`;
     case "condition_superseded":
       return `Replaced by a later condition${by(event)}`;
+    case "condition_read":
+      return "Read into items";
+    case "condition_reading_confirmed":
+      return `The reading was confirmed${by(event)}`;
 
     // --- the round it sits on ---------------------------------------------- //
     //

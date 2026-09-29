@@ -423,8 +423,10 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # as `has_header` and `has_raw_text` beside it, so a `\bcomparison\b` search of the select list
     # would trip on that boolean. The blob itself is what must never travel, and `has_comparison`
     # carries no word of it — it answers "was this round compared", which is the analytic question.
+    # LP-919 adds `reading_run`: model, tokens and cost for one AI call. Not NPI, but not exposed
+    # either — it would need a view rebuild for a column nobody queries yet.
     "condition_rounds": frozenset(
-        {"raw_text", "header", "draft_rows", "parse_report", "comparison"}
+        {"raw_text", "header", "draft_rows", "parse_report", "comparison", "reading_run"}
     ),
     # LP-912 adds `prep_note` and `verdict`. `prep_note` is a short line a processor typed about one
     # borrower's file, which is where a name arrives in a shape no scrubber predicts — it is in
@@ -435,7 +437,24 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # excluded here and pinned by `test_the_conditions_view_touches_verdict_only_for_its_provenance`,
     # which is what stops a later `verdict ->> 'note'` — the processor's own words — from passing every
     # guard in this file.
-    "conditions": frozenset({"verbatim_text", "underwriter_notes", "prep_note", "verdict"}),
+    # LP-919 adds the reading. `reading` restates the lender's amounts, banks and last fours, so it is
+    # NPI and in `NEVER_EXPOSED` too. Its status, source and confidence name nobody, and are excluded
+    # only because exposing them means rebuilding the view for columns no query uses yet.
+    "conditions": frozenset(
+        {
+            "verbatim_text",
+            "underwriter_notes",
+            "prep_note",
+            "verdict",
+            "reading",
+            "reading_status",
+            "reading_source",
+            "reading_confidence",
+        }
+    ),
+    # LP-919 — the items she confirmed for a code: names and performers, no specifics. Excluded rather
+    # than exposed only to avoid rebuilding the view for a column no query uses yet.
+    "lender_condition_codes": frozenset({"confirmed_reading"}),
     # Unlike `finding_events.detail`, which is documented PII-safe, this one holds WHAT CHANGED —
     # an edited wording, an appended note — which is the lender's text.
     "condition_events": frozenset({"detail"}),
@@ -533,6 +552,8 @@ NEVER_EXPOSED: tuple[tuple[str, str], ...] = (
     ("documents", "document_name"),
     ("mismo_imports", "catch_all"),
     ("borrowers", "ssn"),
+    # LP-919 — the reading restates the lender's words (amounts, banks, last fours).
+    ("conditions", "reading"),
     ("users", "hashed_password"),
     ("loan_files", "inbox_token"),
     ("findings", "source_snippet"),

@@ -21,10 +21,11 @@ whole table is exposed in `readonly.lender_condition_codes`.
 
 from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDMixin, utcnow
@@ -74,6 +75,10 @@ class LenderConditionCode(Base, UUIDMixin, TimestampMixin):
         str_enum(OwnerHint, name="lender_condition_code_owner_hint"), nullable=True
     )
     info_only: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    #: LP-919 — the items she confirmed for this code on S3-03 ("Your answer is saved for this lender
+    #: code"). The next file's reading uses it before the library and the AI. Names and performers only,
+    #: never a specific (no amount, account or person), so it carries no borrower's data.
+    confirmed_reading: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     status: Mapped[LenderCodeStatus] = mapped_column(
         str_enum(LenderCodeStatus), default=LenderCodeStatus.OBSERVED_UNMAPPED, nullable=False

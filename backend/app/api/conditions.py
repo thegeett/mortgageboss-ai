@@ -72,6 +72,7 @@ from app.schemas.condition import (
     ConfirmClearedRequest,
     OwnerRequest,
     PrepStatusRequest,
+    ReadingConfirmRequest,
     ReopenRequest,
     RewordedDecisionRequest,
     RoundCompletenessUpdate,
@@ -89,6 +90,12 @@ from app.services.condition_import import (
     RoundNotImportable,
     create_manual_condition,
     import_round,
+)
+from app.services.condition_reading import (
+    ConfirmedItem,
+    ReadingRefused,
+    confirm_reading,
+    use_library_default,
 )
 from app.services.condition_rounds import (
     ENQUEUE_FAILED_DETAIL,
@@ -158,6 +165,17 @@ log = structlog.get_logger(__name__)
 
 #: Read the upload a megabyte at a time, the same as the MISMO path.
 _CHUNK = 1024 * 1024
+
+
+def _enqueue_reading(round_id: UUID) -> None:
+    from app.tasks.conditions import read_condition_round
+
+    try:
+        read_condition_round.delay(str(round_id))
+    except Exception as exc:
+        log.warning(
+            "condition_read_not_queued", round_id=str(round_id), error_type=type(exc).__name__
+        )
 
 
 async def _enqueue_or_fail(
@@ -837,6 +855,10 @@ async def import_condition_round(
             raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
         await db.commit()
 
+    # LP-919 — read the new conditions into items, after the commit so the worker sees them. A broker
+    # that will not take it leaves them `unread`; the import itself has already succeeded and stays so.
+    _enqueue_reading(round_.id)
+
     return ConditionImportResult(
         round_id=round_.id,
         round_number=outcome.round_number,
@@ -1177,6 +1199,45 @@ async def _condition_response(
         round_numbers=numbers.get(condition.id, []),
         today=datetime.now(UTC).date(),
     )
+
+
+@conditions_by_id_router.post("/{condition_id}/reading/confirm", response_model=ConditionPublic)
+async def confirm_condition_reading(
+    condition: ScopedCondition,
+    payload: ReadingConfirmRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionPublic:
+    """S3-03's "This is right": her items become the reading and are saved for this lender code."""
+    try:
+        await confirm_reading(
+            db,
+            condition=condition,
+            items=[
+                ConfirmedItem(name=item.name, performers=tuple(item.performers), key=item.key)
+                for item in payload.items
+            ],
+            actor_user_id=current_user.id,
+        )
+    except ReadingRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    return await _condition_response(db, condition)
+
+
+@conditions_by_id_router.post(
+    "/{condition_id}/reading/library-default", response_model=ConditionPublic
+)
+async def use_condition_library_default(
+    condition: ScopedCondition,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionPublic:
+    """S3-03's "Use the library default": the library type's items, confirmed as they stand."""
+    try:
+        await use_library_default(db, condition=condition, actor_user_id=current_user.id)
+    except ReadingRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    return await _condition_response(db, condition)
 
 
 @conditions_by_id_router.post("/{condition_id}/prep-status", response_model=ConditionPublic)

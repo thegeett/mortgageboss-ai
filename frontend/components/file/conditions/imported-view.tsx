@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmReadingFor } from "@/components/file/conditions/confirm-reading-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -87,6 +88,8 @@ export function ImportedView({
   // --- LP-916: the detail sheet and the two dialogs it opens --------------------------------- //
 
   const [openConditionId, setOpenConditionId] = useState<string | null>(null);
+  // S3-03 (LP-919): the condition whose reading she is confirming, opened from the detail sheet.
+  const [confirmReadingId, setConfirmReadingId] = useState<string | null>(null);
   const [answerFor, setAnswerFor] = useState<Condition | null>(null);
   const [moveBack, setMoveBack] = useState<{
     condition: Condition;
@@ -275,6 +278,13 @@ export function ImportedView({
           setRefusal(null);
           setMoveBack({ condition, to: null, mode: "reopen" });
         }}
+        onConfirmReading={(condition) => setConfirmReadingId(condition.id)}
+      />
+      <ConfirmReadingFor
+        fileId={fileId}
+        conditions={rows}
+        conditionId={confirmReadingId}
+        onClose={() => setConfirmReadingId(null)}
       />
 
       <RecordAnswerDialog

@@ -49,6 +49,20 @@ def _pin_inbox_domain(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_reading_queued(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Importing a round queues LP-919's reading; the suite never reaches a real broker for it.
+
+    Without this, every import test pushed a task into whatever Redis the environment points at, where
+    a running dev worker would pick it up. A test that wants the reading calls `read_round` directly.
+    """
+    from app.tasks import conditions as task_module
+
+    queued: list[str] = []
+    monkeypatch.setattr(task_module.read_condition_round, "delay", queued.append)
+    return queued
+
+
+@pytest.fixture(autouse=True)
 def _pin_ai_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     """Deterministic AI-provider baseline for the WHOLE suite.
 

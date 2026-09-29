@@ -78,7 +78,7 @@ from app.models.activity_log import (  # noqa: E402
 )
 from app.models.borrower import Borrower  # noqa: E402
 from app.models.condition import Condition  # noqa: E402
-from app.models.condition_event import ConditionEvent  # noqa: E402
+from app.models.condition_event import ConditionEvent, ConditionEventKind  # noqa: E402
 from app.models.condition_round import ConditionRound, ConditionSourceKind  # noqa: E402
 from app.models.lender import Lender, LoanProgram  # noqa: E402
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose  # noqa: E402
@@ -310,6 +310,48 @@ async def state_base(db: AsyncSession) -> Shot:
     return Shot(path=_conditions_tab(), now=et(8, 28, 16, 21))
 
 
+async def read(db: AsyncSession, loan_file: LoanFile) -> None:
+    """LP-919: read round 1 with the MOCKED model the tests use (`tests/conditions/reading_fixture`).
+
+    Stamped to 4:21 PM, the moment S3-02's activity says the plan was ready.
+    """
+    from app.services import condition_reading
+    from tests.conditions.reading_fixture import fake_complete
+
+    round_ = await db.scalar(
+        select(ConditionRound).where(ConditionRound.loan_file_id == loan_file.id)
+    )
+    assert round_ is not None
+    condition_reading.complete = fake_complete()  # type: ignore[assignment]
+    await condition_reading.read_round(db, round_id=round_.id)
+    when = et(8, 28, 16, 21)
+    condition_ids = select(Condition.id).where(Condition.loan_file_id == loan_file.id)
+    await db.execute(
+        update(ConditionEvent)
+        .where(
+            ConditionEvent.condition_id.in_(condition_ids),
+            ConditionEvent.kind == ConditionEventKind.CONDITION_READ,
+        )
+        .values(occurred_at=when)
+    )
+
+
+async def state_s3_01(db: AsyncSession) -> Shot:
+    """6637's detail sheet: the reading, its three items and who acts (LP-919's part of S3-01)."""
+    loan_file, _ = await base(db)
+    await read(db, loan_file)
+    return Shot(path=_conditions_tab(), now=et(8, 28, 16, 21), clicks=["6637"])
+
+
+async def state_s3_03(db: AsyncSession) -> Shot:
+    """0132's reading below the bar, with S3-03's dialog open from its detail sheet."""
+    loan_file, _ = await base(db)
+    await read(db, loan_file)
+    return Shot(
+        path=_conditions_tab(), now=et(8, 28, 16, 21), clicks=["0132", "Confirm the reading"]
+    )
+
+
 def _later(ticket: str) -> Callable[[AsyncSession], Awaitable[Shot]]:
     async def build(db: AsyncSession) -> Shot:
         raise NotBuiltYet(f"this screen's state is built by {ticket}")
@@ -320,9 +362,9 @@ def _later(ticket: str) -> Callable[[AsyncSession], Awaitable[Shot]]:
 #: Screen → state builder. A ticket replaces its screens' `_later(...)` with a real builder.
 STATES: dict[str, Callable[[AsyncSession], Awaitable[Shot]]] = {
     "base": state_base,
-    "S3-01": _later("LP-919, LP-920, LP-921"),
+    "S3-01": state_s3_01,
     "S3-02": _later("LP-920, LP-921"),
-    "S3-03": _later("LP-919"),
+    "S3-03": state_s3_03,
     "S3-04": _later("LP-922"),
     "S3-05": _later("LP-922"),
     "S3-06": _later("LP-922"),

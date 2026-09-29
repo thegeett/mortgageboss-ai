@@ -37,6 +37,8 @@ from app.models.condition import (
     ConditionLenderStatus,
     ConditionOrigin,
     ConditionPrepStatus,
+    ConditionReadingSource,
+    ConditionReadingStatus,
     OwnerHint,
     OwnerHintSource,
 )
@@ -47,6 +49,7 @@ from app.models.condition_round import (
     ConditionSheetFormat,
     ConditionSourceKind,
 )
+from app.models.condition_vocabulary import EvidenceCheck, Performer, PlanOption
 from app.schemas.condition import MAX_PASTE_CHARS, BulkAction, ConditionSort, VerdictSourceKind
 from app.services.condition_status import RefusalCode
 
@@ -74,6 +77,13 @@ _MIRRORED: dict[str, type[StrEnum]] = {
     #: value — and this enum gained `round_reparse_requested` mid-stage, which is exactly the drift
     #: this list exists to catch.
     "ConditionEventKind": ConditionEventKind,
+    #: Stage 3's vocabulary (LP-919): the reading is on the wire, and the detail sheet and S3-03 branch
+    #: on who acts, the option and the reading's state.
+    "Performer": Performer,
+    "PlanOption": PlanOption,
+    "EvidenceCheck": EvidenceCheck,
+    "ConditionReadingStatus": ConditionReadingStatus,
+    "ConditionReadingSource": ConditionReadingSource,
     #: Added with the filtered list (LP-911). It is a REQUEST enum rather than a column, and it is
     #: listed here by decision rather than by accident: the client sends `sort`, so a value the server
     #: grew and the client never heard of is a sort nobody can ask for, and one the client sends and

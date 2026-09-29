@@ -274,6 +274,12 @@ class Settings(BaseSettings):
     # cannot disagree.
     receiving_enabled: bool = False
 
+    # --- Conditions: reading (LP-919) -------------------------------------------------------------- #
+    # The confidence bar for the app's reading of a condition. Below it, the reading is marked for her
+    # to confirm and nothing is drafted for that condition (Stage 3 README rule 3). 0.75 is the value
+    # the Stage 3 screens were drawn against: 0.64 falls below it, 0.86 and above pass.
+    condition_reading_confidence_bar: float = 0.75
+
     # LP-810 — AI drafting of the borrower request's framing. OFF by default, like the two prose
     # flags above and for a stronger reason: those compose text a PROCESSOR reads, this composes text
     # a BORROWER reads. With it off, LP-817's deterministic render is not a degraded fallback — it is

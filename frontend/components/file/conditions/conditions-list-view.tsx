@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmReadingFor } from "@/components/file/conditions/confirm-reading-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
@@ -110,6 +111,8 @@ export function ConditionsListView({
   const [openRoundId, setOpenRoundId] = useState<string | null>(null);
   const [enrichment, setEnrichment] = useState<ConditionEnrichResult | null>(null);
   const [openConditionId, setOpenConditionId] = useState<string | null>(null);
+  // S3-03 (LP-919): the condition whose reading she is confirming, opened from the detail sheet.
+  const [confirmReadingId, setConfirmReadingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const [answerFor, setAnswerFor] = useState<Condition[] | null>(null);
   const [moveBack, setMoveBack] = useState<{
@@ -464,6 +467,13 @@ export function ConditionsListView({
                   },
                 )
         }
+        onConfirmReading={(condition) => setConfirmReadingId(condition.id)}
+      />
+      <ConfirmReadingFor
+        fileId={fileId}
+        conditions={rows}
+        conditionId={confirmReadingId}
+        onClose={() => setConfirmReadingId(null)}
       />
 
       <RecordAnswerDialog

@@ -239,6 +239,9 @@ async function main() {
       await sleep(1500);
     }
     await sleep(500);
+    // A dialog or sheet focuses its first control on open; the reference screens show no focus ring.
+    await evaluate("document.activeElement instanceof HTMLElement && document.activeElement.blur()");
+    await sleep(200);
     if (process.env.VISUAL_DEBUG) {
       const fixed = await evaluate(`[...document.querySelectorAll("body *")]
         .filter((el) => getComputedStyle(el).position === "fixed" && el.getBoundingClientRect().width > 0)

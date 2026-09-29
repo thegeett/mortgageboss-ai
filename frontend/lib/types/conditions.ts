@@ -271,8 +271,8 @@ export type ConditionSort = "sheet" | "code" | "status" | "owner" | "updated";
 /**
  * What happened to a round — the history on the round-details sheet (S1-09).
  *
- * The last eight are Stage 2's (LP-912, ADR-408; `round_compared` and `round_completeness_changed`
- * are LP-915's). The detail sheet composes a plain-words history line from `kind`, so a member the
+ * Eight are Stage 2's (LP-912, ADR-408; `round_compared` and `round_completeness_changed` are
+ * LP-915's), and the last two are Stage 3's reading (LP-919). The detail sheet composes a plain-words history line from `kind`, so a member the
  * client cannot type renders as an unrecognised value — which is what the cross-stack mirror guard
  * exists to prevent.
  *
@@ -310,7 +310,9 @@ export type ConditionEventKind =
   | "condition_owner_changed"
   | "condition_superseded"
   | "round_compared"
-  | "round_completeness_changed";
+  | "round_completeness_changed"
+  | "condition_read"
+  | "condition_reading_confirmed";
 
 /**
  * One line of a round's history (S1-09).
@@ -556,6 +558,12 @@ export interface Condition {
   verdict: Verdict | null;
   /** Set by LP-915 when a "reworded" pair is confirmed. Nothing disappears; it points forward. */
   superseded_by_id: string | null;
+  /** LP-919 — the app's reading of the lender's words, or null before it is read. */
+  reading: ConditionReading | null;
+  reading_status: ConditionReadingStatus;
+  reading_confidence: number | null;
+  /** The library type behind the reading, for S3-01's "Library: AS-04 Earnest money" chip. */
+  library_type: LibraryType | null;
   /**
    * Every round this condition appeared on — the `R1 R2` chips.
    *
@@ -891,4 +899,103 @@ export interface ConditionEnrichResult {
   /** A COUNT, not the texts — those are the lender's words and come back on the round. */
   unmatched_existing: number;
   warnings: string[];
+}
+
+// --- Stage 3: the reading (LP-919) ------------------------------------------------------------- //
+
+/** Who acts on one item (backend `Performer`, `app/models/condition_vocabulary.py`). */
+export type Performer =
+  | "borrower"
+  | "lo"
+  | "processor"
+  | "lender"
+  | "title"
+  | "attorney"
+  | "insurance"
+  | "hoa"
+  | "employer"
+  | "appraiser"
+  | "other_party";
+
+/**
+ * The next step for an item or a condition (backend `PlanOption`). "Lender is doing it" and
+ * "Information only" are options here, never statuses (plan §4a change 12).
+ */
+export type PlanOption =
+  | "ask_borrower"
+  | "ask_third_party"
+  | "i_will_do_it"
+  | "already_in_file"
+  | "ask_underwriter"
+  | "push_back"
+  | "lender_doing_it"
+  | "information_only";
+
+/** What code checks on evidence (backend `EvidenceCheck`; LP-923 runs them). */
+export type EvidenceCheck =
+  | "all_pages"
+  | "right_account"
+  | "right_borrower"
+  | "right_period"
+  | "inside_lender_dates"
+  | "amount_matches"
+  | "covers_required_funds"
+  | "signed_and_dated"
+  | "mortgagee_clause_matches"
+  | "effective_by_closing"
+  | "inside_voe_window"
+  | "not_expired";
+
+/** Below the confidence bar, or read without the AI, the reading needs her before anything is drafted. */
+export type ConditionReadingStatus = "unread" | "ready" | "needs_confirmation" | "confirmed";
+
+export type ConditionReadingSource = "ai" | "library" | "confirmed";
+
+export interface ReadingSpecifics {
+  amounts: string[];
+  account_bank: string | null;
+  account_last4: string | null;
+  /** `2026-08`: the statement month the item needs. */
+  month: string | null;
+  names: string[];
+}
+
+export interface ReadingItem {
+  key: string;
+  name: string;
+  acceptable: string;
+  performers: Performer[];
+  option: PlanOption;
+  documents: string[];
+  checks: EvidenceCheck[];
+  specifics: ReadingSpecifics;
+}
+
+export interface ConditionReading {
+  source: ConditionReadingSource;
+  type_id: string | null;
+  /** The short label the plan row shows (S3-02). */
+  summary: string;
+  /** The "How we read it" sentence (S3-01), or null when the model gave none the checks accepted. */
+  explanation: string | null;
+  information_only: boolean;
+  lender_doing_it: boolean;
+  /** What the underwriter's dated note means, in plain words ("Not in Upload" → asked again). */
+  note_meaning: string | null;
+  items: ReadingItem[];
+  /** Figures CODE computed from the lender's words. Decimal strings; never the model's. */
+  figures: { shortfall: { required: string; verified: string; amount: string } | null };
+  /** Two dates code read from the letter: the condition cannot apply (6178). ISO dates. */
+  push_back: { must_not_close_before: string; policy_starts: string } | null;
+  confidence: number | null;
+}
+
+export interface LibraryType {
+  id: string;
+  name: string;
+  /** `AS-04 Earnest money`. */
+  label: string;
+  /** `Fannie Mae B3-4.3-09`, or "Lender requirement". */
+  rule_label: string;
+  rule_note: string | null;
 }

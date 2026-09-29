@@ -552,4 +552,41 @@ def split_condition_round(self: Task, round_id: str) -> None:
     )
 
 
-__all__ = ["parse_condition_round", "split_condition_round"]
+async def _run_read(round_id: str) -> None:
+    from app.services.condition_reading import read_round
+
+    try:
+        round_pk = UUID(round_id)
+    except ValueError:
+        return
+    async with task_session() as db:
+        await read_round(db, round_id=round_pk)
+        await db.commit()
+
+
+@celery_app.task(  # type: ignore[untyped-decorator]
+    bind=True,
+    name="conditions.read_condition_round",
+    max_retries=MAX_RETRIES,
+    soft_time_limit=PARSE_SOFT_LIMIT_SECONDS,
+    time_limit=PARSE_HARD_LIMIT_SECONDS,
+)
+def read_condition_round(self: Task, round_id: str) -> None:
+    """Celery task: read an imported round's new conditions into items, in ONE AI call (LP-919).
+
+    The reading never raises for a model failure: it falls back to the library and marks the
+    conditions to confirm. This bounded retry covers a transient error AROUND it (the database). On
+    exhaustion the conditions stay `unread`, which the plan panel shows as not read yet, and the next
+    import on the file reads them.
+    """
+    retry_or_terminal(
+        self,
+        lambda: run_async(_run_read(round_id)),
+        on_exhausted=lambda exc: logger.error(
+            "condition_read_exhausted", round_id=round_id, error_type=type(exc).__name__
+        ),
+        event="condition_read_exhausted",
+    )
+
+
+__all__ = ["parse_condition_round", "read_condition_round", "split_condition_round"]

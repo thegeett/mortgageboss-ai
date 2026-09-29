@@ -103,6 +103,9 @@ class LibraryItem:
     option: PlanOption
     documents: tuple[str, ...]
     checks: tuple[EvidenceCheck, ...]
+    #: A name that states the lender's amount ("Source of the {amount}"), used when the lender's text
+    #: carries one. CODE fills `{amount}` from the text (LP-919); the model never writes it.
+    name_with_amount: str | None = None
 
 
 @dataclass(frozen=True)
@@ -187,6 +190,14 @@ def _rule(raw: Any, where: str) -> TypeRule:
     raise LibraryError(f"{where}: rule.kind must be agency or lender_requirement, not {kind!r}")
 
 
+def _name_with_amount(value: Any, where: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or "{amount}" not in value:
+        raise LibraryError(f"{where}: name_with_amount must be text containing {{amount}}")
+    return value
+
+
 def _item(raw: Any, where: str, documents_known: frozenset[str]) -> LibraryItem:
     if not isinstance(raw, dict):
         raise LibraryError(f"{where}: an item must be a mapping")
@@ -204,6 +215,7 @@ def _item(raw: Any, where: str, documents_known: frozenset[str]) -> LibraryItem:
         checks=tuple(
             _enum(EvidenceCheck, check, f"{where} check") for check in (raw.get("checks") or ())
         ),
+        name_with_amount=_name_with_amount(raw.get("name_with_amount"), where),
     )
 
 
