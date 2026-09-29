@@ -316,7 +316,8 @@ export type ConditionEventKind =
   | "condition_planned"
   | "condition_plan_changed"
   | "round_plan_confirmed"
-  | "condition_drafted";
+  | "condition_drafted"
+  | "condition_draft_polished";
 
 /**
  * One line of a round's history (S1-09).
@@ -1130,6 +1131,16 @@ export interface ConditionDraft {
   why_facts: { label: string; value: string }[];
   /** "Waiting on Borrower" — what our status becomes when this is marked sent. */
   becomes: string;
+  /** When she used the AI's polish; the dialog's violet "Polished by AI" mark. */
+  polished_at: string | null;
   /** `2026-09-03`: the date the email asks for, editable while unsent. Null for a question. */
   due_date: string | null;
+}
+
+/** "Polish with AI" (LP-922 follow-up): a proposal and the facts it changed, found by code. */
+export interface DraftPolish {
+  polished_html: string | null;
+  warnings: { kind: "dropped" | "added" | "items"; fact: string; sentence: string }[];
+  /** Why there is no proposal, as a sentence. */
+  refusal: string | null;
 }

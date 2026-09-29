@@ -128,6 +128,8 @@ class ConditionEventKind(StrEnum):
     #: LP-922 — a condition was put into a draft email (detail: recipient, communication id). The
     #: send is Phase 4's `communication_sent` activity plus this condition's `condition_prep_moved`.
     CONDITION_DRAFTED = "condition_drafted"
+    #: LP-922 follow-up — she used the AI's polish of a draft (detail: warnings accepted; no text).
+    CONDITION_DRAFT_POLISHED = "condition_draft_polished"
     #: LP-915. An imported round was switched between "full list" and "just some" (A7), which is what
     #: makes a comparison runnable — or withdraws its unconfirmed suggestions.
     ROUND_COMPLETENESS_CHANGED = "round_completeness_changed"

@@ -195,6 +195,9 @@ describe("the only way HTML reaches the DOM", () => {
     // the library's wording with every value escaped (`condition_drafts.fill`), then passes it through
     // the same `sanitise_html` allow-list before storing it (`condition_drafts.render`).
     "draft.body_html",
+    // LP-922 follow-up — the AI's proposal, on the SECOND argument too: the model's reply is passed
+    // through `sanitise_html` before the route returns it (`condition_polish.polish_draft`).
+    'proposal.polished_html ?? ""',
   ]);
 
   it("feeds every dangerouslySetInnerHTML from a renderer or a sanitised column, and nothing else", () => {

@@ -80,7 +80,10 @@ from app.schemas.condition import (
     ConfirmClearedRequest,
     DraftAddressRequest,
     DraftDueDateRequest,
+    DraftFactWarningPublic,
+    DraftPolishPublic,
     DraftTailPublic,
+    DraftUsePolishRequest,
     LenderProcessingRequest,
     NextStepRequest,
     OwnerRequest,
@@ -1795,6 +1798,52 @@ async def set_condition_draft_due_date(
             loan_file=loan_file,
             draft=draft,
             due=payload.due_date,
+            actor_user_id=current_user.id,
+        )
+    except DraftRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    await db.commit()
+    view = await draft_view(db, loan_file=loan_file, draft=draft, actor_user_id=current_user.id)
+    return ConditionDraftPublic.model_validate(view)
+
+
+@router.post("/{loan_file_id}/condition-drafts/{draft_id}/polish", response_model=DraftPolishPublic)
+async def polish_condition_draft(
+    loan_file: ScopedLoanFileById, draft_id: UUID, db: DbSession
+) -> DraftPolishPublic:
+    """ "Polish with AI" (LP-922 follow-up): a proposal and the facts it changed. Stores nothing."""
+    draft = await _scoped_draft(db, loan_file, draft_id)
+    try:
+        proposal = await condition_drafts.propose_polish(db, loan_file=loan_file, draft=draft)
+    except DraftRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    return DraftPolishPublic(
+        polished_html=proposal.html,
+        warnings=[
+            DraftFactWarningPublic(kind=w.kind, fact=w.fact, sentence=w.sentence)
+            for w in proposal.warnings
+        ],
+        refusal=proposal.refusal,
+    )
+
+
+@router.put("/{loan_file_id}/condition-drafts/{draft_id}/body", response_model=ConditionDraftPublic)
+async def use_condition_draft_polish(
+    loan_file: ScopedLoanFileById,
+    draft_id: UUID,
+    payload: DraftUsePolishRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionDraftPublic:
+    """ "Use this": the AI's polished body replaces the draft's, sanitised and marked as AI-polished."""
+    draft = await _scoped_draft(db, loan_file, draft_id)
+    try:
+        await condition_drafts.use_polish(
+            db,
+            loan_file=loan_file,
+            draft=draft,
+            body_html=payload.body_html,
+            warnings_accepted=payload.warnings_accepted,
             actor_user_id=current_user.id,
         )
     except DraftRefused as exc:

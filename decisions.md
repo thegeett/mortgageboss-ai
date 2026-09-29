@@ -16632,3 +16632,31 @@ that draft and regenerates its body.
   while the last move was a send; a move she made is never overridden. The lender's track never moves.
 
 *Status.* Accepted (LP-922).
+
+## ADR-413
+
+**Condition emails get an AI polish on her click: a proposal checked by code for dropped or added facts,
+shown with warnings, stored only when she uses it; always on.**
+
+*Context.* LP-922 shipped the emails as library wording filled by code and raised STOP AND ASK 1 on the
+plan's "the AI polishes the wording". The product owner answered on 2026-09-29: a button that polishes
+by AI.
+- It shows a proposal.
+- A changed or dropped fact is shown with a warning rather than refused.
+- It applies to every draft.
+- It is always on, not tied to Phase 4's `email_draft_enabled`.
+
+*Decision (LP-922 follow-up).*
+- One model call per click (`ai/condition_polish.py`, prompt `conditions/polish_v1.txt`). Only the email
+  body is sent; the reply is sanitised.
+- `conditions/email_facts.py` compares the two versions by code. The facts compared are amounts by value,
+  numeric and spoken dates, digit runs of four or more, links, new day or month words, and the item count.
+  Every difference becomes a named warning.
+- The proposal is stored only on "Use this", which also writes `condition_draft_polished` per condition
+  and sets `condition_drafts.polished_at`, the "Polished by AI" mark.
+- A re-render from the library (the draft's items changed, or she edited its due date) replaces the
+  polished body and clears the mark. An unrelated plan edit leaves it alone; an address change updates
+  only To.
+- Phase 4's own polish (refuse-on-invented-fact, gated by the setting) is unchanged.
+
+*Status.* Accepted (LP-922 follow-up).

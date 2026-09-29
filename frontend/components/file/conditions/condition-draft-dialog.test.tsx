@@ -3,17 +3,32 @@
  * S3-04 (LP-922): the draft dialog shows the draft as the server built it, says nothing is sent from
  * the app, offers the four buttons, and will not mark sent a draft with no address.
  */
-import type { ConditionDraft } from "@/lib/types/conditions";
-import { cleanup, render, screen } from "@testing-library/react";
+import type { ConditionDraft, DraftPolish } from "@/lib/types/conditions";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const draft = vi.hoisted(() => ({ data: undefined as ConditionDraft | undefined }));
+const polish = vi.hoisted(() => ({
+  result: null as DraftPolish | null,
+  applied: [] as { body_html: string; warnings_accepted: number }[],
+}));
 vi.mock("@/lib/api/conditions", () => ({
   useConditionDraft: () => ({ data: draft.data }),
   useMarkConditionDraftSent: () => ({ mutate: vi.fn(), isPending: false }),
   useDeleteConditionDraft: () => ({ mutate: vi.fn(), isPending: false }),
   useSetConditionDraftAddress: () => ({ mutate: vi.fn(), isPending: false }),
   useSetConditionDraftDueDate: () => ({ mutate: vi.fn(), isPending: false }),
+  // "Polish with AI": answers with whatever the test put in `polish.result`.
+  usePolishConditionDraft: () => ({
+    isPending: false,
+    mutate: (_: unknown, options: { onSuccess: (result: DraftPolish) => void }) => {
+      if (polish.result) options.onSuccess(polish.result);
+    },
+  }),
+  useApplyPolish: () => ({
+    isPending: false,
+    mutate: (body: { body_html: string; warnings_accepted: number }) => polish.applied.push(body),
+  }),
 }));
 vi.mock("@/lib/api/preferences", () => ({
   usePreferences: () => ({ data: { mail_client: "gmail", suggested_mail_client: "gmail" } }),
@@ -48,6 +63,7 @@ const BORROWER: ConditionDraft = {
   why_facts: [],
   becomes: "Waiting on Borrower",
   due_date: "2026-09-03",
+  polished_at: null,
 };
 
 describe("ConditionDraftDialog", () => {
@@ -80,5 +96,62 @@ describe("ConditionDraftDialog", () => {
     expect(screen.queryByRole("button", { name: "Mark as sent" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Delete draft" })).toBeNull();
     expect(screen.getByText(/Marked sent/)).toBeDefined();
+  });
+});
+
+describe("Polish with AI (LP-922 follow-up)", () => {
+  it("shows the proposal with the facts it changed, and stores nothing until Use this", () => {
+    draft.data = BORROWER;
+    polish.applied = [];
+    polish.result = {
+      polished_html: "<p>Hello Alex,</p><ol><li>statements</li></ol>",
+      warnings: [{ kind: "dropped", fact: "$38,210.40", sentence: "Dropped: $38,210.40" }],
+      refusal: null,
+    };
+    render(<ConditionDraftDialog fileId="f1" draftId="d1" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Polish with AI" }));
+    expect(screen.getByText(/Proposed by AI/)).toBeDefined();
+    expect(screen.getByText("Dropped: $38,210.40")).toBeDefined();
+    expect(screen.getByText("Hello Alex,")).toBeDefined();
+    // The send buttons wait until she decides.
+    expect(screen.queryByRole("button", { name: "Mark as sent" })).toBeNull();
+    expect(polish.applied).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Use this" }));
+    expect(polish.applied).toEqual([
+      {
+        draftId: "d1",
+        body_html: "<p>Hello Alex,</p><ol><li>statements</li></ol>",
+        warnings_accepted: 1,
+      },
+    ]);
+  });
+
+  it("Keep mine puts her draft back", () => {
+    draft.data = BORROWER;
+    polish.result = { polished_html: "<p>Hello Alex,</p>", warnings: [], refusal: null };
+    render(<ConditionDraftDialog fileId="f1" draftId="d1" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Polish with AI" }));
+    expect(screen.getByText(/checked by code/)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Keep mine" }));
+    expect(screen.queryByText(/Proposed by AI/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Mark as sent" })).toBeDefined();
+  });
+
+  it("says so when there is no proposal", () => {
+    draft.data = BORROWER;
+    polish.result = {
+      polished_html: null,
+      warnings: [],
+      refusal: "The AI could not polish this email just now.",
+    };
+    render(<ConditionDraftDialog fileId="f1" draftId="d1" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Polish with AI" }));
+    expect(screen.getByText("The AI could not polish this email just now.")).toBeDefined();
+  });
+
+  it("marks a polished draft as the AI's", () => {
+    draft.data = { ...BORROWER, polished_at: "2026-08-28T20:45:00Z" };
+    render(<ConditionDraftDialog fileId="f1" draftId="d1" onClose={vi.fn()} />);
+    expect(screen.getByText(/Polished by AI/)).toBeDefined();
   });
 });

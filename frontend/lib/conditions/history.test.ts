@@ -43,6 +43,7 @@ const ALL_KINDS = [
   "condition_plan_changed",
   "round_plan_confirmed",
   "condition_drafted",
+  "condition_draft_polished",
 ] as const satisfies readonly ConditionEventKind[];
 
 /**
@@ -96,7 +97,7 @@ describe("every event kind has a sentence", () => {
 
   it("is exhaustive over the union, checked by the compiler", () => {
     expect(_everyKindIsListed).toBe(true);
-    expect(ALL_KINDS).toHaveLength(25);
+    expect(ALL_KINDS).toHaveLength(26);
   });
 });
 

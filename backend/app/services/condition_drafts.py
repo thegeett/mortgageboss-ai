@@ -747,6 +747,9 @@ async def sync_round_drafts(
         ).scalars()
     )
     touched: dict[UUID, ConditionDraft] = {}
+    #: Drafts whose membership changed this sync. A POLISHED draft is re-rendered only if it is here
+    #: (the polish is hers; an unrelated plan edit must not wipe it).
+    changed: set[UUID] = set()
 
     for item in items:
         condition = by_id[item.condition_id]
@@ -764,6 +767,7 @@ async def sync_round_drafts(
             if current is not None:
                 item.draft_id = None
                 touched[current.id] = current
+                changed.add(current.id)
             continue
         if current is not None and current.recipient is wanted:
             touched[current.id] = current
@@ -780,8 +784,10 @@ async def sync_round_drafts(
         )
         if current is not None:
             touched[current.id] = current
+            changed.add(current.id)
         item.draft_id = draft.id
         touched[draft.id] = draft
+        changed.add(draft.id)
         db.add(_drafted_event(condition, draft, actor_user_id))
 
     for condition in conditions:
@@ -802,6 +808,7 @@ async def sync_round_drafts(
                 actor_user_id=actor_user_id,
             )
             touched[draft.id] = draft
+            changed.add(draft.id)
             db.add(_drafted_event(condition, draft, actor_user_id))
         elif existing is not None:
             touched[existing.id] = existing
@@ -816,6 +823,8 @@ async def sync_round_drafts(
             continue
         if draft.condition_id is None and not await _draft_items(db, draft):
             await _discard(db, loan_file=loan_file, draft=draft)
+            continue
+        if draft.polished_at is not None and draft.id not in changed:
             continue
         await render(
             db, loan_file=loan_file, draft=draft, letter=letter, actor_user_id=actor_user_id
@@ -897,6 +906,8 @@ async def render(
     """Write the draft's To, Subject and body from its items (or its question). Unsent drafts only."""
     message = await db.get(Communication, draft.communication_id)
     assert message is not None
+    # REBUILT FROM THE LIBRARY, SO ANY POLISH IS GONE: the mark must not claim an AI wrote this.
+    draft.polished_at = None
     signer, company = await _signer(db, loan_file=loan_file, actor_user_id=actor_user_id)
     email, name = await _address(db, loan_file=loan_file, recipient=draft.recipient, letter=letter)
     message.recipient = _to_line(email, name)
@@ -1225,10 +1236,20 @@ async def set_address(
     round_ = await db.get(ConditionRound, draft.round_id) if draft.round_id else None
     letter = await letter_facts(db, loan_file=loan_file, round_=round_)
     for other in await open_condition_drafts(db, loan_file_id=loan_file.id):
-        if other.recipient is draft.recipient:
-            await render(
-                db, loan_file=loan_file, draft=other, letter=letter, actor_user_id=actor_user_id
+        if other.recipient is not draft.recipient:
+            continue
+        if other.polished_at is not None:
+            # Her polished words stay; only the address line is new.
+            known, shown = await _address(
+                db, loan_file=loan_file, recipient=other.recipient, letter=letter
             )
+            message = await db.get(Communication, other.communication_id)
+            if message is not None:
+                message.recipient = _to_line(known, shown)
+            continue
+        await render(
+            db, loan_file=loan_file, draft=other, letter=letter, actor_user_id=actor_user_id
+        )
     await db.flush()
 
 
@@ -1462,6 +1483,7 @@ async def draft_view(
         "mortgagee_clause": clause,
         "why_facts": why_facts,
         "becomes": becomes,
+        "polished_at": draft.polished_at,
         "due_date": min(
             (item.due_date for item in await _draft_items(db, draft) if item.due_date),
             default=None,
@@ -1616,3 +1638,62 @@ async def set_due_date(
     letter = await letter_facts(db, loan_file=loan_file, round_=round_)
     await render(db, loan_file=loan_file, draft=draft, letter=letter, actor_user_id=actor_user_id)
     await db.flush()
+
+
+async def propose_polish(db: AsyncSession, *, loan_file: LoanFile, draft: ConditionDraft) -> Any:
+    """ "Polish with AI": the model's version and the fact warnings. Nothing is stored."""
+    from app.ai.condition_polish import polish_draft
+
+    if not await _is_unsent(db, draft):
+        raise DraftRefused("A sent email cannot be polished.")
+    message = await db.get(Communication, draft.communication_id)
+    assert message is not None
+    return await polish_draft(message.body or "")
+
+
+async def use_polish(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    draft: ConditionDraft,
+    body_html: str,
+    warnings_accepted: int,
+    actor_user_id: UUID,
+) -> None:
+    """ "Use this": the polished body replaces the draft's, sanitised; each condition gets an event."""
+    from app.conditions.email_facts import plain
+
+    if not await _is_unsent(db, draft):
+        raise DraftRefused("A sent email cannot be changed.")
+    cleaned = sanitise_html(body_html or "")
+    if not plain(cleaned):
+        raise DraftRefused("That email is empty — keep your draft instead.")
+    message = await db.get(Communication, draft.communication_id)
+    assert message is not None
+    message.body = cleaned
+    draft.polished_at = datetime.now(UTC)
+    if draft.condition_id is not None:
+        condition_ids = [draft.condition_id]
+    else:
+        condition_ids = list(dict.fromkeys(i.condition_id for i in await _draft_items(db, draft)))
+    for condition_id in condition_ids:
+        condition = await db.get(Condition, condition_id)
+        if condition is None:
+            continue
+        db.add(
+            ConditionEvent(
+                company_id=condition.company_id,
+                loan_file_id=condition.loan_file_id,
+                condition_id=condition.id,
+                round_id=draft.round_id,
+                kind=ConditionEventKind.CONDITION_DRAFT_POLISHED,
+                actor_user_id=actor_user_id,
+                detail={"recipient": draft.recipient.value, "warnings_accepted": warnings_accepted},
+            )
+        )
+    await db.flush()
+    logger.info(
+        "condition_draft_polish_used",
+        loan_file_id=str(loan_file.id),
+        warnings_accepted=warnings_accepted,
+    )

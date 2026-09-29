@@ -207,6 +207,10 @@ export function conditionHistoryLine(
       return "Plan proposed";
     case "condition_plan_changed":
       return `The plan was changed${by(event)}`;
+    case "condition_draft_polished":
+      return event.draft_recipient
+        ? `The ${EMAIL_NAME[event.draft_recipient]} was polished by AI${by(event)}`
+        : `A draft email was polished by AI${by(event)}`;
     case "condition_drafted":
       return event.draft_recipient
         ? `Added to the ${EMAIL_NAME[event.draft_recipient]}`

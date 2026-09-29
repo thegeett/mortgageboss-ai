@@ -8,10 +8,11 @@ KEPT OFF `communications.party` ON PURPOSE. Phase 4 finds "the open draft for th
 that column, so a condition draft carrying it would be appended to by Phase 4's compose.
 """
 
+from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Index, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, UUIDMixin
@@ -56,3 +57,6 @@ class ConditionDraft(Base, UUIDMixin, TimestampMixin):
     condition_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("conditions.id", ondelete="CASCADE"), nullable=True
     )
+    #: When she used the AI's polish of this draft; cleared when the plan re-renders it from the
+    #: library (LP-922 follow-up). The dialog's "Polished by AI" mark reads it.
+    polished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

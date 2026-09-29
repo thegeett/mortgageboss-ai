@@ -522,7 +522,8 @@ class ConditionEventPublic(BaseModel):
                 frozenset(member.value for member in DraftRecipient),
                 DraftRecipient,
             )
-            if kind is ConditionEventKind.CONDITION_DRAFTED
+            if kind
+            in (ConditionEventKind.CONDITION_DRAFTED, ConditionEventKind.CONDITION_DRAFT_POLISHED)
             or (kind is ConditionEventKind.CONDITION_PREP_MOVED and detail.get("by") == "email")
             else None,
             lender_status_from=_as_vocab(
@@ -1733,6 +1734,8 @@ class ConditionDraftPublic(BaseModel):
     becomes: str
     #: The date the email asks for, editable in the dialog while unsent (§8). Null for a question.
     due_date: date_type | None = None
+    #: When she used the AI's polish (LP-922 follow-up); the dialog's "Polished by AI" mark.
+    polished_at: datetime | None = None
 
 
 class ConditionDraftSummaryPublic(BaseModel):
@@ -1754,3 +1757,25 @@ class DraftAddressRequest(BaseModel):
 
 class DraftDueDateRequest(BaseModel):
     due_date: date_type
+
+
+class DraftFactWarningPublic(BaseModel):
+    """A fact the AI's polish dropped or added, found by code (LP-922 follow-up)."""
+
+    kind: Literal["dropped", "added", "items"]
+    fact: str
+    sentence: str
+
+
+class DraftPolishPublic(BaseModel):
+    """A proposal, or why there is none. Nothing is stored until she uses it."""
+
+    polished_html: str | None
+    warnings: list[DraftFactWarningPublic]
+    refusal: str | None
+
+
+class DraftUsePolishRequest(BaseModel):
+    body_html: str = Field(min_length=1, max_length=50_000)
+    #: How many fact warnings were on screen when she chose it — recorded on the event, as a count.
+    warnings_accepted: int = Field(default=0, ge=0, le=100)

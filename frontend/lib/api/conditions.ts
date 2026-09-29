@@ -31,6 +31,7 @@ import type {
   ConditionRoundCompleteness,
   ConditionSort,
   ConditionSummary,
+  DraftPolish,
   DraftUpdateInput,
   OwnerHint,
   OwnerInput,
@@ -962,6 +963,33 @@ export function useSetConditionDraftDueDate(fileId: string) {
       (
         await apiClient.put<ConditionDraft>(`${draftsPath(fileId)}/${draftId}/due-date`, {
           due_date,
+        })
+      ).data,
+    onSuccess: () => invalidateDrafts(queryClient, fileId),
+  });
+}
+
+/** "Polish with AI": a proposal only. Nothing is stored until `useApplyPolish`. */
+export function usePolishConditionDraft(fileId: string) {
+  return useMutation({
+    mutationFn: async ({ draftId }: { draftId: string }) =>
+      (await apiClient.post<DraftPolish>(`${draftsPath(fileId)}/${draftId}/polish`)).data,
+  });
+}
+
+/** "Use this": the polished body replaces the draft's. */
+export function useApplyPolish(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      draftId,
+      body_html,
+      warnings_accepted,
+    }: { draftId: string; body_html: string; warnings_accepted: number }) =>
+      (
+        await apiClient.put<ConditionDraft>(`${draftsPath(fileId)}/${draftId}/body`, {
+          body_html,
+          warnings_accepted,
         })
       ).data,
     onSuccess: () => invalidateDrafts(queryClient, fileId),

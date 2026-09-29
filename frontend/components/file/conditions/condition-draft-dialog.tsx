@@ -4,9 +4,11 @@ import { MailClientDialog } from "@/components/file/communication/mail-client-di
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import {
+  useApplyPolish,
   useConditionDraft,
   useDeleteConditionDraft,
   useMarkConditionDraftSent,
+  usePolishConditionDraft,
   useSetConditionDraftAddress,
   useSetConditionDraftDueDate,
 } from "@/lib/api/conditions";
@@ -18,8 +20,8 @@ import {
 } from "@/lib/communication/compose-routes";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { copyMessage } from "@/lib/markdown/copy-rich";
-import type { ConditionDraft } from "@/lib/types/conditions";
-import { Check, Copy, Trash2, User } from "lucide-react";
+import type { ConditionDraft, DraftPolish } from "@/lib/types/conditions";
+import { Check, Copy, Sparkles, Trash2, TriangleAlert, User } from "lucide-react";
 import { useState } from "react";
 
 /** The subtitle every condition draft carries (README rule 4, LP-934 M6). */
@@ -86,6 +88,10 @@ function DraftBody({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  // LP-922 follow-up — the AI's proposal, held on screen until she uses it or keeps her own.
+  const [proposal, setProposal] = useState<DraftPolish | null>(null);
+  const polish = usePolishConditionDraft(fileId);
+  const applyPolish = useApplyPolish(fileId);
   const client = chosenClient ?? preferences.data?.mail_client ?? null;
   const sent = draft.status === "sent";
 
@@ -138,18 +144,47 @@ function DraftBody({
           <span className="block truncate">{draft.subject}</span>
         </Field>
         {draft.due_date && !sent ? <DueDate fileId={fileId} draft={draft} /> : null}
-        <div
-          className={
-            "rounded-lg border border-input bg-card px-4 py-3 text-sm leading-relaxed text-foreground " +
-            "[&_a]:text-primary [&_a]:underline [&_em]:not-italic [&_em]:text-muted-foreground " +
-            "[&_li]:mb-2 [&_ol]:mb-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2"
-          }
-          // SERVER-BUILT AND SANITISED (LP-922): the words are the library's, filled by code and
-          // passed through Phase 4's HTML allow-list before they are stored.
-          // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitised server-side, see above
-          dangerouslySetInnerHTML={{ __html: draft.body_html }}
-        />
-        {sent ? (
+        {proposal?.polished_html ? (
+          <PolishProposal
+            proposal={proposal}
+            pending={applyPolish.isPending}
+            onUse={() =>
+              applyPolish.mutate(
+                {
+                  draftId: draft.id,
+                  body_html: proposal.polished_html ?? "",
+                  warnings_accepted: proposal.warnings.length,
+                },
+                {
+                  onSuccess: () => {
+                    setProposal(null);
+                    setNote(null);
+                  },
+                  onError: (error) => setNote(getErrorMessage(error)),
+                },
+              )
+            }
+            onKeep={() => setProposal(null)}
+          />
+        ) : (
+          <>
+            {draft.polished_at ? (
+              <span className="inline-flex w-fit items-center gap-1 rounded-md border border-ai/30 bg-ai/10 px-1.5 py-0.5 text-xs text-ai">
+                <Sparkles className="h-3 w-3" aria-hidden />
+                Polished by AI — facts checked by code
+              </span>
+            ) : null}
+            <div
+              className={BODY_CLASS}
+              // SERVER-BUILT AND SANITISED (LP-922): the words are the library's, filled by code and
+              // passed through Phase 4's HTML allow-list before they are stored — and a polished body
+              // she chose went through the same allow-list on the way in.
+              // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitised server-side, see above
+              dangerouslySetInnerHTML={{ __html: draft.body_html }}
+            />
+          </>
+        )}
+        {proposal?.polished_html ? null : sent ? (
           <p className="inline-flex items-center gap-1.5 text-sm text-success">
             <Check className="h-4 w-4" aria-hidden />
             Marked sent{draft.sent_at ? ` ${shortDate(draft.sent_at)}` : ""}
@@ -163,6 +198,33 @@ function DraftBody({
             <Button type="button" variant="outline" onClick={() => void copyOnly()}>
               <Copy className="h-4 w-4" aria-hidden />
               Copy message
+            </Button>
+            {/* LP-922 FOLLOW-UP — HER CLICK, A PROPOSAL, FACTS CHECKED BY CODE. Violet because it is the
+                AI's (README rule 2). */}
+            <Button
+              type="button"
+              variant="outline"
+              className="border-ai/40 text-ai hover:bg-ai/10 hover:text-ai"
+              disabled={polish.isPending}
+              onClick={() =>
+                polish.mutate(
+                  { draftId: draft.id },
+                  {
+                    onSuccess: (result) => {
+                      if (result.polished_html) {
+                        setProposal(result);
+                        setNote(null);
+                      } else {
+                        setNote(result.refusal ?? "The AI could not polish this email just now.");
+                      }
+                    },
+                    onError: (error) => setNote(getErrorMessage(error)),
+                  },
+                )
+              }
+            >
+              <Sparkles className="h-4 w-4" aria-hidden />
+              {polish.isPending ? "Polishing…" : "Polish with AI"}
             </Button>
             <Button
               type="button"
@@ -237,6 +299,70 @@ function DraftBody({
         }}
       />
     </div>
+  );
+}
+
+const BODY_CLASS =
+  "rounded-lg border border-input bg-card px-4 py-3 text-sm leading-relaxed text-foreground " +
+  "[&_a]:text-primary [&_a]:underline [&_em]:not-italic [&_em]:text-muted-foreground " +
+  "[&_li]:mb-2 [&_ol]:mb-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2";
+
+/**
+ * The AI's proposal (LP-922 follow-up). NOTHING CHANGES UNTIL SHE USES IT. A fact the AI dropped or added
+ * is listed above it — found by code, not by the model — and she decides (product owner, 2026-09-29).
+ */
+function PolishProposal({
+  proposal,
+  pending,
+  onUse,
+  onKeep,
+}: {
+  proposal: DraftPolish;
+  pending: boolean;
+  onUse: () => void;
+  onKeep: () => void;
+}) {
+  return (
+    <section className="flex flex-col gap-2">
+      <span className="inline-flex w-fit items-center gap-1 rounded-md border border-ai/30 bg-ai/10 px-1.5 py-0.5 text-xs text-ai">
+        <Sparkles className="h-3 w-3" aria-hidden />
+        Proposed by AI — nothing changes until you use it
+      </span>
+      {proposal.warnings.length > 0 ? (
+        <div className="rounded-md border border-warning/50 bg-warning/5 px-3 py-2 text-xs text-foreground-2">
+          <p className="inline-flex items-center gap-1 font-medium text-warning">
+            <TriangleAlert className="h-3.5 w-3.5" aria-hidden />
+            The AI changed {proposal.warnings.length === 1 ? "a fact" : "some facts"} — check before
+            you use it:
+          </p>
+          <ul className="mt-1 list-disc pl-5">
+            {proposal.warnings.map((warning) => (
+              <li key={`${warning.kind}-${warning.fact}`}>{warning.sentence}</li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Every amount, date, account ending, link and item is still there — checked by code.
+        </p>
+      )}
+      <div
+        className={`${BODY_CLASS} border-ai/30`}
+        // SANITISED SERVER-SIDE: the model's reply goes through Phase 4's allow-list before it is
+        // returned (`condition_polish.polish_draft`).
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitised server-side, see above
+        dangerouslySetInnerHTML={{ __html: proposal.polished_html ?? "" }}
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" disabled={pending} onClick={onUse}>
+          <Check className="h-4 w-4" aria-hidden />
+          Use this
+        </Button>
+        <Button type="button" variant="outline" onClick={onKeep}>
+          Keep mine
+        </Button>
+      </div>
+    </section>
   );
 }
 
