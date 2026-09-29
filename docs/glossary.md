@@ -166,6 +166,72 @@ Stage 2 makes the two statuses move, which needs the words for them (ADR-408):
   and is absent from a new **full list**. It is always a question with a button,
   and confirming it is what records the verdict (ADR-404).
 
+Stage 3 turns a condition into work: what it asks for, who does it, and what
+arrives (ADR-409 to ADR-416):
+
+- **Condition library / condition type** — our reviewed list of the kinds of
+  condition lenders issue (55 types, ids like `AS-10` "Short funds to close or
+  reserves"). A lender code is mapped to a type once per lender; the type says
+  what items the condition breaks into, who usually acts, what the evidence is
+  checked for, and the sentence the email uses. It is data in the repository, not
+  model output (ADR-409).
+- **Reading** — what a condition asks for, in our terms: its items, who acts on
+  each, and the specifics (amounts, the account's last four, months). Made by one
+  AI call per round, or by the library alone when the AI is off; a reading below
+  the confidence bar, or from the library alone, waits for the processor to
+  confirm it. Every figure in a reading must be in the lender's own text
+  (ADR-410).
+- **Item** — one thing a condition needs, with who does it: 6637's earnest money
+  is three items (the source → borrower, the receipt → title, the clearance →
+  borrower). One document may answer items on several conditions.
+- **Plan / next step** — for each item (or the whole condition), how it will be
+  done: **Ask the borrower** (or another party), **I'll do it** (the processor's
+  own task), **Already in the file**, **Push back** (a question to the
+  underwriter), **Lender is doing it**, or **Information only**. The plan is a
+  proposal until she confirms it; after that, a step that needs nothing more
+  moves the condition to Ready to send, forward only (ADR-411).
+- **Condition draft** — an email the app writes for a round (one per recipient:
+  borrower, title/attorney, LO, a question to the underwriter). **Nothing is sent
+  by the app**: she copies it into her own mail, sends it, and marks it sent,
+  which moves the asked conditions to Waiting on that person (ADR-412). **Polish
+  with AI** proposes a better-worded version; a changed or dropped fact is shown
+  with a warning, and her click applies it (ADR-413).
+- **Evidence check** — what code checks on a document that arrives for an item:
+  right account, right period, right borrower, inside the lender's dates, all
+  pages, the amount, and whether the funds cover what is required. A statement
+  that fails one of its own checks (other than the funds total) is **rejected**:
+  it is not evidence, its balance counts for nothing, and she may **accept it
+  anyway** with a reason that is kept (ADR-414).
+- **Large deposit** — a deposit over 50% of the monthly income used to qualify
+  (Fannie Mae B3-4.2-02; $2,870.66 on $5,741.32). If the funds to close need it,
+  it must be **sourced**: she asks the borrower for a letter, or records how it is
+  already explained. Payroll deposits are not large deposits.
+- **Figures check** — what accepted evidence changes in the file's figures
+  (verified assets, the insurance premium, the ratios), computed by code and
+  shown as a proposal. Nothing changes until she applies it (ADR-415).
+- **DU re-run** — whether the loan must be resubmitted to Desktop Underwriter
+  after the figures change: Fannie Mae B3-2-10's tolerances (the DTI rising over
+  45%, or by 3 points or more; income or reserves falling short). Whether "over
+  45%" means crossing it or being above it is an open question for the domain
+  expert (**STOP AND ASK 2 — verify with domain expert**).
+- **Condition package** — what goes to the lender for a round: one PDF per Ready
+  condition, named with the lender's code (`7086 - Assets.pdf`), and one note per
+  condition for the underwriter. She downloads it and uploads it herself, in the
+  lender's portal (UWM's is **EASE**), then presses **Mark submitted**, which
+  moves exactly those conditions to Sent to lender. The lender's status never
+  moves by it (ADR-416).
+- **Upload cutoff** — the time of day by which a lender wants condition uploads
+  (UWM: 8:00 PM Eastern). Set per lender and counted down on the package. What
+  happens to an upload after it is the lender's rule, not the app's **(verify
+  with domain expert)**.
+- **Mortgagee clause** — the lender's name and address as it must appear on the
+  homeowners insurance policy, as the party paid if there is a loss (UWM's
+  begins "United Wholesale Mortgage ISAOA, ATIMA": its successors and/or assigns,
+  as their interests may appear). Set per lender, filled from the approval letter
+  until saved.
+- **Lender codes to review** — lender codes seen on sheets that no library type
+  covers yet. An admin chooses the type once, and later imports use it.
+
 ### Rules and verification
 
 - **Investor guidelines** — the baseline rulebooks: the Fannie Mae Selling Guide

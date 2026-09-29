@@ -280,7 +280,7 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-923 Evidence arrives and is checked | REVIEWED | `d2a6f43a` | the commit titled `LP-923 review:` | S3-07, S3-08, S3-12 shot and walked by the reviewer; S3-08 matches every line, S3-12 confirms Failed a check 3 | review found 2, fixed: LP-934's D1 still said 2; the per-item open-finding guard had no test |
 | LP-924 The figures check | REVIEWED | `2f848c5f` + follow-up `e7afa680` | the commits titled `LP-924 review:` and `LP-924 follow-up review:` | S3-09 shot and walked by the reviewer: matches every line | review found 1 (Apply ignored the baseline she saw); the builder fixed it and the fix is verified, including that it does not over-refuse. STOP AND ASK 2 open on the 45% reading |
 | LP-925 Package, submit, lender settings | REVIEWED | `b415c136` | the commit titled `LP-925 review:` | S3-10 and S3-11 shot and walked by the reviewer: both match, with D10 and D11 | no defects; the ungated lender-settings routes judged correct; a note-check boundary recorded |
-| LP-935 Stage 3 close | PENDING | | | every screen | |
+| LP-935 Stage 3 close | AWAITING_REVIEW | (this commit) | | every screen, gathered in "Stage 3 — every screen" | documentation only |
 
 ## Stage 3A — acceptance (build prompt §6)
 
@@ -484,15 +484,125 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
 
 - **The product owner's sign-off on the library's top 20 types** (decision 6), once LP-918 has written
   `phase4.5-library-review.md`.
-- **Screen deviations for the product owner to redraw: D1 to D9**, spread across five tickets —
-  D1, D2, D4 (S3-12) and D3 (S3-09) in [LP-934](../tickets/LP-934.md); D5 (S3-01's check number) in
-  [LP-919](../tickets/LP-919.md); D6 (S3-01's shared line) in [LP-920](../tickets/LP-920.md); D7
-  (S3-05's 6378 label and line) and D8 (the **Polish with AI** button on S3-04, S3-05 and S3-06,
-  which the drawings predate) in [LP-922](../tickets/LP-922.md); **D1 amended** (Failed a check is 3,
-  not 2: 6637's clearance fails too) and D9 (S3-08's grouped check row) in
-  [LP-923](../tickets/LP-923.md).
-  LP-935's close should gather them into one list rather than leave the owner to find five.
+- **Screen deviations for the product owner to redraw: D1 to D12**, gathered in one list below
+  ("Stage 3 — screen deviations").
 - **S3-12 outside LP-921 (LP-921 visual check):** the list's status select is Stage 2's native select
   and carries no glyph where S3-12 draws one; the rail's Recent activity shows Stage 2's relative times
   ("5 days ago") where S3-12 prints "Aug 28, 5:02 PM". Neither is a Stage 3 change; both are for the
   product owner to decide.
+
+## Stage 3 — what shipped
+
+| Ticket | What | State |
+|---|---|---|
+| [LP-934](../tickets/LP-934.md) | the screens checked against the plan (7 mismatches, their resolutions); the visual-check harness (`scripts/visual-check/`) | reviewed |
+| [LP-918](../tickets/LP-918.md) | the condition library: 55 types as reviewed YAML, citations only where the plan cites (ADR-409) | reviewed; the owner's top-20 sign-off open |
+| [LP-919](../tickets/LP-919.md) | reading each condition: one model call per round, library fallback, her confirm (ADR-410); migration `b8963ab6b627` | reviewed |
+| [LP-920](../tickets/LP-920.md) | the action plan: items, needs shared across conditions, confirm (ADR-411); migration `6d517ee261d7` | reviewed |
+| [LP-921](../tickets/LP-921.md) | next-step options, the Next step column and the Stage 3 summary bar | reviewed |
+| [LP-922](../tickets/LP-922.md) | drafts only: borrower, title/attorney, LO, question to the underwriter; mark as sent; Polish with AI (ADR-412, ADR-413); migrations `fccf8534a7cd`, `976c705e5637` | reviewed, with the follow-up |
+| [LP-923](../tickets/LP-923.md) | evidence checked by code; the large-deposit finding (B3-4.2-02); accept anyway; re-ask (ADR-414); migration `52239e18fd5d` | reviewed |
+| [LP-924](../tickets/LP-924.md) | the figures check and its DU re-run tolerances (B3-2-10), applied only by her (ADR-415) | reviewed, with the follow-up |
+| [LP-925](../tickets/LP-925.md) | the condition package, Mark submitted, lender condition settings (ADR-416); migration `08828fa86ffc` | reviewed |
+| Stage 3A / 3B acceptance | above in this file | reviewed |
+
+Migrations added by Stage 3: `b8963ab6b627`, `6d517ee261d7`, `fccf8534a7cd`, `976c705e5637`,
+`52239e18fd5d`, `08828fa86ffc` (**head**). ADRs: 409 to 416.
+
+## Stage 3 — acceptance
+
+- **Stage 3A** (`test_stage3a_acceptance.py`): plan §6's table on round 1, row by row. It needed one
+  fix: a library item may name two performers (DI-01's disclosure: borrower and LO). Reviewed.
+- **Stage 3B** (`test_stage3b_acceptance.py`): statements to submit on one file. It found one class of
+  defect in five places (a rejected statement treated as evidence), fixed behind one predicate. The
+  review pinned the premise of the deposit fix (one library item carries the funds check). Reviewed.
+
+Both tables are in their sections above. How the screens were checked against them is in
+[LP-935](../tickets/LP-935.md): the harness replays the acceptance steps through the same services, and
+every screen was shot and walked. No test clicks through the UI end to end.
+
+## Stage 3 — decisions taken without the product owner
+
+The standing rule was: take the plan's reading, choose the option that never moves a status without her,
+and record it. Each ticket keeps its own table. These are the ones she may want to overturn:
+
+| Where | Question | What was chosen |
+|---|---|---|
+| [LP-918](../tickets/LP-918.md) #1, #4 | The plan's taxonomy appendix is in no branch | Our own ids in the Stage 1 spec's shape; about 40 types became 55 (every mapped code needs a type), bounded at 40 to 60 by a test |
+| [LP-918](../tickets/LP-918.md) #2 | Which agency sections to cite | Only the plan's six sources; everything else says "lender requirement" rather than a section nobody checked |
+| [LP-919](../tickets/LP-919.md) #1, #2 | What the model may supply; how a fallback reading is treated | Specifics yes, figures never (every amount must be in the lender's text); a library-only reading needs her confirm |
+| [LP-920](../tickets/LP-920.md) #1 | Due dates | 4 business days on asks only; working back from the lender's dates is not built |
+| [LP-921](../tickets/LP-921.md) #1, #2 | When a chosen step moves our status | At confirm, forward only, from To do; never over a move she made |
+| [LP-922](../tickets/LP-922.md) #2 | Whose "Waiting on" a sent email sets | The first asked item's (ADR-412), which is S3-12's "Waiting on LO" for 0132 |
+| [LP-922](../tickets/LP-922.md) #7 | The due date on an ask draft | Editable in the draft, an addition to S3-04 |
+| [LP-923](../tickets/LP-923.md) | A re-ask: drafted by the app, or her button? | Her button (S3-07), never auto-drafted |
+| [LP-924](../tickets/LP-924.md) | The 45% DU tolerance | The crossing reading. **STOP AND ASK 2, open** |
+| [LP-925](../tickets/LP-925.md) | A Ready prior-to-funding condition | It goes in the package (S3-10 packages 0006); the ones not yet ready go in the info line |
+| [LP-925](../tickets/LP-925.md) | Lender settings | Their own admin routes, not the lender's PATCH, so saving them cannot touch other lender fields |
+| Stage 3B acceptance | A rejected statement | Is not evidence (`counts_as_evidence`); an answer to a deposit reaches every copy of it on the condition |
+
+## Stage 3 — screen deviations (for the product owner to redraw)
+
+Every Must-match line the build made untrue, and why. The reference PNGs are in
+`docs/design/phase4.5-conditions/stage3/screens/`. The build's shots and the reviewer's are in `checks/`.
+
+| # | Screen | The line | Why | Recorded in |
+|---|---|---|---|---|
+| D1 | S3-12 | "Failed a check 1 (red)" | It is **3**: the 5-page August statement answers 6132, 7086 and 6637's clearance, and a document is checked once for each item it answers (§4a change 2) | [LP-934](../tickets/LP-934.md), amended in [LP-923](../tickets/LP-923.md) |
+| D2 | S3-12 | 7086's next step "Deposit explanation asked · 09/02" | 7086 also fails "All pages", and a failed check outranks the finding: "Evidence failed a check — page 6" | LP-934 |
+| D3 | S3-09 | Activity "Evidence accepted for 7086 and 6178" | 6178 has no evidence items (§6); only 7086's evidence is accepted | LP-934 |
+| D4 | S3-12 | Activity "3 emails marked sent" | Four were: three drafts and the question to the underwriter, each an event | LP-934 |
+| D5 | S3-01 | "Statement showing check #1042 cleared" | No check number is in the lender's text on 08/28, and the reading invents nothing: "Statement showing the check cleared · Aug 2026" | [LP-919](../tickets/LP-919.md) |
+| D6 | S3-01 | "Same Aug statement answers 6132" | One need covers both months and both conditions: "Same statement as 7086 and 6132 — asked for once" | [LP-920](../tickets/LP-920.md) |
+| D7 | S3-05 | "6378 Loan number on checks" and its item 4 | 6378 is the general TI-04 Instruction to title; the item quotes the lender's own instruction | [LP-922](../tickets/LP-922.md) |
+| D8 | S3-04, S3-05, S3-06 | The four dialog buttons | A fifth, **Polish with AI**, sits between Copy message and Mark as sent (her answer of 2026-09-29) | LP-922 |
+| D9 | S3-08 | Right account, period and all pages as one check row | Each check is its own row with its own reason, as S3-07 draws them | [LP-923](../tickets/LP-923.md) |
+| D10 | S3-10 | "26 pages", and the row order | The fixture's documents give 43 pages (7086 and 6132 share the 12-page statement), in the sheet's order (6178 before 0132) | [LP-925](../tickets/LP-925.md) |
+| D11 | S3-11 | "2 files" / "1 file" seen | "Seen" counts the loan files carrying the code: truthfully 0 in the harness | LP-925 |
+| D12 | S3-07, S3-08, S3-09, S3-12 | (none contradicted) | LP-925's package bar ("1 condition ready to send · Build package") appears whenever something is Ready, which those drawings predate | Stage 3B acceptance, above |
+
+Also for her, outside any ticket's lines (LP-921): S3-12's status select is Stage 2's native select with
+no glyph, and the rail shows relative times ("5 days ago") where S3-12 prints "Aug 28, 5:02 PM".
+
+## Stage 3 — every screen, and how to open it
+
+Unlike Stage 2's table, every screen here has been checked on screen, by both sessions. Run
+`VISUAL_STATES="S3-xx" scripts/visual-check/run.sh all` (a scratch database, never the dev one). It
+seeds the state through the same services the acceptance tests use, opens the page at 1600 px with the
+clock set to the screen's moment, clicks what the screen needs open, and writes
+`docs/design/phase4.5-conditions/stage3/checks/S3-xx-actual.png`.
+
+| Screen | Ticket | State (the harness builds it) | Result |
+|---|---|---|---|
+| S3-01 condition items | LP-919, LP-920, LP-921 | 08/28, 4:41 PM, the plan confirmed at 4:40 PM; 6637's sheet open | **matches**, with D5 and D6 |
+| S3-02 round plan | LP-920 | 08/28, 4:21 PM, the plan ready, not confirmed | **matches every line** |
+| S3-03 confirm reading | LP-919 | 0132's reading at 0.64, its confirm dialog open from its sheet | **matches** |
+| S3-04 borrower email | LP-922 | 08/28, 4:41 PM, confirmed at 4:40 PM; "Borrower · draft" open | **matches**, with D8 |
+| S3-05 title email | LP-922 | "Title/attorney · draft" open | **matches**, with D7 and D8 |
+| S3-06 underwriter question | LP-922 | "Question 6178 · draft" open | **matches**, with D8 |
+| S3-07 evidence checked | LP-923 | 09/02, 9:30 AM; the 5-page August; 6132 open | **matches**; re-shot after the Stage 3B fixes, with D12 |
+| S3-08 new finding | LP-923 | 09/02; July and August, 12 pages; 7086 open | **matches every line**, with D9; re-shot, D12 behind the drawer |
+| S3-09 figures check | LP-924 | 09/08, 3:10 PM; the deposit explained, the declarations in the file | **matches every line**, with D3; re-shot, D12 below the panel |
+| S3-10 package | LP-925 | 09/09, 5:46 PM; six Ready; the package built | **matches**, with D10. Its button row is below the 1016 px fold, so it is verified by `condition-package-panel.test.tsx` |
+| S3-11 lender settings | LP-925 | Administration → Lenders → UWM, as the company's admin | **matches**, with D11 |
+| S3-12 list with next steps | LP-921, LP-922, LP-923 | 09/02, 9:30 AM; the four sends of 08/28; the 5-page August | **matches**, with D1, D2, D4 and D12 |
+
+**Not covered by any screen:** the clicks themselves as one run. Each is covered by its component test
+and its route test, not by a browser test (see [LP-935](../tickets/LP-935.md)).
+
+## Stage 3 — deferred, on purpose
+
+- **LP-914 (board view)**, after Stage 3 (D1 of Stage 2).
+- **Smart due dates** worked back from the lender's dates (lock expiry, close-by): asks get 4 business
+  days ([LP-920](../tickets/LP-920.md) #1).
+- **Re-asking the same deposit across conditions**: an answer reaches every copy on its condition. That
+  is enough while one library item carries the funds check, which the review pinned
+  (`test_deposit_findings_stay_on_one_item.py`).
+- **A superseded failed upload** still reads "failed a check" on a Ready condition: an open item for the
+  owner (above), not changed.
+- **The note check's swap blindness** (the LP-925 review): a note that swaps two real figures passes,
+  because the check is shared with the finding-prose path. It needs a ticket of its own.
+- **No upload to any lender portal.** The package is downloaded and uploaded by her; Mark submitted is
+  her statement that she did.
+- **Owner sign-offs:** the library's top 20 (`phase4.5-library-review.md`), STOP AND ASK 2, and the
+  deviations above.
