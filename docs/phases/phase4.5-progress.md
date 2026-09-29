@@ -283,7 +283,7 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-935 Stage 3 close | REVIEWED | `5b1582cf` | the commit titled `LP-935 review:` | every screen (24 shots: both sessions, all twelve) | review found 2, fixed: the mortgagee-clause term asserted unsourced domain claims; a decision she may want to overturn was missing from the table |
 | LP-936 DU tolerance (STOP AND ASK 2) | REVIEWED | `0c8090e6` | the commit titled `LP-936 review:` | S3-09 re-shot by the reviewer: the new callout is true as a rule, not only in this state | no findings; the owner's table and the 50% parenthetical both verified, including 47→51 |
 | LP-937 Superseded failures | REVIEWED | `770d2513` | the review section in [LP-937](../tickets/LP-937.md) (written, not yet committed) | S3-08, S3-12 re-shot: unchanged (no drawn state shows it) | review found 1: a superseded row that is still evidence can hold the condition while the sheet hides the finding doing it — the Stage 3B dead end through the other door; plus the "together with" wording is false when both rows are the same account. Counts verified (8702/1, 2125/2125); a second intermittent test recorded. **Follow-up `da6fbd19` reviewed: no findings** — `replaced` and `_settle`'s filter are now the same predicate negated, so a row that can hold the condition can no longer be hidden; the third member (Next step) verified reachable; predicate pinned in both directions |
-| LP-938 Library fixes (AS-04, the review table) | REVIEWED | `37f5aa9f` | the review section in [LP-938](../tickets/LP-938.md) (written, not yet committed) | none (no screen) | review found 1 (pre-existing, not a regression): AS-04's receipt item's only check, `amount_matches`, reads bank-statement transactions and so returns not_run for an earnest money receipt — the item can never pass without a manual accept. Table verified independently of its generator: 20 rows x 5 columns re-derived from the raw YAML and seed files, 0 mismatches. The owner's top-20 sign-off still open, on the regenerated table |
+| LP-938 Library fixes (AS-04, the review table) | REVIEWED | `37f5aa9f` | the review section in [LP-938](../tickets/LP-938.md) (written, not yet committed) | none (no screen) | review found 1 (pre-existing, not a regression): AS-04's receipt item's only check, `amount_matches`, reads bank-statement transactions and so returns not_run for an earnest money receipt — the item can never pass without a manual accept. Table verified independently of its generator: 20 rows x 5 columns re-derived from the raw YAML and seed files, 0 mismatches. The owner's top-20 sign-off still open, on the regenerated table. **Follow-up `8239ea91` reviewed: 1 finding** — the receipt is fixed and the purchase-agreement census is clean (only AS-11 lists it, with no amount check), but the same dead end is open on AS-06's `gift_letter` item, whose only document type carries `gift_amount` that `amount_matches` never reads; latent, since AS-05/AS-06 are on no mapped sheet |
 | LP-939 Real-model trial | SKIPPED | | | none | skipped for now by the owner, 2026-09-29 |
 | LP-940 Withdraw a hand-added condition | PENDING | | | detail sheet | amends ADR-404 |
 
@@ -513,6 +513,23 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   stops at Received and needs a manual accept every time. Fix: let `amount_matches` read a receipt's own
   amount for that document type, and correct the reason. Detail in [LP-938](../tickets/LP-938.md)
   "Review".
+
+- **`amount_matches` reads no amount off two more document types** — found by the LP-938 follow-up
+  review, open, latent. The follow-up fixed AS-04 by reading a receipt's own amount; the same gap remains
+  for **AS-06's `gift_letter` item**, whose only document type is `gift_letter` and whose only check is
+  `amount_matches`: `gift_amount` is extracted and never read, so the item can never pass and needs a
+  manual accept every time — AS-04's defect in another item. AS-05's `explanation` is degraded, not dead:
+  `bank_deposit_slip`'s `deposit_total` is equally unread, but that item also takes `bank_statement`.
+  Latent because AS-05 and AS-06 are on no mapped sheet yet. Fix: generalise the branch to the document's
+  own amount field, with `source` following. Detail in [LP-938](../tickets/LP-938.md) "Review of the
+  follow-up".
+
+- **Nothing stops a library edit from letting a STATED amount satisfy `amount_matches`** — found by the
+  same review, open. `purchase_agreement` extracts `earnest_money_amount`, and today no item pairs it
+  with `amount_matches` (censused: only AS-11 `sale_evidence` lists it, checks `[signed_and_dated]`), so
+  the code is safe by a fact about `types.yaml` that a comment records and nothing enforces. Pair the two
+  and a contract's *stated* deposit would satisfy a check that exists to confirm *receipt*. Wants the
+  tripwire shape of `test_deposit_findings_stay_on_one_item.py`.
 - **Screen deviations for the product owner to redraw: D1 to D12**, gathered in one list below
   ("Stage 3 — screen deviations").
 - **S3-12 outside LP-921 (LP-921 visual check):** the list's status select is Stage 2's native select
