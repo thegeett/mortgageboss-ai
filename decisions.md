@@ -16696,3 +16696,28 @@ S3-08's threshold is 50% of the letter's Verified Income.
   like any upload.
 
 *Status.* Accepted (LP-923).
+
+## ADR-415
+
+**The figures check is a proposal recomputed from the file on every read. It is priced by the file's own
+DTI calculator with in-memory overrides, compared with B3-2-10 by code, and applied only by her, through
+the existing edits and only if it still matches what she saw.**
+
+*Context.* Plan §5 LP-924: conditions change numbers (7086's verified assets, a new insurance premium). The
+app must work out what accepted evidence changes, compare it with the DU tolerances, and propose it.
+README rule 6 is that figures change only when she applies them. The file's DTI calculator already has
+an in-memory override path (LP-643's ungate preview).
+
+*Decision (LP-924).*
+- **No stored proposal.** `figures_check` recomputes from accepted evidence (items done and proving funds
+  to close; the latest homeowners insurance declarations) each time, so there is nothing to go stale.
+- **One calculator.** The before and after ratios are `build_dti_calculation` without and with the
+  proposed insurance as `extra_overrides`. The ratio shown is the one applying produces.
+- **B3-2-10 by code** (`du_rerun_reasons`, pure): above 45% from at or under it; up 3 points or more;
+  verified income below the income DU used; verified reserves short of DU's requirement and below 90%
+  of it. An input the file lacks is listed as not checked.
+- **Applying** writes the stated asset (update the one depository asset, else add) and the DTI
+  calculator's insurance override, each with the audit its existing edit writes. It adds one activity
+  line naming the conditions. It refuses (409) unless the recomputed rows equal the rows she saw.
+
+*Status.* Accepted (LP-924).

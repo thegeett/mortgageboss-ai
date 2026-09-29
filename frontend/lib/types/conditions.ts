@@ -1196,3 +1196,31 @@ export interface ConditionEvidence {
   /** What S3-07's button asks for: "page 6". */
   reask: string | null;
 }
+
+// --- Stage 3: the figures check (LP-924) ------------------------------------------------------- //
+
+export interface FigureChange {
+  key: string;
+  /** "Verified assets", "Monthly homeowners insurance", "Housing ratio", "Debt-to-income (DTI)". */
+  label: string;
+  /** Decimal strings: money in dollars, ratios in percent. */
+  in_file: string | null;
+  from_evidence: string;
+  /** "7086 · Capital One ··9912 Jul–Aug", "computed · +0.61 points". */
+  source: string;
+  unit: "money" | "percent";
+  /** False for the ratios, which follow from the others. */
+  applies: boolean;
+  condition_codes: string[];
+}
+
+/** S3-09: what accepted evidence changes in the file's figures. A proposal — nothing is applied. */
+export interface FiguresCheck {
+  changes: FigureChange[];
+  apply_count: number;
+  covers: { verified: string; required: string } | null;
+  du_rerun: boolean;
+  du_reasons: string[];
+  du_not_checked: string[];
+  citation: string;
+}

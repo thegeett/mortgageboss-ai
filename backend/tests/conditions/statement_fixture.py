@@ -141,3 +141,46 @@ async def add_statement(
     )
     await db.flush()
     return document
+
+
+async def add_declarations(
+    db: AsyncSession,
+    loan_file: LoanFile,
+    *,
+    annual: str = "1860.00",
+    effective: date = date(2026, 9, 30),
+) -> Document:
+    """The new homeowners insurance declarations page: $1,860.00 a year ($155.00 a month), in force
+    09/30/2026 — the policy 6178's text names (LP-934 M2)."""
+    from app.ai.extraction.homeowners_insurance import HomeownersInsuranceExtraction
+
+    document = Document(
+        id=uuid4(),
+        loan_file_id=loan_file.id,
+        original_filename="declarations.pdf",
+        mime_type="application/pdf",
+        file_size_bytes=10,
+        storage_path=f"{loan_file.company_id}/{loan_file.id}/declarations.pdf",
+        document_type="homeowners_insurance",
+        document_name="Homeowners declarations 09/30/2026",
+        status=DocumentStatus.COMPLETED,
+        upload_source=UploadSource.USER_UPLOAD,
+    )
+    db.add(document)
+    await db.flush()
+    data = HomeownersInsuranceExtraction(
+        annual_premium=TypedField(value=Decimal(annual)),
+        effective_date=TypedField(value=effective),
+    ).model_dump(mode="json")
+    db.add(
+        Extraction(
+            document_id=document.id,
+            version=1,
+            is_current=True,
+            extracted_data=data,
+            extraction_status=ExtractionStatus.SUCCEEDED,
+            model_used="fixture",
+        )
+    )
+    await db.flush()
+    return document

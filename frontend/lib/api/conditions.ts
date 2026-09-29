@@ -33,6 +33,7 @@ import type {
   ConditionSummary,
   DraftPolish,
   DraftUpdateInput,
+  FiguresCheck,
   OwnerHint,
   OwnerInput,
   PasteConditionsInput,
@@ -1057,5 +1058,34 @@ export function useAnswerFinding(fileId: string) {
         })
       ).data,
     onSuccess: () => invalidateDrafts(queryClient, fileId),
+  });
+}
+
+// --- LP-924: the figures check (S3-09) --------------------------------------------------------- //
+
+export const figuresCheckQueryKey = (fileId: string) => ["figures-check", fileId] as const;
+
+export function useFiguresCheck(fileId: string) {
+  return useQuery({
+    queryKey: figuresCheckQueryKey(fileId),
+    queryFn: async () =>
+      (await apiClient.get<FiguresCheck>(`${filePath(fileId)}/figures-check`)).data,
+  });
+}
+
+/** "Apply N changes to the file's figures": the rows she saw; refused (409) if the file moved. */
+export function useApplyFigures(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ changes }: { changes: { key: string; from_evidence: string }[] }) =>
+      (await apiClient.post<FiguresCheck>(`${filePath(fileId)}/figures-check/apply`, { changes }))
+        .data,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: figuresCheckQueryKey(fileId) });
+      // The rail's ratios and the stated figures moved: every DTI and file view refreshes.
+      void queryClient.invalidateQueries({ queryKey: ["dti"] });
+      void queryClient.invalidateQueries({ queryKey: ["loan-file"] });
+      void queryClient.invalidateQueries({ queryKey: ["loan-file-activity"] });
+    },
   });
 }

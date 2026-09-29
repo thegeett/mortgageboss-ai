@@ -86,6 +86,8 @@ from app.schemas.condition import (
     DraftTailPublic,
     DraftUsePolishRequest,
     EvidenceAcceptRequest,
+    FiguresApplyRequest,
+    FiguresCheckPublic,
     FindingAnswerRequest,
     LenderProcessingRequest,
     NextStepRequest,
@@ -1945,3 +1947,40 @@ async def answer_condition_finding(
     except EvidenceRefused as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
     return await _condition_response(db, condition)
+
+
+# --------------------------------------------------------------------------- #
+# LP-924 — the figures check (S3-09). Proposes; applies only when she says so.
+# --------------------------------------------------------------------------- #
+
+
+@router.get("/{loan_file_id}/figures-check", response_model=FiguresCheckPublic)
+async def get_figures_check(loan_file: ScopedLoanFileById, db: DbSession) -> FiguresCheckPublic:
+    """What the file's accepted evidence changes: computed by code, nothing applied."""
+    from app.services import figures_check
+
+    check = await figures_check.figures_check(db, loan_file=loan_file)
+    return FiguresCheckPublic.model_validate(figures_check.as_dict(check))
+
+
+@router.post("/{loan_file_id}/figures-check/apply", response_model=FiguresCheckPublic)
+async def apply_figures_check(
+    loan_file: ScopedLoanFileById,
+    payload: FiguresApplyRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> FiguresCheckPublic:
+    """ "Apply N changes to the file's figures" — through the existing edits, with the evidence named."""
+    from app.services import figures_check
+
+    try:
+        check = await figures_check.apply(
+            db,
+            loan_file=loan_file,
+            expected=[row.model_dump() for row in payload.changes],
+            actor_user_id=current_user.id,
+        )
+    except figures_check.FiguresChanged as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await db.commit()
+    return FiguresCheckPublic.model_validate(figures_check.as_dict(check))

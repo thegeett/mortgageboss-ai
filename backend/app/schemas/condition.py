@@ -1898,3 +1898,49 @@ class DraftUsePolishRequest(BaseModel):
     body_html: str = Field(min_length=1, max_length=50_000)
     #: How many fact warnings were on screen when she chose it — recorded on the event, as a count.
     warnings_accepted: int = Field(default=0, ge=0, le=100)
+
+
+# --------------------------------------------------------------------------- #
+# LP-924 — the figures check
+# --------------------------------------------------------------------------- #
+
+
+class FigureChangePublic(BaseModel):
+    """One row of S3-09's table. Ratios (`applies` false) follow from the others."""
+
+    key: str
+    label: str
+    in_file: Decimal | None
+    from_evidence: Decimal
+    source: str
+    unit: Literal["money", "percent"]
+    applies: bool
+    condition_codes: list[str]
+
+
+class FiguresCoverPublic(BaseModel):
+    verified: Decimal
+    required: Decimal
+
+
+class FiguresCheckPublic(BaseModel):
+    """What accepted evidence changes in the file's figures — a proposal; nothing is applied here."""
+
+    changes: list[FigureChangePublic]
+    apply_count: int
+    covers: FiguresCoverPublic | None
+    du_rerun: bool
+    du_reasons: list[str]
+    du_not_checked: list[str]
+    citation: str
+
+
+class FiguresApplyRow(BaseModel):
+    key: str = Field(max_length=40)
+    from_evidence: str = Field(max_length=40)
+
+
+class FiguresApplyRequest(BaseModel):
+    """The rows she saw; applied only if the file would still get exactly these."""
+
+    changes: list[FiguresApplyRow] = Field(max_length=20)

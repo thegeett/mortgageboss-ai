@@ -42,6 +42,7 @@ import { ConditionsBulkBar, bulkResultSummary } from "./conditions-bulk-bar";
 import { ConditionsFilterRow } from "./conditions-filter-row";
 import { ConditionsList } from "./conditions-list";
 import { ConditionsSummaryBar } from "./conditions-summary-bar";
+import { FiguresCheckPanel } from "./figures-check-panel";
 import { RoundComparisonPanel } from "./round-comparison-panel";
 import { RoundDetailsSheet } from "./round-details-sheet";
 import { RoundDrafts } from "./round-drafts";
@@ -343,6 +344,9 @@ export function ConditionsListView({
           onConfirmReading={setConfirmReadingId}
         />
       ) : null}
+
+      {/* LP-924: what accepted evidence changes in the file's figures (S3-09), until applied. */}
+      <FiguresCheckPanel fileId={fileId} />
 
       {/* LP-922: the round's unsent drafts, once the plan panel is gone. */}
       <RoundDrafts fileId={fileId} onOpenDraft={setDraftId} />

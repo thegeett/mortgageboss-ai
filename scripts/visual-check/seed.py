@@ -575,6 +575,54 @@ async def state_s3_08(db: AsyncSession) -> Shot:
     return Shot(path=_conditions_tab(), now=et(9, 2, 9, 30), clicks=["7086"])
 
 
+async def state_s3_09(db: AsyncSession) -> Shot:
+    """The figures check on 09/08: 7086's statements accepted (the deposit explained at 3:02 PM) and
+    the new declarations page for the policy 6178 names in the file. Nothing applied yet."""
+    from app.models.condition_evidence import ConditionEvidence
+    from app.models.stated_financials import StatedAsset
+    from app.services.condition_evidence import answer_finding
+    from tests.conditions.statement_fixture import add_declarations
+
+    loan_file, user = await base(db)
+    # What the 1003 stated for the account: the letter's $11,062.18 verified.
+    db.add(
+        StatedAsset(
+            loan_file_id=loan_file.id,
+            asset_type="CheckingAccount",
+            value=Decimal("11062.18"),
+            holder_name="Alex Rivera",
+        )
+    )
+    await read(db, loan_file)
+    await confirm_plan(db, loan_file, user)
+    await mark_round_sent(db, loan_file, user)
+    await statements_arrive(db, loan_file, user, complete=True)
+    seven = await db.scalar(
+        select(Condition).where(
+            Condition.loan_file_id == loan_file.id, Condition.lender_code == "7086"
+        )
+    )
+    assert seven is not None
+    for row in (
+        await db.execute(
+            select(ConditionEvidence).where(ConditionEvidence.condition_id == seven.id)
+        )
+    ).scalars():
+        if row.findings:
+            await answer_finding(
+                db,
+                condition=seven,
+                evidence_id=row.id,
+                index=0,
+                answer="explained",
+                reason="Gift from a relative; gift letter and transfer are in the file",
+                actor_user_id=user.id,
+            )
+    await add_declarations(db, loan_file)
+    await _stamp_events_since(db, loan_file, et(9, 8, 15, 2), after=et(9, 2, 9, 15))
+    return Shot(path=_conditions_tab(), now=et(9, 8, 15, 10))
+
+
 async def state_s3_12(db: AsyncSession) -> Shot:
     """The list on 09/02: the round's four emails sent 08/28, the 5-page August statement checked
     (6132, 7086 and 6637's clearance fail "All pages", D1/D2), and the deposit explanation asked."""
@@ -650,7 +698,7 @@ STATES: dict[str, Callable[[AsyncSession], Awaitable[Shot]]] = {
     "S3-06": state_s3_06,
     "S3-07": state_s3_07,
     "S3-08": state_s3_08,
-    "S3-09": _later("LP-924"),
+    "S3-09": state_s3_09,
     "S3-10": _later("LP-925"),
     "S3-11": _later("LP-925"),
     "S3-12": state_s3_12,
