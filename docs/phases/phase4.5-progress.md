@@ -278,7 +278,7 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-921 Next-step options | REVIEWED | `0111c5f0` | the commit titled `LP-921 review:` | S3-12 shot and walked by the reviewer: every line this ticket builds matches (sends LP-922, checks LP-923); S3-01 chips match | review found 2, fixed: the suite count was pre-fix (8592), the deviation list named only D1-D4 |
 | LP-922 Asking people (drafts only) | REVIEWED | `29c74a7d` + follow-up `35a558f8` | the commits titled `LP-922 review:` and `LP-922 follow-up review:` | S3-04, S3-05, S3-06 shot and walked by the reviewer; D7 and D8 recorded | 2 reviews: a pre-existing flaky test recorded; the polish fact-check could not see a swapped pair, now caught |
 | LP-923 Evidence arrives and is checked | REVIEWED | `d2a6f43a` | the commit titled `LP-923 review:` | S3-07, S3-08, S3-12 shot and walked by the reviewer; S3-08 matches every line, S3-12 confirms Failed a check 3 | review found 2, fixed: LP-934's D1 still said 2; the per-item open-finding guard had no test |
-| LP-924 The figures check | AWAITING_REVIEW | the commit titled `LP-924:` | | S3-09 matches every line | proposal recomputed each read; applies only what she saw; no migration |
+| LP-924 The figures check | REVIEWED | `2f848c5f` | the commit titled `LP-924 review:` | S3-09 shot and walked by the reviewer: matches every line | review found 1 (Apply does not compare the baseline she saw — reported, contract change) and raised STOP AND ASK 2 on the 45% reading |
 | LP-925 Package, submit, lender settings | PENDING | | | S3-10, S3-11 | then the Stage 3B acceptance test |
 | LP-935 Stage 3 close | PENDING | | | every screen | |
 
@@ -376,6 +376,7 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
 | # | Where | Question | Reading taken (never idle) |
 |---|---|---|---|
 | 1 | plan §5 LP-922 "The AI polishes the wording and does not invent new requests" | Should condition emails get an AI polish pass? | **Answered by the product owner, 2026-09-29: yes, as a button.** The AI's version is shown as a proposal. A changed or dropped fact is shown with a warning, not refused. It applies to every draft and is always on. Built as the LP-922 follow-up (ADR-413, [LP-922](../tickets/LP-922.md) "Follow-up"). The reading first taken (no pass) is superseded. |
+| 2 | plan §2.3 and §5 LP-924 (B3-2-10) against LP-924's own **Done when** | Is DU resubmission required when the DTI *is* above 45%, or only when it *crosses* 45% from at or under it? | **The plan says both and they cannot both hold.** §2.3 and §5 state a LEVEL ("exceeds 45%" / "now over 45%"); the Done-when requires 46% → 48% NOT to be flagged, which a level reading would flag. The build follows the Done-when (crossing), and is coherent: 44→46 flags, 46→48 does not, 46→49 flags on the 3-point limb, 50→51 does not. **Reading taken: the Done-when's**, because it is the ticket's acceptance criterion and the 3-point limb still catches large rises above 45%. B3-2-10 itself is not in this repository, so the guide cannot be checked from here — this is a domain question for the resident expert (CLAUDE.md), not a reading either session should settle. Raised by the LP-924 review; see [LP-924](../tickets/LP-924.md) "STOP AND ASK". |
 
 ## Stage 3 — open items (not blocking)
 
