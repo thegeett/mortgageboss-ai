@@ -442,6 +442,9 @@ class ConditionEventPublic(BaseModel):
     #: Waiting on someone" into S2-03's "Moved to Waiting on Borrower". A CLOSED enum (`OwnerHint`),
     #: projected for `CONDITION_PREP_MOVED` only.
     waiting_on: OwnerHint | None = None
+    #: The step that moved our status, when the PLAN moved it (LP-921: `by: "plan"`), for "Moved to
+    #: Ready to send (Already in the file)". A CLOSED enum, projected for `CONDITION_PREP_MOVED` only.
+    plan_option: PlanOption | None = None
     #: The lender's track's move, on the three events that state one. CLOSED enums.
     lender_status_from: ConditionLenderStatus | None = None
     lender_status_to: ConditionLenderStatus | None = None
@@ -502,6 +505,13 @@ class ConditionEventPublic(BaseModel):
                 OwnerHint,
             )
             if kind is ConditionEventKind.CONDITION_PREP_MOVED
+            else None,
+            plan_option=_as_vocab(
+                detail.get("option"),
+                frozenset(member.value for member in PlanOption),
+                PlanOption,
+            )
+            if kind is ConditionEventKind.CONDITION_PREP_MOVED and detail.get("by") == "plan"
             else None,
             lender_status_from=_as_vocab(
                 detail.get("lender_status_from"), lender_values, ConditionLenderStatus
@@ -772,6 +782,8 @@ class ConditionItemPublic(BaseModel):
     waits_on_code: str | None = None
     due_date: date_type | None = None
     specifics: ReadingSpecificsPublic = Field(default_factory=ReadingSpecificsPublic)
+    #: LP-921 — what she does, from the library ("upload the invoice"); None on an ask or her own item.
+    task: str | None = None
 
 
 class ConditionItemUpdate(BaseModel):
@@ -781,6 +793,8 @@ class ConditionItemUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=200)
     performers: list[Performer] | None = Field(default=None, min_length=1, max_length=3)
     due_date: date_type | None = None
+    #: LP-921 — `done` / `open` on an "I'll do it" item only; the service refuses anything else.
+    status: ConditionItemStatus | None = None
 
 
 class ConditionItemCreate(BaseModel):
@@ -881,6 +895,8 @@ class ConditionPublic(BaseModel):
     #: Both tracks (ADR-404). Ours says what WE are doing; the lender's says what the LENDER said.
     prep_status: ConditionPrepStatus
     lender_status: ConditionLenderStatus
+    #: Who we are waiting on while our status is Waiting (LP-921: S3-12's "Waiting on Borrower").
+    waiting_on: OwnerHint | None = None
 
     #: WITHOUT THIS, LP-912's `stale` REFUSAL IS UNREACHABLE. Its writes are optimistic on
     #: `updated_at`, and a client cannot echo a value it was never given — which is exactly how
@@ -1000,6 +1016,7 @@ class ConditionPublic(BaseModel):
             created_at=condition.created_at,
             prep_status=condition.prep_status,
             lender_status=condition.lender_status,
+            waiting_on=condition.waiting_on,
             updated_at=condition.updated_at,
             effective_owner=effective_owner,
             effective_owner_source=effective_owner_source,
@@ -1342,6 +1359,14 @@ class ConditionSummaryPublic(BaseModel):
     #: model and the TypeScript mirror would otherwise change twice; never a guess, and the round
     #: card's "N probably cleared — review" reads it.
     pending_suggestions: int = 0
+
+    #: LP-921 (S3-12). Required: each is a filter the bar applies, and a defaulted count is how
+    #: `condition_count` once read "0 on sheet".
+    waiting_on_others: int
+    your_tasks: int
+    ready_to_send: int
+    #: Whether any round of this file has a plan — the bar shows Stage 3's numbers only then.
+    has_plan: bool
 
     #: The newest imported round, for the rail's "from round 2, printed 09/10". `None` on a file whose
     #: sheets have all been discarded or never imported.

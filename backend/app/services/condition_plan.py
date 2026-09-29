@@ -46,6 +46,7 @@ from app.models.condition import (
     BucketKind,
     Condition,
     ConditionLenderStatus,
+    ConditionPrepStatus,
     ConditionReadingStatus,
 )
 from app.models.condition_event import ConditionEvent, ConditionEventKind
@@ -95,6 +96,9 @@ REASON_PUSH_BACK = "Reason from the letter"
 REASON_SHORTFALL = "Shortfall computed by code"
 REASON_TITLE_INSTRUCTION = "Added to the title email"
 REASON_LENDER_PROCESSING = "Lender is processing this file"
+ITEM_DONE_ONLY_FOR_TASKS = (
+    "Only your own tasks are marked done here — an item you asked for is done when it arrives."
+)
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -644,6 +648,98 @@ class PlanRefused(Exception):
         self.reason = reason
 
 
+# --------------------------------------------------------------------------------------------- #
+# Our status from the step (LP-921)
+# --------------------------------------------------------------------------------------------- #
+
+#: Shown, never acted on (plan §4a change 12): they add no status and move nothing.
+DISPLAY_ONLY = frozenset({PlanOption.LENDER_DOING_IT, PlanOption.INFORMATION_ONLY})
+
+
+def ready_because(condition: Condition, items: list[ConditionItem]) -> PlanOption | None:
+    """The step that makes this condition Ready to send now, or None while something is still owed.
+
+    Ready when its own step is "Already in the file", or when it has no step of its own (or "I'll do
+    it") and every live item is done — the file held it, or she marked her task done. A condition-level
+    ask, question or push-back is owed until LP-922's send moves it; a display-only step never moves.
+    """
+    if condition.next_step is PlanOption.ALREADY_IN_FILE:
+        return PlanOption.ALREADY_IN_FILE
+    if condition.next_step is not None and condition.next_step is not PlanOption.I_WILL_DO_IT:
+        return None
+    live = [item for item in items if item.status is not ConditionItemStatus.NOT_NEEDED]
+    if not live or any(item.status is not ConditionItemStatus.DONE for item in live):
+        return None
+    if any(item.option is PlanOption.I_WILL_DO_IT for item in live):
+        return PlanOption.I_WILL_DO_IT
+    return live[0].option
+
+
+async def _plan_in_force(db: AsyncSession, condition: Condition) -> bool:
+    """Whether the condition's round has a confirmed plan. Before that, every step is a proposal."""
+    if condition.last_seen_round_id is None:
+        return False
+    round_ = await db.get(ConditionRound, condition.last_seen_round_id)
+    return round_ is not None and round_.plan_confirmed_at is not None
+
+
+async def apply_step_status(
+    db: AsyncSession,
+    *,
+    condition: Condition,
+    items: list[ConditionItem] | None = None,
+    actor_user_id: UUID | None,
+    in_force: bool | None = None,
+) -> bool:
+    """Move our status to Ready when the chosen step says so. Returns whether it moved. Flushes.
+
+    FORWARD ONLY, AND ONLY FROM TO DO. The plan never moves a condition backwards and never overrides a
+    move she made herself: a condition she already has at Waiting or Sent to lender is hers. The move
+    writes `condition_prep_moved` with `by: "plan"` and the option, so the history says why it moved.
+    """
+    if condition.prep_status is not ConditionPrepStatus.TO_DO:
+        return False
+    if condition.info_only or condition.lender_status not in (
+        ConditionLenderStatus.OPEN,
+        ConditionLenderStatus.NOT_CLEARED,
+    ):
+        return False
+    if in_force is None:
+        in_force = await _plan_in_force(db, condition)
+    if not in_force:
+        return False
+    if items is None:
+        items = (await _items_by_condition(db, condition.loan_file_id)).get(condition.id, [])
+    because = ready_because(condition, items)
+    if because is None:
+        return False
+    condition.prep_status = ConditionPrepStatus.READY
+    condition.prep_status_changed_at = datetime.now(UTC)
+    condition.waiting_on = None
+    db.add(
+        _event(
+            condition,
+            ConditionEventKind.CONDITION_PREP_MOVED,
+            {
+                "prep_status_from": ConditionPrepStatus.TO_DO.value,
+                "prep_status_to": ConditionPrepStatus.READY.value,
+                "by": "plan",
+                "option": because.value,
+            },
+            round_id=condition.last_seen_round_id,
+            actor_user_id=actor_user_id,
+        )
+    )
+    await db.flush()
+    logger.info(
+        "condition_prep_moved_by_plan",
+        condition_id=str(condition.id),
+        loan_file_id=str(condition.loan_file_id),
+        option=because.value,
+    )
+    return True
+
+
 async def set_next_step(
     db: AsyncSession, *, condition: Condition, next_step: PlanOption | None, actor_user_id: UUID
 ) -> None:
@@ -663,6 +759,7 @@ async def set_next_step(
         )
     )
     await db.flush()
+    await apply_step_status(db, condition=condition, actor_user_id=actor_user_id)
 
 
 async def update_item(
@@ -675,8 +772,19 @@ async def update_item(
     performers: list[Performer] | None,
     due_date: date | None,
     actor_user_id: UUID,
+    status: ConditionItemStatus | None = None,
 ) -> None:
+    """Her edit to one item. `status` is done/open on an "I'll do it" item only (LP-921): an ask's item
+    is done when its evidence passes (LP-923), never by hand here."""
     changed: dict[str, Any] = {"change": "item", "item_key": item.key}
+    if status is not None and status is not item.status:
+        if item.option is not PlanOption.I_WILL_DO_IT or status not in (
+            ConditionItemStatus.DONE,
+            ConditionItemStatus.OPEN,
+        ):
+            raise PlanRefused(ITEM_DONE_ONLY_FOR_TASKS)
+        changed["status"] = {"from": item.status.value, "to": status.value}
+        item.status = status
     if option is not None and option is not item.option:
         changed["option"] = {"from": item.option.value, "to": option.value}
         item.option = option
@@ -700,6 +808,7 @@ async def update_item(
         )
     )
     await db.flush()
+    await apply_step_status(db, condition=condition, actor_user_id=actor_user_id)
 
 
 async def add_item(
@@ -774,6 +883,7 @@ async def remove_item(
         )
     )
     await db.flush()
+    await apply_step_status(db, condition=condition, actor_user_id=actor_user_id)
 
 
 async def set_lender_processing(
@@ -868,6 +978,24 @@ async def confirm_round_plan(
         detail={"round_id": str(round_.id)},
     )
     await db.flush()
+    # THE STEPS COME INTO FORCE NOW (LP-921): "Already in the file" moves to Ready at confirm, not while
+    # the plan was a proposal.
+    by_condition = await _items_by_condition(db, round_.loan_file_id)
+    on_round = (
+        await db.execute(
+            select(Condition).where(
+                Condition.last_seen_round_id == round_.id, Condition.deleted_at.is_(None)
+            )
+        )
+    ).scalars()
+    for condition in on_round:
+        await apply_step_status(
+            db,
+            condition=condition,
+            items=by_condition.get(condition.id, []),
+            actor_user_id=actor_user_id,
+            in_force=True,
+        )
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -917,15 +1045,18 @@ async def items_public_for_file(db: AsyncSession, *, loan_file_id: UUID) -> dict
     if not all_items:
         return {}
     code_rows = await db.execute(
-        select(Condition.id, Condition.lender_code, Condition.sequence).where(
-            Condition.loan_file_id == loan_file_id
-        )
+        select(
+            Condition.id, Condition.lender_code, Condition.sequence, Condition.canonical_type_id
+        ).where(Condition.loan_file_id == loan_file_id)
     )
     codes: dict[UUID, str | None] = {}
     sequence: dict[UUID, int] = {}
-    for condition_id, code, seq in code_rows.tuples().all():
+    type_ids: dict[UUID, str | None] = {}
+    for condition_id, code, seq, type_id in code_rows.tuples().all():
         codes[condition_id] = code
         sequence[condition_id] = seq
+        type_ids[condition_id] = type_id
+    library = load_library()
     need_ids = {item.need_id for item in all_items if item.need_id}
     need_titles: dict[UUID, str] = {}
     if need_ids:
@@ -956,6 +1087,8 @@ async def items_public_for_file(db: AsyncSession, *, loan_file_id: UUID) -> dict
     out: dict[UUID, list[Any]] = {}
     for condition_id, items in by_condition.items():
         rows = []
+        library_type = library.get(type_ids.get(condition_id))
+        tasks = {each.key: each.task for each in library_type.items} if library_type else {}
         for item in items:
             shared: list[str] = []
             if item.need_id is not None:
@@ -990,6 +1123,9 @@ async def items_public_for_file(db: AsyncSession, *, loan_file_id: UUID) -> dict
                     else None,
                     due_date=item.due_date,
                     specifics=ReadingSpecificsPublic.model_validate(item.specifics or {}),
+                    # THE LIBRARY'S WORDS WHILE THE ITEM IS STILL ITS TASK: an item she re-pointed to an
+                    # ask is no longer hers to do.
+                    task=tasks.get(item.key) if item.option is PlanOption.I_WILL_DO_IT else None,
                 )
             )
         out[condition_id] = rows

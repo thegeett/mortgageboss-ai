@@ -52,6 +52,7 @@ from app.models.condition_round import (
     ConditionRoundStatus,
     ConditionSourceKind,
 )
+from app.models.condition_vocabulary import PlanOption
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.schemas.condition import (
@@ -633,6 +634,10 @@ async def list_file_conditions(
     category: Annotated[str | None, Query()] = None,
     info_only: Annotated[bool | None, Query()] = None,
     origin: Annotated[ConditionOrigin | None, Query()] = None,
+    next_step: Annotated[
+        list[PlanOption] | None,
+        Query(description="An open step of these options, the condition's own or an item's"),
+    ] = None,
     q: Annotated[str | None, Query(description="Text search in the wording and the code")] = None,
     sort: Annotated[ConditionSort, Query()] = ConditionSort.SHEET,
 ) -> list[ConditionPublic]:
@@ -667,6 +672,7 @@ async def list_file_conditions(
         category=category,
         info_only=info_only,
         origin=origin,
+        next_step=tuple(next_step or ()),
         q=q,
     )
     numbers, _ = await appearances_for_file(db, loan_file_id=loan_file.id)
@@ -747,6 +753,10 @@ async def get_conditions_summary(
         open_prior_to_docs=summary.open_prior_to_docs,
         open_prior_to_funding=summary.open_prior_to_funding,
         pending_suggestions=summary.pending_suggestions,
+        waiting_on_others=summary.waiting_on_others,
+        your_tasks=summary.your_tasks,
+        ready_to_send=summary.ready_to_send,
+        has_plan=summary.has_plan,
         latest_round=(await _round_card(db, latest) if latest is not None else None),
     )
 
@@ -1330,16 +1340,20 @@ async def update_condition_item(
 ) -> ConditionPublic:
     """Change one item's option, wording, who acts or due date."""
     item = await _scoped_item(db, condition, item_id)
-    await update_item(
-        db,
-        condition=condition,
-        item=item,
-        option=payload.option,
-        name=payload.name,
-        performers=payload.performers,
-        due_date=payload.due_date,
-        actor_user_id=current_user.id,
-    )
+    try:
+        await update_item(
+            db,
+            condition=condition,
+            item=item,
+            option=payload.option,
+            name=payload.name,
+            performers=payload.performers,
+            due_date=payload.due_date,
+            actor_user_id=current_user.id,
+            status=payload.status,
+        )
+    except PlanRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
     return await _condition_response(db, condition)
 
 

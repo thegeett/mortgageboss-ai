@@ -272,6 +272,9 @@ async def test_only_the_named_scalars_are_exposed(
         # LP-916 REVIEW: an `OwnerHint` member, projected on `CONDITION_PREP_MOVED` only — what makes
         # "Moved to Waiting on Borrower" (S2-03) sayable. A closed set, like the statuses above.
         "waiting_on",
+        # LP-921: a `PlanOption` member, projected on `CONDITION_PREP_MOVED` only when the PLAN made
+        # the move (`by: "plan"`) — "Moved to Ready to send (Already in the file)". A closed set.
+        "plan_option",
     }
     # THREE FIELDS CAME OFF THIS LIST AND THAT IS THE POINT. `reader_version`,
     # `duplicates_dropped` and `filled_from` were projected and read by no sentence — three open

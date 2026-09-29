@@ -81,6 +81,12 @@ def test_the_minimal_library_loads() -> None:
             lambda d: d["types"][0]["items"][0].update(name_with_amount="Source of the money"),
             "must be text containing",
         ),
+        # LP-921: an ask is not her task, and her task must say what she does.
+        (lambda d: d["types"][0]["items"][0].update(task="upload it"), "only an i_will_do_it"),
+        (
+            lambda d: d["types"][0]["items"][0].update(option="i_will_do_it"),
+            "task must be non-empty",
+        ),
     ],
 )
 def test_a_malformed_library_is_refused(mutate: Any, message: str) -> None:

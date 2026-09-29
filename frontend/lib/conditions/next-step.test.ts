@@ -1,0 +1,185 @@
+/**
+ * LP-921 — S3-12's Next step tokens and S3-01's "Becomes …" line, from the items the server sends.
+ *
+ * Items are built with the values the server emits (`PlanOption`, `ConditionItemStatus`), one per
+ * S3-12 row, so each token below is the screen's own wording for that condition.
+ */
+import type { Condition, ConditionItem } from "@/lib/types/conditions";
+import { describe, expect, it } from "vitest";
+import { becomes, itemWhere, nextStepToken, stepOptions, waitingLabel } from "./next-step";
+
+function item(overrides: Partial<ConditionItem> = {}): ConditionItem {
+  return {
+    id: "i1",
+    key: "statement",
+    name: "Bank statement",
+    acceptable: "All pages",
+    performer: "borrower",
+    performers: ["borrower"],
+    option: "ask_borrower",
+    status: "open",
+    origin: "reading",
+    need_id: null,
+    need_title: null,
+    shared_with_codes: [],
+    document_id: null,
+    document_name: null,
+    document_page: null,
+    waits_on_condition_id: null,
+    waits_on_code: null,
+    due_date: null,
+    specifics: { amounts: [], account_bank: null, account_last4: null, month: null, names: [] },
+    task: null,
+    ...overrides,
+  };
+}
+
+function condition(overrides: Partial<Condition> = {}): Condition {
+  return {
+    prep_status: "to_do",
+    next_step: null,
+    items: [],
+    ...overrides,
+  } as Condition;
+}
+
+describe("nextStepToken (S3-12)", () => {
+  it("1228: the lender is doing it, quietly", () => {
+    expect(nextStepToken(condition({ next_step: "lender_doing_it" }))).toEqual({
+      icon: "lender",
+      text: "Lender is doing it",
+      tone: "quiet",
+    });
+  });
+
+  it("6178: a push-back is a question to the underwriter", () => {
+    expect(nextStepToken(condition({ next_step: "push_back" }))?.text).toBe("Question to UW");
+  });
+
+  it("6637: borrower and title emails, one word each", () => {
+    const items = [
+      item({ key: "source" }),
+      item({
+        key: "receipt",
+        performer: "title",
+        performers: ["title"],
+        option: "ask_third_party",
+      }),
+      item({ key: "clearance" }),
+    ];
+    expect(nextStepToken(condition({ items }))?.text).toBe("Borrower + title emails");
+  });
+
+  it("0132: the LO email carries the borrower's signature, and the attorney has its own", () => {
+    const items = [
+      item({ key: "disclosure", performers: ["borrower", "lo"], option: "ask_third_party" }),
+      item({
+        key: "preference",
+        performer: "attorney",
+        performers: ["attorney"],
+        option: "ask_third_party",
+      }),
+    ];
+    expect(nextStepToken(condition({ items }))?.text).toBe("LO + attorney emails");
+  });
+
+  it("1947: one email is 'In title email'", () => {
+    const items = [item({ performer: "title", performers: ["title"], option: "ask_third_party" })];
+    expect(nextStepToken(condition({ items }))?.text).toBe("In title email");
+  });
+
+  it("1582: her task, in the library's words", () => {
+    const items = [
+      item({ option: "i_will_do_it", performer: "processor", task: "upload the invoice" }),
+    ];
+    expect(nextStepToken(condition({ items }))).toEqual({
+      icon: "task",
+      text: "Your task · upload the invoice",
+      tone: "quiet",
+    });
+  });
+
+  it("0007: a task that waits says what on", () => {
+    const items = [
+      item({ option: "i_will_do_it", task: "upload the invoice", waits_on_code: "1228" }),
+    ];
+    expect(nextStepToken(condition({ items }))?.text).toBe("Waits on 1228");
+  });
+
+  it("0006: already in the file, with the page", () => {
+    const items = [item({ option: "already_in_file", status: "done", document_page: 1 })];
+    expect(nextStepToken(condition({ items }))?.text).toBe("Already in the file · p.1");
+  });
+
+  it("no plan, no token", () => {
+    expect(nextStepToken(condition())).toBeNull();
+  });
+
+  it("a dropped item is not a step, and a done task is not a task", () => {
+    const items = [
+      item({ status: "not_needed" }),
+      item({ option: "i_will_do_it", status: "done", task: "upload the invoice" }),
+    ];
+    expect(nextStepToken(condition({ items }))).toBeNull();
+    expect(stepOptions(condition({ items }))).toEqual(["i_will_do_it"]);
+  });
+});
+
+describe("stepOptions", () => {
+  it("is the condition's own step and its items', once each", () => {
+    const items = [item(), item({ option: "ask_third_party" }), item()];
+    expect(stepOptions(condition({ next_step: "ask_underwriter", items }))).toEqual([
+      "ask_underwriter",
+      "ask_borrower",
+      "ask_third_party",
+    ]);
+  });
+});
+
+describe("becomes (S3-01)", () => {
+  it("6637: Waiting on Borrower when the borrower email is marked sent", () => {
+    const items = [
+      item(),
+      item({ performer: "title", performers: ["title"], option: "ask_third_party" }),
+    ];
+    expect(becomes(condition({ items }))).toEqual({
+      status: "Waiting on Borrower",
+      when: "the borrower email is marked sent",
+    });
+  });
+
+  it("0132: the LO email leaves us waiting on the LO", () => {
+    const items = [item({ performers: ["borrower", "lo"], option: "ask_third_party" })];
+    expect(becomes(condition({ items }))?.status).toBe("Waiting on LO");
+  });
+
+  it("a question waits on the lender", () => {
+    expect(becomes(condition({ next_step: "ask_underwriter" }))).toEqual({
+      status: "Waiting on Lender",
+      when: "the question is marked sent",
+    });
+  });
+
+  it("her task becomes Ready to send", () => {
+    const items = [item({ option: "i_will_do_it" })];
+    expect(becomes(condition({ items }))?.status).toBe("Ready to send");
+  });
+
+  it("says nothing for a display-only step or a condition already moved", () => {
+    expect(becomes(condition({ next_step: "lender_doing_it" }))).toBeNull();
+    expect(becomes(condition({ prep_status: "waiting", items: [item()] }))).toBeNull();
+  });
+});
+
+describe("words", () => {
+  it("the broker is the LO while we wait (M5)", () => {
+    expect(waitingLabel("broker")).toBe("LO");
+    expect(waitingLabel("borrower")).toBe("Borrower");
+    expect(waitingLabel(null)).toBe("someone");
+  });
+
+  it("an ask says which email it is in; a task says nothing here", () => {
+    expect(itemWhere(item())).toBe("In borrower email");
+    expect(itemWhere(item({ option: "i_will_do_it" }))).toBeNull();
+  });
+});

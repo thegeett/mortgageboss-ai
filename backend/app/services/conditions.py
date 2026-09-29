@@ -61,7 +61,9 @@ from app.models.condition import (
     OwnerHintSource,
 )
 from app.models.condition_event import ConditionEvent, ConditionEventKind
+from app.models.condition_item import ConditionItem
 from app.models.condition_round import ConditionRound, ConditionRoundStatus
+from app.models.condition_vocabulary import ConditionItemStatus, PlanOption
 from app.models.helpers import only_active
 from app.schemas.condition import ConditionSort
 
@@ -414,6 +416,9 @@ class ConditionFilters:
     category: str | None = None
     info_only: bool | None = None
     origin: ConditionOrigin | None = None
+    #: LP-921 — conditions with an OPEN step of these options: their own step, or an item with it that
+    #: is neither done nor dropped. S3-12's "Your tasks" is `next_step=(i_will_do_it,)`.
+    next_step: tuple[PlanOption, ...] = ()
     q: str | None = None
 
     def names(self) -> list[str]:
@@ -433,9 +438,29 @@ class ConditionFilters:
             "category": self.category is not None,
             "info_only": self.info_only is not None,
             "origin": self.origin is not None,
+            "next_step": bool(self.next_step),
             "q": self.q is not None,
         }
         return sorted(name for name, was_set in present.items() if was_set)
+
+
+def has_open_step(options: tuple[PlanOption, ...]) -> ColumnElement[bool]:
+    """The condition's own step is one of `options`, or a live, unfinished item's is (LP-921).
+
+    ONE PREDICATE FOR THE FILTER AND THE COUNT: "Your tasks 2" and the rows its click shows are the
+    same SQL, so they cannot disagree about a task she already marked done.
+    """
+    item_has_it = (
+        select(ConditionItem.id)
+        .where(
+            ConditionItem.condition_id == Condition.id,
+            ConditionItem.deleted_at.is_(None),
+            ConditionItem.option.in_(options),
+            ConditionItem.status.not_in((ConditionItemStatus.DONE, ConditionItemStatus.NOT_NEEDED)),
+        )
+        .exists()
+    )
+    return or_(Condition.next_step.in_(options), item_has_it)
 
 
 def _effective_owner_column() -> ColumnElement[OwnerHint]:
@@ -480,6 +505,8 @@ def _apply_filters(
         stmt = stmt.where(Condition.info_only.is_(filters.info_only))
     if filters.origin is not None:
         stmt = stmt.where(Condition.origin == filters.origin)
+    if filters.next_step:
+        stmt = stmt.where(has_open_step(filters.next_step))
     if filters.q:
         # AUTOESCAPED, so a processor searching for "50%" or "_" gets those characters rather than
         # wildcards. The value is never logged (ADR-405); `ConditionFilters.names()` is what a log
@@ -608,10 +635,20 @@ class ConditionSummary:
     open_prior_to_docs: int
     open_prior_to_funding: int
     pending_suggestions: int
+    #: LP-921 (S3-12). Open conditions whose our-status is Waiting / Ready, and those with an open "I'll
+    #: do it" step. `has_plan` chooses Stage 3's bar over Stage 2's.
+    waiting_on_others: int
+    your_tasks: int
+    ready_to_send: int
+    has_plan: bool
 
 
 def summarise_conditions(
-    conditions: list[Condition], *, pending_suggestions: int
+    conditions: list[Condition],
+    *,
+    pending_suggestions: int,
+    task_ids: frozenset[UUID],
+    has_plan: bool,
 ) -> ConditionSummary:
     """Count one file's conditions. Pure, so a test can state the rows and read the numbers.
 
@@ -657,6 +694,12 @@ def summarise_conditions(
         # numbers. It is a REQUIRED keyword rather than a defaulted one for the reason the dataclass
         # gives above: a default here is how `condition_count` came to read "0 on sheet".
         pending_suggestions=pending_suggestions,
+        waiting_on_others=by_prep_status.get(ConditionPrepStatus.WAITING.value, 0),
+        # `task_ids` IS `has_open_step((i_will_do_it,))`, the filter's own predicate, passed in so this
+        # stays pure; intersected with open here as the filter intersects it with the lender's Open.
+        your_tasks=sum(1 for condition in open_conditions if condition.id in task_ids),
+        ready_to_send=by_prep_status.get(ConditionPrepStatus.READY.value, 0),
+        has_plan=has_plan,
     )
 
 
@@ -668,9 +711,26 @@ async def condition_summary(db: AsyncSession, *, loan_file_id: UUID) -> Conditio
     place for "open" to be spelled differently from :func:`is_open`, which is the one definition the
     row and the bar must share.
     """
+    task_rows = await db.execute(
+        select(Condition.id).where(
+            Condition.loan_file_id == loan_file_id,
+            has_open_step((PlanOption.I_WILL_DO_IT,)),
+        )
+    )
+    planned = await db.execute(
+        select(ConditionRound.id)
+        .where(
+            ConditionRound.loan_file_id == loan_file_id,
+            ConditionRound.plan_ready_at.is_not(None),
+            ConditionRound.deleted_at.is_(None),
+        )
+        .limit(1)
+    )
     return summarise_conditions(
         await list_conditions(db, loan_file_id=loan_file_id),
         pending_suggestions=await pending_suggestion_count(db, loan_file_id=loan_file_id),
+        task_ids=frozenset(task_rows.scalars().all()),
+        has_plan=planned.first() is not None,
     )
 
 

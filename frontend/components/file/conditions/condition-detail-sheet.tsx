@@ -8,17 +8,22 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCondition, useConditionEvents } from "@/lib/api/conditions";
 import { conditionHistoryLine } from "@/lib/conditions/history";
+import { becomes, stepOptions, waitingLabel } from "@/lib/conditions/next-step";
 import { OWNER_LABEL } from "@/lib/conditions/owners";
+import { OPTION_LABEL } from "@/lib/conditions/plan-words";
 import { CONDITION_LENDER_STATUS, CONDITION_PREP_STATUS, resolveStatus } from "@/lib/status";
 import type {
   Condition,
+  ConditionItem,
   ConditionPrepStatus,
   OwnerHint,
   Performer,
+  PlanOption,
   UnderwriterNote,
   Verdict,
 } from "@/lib/types/conditions";
 import { BUCKET_KIND_CHIP } from "@/lib/types/conditions";
+import { cn } from "@/lib/utils";
 import { Check, ChevronDown, ChevronUp, Copy, Minus, Undo2 } from "lucide-react";
 import { useCallback, useEffect } from "react";
 import { OwnerCell } from "./owner-cell";
@@ -87,6 +92,59 @@ function VerdictCallout({ verdict }: { verdict: Verdict }) {
 }
 
 /** A dated note chip, showing the round it arrived in (S2-03's Underwriter notes). */
+/** The chips S3-01 offers beside the ones already chosen. */
+const ALSO_OFFERED: PlanOption[] = ["already_in_file", "ask_underwriter"];
+
+/**
+ * S3-01's Next step chips: every step the condition has, selected, plus "Already in the file" and
+ * "Ask the underwriter". A chip that is the condition's OWN step toggles it; a step that comes from an
+ * item is changed on the item (the plan panel's select), so its chip is shown selected and inert.
+ */
+function NextStepChips({
+  condition,
+  disabled,
+  onChoose,
+}: {
+  condition: Condition;
+  disabled: boolean;
+  onChoose?: (option: PlanOption | null) => void;
+}) {
+  const chosen = stepOptions(condition);
+  const offered = [...chosen, ...ALSO_OFFERED.filter((option) => !chosen.includes(option))];
+  return (
+    <section className="flex flex-col gap-1.5">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Next step</p>
+      <div className="flex flex-wrap gap-1.5">
+        {offered.map((option) => {
+          const selected = chosen.includes(option);
+          const own = condition.next_step === option;
+          const inert = disabled || !onChoose || (selected && !own);
+          return (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={selected}
+              disabled={inert}
+              title={selected && !own ? "Change it on the item" : undefined}
+              onClick={() => onChoose?.(own ? null : option)}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs",
+                selected
+                  ? "border-primary/50 bg-primary/10 font-medium text-primary"
+                  : "border-input text-foreground-2 hover:bg-muted/60",
+                inert && !selected && "opacity-60",
+              )}
+            >
+              {selected ? <Check className="h-3 w-3" aria-hidden /> : null}
+              {OPTION_LABEL[option]}
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function NoteChip({ note, roundLabel }: { note: UnderwriterNote; roundLabel: string | null }) {
   return (
     <span className="inline-flex items-baseline gap-1.5 rounded-md border-l-2 border-warning bg-muted px-1.5 py-0.5 text-xs">
@@ -129,6 +187,8 @@ export function ConditionDetailSheet({
   onConfirmSuggestion,
   onConfirmReading,
   onAddItem,
+  onSetNextStep,
+  onMarkItemDone,
 }: {
   /** The list's rows, in the list's order — the filter and sort come with them. */
   conditions: Condition[];
@@ -154,6 +214,10 @@ export function ConditionDetailSheet({
   onConfirmReading?: (condition: Condition) => void;
   /** S3-01's "Add an item" (LP-920). */
   onAddItem?: (condition: Condition, name: string, performer: Performer) => void;
+  /** S3-01's next-step chips (LP-921): the condition's own step, or null to clear it. */
+  onSetNextStep?: (condition: Condition, option: PlanOption | null) => void;
+  /** LP-921 — her own task done or not. */
+  onMarkItemDone?: (condition: Condition, item: ConditionItem, done: boolean) => void;
 }) {
   const index = conditions.findIndex((row) => row.id === openId);
   const row = index >= 0 ? conditions[index] : undefined;
@@ -210,6 +274,8 @@ export function ConditionDetailSheet({
             onConfirmSuggestion={onConfirmSuggestion}
             onConfirmReading={onConfirmReading}
             onAddItem={onAddItem}
+            onSetNextStep={onSetNextStep}
+            onMarkItemDone={onMarkItemDone}
           />
         ) : null}
       </SheetContent>
@@ -231,6 +297,8 @@ function SheetBody({
   onConfirmSuggestion,
   onConfirmReading,
   onAddItem,
+  onSetNextStep,
+  onMarkItemDone,
   conditions,
 }: {
   row: Condition;
@@ -248,6 +316,8 @@ function SheetBody({
   onConfirmSuggestion?: (condition: Condition) => void;
   onConfirmReading?: (condition: Condition) => void;
   onAddItem?: (condition: Condition, name: string, performer: Performer) => void;
+  onSetNextStep?: (condition: Condition, option: PlanOption | null) => void;
+  onMarkItemDone?: (condition: Condition, item: ConditionItem, done: boolean) => void;
 }) {
   const detail = useCondition(row.id);
   const events = useConditionEvents(row.id);
@@ -255,6 +325,7 @@ function SheetBody({
   const condition = detail.data ?? row;
 
   const prepMeta = resolveStatus(CONDITION_PREP_STATUS, condition.prep_status);
+  const becomesLine = becomes(condition);
   const lenderMeta = resolveStatus(CONDITION_LENDER_STATUS, condition.lender_status);
   const kindChip = BUCKET_KIND_CHIP[condition.bucket_kind];
   const reopenable = condition.lender_status === "cleared" || condition.lender_status === "waived";
@@ -372,9 +443,19 @@ function SheetBody({
             onAdd={
               onAddItem ? (name, performer) => onAddItem(condition, name, performer) : undefined
             }
+            onMarkDone={
+              onMarkItemDone ? (item, done) => onMarkItemDone(condition, item, done) : undefined
+            }
           />
         ) : condition.reading ? (
           <ReadingItems items={condition.reading.items} />
+        ) : null}
+        {condition.items.length > 0 || condition.next_step !== null ? (
+          <NextStepChips
+            condition={condition}
+            disabled={replacedById !== null}
+            onChoose={onSetNextStep ? (option) => onSetNextStep(condition, option) : undefined}
+          />
         ) : null}
 
         <section className="rounded-lg border border-input bg-card p-3">
@@ -402,10 +483,18 @@ function SheetBody({
                 : [condition.prep_status, ...OFFERED_PREP]
               ).map((value) => (
                 <option key={value} value={value}>
-                  {CONDITION_PREP_STATUS[value].label}
+                  {value === "waiting" && condition.waiting_on
+                    ? `Waiting on ${waitingLabel(condition.waiting_on)}`
+                    : CONDITION_PREP_STATUS[value].label}
                 </option>
               ))}
             </Select>
+            {becomesLine ? (
+              <p className="col-start-2 text-xs text-muted-foreground">
+                Becomes <b className="font-semibold text-foreground">{becomesLine.status}</b> when{" "}
+                {becomesLine.when}.
+              </p>
+            ) : null}
 
             <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Owner

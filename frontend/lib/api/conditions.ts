@@ -280,6 +280,8 @@ export interface ConditionListParams {
   category?: string;
   info_only?: boolean;
   origin?: ConditionOrigin;
+  /** LP-921 — an open step of these options (S3-12's "Your tasks" is `["i_will_do_it"]`). */
+  next_step?: PlanOption[];
   q?: string;
   sort?: ConditionSort;
 }
@@ -602,6 +604,11 @@ function invalidatePlan(queryClient: ReturnType<typeof useQueryClient>, fileId: 
   void queryClient.invalidateQueries({ queryKey: ["condition-round-plan"] });
   void queryClient.invalidateQueries({ queryKey: conditionsQueryPrefix(fileId) });
   void queryClient.invalidateQueries({ queryKey: conditionsSummaryQueryKey(fileId) });
+  // THE OPEN SHEET READS ITS OWN QUERY, and a plan change can move our status (LP-921) and add
+  // events, so the sheet and its history refresh too — the first version left them stale until the
+  // sheet was closed and reopened.
+  void queryClient.invalidateQueries({ queryKey: ["condition"] });
+  void queryClient.invalidateQueries({ queryKey: ["condition-events"] });
 }
 
 /** S3-02's "Confirm plan…". 409s with a sentence while a reading still needs her. */
@@ -633,6 +640,8 @@ export interface ConditionItemChange {
   name?: string;
   performers?: Performer[];
   due_date?: string;
+  /** LP-921 — `done` / `open` on an "I'll do it" item only; the server refuses it on an ask. */
+  status?: "done" | "open";
 }
 
 /** Change one item of the plan. */

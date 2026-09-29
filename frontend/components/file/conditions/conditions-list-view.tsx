@@ -16,7 +16,9 @@ import {
   usePrepStatus,
   useReopen,
   useResolveReworded,
+  useSetNextStep,
   useSwitchCompleteness,
+  useUpdateItem,
   useVerdict,
 } from "@/lib/api/conditions";
 import type { ConditionListUrlState } from "@/lib/conditions/list-url";
@@ -93,6 +95,7 @@ export function ConditionsListView({
     prep_status: urlState.prepStatus.length > 0 ? urlState.prepStatus : undefined,
     owner: urlState.owner.length > 0 ? urlState.owner : undefined,
     bucket_kind: urlState.bucketKind.length > 0 ? urlState.bucketKind : undefined,
+    next_step: urlState.step.length > 0 ? urlState.step : undefined,
     q: search.trim() === "" ? undefined : search.trim(),
   };
 
@@ -116,6 +119,8 @@ export function ConditionsListView({
   // S3-03 (LP-919): the condition whose reading she is confirming, opened from the detail sheet.
   // S3-01's "Add an item" (LP-920).
   const addItem = useAddItem(fileId);
+  const setNextStep = useSetNextStep(fileId);
+  const updateItem = useUpdateItem(fileId);
   const [confirmReadingId, setConfirmReadingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const [answerFor, setAnswerFor] = useState<Condition[] | null>(null);
@@ -487,6 +492,27 @@ export function ConditionsListView({
         onConfirmReading={(condition) => setConfirmReadingId(condition.id)}
         onAddItem={(condition, name, performer) =>
           addItem.mutate({ conditionId: condition.id, name, performers: [performer] })
+        }
+        onSetNextStep={(condition, option) =>
+          setNextStep.mutate(
+            { conditionId: condition.id, next_step: option },
+            {
+              onError: (error) =>
+                notifyError({
+                  title: "The step was not changed",
+                  whatToDo: getErrorMessage(error),
+                }),
+            },
+          )
+        }
+        onMarkItemDone={(condition, item, done) =>
+          updateItem.mutate(
+            { conditionId: condition.id, itemId: item.id, status: done ? "done" : "open" },
+            {
+              onError: (error) =>
+                notifyError({ title: "That was not recorded", whatToDo: getErrorMessage(error) }),
+            },
+          )
         }
       />
       <ConfirmReadingFor

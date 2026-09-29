@@ -7,15 +7,16 @@ import { Select } from "@/components/ui/select";
 import { groupConditions } from "@/lib/conditions/grouping";
 import type { ConditionGroupBy, ConditionListUrlState } from "@/lib/conditions/list-url";
 import { describeConditionFilters } from "@/lib/conditions/list-url";
+import { isDisplayOnly, waitingLabel } from "@/lib/conditions/next-step";
 import { OWNER_LABEL } from "@/lib/conditions/owners";
 import { displayWording } from "@/lib/conditions/wording";
 import { CONDITION_LENDER_STATUS, CONDITION_PREP_STATUS, resolveStatus } from "@/lib/status";
 import type { Condition, ConditionPrepStatus } from "@/lib/types/conditions";
 import { BUCKET_KIND_CHIP } from "@/lib/types/conditions";
 import { cn } from "@/lib/utils";
-import { ChevronRight, Info } from "lucide-react";
+import { ChevronRight, Info, Landmark } from "lucide-react";
 import { useRef, useState } from "react";
-import { OwnerCell } from "./owner-cell";
+import { NextStepCell } from "./next-step-cell";
 
 /**
  * The conditions list (S2-01, S2-02, S2-09) — the processor's main screen for conditions.
@@ -285,11 +286,13 @@ function ConditionGroup({
         <span className="ml-auto text-xs text-muted-foreground">{rows.length}</span>
       </div>
 
-      <div className="grid grid-cols-[1.5rem_3.5rem_minmax(0,1fr)_7.5rem_10.5rem_7.5rem] gap-3 border-b border-input px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <div className="grid grid-cols-[1.5rem_3.5rem_minmax(0,1fr)_14rem_10.5rem_7.5rem] gap-3 border-b border-input px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
         <span />
         <span>Code</span>
         <span>Lender’s words</span>
-        <span>Owner</span>
+        {/* NEXT STEP WHERE OWNER WAS (S3-12, LP-934 M3). The owner stays in the Owner filter and on
+            the detail sheet. */}
+        <span>Next step</span>
         <span>Our status</span>
         <span>Lender</span>
       </div>
@@ -330,7 +333,7 @@ function ConditionRow({
   return (
     <div
       className={cn(
-        "relative grid grid-cols-[1.5rem_3.5rem_minmax(0,1fr)_7.5rem_10.5rem_7.5rem] items-start gap-3 border-b border-input px-3 py-2.5 last:border-b-0",
+        "relative grid grid-cols-[1.5rem_3.5rem_minmax(0,1fr)_14rem_10.5rem_7.5rem] items-start gap-3 border-b border-input px-3 py-2.5 last:border-b-0",
         checked && "bg-primary/5",
       )}
     >
@@ -404,27 +407,43 @@ function ConditionRow({
         </span>
       </button>
 
-      <OwnerCell hint={condition.effective_owner} source={condition.effective_owner_source} />
+      <NextStepCell condition={condition} />
 
-      {/* INLINE, AND IT UPDATES STRAIGHT AWAY. A backward move opens S2-05 instead, because the
-          server refuses one without a reason and the dialog is where the reason comes from. */}
-      <Select
-        aria-label={`Our status for ${condition.lender_code ?? "this condition"}`}
-        value={condition.prep_status}
-        onChange={(event) => {
-          const to = event.target.value as ConditionPrepStatus;
-          if (to !== condition.prep_status) onMovePrepStatus(condition, to);
-        }}
-      >
-        {(OFFERED_PREP.includes(condition.prep_status)
-          ? OFFERED_PREP
-          : [condition.prep_status, ...OFFERED_PREP]
-        ).map((value) => (
-          <option key={value} value={value}>
-            {CONDITION_PREP_STATUS[value].label}
-          </option>
-        ))}
-      </Select>
+      {/* A DISPLAY-ONLY STEP HAS NO STATUS OF ITS OWN (S3-12, LP-934 M4): "Lender is doing it" stays in
+          its heading group, neutral, with no select — it is not ours to move. */}
+      {isDisplayOnly(condition) ? (
+        <span className="inline-flex items-center gap-1.5 pt-0.5 text-sm text-muted-foreground">
+          {condition.next_step === "lender_doing_it" ? (
+            <Landmark className="h-3.5 w-3.5" aria-hidden />
+          ) : (
+            <Info className="h-3.5 w-3.5" aria-hidden />
+          )}
+          {condition.next_step === "lender_doing_it" ? "Lender is doing it" : "Information only"}
+        </span>
+      ) : (
+        /* INLINE, AND IT UPDATES STRAIGHT AWAY. A backward move opens S2-05 instead, because the
+           server refuses one without a reason and the dialog is where the reason comes from. */
+        <Select
+          aria-label={`Our status for ${condition.lender_code ?? "this condition"}`}
+          value={condition.prep_status}
+          onChange={(event) => {
+            const to = event.target.value as ConditionPrepStatus;
+            if (to !== condition.prep_status) onMovePrepStatus(condition, to);
+          }}
+        >
+          {(OFFERED_PREP.includes(condition.prep_status)
+            ? OFFERED_PREP
+            : [condition.prep_status, ...OFFERED_PREP]
+          ).map((value) => (
+            <option key={value} value={value}>
+              {/* "Waiting on Borrower", not "Waiting on someone", once we know who (S3-12). */}
+              {value === "waiting" && condition.waiting_on
+                ? `Waiting on ${waitingLabel(condition.waiting_on)}`
+                : CONDITION_PREP_STATUS[value].label}
+            </option>
+          ))}
+        </Select>
+      )}
 
       <span className="pt-0.5">
         <StatusToken meta={lenderMeta} />

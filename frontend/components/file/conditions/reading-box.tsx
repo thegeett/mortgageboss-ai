@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { itemWhere } from "@/lib/conditions/next-step";
 import {
   OPTION_LABEL,
   PERFORMER_LABEL,
@@ -8,7 +9,16 @@ import {
   performersLabel,
 } from "@/lib/conditions/plan-words";
 import type { Condition, ConditionItem, Performer, ReadingItem } from "@/lib/types/conditions";
-import { Building2, Link2, ListChecks, Plus, Sparkles, TriangleAlert, User } from "lucide-react";
+import {
+  Building2,
+  Check,
+  Link2,
+  ListChecks,
+  Plus,
+  Sparkles,
+  TriangleAlert,
+  User,
+} from "lucide-react";
 import { useState } from "react";
 
 /**
@@ -142,10 +152,13 @@ type ShownItem = ReadingItem | ConditionItem;
 export function ReadingItems({
   items,
   onAdd,
+  onMarkDone,
 }: {
   items: ShownItem[];
   /** S3-01's "Add an item" (LP-920). Offered only once the plan exists. */
   onAdd?: (name: string, performer: Performer) => void;
+  /** LP-921 — her own task done (or not). Offered on an "I'll do it" item only. */
+  onMarkDone?: (item: ConditionItem, done: boolean) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
@@ -202,6 +215,7 @@ export function ReadingItems({
                 {performersLabel(item.performers)}
               </p>
               <p className="text-xs text-muted-foreground">{OPTION_LABEL[item.option]}</p>
+              {"id" in item ? <ItemWhere item={item} onMarkDone={onMarkDone} /> : null}
             </div>
           </li>
         ))}
@@ -242,6 +256,30 @@ export function ReadingItems({
         </div>
       ) : null}
     </section>
+  );
+}
+
+/** Where a plan item is (S3-01): the email it is in, or her task with "Mark done". */
+function ItemWhere({
+  item,
+  onMarkDone,
+}: {
+  item: ConditionItem;
+  onMarkDone?: (item: ConditionItem, done: boolean) => void;
+}) {
+  const where = itemWhere(item);
+  if (where) return <p className="text-xs text-primary">{where}</p>;
+  if (item.option !== "i_will_do_it" || !onMarkDone) return null;
+  const done = item.status === "done";
+  return (
+    <button
+      type="button"
+      onClick={() => onMarkDone(item, !done)}
+      className="inline-flex w-fit items-center gap-1 text-xs text-primary hover:underline"
+    >
+      {done ? <Check className="h-3 w-3" aria-hidden /> : null}
+      {done ? "Done — undo" : "Mark done"}
+    </button>
   );
 }
 

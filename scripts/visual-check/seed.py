@@ -77,9 +77,11 @@ from app.models.activity_log import (  # noqa: E402
     ActivityType,
 )
 from app.models.borrower import Borrower  # noqa: E402
-from app.models.condition import Condition  # noqa: E402
+from app.models.condition import Condition, ConditionPrepStatus, OwnerHint  # noqa: E402
 from app.models.condition_event import ConditionEvent, ConditionEventKind  # noqa: E402
+from app.models.condition_item import ConditionItem  # noqa: E402
 from app.models.condition_round import ConditionRound, ConditionSourceKind  # noqa: E402
+from app.models.condition_vocabulary import Performer  # noqa: E402
 from app.models.document import Document, DocumentStatus  # noqa: E402
 from app.models.lender import Lender, LoanProgram  # noqa: E402
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose  # noqa: E402
@@ -399,6 +401,115 @@ async def state_s3_03(db: AsyncSession) -> Shot:
     )
 
 
+async def confirm_plan(db: AsyncSession, loan_file: LoanFile, actor: User) -> None:
+    """0132's reading confirmed as read, then the plan confirmed — at 4:40 PM, as S3-12's activity says."""
+    from app.services.condition_plan import confirm_round_plan
+    from app.services.condition_reading import ConfirmedItem, confirm_reading
+
+    round_ = await db.scalar(
+        select(ConditionRound).where(ConditionRound.loan_file_id == loan_file.id)
+    )
+    assert round_ is not None
+    code_0132 = await db.scalar(
+        select(Condition).where(
+            Condition.loan_file_id == loan_file.id, Condition.lender_code == "0132"
+        )
+    )
+    assert code_0132 is not None
+    items = (
+        await db.execute(
+            select(ConditionItem)
+            .where(ConditionItem.condition_id == code_0132.id, ConditionItem.deleted_at.is_(None))
+            .order_by(ConditionItem.sequence)
+        )
+    ).scalars()
+    await confirm_reading(
+        db,
+        condition=code_0132,
+        items=[
+            ConfirmedItem(
+                name=item.name,
+                performers=tuple(Performer(p) for p in item.performers) or (item.performer,),
+                key=item.key,
+            )
+            for item in items
+        ],
+        actor_user_id=actor.id,
+    )
+    await confirm_round_plan(db, round_=round_, actor_user_id=actor.id)
+    when = et(8, 28, 16, 40)
+    round_.plan_confirmed_at = when
+    await _stamp_events_since(db, loan_file, when, after=et(8, 28, 16, 22))
+    await db.execute(
+        update(ActivityLog)
+        .where(
+            ActivityLog.loan_file_id == loan_file.id,
+            ActivityLog.activity_type == ActivityType.CONDITION_PLAN_CONFIRMED,
+        )
+        .values(created_at=when, updated_at=when)
+    )
+
+
+async def _stamp_events_since(
+    db: AsyncSession, loan_file: LoanFile, when: datetime, *, after: datetime
+) -> None:
+    """Every condition event written by this seed after `after` (real time) is stamped `when`."""
+    await db.flush()
+    await db.execute(
+        update(ConditionEvent)
+        .where(ConditionEvent.loan_file_id == loan_file.id, ConditionEvent.occurred_at > after)
+        .values(occurred_at=when)
+    )
+
+
+#: Our statuses on S3-12, once the round's emails and the question were marked sent on 08/28.
+S3_12_WAITING: dict[str, OwnerHint] = {
+    "7086": OwnerHint.BORROWER,
+    "6132": OwnerHint.BORROWER,
+    "6637": OwnerHint.BORROWER,
+    "6178": OwnerHint.LENDER,
+    "0132": OwnerHint.BROKER,
+    "1947": OwnerHint.TITLE,
+    "6378": OwnerHint.TITLE,
+}
+
+
+async def state_s3_12(db: AsyncSession) -> Shot:
+    """The list on 09/02 with the plan confirmed and the round's asks out (LP-921's part of S3-12).
+
+    THE SENDS ARE LP-922's. Until it lands, the seven Waiting statuses are set the way she can set
+    them today — Stage 2's status control (`move_prep_status`) — at 5:02 PM on 08/28, so the list, the
+    "Waiting on LO" wording and the summary numbers can be checked. The "· sent 08/28" tails, the
+    "3 emails marked sent" activity (D4) and 6132's failed check (LP-923) are not here yet.
+    """
+    from app.schemas.condition import PrepStatusRequest
+    from app.services.condition_status import move_prep_status
+
+    loan_file, user = await base(db)
+    await read(db, loan_file)
+    await confirm_plan(db, loan_file, user)
+    rows = (
+        await db.execute(
+            select(Condition).where(
+                Condition.loan_file_id == loan_file.id,
+                Condition.lender_code.in_(list(S3_12_WAITING)),
+            )
+        )
+    ).scalars()
+    for condition in rows:
+        await move_prep_status(
+            db,
+            condition=condition,
+            payload=PrepStatusRequest(
+                to=ConditionPrepStatus.WAITING,
+                waiting_on=S3_12_WAITING[condition.lender_code or ""],
+            ),
+            actor_user_id=user.id,
+        )
+    await _stamp_events_since(db, loan_file, et(8, 28, 17, 2), after=et(8, 28, 16, 41))
+    return Shot(path=_conditions_tab(), now=et(9, 2, 9, 30))
+
+
 def _later(ticket: str) -> Callable[[AsyncSession], Awaitable[Shot]]:
     async def build(db: AsyncSession) -> Shot:
         raise NotBuiltYet(f"this screen's state is built by {ticket}")
@@ -420,7 +531,7 @@ STATES: dict[str, Callable[[AsyncSession], Awaitable[Shot]]] = {
     "S3-09": _later("LP-924"),
     "S3-10": _later("LP-925"),
     "S3-11": _later("LP-925"),
-    "S3-12": _later("LP-921"),
+    "S3-12": state_s3_12,
 }
 
 

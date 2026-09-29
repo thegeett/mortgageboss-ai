@@ -70,6 +70,7 @@ function makeEvent(overrides: Partial<ConditionEvent> = {}): ConditionEvent {
     prep_status_from: null,
     prep_status_to: null,
     waiting_on: null,
+    plan_option: null,
     lender_status_from: null,
     lender_status_to: null,
     verdict_source_kind: null,

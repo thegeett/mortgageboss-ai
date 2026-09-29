@@ -30,6 +30,7 @@ describe("the search term never reaches the URL", () => {
       prepStatus: ["waiting"],
       owner: ["title"],
       bucketKind: ["prior_to_docs"],
+      step: ["i_will_do_it"],
       groupBy: "owner",
     });
 
@@ -91,6 +92,7 @@ describe("writing", () => {
       prepStatus: ["waiting", "ready"],
       owner: ["title", "borrower"],
       bucketKind: ["prior_to_funding"],
+      step: ["i_will_do_it", "ask_borrower"],
       groupBy: "prep_status",
     };
 

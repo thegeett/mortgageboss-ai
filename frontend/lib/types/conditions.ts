@@ -357,6 +357,8 @@ export interface ConditionEvent {
   prep_status_to: ConditionPrepStatus | null;
   /** Who we are waiting on, on a move TO `waiting` only (LP-916 review). */
   waiting_on: OwnerHint | null;
+  /** The step that moved it, when the plan moved it (LP-921): "Moved to Ready to send (Already in the file)". */
+  plan_option: PlanOption | null;
   /** The lender's track's move. */
   lender_status_from: ConditionLenderStatus | null;
   lender_status_to: ConditionLenderStatus | null;
@@ -524,6 +526,8 @@ export interface Condition {
   prep_status: ConditionPrepStatus;
   /** The lender's answer. Nothing but a recorded verdict moves this off `open`/`not_cleared`. */
   lender_status: ConditionLenderStatus;
+  /** Who we are waiting on while our status is Waiting (LP-921: "Waiting on Borrower", "Waiting on LO"). */
+  waiting_on: OwnerHint | null;
   /**
    * When the row last changed — the value an LP-912 write must echo back.
    *
@@ -744,6 +748,12 @@ export interface ConditionSummary {
   open_prior_to_funding: number;
   /** 0 until LP-915 proposes one. The round card's "N probably cleared — review" reads it. */
   pending_suggestions: number;
+  /** LP-921 (S3-12): open and Waiting; open with an unfinished "I'll do it" step; open and Ready. */
+  waiting_on_others: number;
+  your_tasks: number;
+  ready_to_send: number;
+  /** Whether any round of the file has a plan — the bar shows S3-12's numbers only then. */
+  has_plan: boolean;
   /** The newest imported round, for the rail's "from round 2, printed 09/10". */
   latest_round: ConditionRound | null;
 }
@@ -1035,6 +1045,8 @@ export interface ConditionItem {
   waits_on_code: string | null;
   due_date: string | null;
   specifics: ReadingSpecifics;
+  /** LP-921 — what she does, from the library ("upload the invoice"); null on an ask or her own item. */
+  task: string | null;
 }
 
 export interface RoundPlanDraft {

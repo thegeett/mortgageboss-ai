@@ -298,6 +298,7 @@ types:
         acceptable: A logged call with the employer, from an independently found number, inside the window before the note date
         performer: processor
         option: i_will_do_it
+        task: log the verbal VOE call
         documents: [verbal_voe]
         checks: [inside_voe_window]
 
@@ -326,6 +327,7 @@ types:
         acceptable: Completed written VOE from the employer or a verification vendor
         performer: processor
         option: i_will_do_it
+        task: order the written VOE
         documents: [voe]
         checks: [right_borrower, inside_lender_dates]
 
@@ -445,6 +447,7 @@ types:
         acceptable: Completion report (1004D) confirming the work matches the plans and specs
         performer: appraiser
         option: i_will_do_it
+        task: order the final inspection
         documents: [appraisal]
         checks: []
 
@@ -739,6 +742,7 @@ types:
         acceptable: The credit vendor's invoice for this file
         performer: processor
         option: i_will_do_it
+        task: upload the invoice
         documents: [service_invoice]
         match_words: ["credit"]
         checks: []
@@ -754,6 +758,7 @@ types:
         acceptable: The processing company's invoice for this file
         performer: processor
         option: i_will_do_it
+        task: upload the invoice
         documents: [service_invoice]
         match_words: ["processing"]
         checks: []
@@ -769,6 +774,7 @@ types:
         acceptable: The appraiser's or AMC's invoice for the inspection
         performer: processor
         option: i_will_do_it
+        task: upload the invoice
         documents: [service_invoice, appraisal_payment]
         match_words: ["inspection", "appraisal"]
         checks: []
@@ -810,5 +816,6 @@ types:
         acceptable: Whatever the underwriter's note names
         performer: processor
         option: i_will_do_it
+        task: upload the documents
         documents: []
         checks: []

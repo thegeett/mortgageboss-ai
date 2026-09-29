@@ -91,6 +91,7 @@ function condition(overrides: Partial<Condition> = {}): Condition {
     // wrong reason.
     prep_status: "to_do",
     lender_status: "open",
+    waiting_on: null,
     updated_at: "2026-08-28T10:00:00Z",
     effective_owner: "unknown",
     effective_owner_source: "none",
@@ -206,6 +207,7 @@ function event(overrides: Partial<ConditionEvent> = {}): ConditionEvent {
     prep_status_from: null,
     prep_status_to: null,
     waiting_on: null,
+    plan_option: null,
     lender_status_from: null,
     lender_status_to: null,
     verdict_source_kind: null,

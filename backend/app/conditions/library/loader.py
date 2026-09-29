@@ -110,6 +110,9 @@ class LibraryItem:
     #: holds ("credit" for a credit report invoice against a processing invoice). Matched by code
     #: against the document's name; LP-920's "Already in the file".
     match_words: tuple[str, ...] = ()
+    #: What she does, in the list's words ("upload the invoice"), for S3-12's "Your task · …". Required
+    #: on an "I'll do it" item and refused on any other: an ask is not her task.
+    task: str | None = None
 
 
 @dataclass(frozen=True)
@@ -209,18 +212,25 @@ def _item(raw: Any, where: str, documents_known: frozenset[str]) -> LibraryItem:
     unknown = [doc for doc in documents if doc not in documents_known]
     if unknown:
         raise LibraryError(f"{where}: documents {unknown} are not document types the app files")
+    option = _enum(PlanOption, raw.get("option"), f"{where} option")
+    task = raw.get("task")
+    if option is PlanOption.I_WILL_DO_IT:
+        task = _text(raw, "task", where)
+    elif task is not None:
+        raise LibraryError(f"{where}: only an i_will_do_it item carries a task")
     return LibraryItem(
         key=_text(raw, "key", where),
         name=_text(raw, "name", where),
         acceptable=_text(raw, "acceptable", where),
         performer=_enum(Performer, raw.get("performer"), f"{where} performer"),
-        option=_enum(PlanOption, raw.get("option"), f"{where} option"),
+        option=option,
         documents=documents,
         checks=tuple(
             _enum(EvidenceCheck, check, f"{where} check") for check in (raw.get("checks") or ())
         ),
         name_with_amount=_name_with_amount(raw.get("name_with_amount"), where),
         match_words=tuple(str(word).lower() for word in raw.get("match_words") or ()),
+        task=task,
     )
 
 

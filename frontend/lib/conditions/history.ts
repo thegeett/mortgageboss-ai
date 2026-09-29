@@ -30,7 +30,8 @@
  * back" are the words the controls, the refusal sentences and the chips already use; a second copy
  * is how a history line ends up calling something by a name no control offers.
  */
-import { OWNER_LABEL } from "@/lib/conditions/owners";
+import { waitingLabel } from "@/lib/conditions/next-step";
+import { OPTION_LABEL } from "@/lib/conditions/plan-words";
 import { CONDITION_LENDER_STATUS, CONDITION_PREP_STATUS } from "@/lib/status";
 import type {
   ConditionEvent,
@@ -155,9 +156,15 @@ export function conditionHistoryLine(
       // "Moved to Waiting on Borrower" (S2-03) names the owner. `unknown` keeps the generic label:
       // "Waiting on Owner not known" would read worse than "Waiting on someone".
       if (to === "waiting" && event.waiting_on && event.waiting_on !== "unknown") {
-        return `Moved to Waiting on ${OWNER_LABEL[event.waiting_on]}${by(event)}`;
+        // "Waiting on LO", as the status select says it (LP-934 M5).
+        return `Moved to Waiting on ${waitingLabel(event.waiting_on)}${by(event)}`;
       }
-      return to ? `Moved to ${CONDITION_PREP_STATUS[to].label}${by(event)}` : `Moved${by(event)}`;
+      // THE PLAN MOVED IT (LP-921), SO THE LINE SAYS WHICH STEP: "Moved to Ready to send (Already in
+      // the file)". Without it the line reads as though she picked the status herself.
+      const step = event.plan_option ? ` (${OPTION_LABEL[event.plan_option]})` : "";
+      return to
+        ? `Moved to ${CONDITION_PREP_STATUS[to].label}${step}${by(event)}`
+        : `Moved${by(event)}`;
     }
     case "condition_verdict_recorded": {
       const to = event.lender_status_to;

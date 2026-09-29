@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { useConfirmPlan, useRoundPlan, useSetNextStep, useUpdateItem } from "@/lib/api/conditions";
+import { stepOptions } from "@/lib/conditions/next-step";
 import { OPTION_LABEL, PERFORMER_LABEL, performersLabel } from "@/lib/conditions/plan-words";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import type { Condition, ConditionItem, ConditionRound, PlanOption } from "@/lib/types/conditions";
@@ -62,7 +63,7 @@ export function RoundPlanPanel({
 
   const changeOption = (condition: Condition, from: PlanOption, to: PlanOption) => {
     setRefusal(null);
-    if (condition.next_step !== null) {
+    if (from === condition.next_step) {
       setNextStep.mutate(
         { conditionId: condition.id, next_step: to },
         { onError: (error) => setRefusal(getErrorMessage(error)) },
@@ -275,17 +276,6 @@ function ReadingCell({ condition, onConfirm }: { condition: Condition; onConfirm
       {confidence === null ? "Library" : confidence.toFixed(2)}
     </span>
   );
-}
-
-/** The condition's next steps: its own when it takes one, else each distinct item option. */
-function stepOptions(condition: Condition): PlanOption[] {
-  if (condition.next_step) return [condition.next_step];
-  const seen: PlanOption[] = [];
-  for (const item of condition.items) {
-    if (item.status === "not_needed") continue;
-    if (!seen.includes(item.option)) seen.push(item.option);
-  }
-  return seen;
 }
 
 /** "Source, clearance → Borrower · receipt → Title / escrow", or the push-back's reason. */

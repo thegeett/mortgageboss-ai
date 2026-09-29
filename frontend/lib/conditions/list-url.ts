@@ -26,6 +26,7 @@
 "use client";
 
 import { OWNER_LABEL } from "@/lib/conditions/owners";
+import { OPTION_LABEL } from "@/lib/conditions/plan-words";
 import { CONDITION_LENDER_STATUS, CONDITION_PREP_STATUS } from "@/lib/status";
 import { BUCKET_KIND_CHIP } from "@/lib/types/conditions";
 import type {
@@ -33,6 +34,7 @@ import type {
   ConditionLenderStatus,
   ConditionPrepStatus,
   OwnerHint,
+  PlanOption,
 } from "@/lib/types/conditions";
 import { useSearchParams } from "next/navigation";
 import { useMemo } from "react";
@@ -46,6 +48,8 @@ export interface ConditionListUrlState {
   prepStatus: ConditionPrepStatus[];
   owner: OwnerHint[];
   bucketKind: BucketKind[];
+  /** LP-921 — an open step of these options; S3-12's "Your tasks" is `["i_will_do_it"]`. */
+  step: PlanOption[];
   groupBy: ConditionGroupBy;
 }
 
@@ -55,6 +59,7 @@ export const EMPTY_LIST_URL_STATE: ConditionListUrlState = {
   prepStatus: [],
   owner: [],
   bucketKind: [],
+  step: [],
   groupBy: "heading",
 };
 
@@ -67,6 +72,7 @@ const isLenderStatus = (v: string): v is ConditionLenderStatus =>
   Object.hasOwn(CONDITION_LENDER_STATUS, v);
 const isBucketKind = (v: string): v is BucketKind => Object.hasOwn(BUCKET_KIND_CHIP, v);
 const isOwner = (v: string): v is OwnerHint => Object.hasOwn(OWNER_LABEL, v);
+const isPlanOption = (v: string): v is PlanOption => Object.hasOwn(OPTION_LABEL, v);
 
 const isGroupBy = (v: string | null): v is ConditionGroupBy =>
   v === "heading" || v === "owner" || v === "prep_status";
@@ -82,6 +88,7 @@ export function readConditionListUrl(params: URLSearchParams): ConditionListUrlS
     prepStatus: params.getAll("prep_status").filter(isPrepStatus),
     owner: params.getAll("owner").filter(isOwner),
     bucketKind: params.getAll("bucket_kind").filter(isBucketKind),
+    step: params.getAll("step").filter(isPlanOption),
     groupBy: isGroupBy(params.get("group")) ? (params.get("group") as ConditionGroupBy) : "heading",
   };
 }
@@ -113,6 +120,7 @@ export function writeConditionListUrl(state: ConditionListUrlState): string {
   for (const value of state.prepStatus) params.append("prep_status", value);
   for (const value of state.owner) params.append("owner", value);
   for (const value of state.bucketKind) params.append("bucket_kind", value);
+  for (const value of state.step) params.append("step", value);
   if (state.groupBy !== "heading") params.set("group", state.groupBy);
   const query = params.toString();
   return query ? `?${query}` : "";
@@ -136,6 +144,7 @@ export function isConditionListFiltered(state: ConditionListUrlState, search = "
     state.prepStatus.length > 0 ||
     state.owner.length > 0 ||
     state.bucketKind.length > 0 ||
+    state.step.length > 0 ||
     search.trim() !== ""
   );
 }
@@ -164,6 +173,10 @@ export function describeConditionFilters(state: ConditionListUrlState, search = 
     parts.push(value === "unknown" ? "Owner not known" : `Owner: ${OWNER_LABEL[value]}`);
   }
   for (const value of state.bucketKind) parts.push(`Heading: ${BUCKET_KIND_CHIP[value]}`);
+  // "Your tasks" rather than "Next step: I'll do it": it is the name of the number she clicked.
+  for (const value of state.step) {
+    parts.push(value === "i_will_do_it" ? "Your tasks" : `Next step: ${OPTION_LABEL[value]}`);
+  }
   // The term itself, quoted, because the processor typed it and it is the filter they will undo
   // first. Safe on screen — it is the URL this must stay out of, not the page.
   if (search.trim() !== "") parts.push(`matching “${search.trim()}”`);
