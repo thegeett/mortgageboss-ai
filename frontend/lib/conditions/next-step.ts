@@ -164,7 +164,10 @@ export function nextStepToken(condition: Condition): NextStepToken | null {
       tone: "blocking",
     };
   }
+  // Not a REPLACED upload's findings: they hold nothing on the server (`_settle`), and since LP-937 made
+  // its `failed` false this line is reached for it (LP-937 review).
   const finding = (condition.evidence ?? [])
+    .filter((evidence) => !evidence.replaced)
     .flatMap((evidence) => evidence.findings)
     .find((f) => f.needed && f.status !== "explained");
   if (finding) {

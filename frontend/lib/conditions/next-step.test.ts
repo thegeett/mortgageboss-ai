@@ -253,6 +253,26 @@ describe("evidence tokens (LP-923)", () => {
     );
     expect(token?.text).toBe("Deposit explanation asked");
   });
+
+  it("skips a replaced upload's deposit, and keeps one on a statement still evidence (LP-937)", () => {
+    const deposit = [{ needed: true, status: "open" }];
+    const replaced = nextStepToken(
+      condition({
+        prep_status: "ready",
+        evidence: [
+          { failed: false, replaced: false, reask: null, checks: [], findings: [] },
+          { failed: false, replaced: true, reask: null, checks: [], findings: deposit },
+        ],
+      } as unknown as Partial<Condition>),
+    );
+    expect(replaced?.text).toBe("Evidence checked");
+    const stillEvidence = nextStepToken(
+      condition({
+        evidence: [{ failed: false, replaced: false, reask: null, checks: [], findings: deposit }],
+      } as unknown as Partial<Condition>),
+    );
+    expect(stillEvidence?.text).toBe("Large deposit needs sourcing");
+  });
 });
 
 it("a condition its evidence made Ready says so", () => {

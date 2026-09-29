@@ -1169,19 +1169,27 @@ async def evidence_public_for_file(
             continue
         statement = statement_from(_extraction_data(document))
         superseded = None
+        replaced = False
         replacement = superseded_by(row, items.get(row.item_id), rows)
         if replacement is not None and (by := documents.get(replacement.document_id)) is not None:
             title = document_title(by, statement_from(_extraction_data(by)))
             # A statement short of the total ON ITS OWN is still evidence (it goes in the package), so
-            # "replaced" would be untrue of it: the later statement completed it, not replaced it.
+            # "replaced" would be untrue of it. "Together with" was untrue too, for two statements of
+            # one account: `_verified` takes the account's latest balance, so the later statement met
+            # the total by itself (LP-937 review).
+            replaced = not counts_as_evidence(row)
             superseded = (
-                f"Enough for closing together with {title}"
-                if counts_as_evidence(row)
-                else f"Replaced by {title}"
+                f"Replaced by {title}"
+                if replaced
+                else f"Still evidence — enough for closing was met by {title}"
             )
         out.setdefault(row.condition_id, []).append(
             ConditionEvidencePublic.build(
-                row, document=document, statement=statement, superseded=superseded
+                row,
+                document=document,
+                statement=statement,
+                superseded=superseded,
+                replaced=replaced,
             )
         )
     return out

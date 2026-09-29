@@ -57,6 +57,7 @@ const S3_07: ConditionEvidence = {
   accepted_reason: null,
   reask: "page 6",
   superseded: null,
+  replaced: false,
 };
 
 const S3_08: ConditionEvidence = {
@@ -115,6 +116,7 @@ describe("EvidenceSection", () => {
       failed: false,
       reask: null,
       superseded: "Replaced by Capital One statements ··9912 · July and August 2026 · 12 pages",
+      replaced: true,
     };
     render(<EvidenceSection fileId="f1" condition={condition([replaced], "7086")} />);
     expect(
@@ -129,6 +131,21 @@ describe("EvidenceSection", () => {
     expect(screen.queryByRole("button", { name: /Accept anyway/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Ask the borrower to explain it/ })).toBeNull();
     expect(screen.queryByText(/New finding/)).toBeNull();
+  });
+
+  it("keeps the deposit on a superseded statement that is still evidence (LP-937 review)", () => {
+    // July short on its own, carrying the open deposit; August met the total. July still goes in the
+    // package, so its deposit still holds 7086 — it must be on screen and answerable.
+    const stillEvidence: ConditionEvidence = {
+      ...S3_08,
+      failed: false,
+      superseded:
+        "Still evidence — enough for closing was met by Capital One statement ··9912 · August 2026 · 6 pages",
+      replaced: false,
+    };
+    render(<EvidenceSection fileId="f1" condition={condition([stillEvidence], "7086")} />);
+    expect(screen.getByText(/Still evidence — enough for closing was met by/)).toBeDefined();
+    expect(screen.getByRole("button", { name: /Ask the borrower to explain it/ })).toBeDefined();
   });
 
   it("is S3-07: the card, the checks, the callout and its two answers", () => {

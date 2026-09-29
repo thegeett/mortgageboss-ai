@@ -820,10 +820,20 @@ class ConditionEvidencePublic(BaseModel):
     #: LP-937 — "Replaced by <document>" (or "Enough for closing together with <document>") once a
     #: passing document has done the item. The failure then no longer counts and `failed` is false.
     superseded: str | None = None
+    #: LP-937 follow-up — superseded AND no longer evidence ("Replaced by …"). Only then do its findings
+    #: stop mattering: `_settle` ignores them, so the sheet hides them and the Next step skips them. A
+    #: superseded row that is still evidence keeps its findings, which can still hold the condition.
+    replaced: bool = False
 
     @classmethod
     def build(
-        cls, row: Any, *, document: Any, statement: Any, superseded: str | None = None
+        cls,
+        row: Any,
+        *,
+        document: Any,
+        statement: Any,
+        superseded: str | None = None,
+        replaced: bool = False,
     ) -> "ConditionEvidencePublic":
         from app.models.condition_vocabulary import EvidenceCheck
         from app.models.document import UploadSource
@@ -878,6 +888,7 @@ class ConditionEvidencePublic(BaseModel):
             accepted_reason=row.accepted_reason,
             reask=reask,
             superseded=superseded,
+            replaced=replaced,
         )
 
 

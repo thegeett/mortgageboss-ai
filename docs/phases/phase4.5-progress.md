@@ -462,6 +462,10 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   LP-925**: the fixture was exactly 600,000 ms old against a strict `>`, now eleven minutes. Confirmed
   by the LP-925 review: 15/15 three times at file scope, where it failed 4/4 before; the frontend suite
   is fully green for the first time this stage.
+- `backend/tests/conditions/test_condition_evidence.py::test_the_reask_goes_into_a_new_borrower_email` —
+  **intermittent, seen once in three full runs** by the LP-937 review. It passes alone, passes with its
+  module (22/22), and passes right after the sonnet test; a third identical fixed-order run was clean.
+  Not caused by LP-937 and not the inbox-token flake below. Recorded so the next ticket is not blamed.
 - `backend/tests/services/test_loan_file_ids.py::test_inbox_token_is_independent_of_display_id` —
   **randomised, and it fails about once in a thousand runs** (measured by the LP-922 review: 2 trips in
   2000 simulated runs, 0.100%). It draws 1000 display ids and asserts the 4-character code is not a
@@ -485,8 +489,9 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   the item, the earlier failures stop counting in "Failed a check" and stop showing in the Next step.
   They stay in the history, and on the sheet as "Replaced by <document>".
 
-- **A superseded card can hide the finding that is holding its condition** — found by the LP-937 review,
-  open. `_settle` holds a condition on an open finding carried by any row that `counts_as_evidence`,
+- ~~**A superseded card can hide the finding that is holding its condition**~~ — **fixed in the LP-937
+  follow-up**: findings are hidden on replaced rows only (`replaced`, set by the server), and the Next
+  step skips only those. Found by the LP-937 review; originally: `_settle` holds a condition on an open finding carried by any row that `counts_as_evidence`,
   which includes a statement whose only failed check is "Enough for closing"; LP-937 supersedes that
   same row, and the sheet renders none of a superseded row's findings. So an unexplained deposit on the
   earlier statement holds the condition at Waiting with no way to answer it, while the list still says
@@ -553,7 +558,7 @@ and record it. Each ticket keeps its own table. These are the ones she may want 
 | [LP-925](../tickets/LP-925.md) | A Ready prior-to-funding condition | It goes in the package (S3-10 packages 0006); the ones not yet ready go in the info line |
 | [LP-925](../tickets/LP-925.md) | Lender settings | Their own admin routes, not the lender's PATCH, so saving them cannot touch other lender fields |
 | Stage 3B acceptance | A rejected statement | Is not evidence (`counts_as_evidence`); an answer to a deposit reaches every copy of it on the condition |
-| Stage 3B acceptance, [LP-937](../tickets/LP-937.md) | A superseded failed check | **Decided by the owner, 2026-09-29, and built (LP-937):** once a passing document has done the item, earlier failures for it stop counting and stop showing in the Next step; they stay in the history and on the sheet as "Replaced by <document>". A statement that failed only the funds total on its own reads "Enough for closing together with <document>", because it is still evidence. The first reading ("left as it is") is superseded |
+| Stage 3B acceptance, [LP-937](../tickets/LP-937.md) | A superseded failed check | **Decided by the owner, 2026-09-29, and built (LP-937):** once a passing document has done the item, earlier failures for it stop counting and stop showing in the Next step; they stay in the history and on the sheet as "Replaced by <document>". A statement that failed only the funds total on its own is still evidence: it reads "Still evidence — enough for closing was met by <document>", and its findings stay on the sheet, answerable, because they can still hold the condition (LP-937 follow-up; the first wording, "together with", was untrue for two statements of one account). The first reading ("left as it is") is superseded |
 
 ## Stage 3 — screen deviations (for the product owner to redraw)
 

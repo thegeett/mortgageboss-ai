@@ -53,7 +53,8 @@ function EvidenceCard({
   const failed = evidence.checks.filter((check) => check.result === "failed");
   const itemFailures = failed.filter((check) => check.check !== "no_large_deposit");
   // LP-937 — a later document did this item. The card stays, as the record of what arrived and what
-  // its checks found; it offers nothing to act on, because the answer belongs on the document that did.
+  // its checks found. Its failed checks offer nothing to act on; its findings stay unless it was
+  // replaced outright, because a statement that is still evidence can still be held by its deposit.
   const superseded = evidence.superseded;
   return (
     <div className={cn("flex flex-col gap-3", superseded && "opacity-70")}>
@@ -99,7 +100,9 @@ function EvidenceCard({
         />
       ) : null}
 
-      {(superseded ? [] : evidence.findings).map((finding, index) => (
+      {/* Only a REPLACED row's findings go: a superseded row that is still evidence can hold the
+          condition by its deposit, and that must stay on screen and answerable (LP-937 review). */}
+      {(evidence.replaced ? [] : evidence.findings).map((finding, index) => (
         <FindingBox
           key={`${finding.date}-${finding.amount}`}
           fileId={fileId}

@@ -1198,6 +1198,9 @@ export interface ConditionEvidence {
   /** LP-937 — "Replaced by <document>" (or "Enough for closing together with <document>") once a
    *  passing document has done the item; the failure then no longer counts and `failed` is false. */
   superseded: string | null;
+  /** Superseded AND no longer evidence ("Replaced by …"): its findings hold nothing, so they are hidden
+   *  here and skipped by the Next step. A superseded row that is still evidence keeps them. */
+  replaced: boolean;
 }
 
 // --- Stage 3: the figures check (LP-924) ------------------------------------------------------- //

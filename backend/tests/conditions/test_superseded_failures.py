@@ -81,7 +81,12 @@ async def test_a_failure_stops_counting_once_a_passing_document_does_its_item(
 
     public = await evidence_public_for_file(db, loan_file_id=loan_file.id)
     (six,) = [c for c in public[conditions["6132"].id] if c.document_id == short.id]
-    assert (six.failed, six.superseded, six.reask) == (False, f"Replaced by {BOTH}", None)
+    assert (six.failed, six.superseded, six.reask, six.replaced) == (
+        False,
+        f"Replaced by {BOTH}",
+        None,
+        True,
+    )
     # The checks are shown as they were: the history of what arrived is not rewritten.
     assert [c.result for c in six.checks if c.check == "all_pages"] == ["failed"]
 
@@ -147,9 +152,13 @@ async def test_a_statement_short_on_its_own_is_completed_not_replaced(
     public = await evidence_public_for_file(db, loan_file_id=loan_file.id)
     (card,) = [c for c in public[conditions["7086"].id] if c.document_id == first.id]
     assert [c.check for c in card.checks if c.result == "failed"] == ["covers_required_funds"]
+    # Not "together with": one account, so August met the total by itself (`_verified` takes its latest
+    # balance). July is still evidence because the lender asked for two months (LP-937 review).
     assert card.superseded == (
-        "Enough for closing together with Capital One statement ··9912 · August 2026 · 6 pages"
+        "Still evidence — enough for closing was met by "
+        "Capital One statement ··9912 · August 2026 · 6 pages"
     )
+    assert card.replaced is False
     assert card.failed is False
     assert "7086" not in (await _failing(db, loan_file))[0]
 
@@ -192,3 +201,61 @@ async def test_a_done_item_takes_no_new_evidence(db_session: AsyncSession) -> No
     late = await add_statement(db, loan_file, august(pages_present=5), name="late.pdf")
     await check_document(db, document_id=late.id, today=TODAY)
     assert [e.document_id for e in await _evidence(db, conditions["6132"])] == [both.id]
+
+
+async def test_the_deposit_holding_the_condition_stays_on_the_sheet(
+    db_session: AsyncSession,
+) -> None:
+    """THE LP-937 REVIEW'S FINDING, from its reproduction. July is short on its own and carries a $4,000.00
+    deposit; August meets the total by itself and is clean. July is superseded (its only failure is
+    the funds total) but is still evidence, so its open deposit holds 7086. That deposit must stay on
+    the sheet and answerable: `replaced` is false, and only a replaced row's findings are hidden."""
+    from datetime import date
+    from decimal import Decimal
+
+    from app.ai.extraction.bank_statement import Transaction
+    from app.models.condition import ConditionPrepStatus
+    from tests.conditions.statement_fixture import AUGUST, JULY
+
+    db = db_session
+    loan_file, conditions, actor = await _asked(db)
+    await _drop_other_accounts(db, conditions["7086"], actor)
+    deposit = Transaction(
+        date=date(2026, 7, 21),
+        description="Mobile Deposit",
+        amount=Decimal("4000.00"),
+        transaction_type="deposit",
+    )
+    first = await add_statement(db, loan_file, july(transactions=[*JULY, deposit]), name="july.pdf")
+    await check_document(db, document_id=first.id, today=TODAY)
+    clean = [t for t in AUGUST if t.description != "Mobile Deposit"]
+    second = await add_statement(db, loan_file, august(transactions=clean), name="august.pdf")
+    await check_document(db, document_id=second.id, today=TODAY)
+    # The premise: the condition is held, by July's deposit.
+    assert conditions["7086"].prep_status is ConditionPrepStatus.WAITING
+
+    public = await evidence_public_for_file(db, loan_file_id=loan_file.id)
+    (card,) = [c for c in public[conditions["7086"].id] if c.document_id == first.id]
+    assert card.superseded is not None and card.replaced is False
+    # What the sheet renders (evidence-section hides findings on replaced rows only).
+    shown = [
+        f
+        for c in public[conditions["7086"].id]
+        if not c.replaced
+        for f in c.findings
+        if f.status == "open" and f.needed
+    ]
+    assert [(f.date, f.amount) for f in shown] == [(date(2026, 7, 21), Decimal("4000.00"))]
+
+    # And answering it there releases the condition.
+    (row,) = [e for e in await _evidence(db, conditions["7086"]) if e.document_id == first.id]
+    await condition_evidence.answer_finding(
+        db,
+        condition=conditions["7086"],
+        evidence_id=row.id,
+        index=0,
+        answer="explained",
+        reason="Gift from a relative",
+        actor_user_id=actor,
+    )
+    assert conditions["7086"].prep_status is ConditionPrepStatus.READY
