@@ -279,7 +279,7 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-922 Asking people (drafts only) | REVIEWED | `29c74a7d` + follow-up `35a558f8` | the commits titled `LP-922 review:` and `LP-922 follow-up review:` | S3-04, S3-05, S3-06 shot and walked by the reviewer; D7 and D8 recorded | 2 reviews: a pre-existing flaky test recorded; the polish fact-check could not see a swapped pair, now caught |
 | LP-923 Evidence arrives and is checked | REVIEWED | `d2a6f43a` | the commit titled `LP-923 review:` | S3-07, S3-08, S3-12 shot and walked by the reviewer; S3-08 matches every line, S3-12 confirms Failed a check 3 | review found 2, fixed: LP-934's D1 still said 2; the per-item open-finding guard had no test |
 | LP-924 The figures check | REVIEWED | `2f848c5f` + follow-up `e7afa680` | the commits titled `LP-924 review:` and `LP-924 follow-up review:` | S3-09 shot and walked by the reviewer: matches every line | review found 1 (Apply ignored the baseline she saw); the builder fixed it and the fix is verified, including that it does not over-refuse. STOP AND ASK 2 open on the 45% reading |
-| LP-925 Package, submit, lender settings | AWAITING_REVIEW | `b415c136` | | S3-10, S3-11 shot: match their Must-match lines with D10 (pages/order from the fixture) and D11 ("Seen" 0 files in the seed) | then the Stage 3B acceptance test |
+| LP-925 Package, submit, lender settings | REVIEWED | `b415c136` | the commit titled `LP-925 review:` | S3-10 and S3-11 shot and walked by the reviewer: both match, with D10 and D11 | no defects; the ungated lender-settings routes judged correct; a note-check boundary recorded |
 | LP-935 Stage 3 close | PENDING | | | every screen | |
 
 ## Stage 3A — acceptance (build prompt §6)
@@ -360,8 +360,10 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
 
 - `backend/tests/ai/test_provider_selection_b1.py::test_a_sonnet_reasoning_id_cannot_survive_boot` —
   this machine's `backend/.env` sets its own `ANTHROPIC_MODEL_*` values, so the test's premise fails here.
-- `frontend/components/file/conditions/conditions-screens.test.tsx` › "offers a way out once the round
-  is stranded" — fixture on the threshold (Stage 2 follow-ups).
+- ~~`conditions-screens.test.tsx` › "offers a way out once the round is stranded"~~ — **FIXED in
+  LP-925**: the fixture was exactly 600,000 ms old against a strict `>`, now eleven minutes. Confirmed
+  by the LP-925 review: 15/15 three times at file scope, where it failed 4/4 before; the frontend suite
+  is fully green for the first time this stage.
 - `backend/tests/services/test_loan_file_ids.py::test_inbox_token_is_independent_of_display_id` —
   **randomised, and it fails about once in a thousand runs** (measured by the LP-922 review: 2 trips in
   2000 simulated runs, 0.100%). It draws 1000 display ids and asserts the 4-character code is not a
