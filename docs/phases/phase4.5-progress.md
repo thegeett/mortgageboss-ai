@@ -279,7 +279,7 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-922 Asking people (drafts only) | REVIEWED | `29c74a7d` + follow-up `35a558f8` | the commits titled `LP-922 review:` and `LP-922 follow-up review:` | S3-04, S3-05, S3-06 shot and walked by the reviewer; D7 and D8 recorded | 2 reviews: a pre-existing flaky test recorded; the polish fact-check could not see a swapped pair, now caught |
 | LP-923 Evidence arrives and is checked | REVIEWED | `d2a6f43a` | the commit titled `LP-923 review:` | S3-07, S3-08, S3-12 shot and walked by the reviewer; S3-08 matches every line, S3-12 confirms Failed a check 3 | review found 2, fixed: LP-934's D1 still said 2; the per-item open-finding guard had no test |
 | LP-924 The figures check | REVIEWED | `2f848c5f` + follow-up `e7afa680` | the commits titled `LP-924 review:` and `LP-924 follow-up review:` | S3-09 shot and walked by the reviewer: matches every line | review found 1 (Apply ignored the baseline she saw); the builder fixed it and the fix is verified, including that it does not over-refuse. STOP AND ASK 2 open on the 45% reading |
-| LP-925 Package, submit, lender settings | AWAITING_REVIEW | (this commit) | | S3-10, S3-11 shot: match their Must-match lines with D10 (pages/order from the fixture) and D11 ("Seen" 0 files in the seed) | then the Stage 3B acceptance test |
+| LP-925 Package, submit, lender settings | AWAITING_REVIEW | `b415c136` | | S3-10, S3-11 shot: match their Must-match lines with D10 (pages/order from the fixture) and D11 ("Seen" 0 files in the seed) | then the Stage 3B acceptance test |
 | LP-935 Stage 3 close | PENDING | | | every screen | |
 
 ## Stage 3A — acceptance (build prompt §6)
