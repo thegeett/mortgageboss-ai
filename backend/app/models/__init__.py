@@ -35,6 +35,7 @@ from app.models.condition import (
 )
 from app.models.condition_draft import ConditionDraft, DraftRecipient
 from app.models.condition_event import ConditionEvent, ConditionEventKind
+from app.models.condition_evidence import ConditionEvidence, EvidenceStatus
 from app.models.condition_item import ConditionItem
 from app.models.condition_round import (
     ConditionRound,
@@ -157,6 +158,7 @@ __all__ = [
     "ConditionDraft",
     "ConditionEvent",
     "ConditionEventKind",
+    "ConditionEvidence",
     "ConditionItem",
     "ConditionLenderStatus",
     "ConditionOrigin",
@@ -181,6 +183,7 @@ __all__ = [
     "EncryptedString",
     "EvaluationOutcome",
     "EvidenceEvent",
+    "EvidenceStatus",
     "Extraction",
     "ExtractionStatus",
     "FieldReview",

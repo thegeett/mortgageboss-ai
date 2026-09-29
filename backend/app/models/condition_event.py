@@ -130,6 +130,11 @@ class ConditionEventKind(StrEnum):
     CONDITION_DRAFTED = "condition_drafted"
     #: LP-922 follow-up — she used the AI's polish of a draft (detail: warnings accepted; no text).
     CONDITION_DRAFT_POLISHED = "condition_draft_polished"
+    #: LP-923 — evidence arrived and was checked by code (detail: document id, results counted — no
+    #: figures); she accepted a failed check with a reason; she answered a finding (asked / explained).
+    CONDITION_EVIDENCE_CHECKED = "condition_evidence_checked"
+    CONDITION_EVIDENCE_ACCEPTED = "condition_evidence_accepted"
+    CONDITION_FINDING_ANSWERED = "condition_finding_answered"
     #: LP-915. An imported round was switched between "full list" and "just some" (A7), which is what
     #: makes a comparison runnable — or withdraws its unconfirmed suggestions.
     ROUND_COMPLETENESS_CHANGED = "round_completeness_changed"

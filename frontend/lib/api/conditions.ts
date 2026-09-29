@@ -285,6 +285,8 @@ export interface ConditionListParams {
   origin?: ConditionOrigin;
   /** LP-921 — an open step of these options (S3-12's "Your tasks" is `["i_will_do_it"]`). */
   next_step?: PlanOption[];
+  /** LP-923 — `failed`: a failed, unaccepted evidence check (S3-12's "Failed a check"). */
+  check?: "failed";
   q?: string;
   sort?: ConditionSort;
 }
@@ -990,6 +992,68 @@ export function useApplyPolish(fileId: string) {
         await apiClient.put<ConditionDraft>(`${draftsPath(fileId)}/${draftId}/body`, {
           body_html,
           warnings_accepted,
+        })
+      ).data,
+    onSuccess: () => invalidateDrafts(queryClient, fileId),
+  });
+}
+
+// --- LP-923: her answers to what the evidence check found ------------------------------------- //
+
+function evidencePath(conditionId: string, evidenceId: string) {
+  return `${conditionPath(conditionId)}/evidence/${evidenceId}`;
+}
+
+/** "Accept anyway…": needs a reason, kept in the history. */
+export function useAcceptEvidence(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      conditionId,
+      evidenceId,
+      reason,
+    }: { conditionId: string; evidenceId: string; reason: string }) =>
+      (
+        await apiClient.post<Condition>(`${evidencePath(conditionId, evidenceId)}/accept`, {
+          reason,
+        })
+      ).data,
+    onSuccess: () => invalidateDrafts(queryClient, fileId),
+  });
+}
+
+/** "Add 'please send page 6' to the borrower email". */
+export function useReaskEvidence(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ conditionId, evidenceId }: { conditionId: string; evidenceId: string }) =>
+      (await apiClient.post<Condition>(`${evidencePath(conditionId, evidenceId)}/reask`)).data,
+    onSuccess: () => invalidateDrafts(queryClient, fileId),
+  });
+}
+
+/** S3-08: "Ask the borrower to explain it" or "It's already explained…". */
+export function useAnswerFinding(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      conditionId,
+      evidenceId,
+      index,
+      answer,
+      reason,
+    }: {
+      conditionId: string;
+      evidenceId: string;
+      index: number;
+      answer: "ask" | "explained";
+      reason?: string;
+    }) =>
+      (
+        await apiClient.post<Condition>(`${evidencePath(conditionId, evidenceId)}/finding`, {
+          index,
+          answer,
+          reason,
         })
       ).data,
     onSuccess: () => invalidateDrafts(queryClient, fileId),

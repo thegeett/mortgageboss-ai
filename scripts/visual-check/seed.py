@@ -72,7 +72,6 @@ sys.path.insert(0, str(_BACKEND))
 from app.core.database import async_session_maker  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.models import Company, User, UserRole  # noqa: E402
-from app.models.user import MailClient  # noqa: E402
 from app.models.activity_log import (  # noqa: E402
     ActivityLog,
     ActivityType,
@@ -89,6 +88,7 @@ from app.models.lender import Lender, LoanProgram  # noqa: E402
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose  # noqa: E402
 from app.models.property import OccupancyType, Property, PropertyType  # noqa: E402
 from app.models.stated_financials import StatedIncomeItem, StatedLiability  # noqa: E402
+from app.models.user import MailClient  # noqa: E402
 from app.schemas.dti import DtiOverrideInput  # noqa: E402
 from app.scripts.seed_lender_codes import seed_lender_codes  # noqa: E402
 from app.services.condition_import import import_round  # noqa: E402
@@ -526,15 +526,89 @@ async def mark_round_sent(db: AsyncSession, loan_file: LoanFile, actor: User) ->
     )
 
 
-async def state_s3_12(db: AsyncSession) -> Shot:
-    """The list on 09/02, the plan confirmed and the round's four emails marked sent on 08/28.
+async def statements_arrive(
+    db: AsyncSession, loan_file: LoanFile, actor: User, *, complete: bool
+) -> None:
+    """LP-923: the borrower's statements arrive through the upload link on 09/02 at 9:14 AM.
 
-    LP-923 adds what arrived on 09/02 (6132's failed check, 7086's deposit): not here yet.
+    July has been in the file since 08/20 (a processor upload, before the plan — not re-checked).
+    `complete=False` is S3-07 / S3-12's upload: August alone, pages 1-5 of 6 (LP-934 M1).
+    `complete=True` is S3-08's: July and August together, 12 pages.
     """
+    from app.services.condition_evidence import check_document
+    from tests.conditions.statement_fixture import add_statement, august, july, july_and_august
+
+    earlier = await add_statement(db, loan_file, july(), name="july.pdf", via_link=False)
+    arrived = await add_statement(
+        db,
+        loan_file,
+        july_and_august() if complete else august(pages_present=5),
+        name="statements.pdf",
+    )
+    await db.execute(
+        update(Document).where(Document.id == earlier.id).values(created_at=et(8, 20, 11, 5))
+    )
+    await db.execute(
+        update(Document).where(Document.id == arrived.id).values(created_at=et(9, 2, 9, 14))
+    )
+    await check_document(db, document_id=arrived.id, today=date(2026, 9, 2))
+    await _stamp_events_since(db, loan_file, et(9, 2, 9, 14), after=et(8, 28, 17, 3))
+
+
+async def state_s3_07(db: AsyncSession) -> Shot:
+    """6132's sheet on 09/02: the August statement arrived with page 6 missing."""
     loan_file, user = await base(db)
     await read(db, loan_file)
     await confirm_plan(db, loan_file, user)
     await mark_round_sent(db, loan_file, user)
+    await statements_arrive(db, loan_file, user, complete=False)
+    return Shot(path=_conditions_tab(), now=et(9, 2, 9, 30), clicks=["6132"])
+
+
+async def state_s3_08(db: AsyncSession) -> Shot:
+    """7086's sheet on 09/02: both months arrived, 12 pages, with the $4,000.00 mobile deposit."""
+    loan_file, user = await base(db)
+    await read(db, loan_file)
+    await confirm_plan(db, loan_file, user)
+    await mark_round_sent(db, loan_file, user)
+    await statements_arrive(db, loan_file, user, complete=True)
+    return Shot(path=_conditions_tab(), now=et(9, 2, 9, 30), clicks=["7086"])
+
+
+async def state_s3_12(db: AsyncSession) -> Shot:
+    """The list on 09/02: the round's four emails sent 08/28, the 5-page August statement checked
+    (6132, 7086 and 6637's clearance fail "All pages", D1/D2), and the deposit explanation asked."""
+    from app.models.condition_evidence import ConditionEvidence
+    from app.services.condition_evidence import answer_finding
+
+    loan_file, user = await base(db)
+    await read(db, loan_file)
+    await confirm_plan(db, loan_file, user)
+    await mark_round_sent(db, loan_file, user)
+    await statements_arrive(db, loan_file, user, complete=False)
+    seven = await db.scalar(
+        select(Condition).where(
+            Condition.loan_file_id == loan_file.id, Condition.lender_code == "7086"
+        )
+    )
+    assert seven is not None
+    rows = (
+        await db.execute(
+            select(ConditionEvidence).where(ConditionEvidence.condition_id == seven.id)
+        )
+    ).scalars()
+    for row in rows:
+        if row.findings:
+            await answer_finding(
+                db,
+                condition=seven,
+                evidence_id=row.id,
+                index=0,
+                answer="ask",
+                reason=None,
+                actor_user_id=user.id,
+            )
+    await _stamp_events_since(db, loan_file, et(9, 2, 9, 20), after=et(9, 2, 9, 15))
     return Shot(path=_conditions_tab(), now=et(9, 2, 9, 30))
 
 
@@ -574,8 +648,8 @@ STATES: dict[str, Callable[[AsyncSession], Awaitable[Shot]]] = {
     "S3-04": state_s3_04,
     "S3-05": state_s3_05,
     "S3-06": state_s3_06,
-    "S3-07": _later("LP-923"),
-    "S3-08": _later("LP-923"),
+    "S3-07": state_s3_07,
+    "S3-08": state_s3_08,
     "S3-09": _later("LP-924"),
     "S3-10": _later("LP-925"),
     "S3-11": _later("LP-925"),

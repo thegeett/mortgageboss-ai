@@ -16660,3 +16660,39 @@ by AI.
 - Phase 4's own polish (refuse-on-invented-fact, gated by the setting) is unchanged.
 
 *Status.* Accepted (LP-922 follow-up).
+
+## ADR-414
+
+**A condition's evidence is linked and checked by code in the per-file needs update; the large deposit is
+a finding, not a check; only her answer or a fully passing document moves the condition to Ready.**
+
+*Context.* Plan §5 LP-923 asks for arriving documents to be linked to condition items, checked (pages,
+account, borrower, lender dates, period), the file's verification re-run for new findings such as a large
+deposit (B3-4.2-02), and the condition moved to Ready when everything passes. Rule AS-1 already covers
+large deposits for the file. It depends on AI-resolved transaction tags and the MISMO stated income, while
+S3-08's threshold is 50% of the letter's Verified Income.
+
+*Decision (LP-923).*
+- **`condition_evidence`**, one row per (item, document), holding each check's result
+  (passed / failed / not_run, with a reason) and the document's findings. The step runs inside
+  `tasks/needs._run_needs_update`, right after the needs engine links the document, in a savepoint; a
+  failure there never stops the needs passes.
+- **Linking** is by the item's document types and statement month. A statement for the wrong account is
+  linked anyway so it can be rejected with the reason. "Any other account" items take only statements for
+  accounts their siblings do not name.
+- **Checks read the current extraction and the letter only.** A check without its inputs is not run, never
+  passed.
+- **The large deposit is a finding.** It is computed by code against the letter's Verified Income, is
+  "needed" when assets without it fall short of the required funds, and never counts as "Failed a check"
+  (LP-934 on S3-08). Asking about it is not answering it; only "It's already explained…", with a reason,
+  closes it. AS-1 continues to run for the file.
+- **Ready** comes from evidence when every live item is done and no finding is open, from To do or Waiting,
+  as `condition_prep_moved` with `by: "evidence"`. "Accept anyway…" (with a reason) completes an item but
+  never answers a finding.
+- **Nothing is drafted by itself.** The re-ask and the explanation request are items added when she
+  presses S3-07's and S3-08's buttons, and they reach the borrower's unsent draft through LP-922's
+  accumulation.
+- **Upload-link documents are processed.** LP-815 created them and queued nothing; they are now queued
+  like any upload.
+
+*Status.* Accepted (LP-923).

@@ -121,15 +121,27 @@ function capitalise(word: string): string {
   return word.charAt(0).toUpperCase() + word.slice(1);
 }
 
-export type NextStepIcon = "lender" | "info" | "question" | "mail" | "task" | "waits" | "file";
+export type NextStepIcon =
+  | "lender"
+  | "info"
+  | "question"
+  | "mail"
+  | "task"
+  | "waits"
+  | "file"
+  | "failed"
+  | "finding";
 
 export interface NextStepToken {
   icon: NextStepIcon;
   text: string;
   /** LP-922 — the draft this token opens, when it is about an email. */
   draftId?: string;
-  /** `action` is ours to do or already under way (primary); `quiet` is watching or waiting (muted). */
-  tone: "action" | "quiet";
+  /**
+   * `action` is ours to do or already under way (primary); `quiet` is watching or waiting (muted);
+   * `blocking` is a failed check (red, S3-12); `attention` is a finding waiting on an answer.
+   */
+  tone: "action" | "quiet" | "blocking" | "attention";
 }
 
 /**
@@ -141,6 +153,32 @@ export interface NextStepToken {
  */
 export function nextStepToken(condition: Condition): NextStepToken | null {
   const step = condition.next_step;
+  // LP-923 — WHAT ARRIVED OUTRANKS WHAT WAS ASKED. A failed check is the next thing she must act on
+  // ("Evidence failed a check — page 6", S3-12), then a deposit waiting on an explanation.
+  const failed = (condition.evidence ?? []).find((evidence) => evidence.failed);
+  if (failed) {
+    const what = failed.reask ?? failed.checks.find((c) => c.result === "failed")?.label ?? "";
+    return {
+      icon: "failed",
+      text: `Evidence failed a check${what ? ` — ${what}` : ""}`,
+      tone: "blocking",
+    };
+  }
+  const finding = (condition.evidence ?? [])
+    .flatMap((evidence) => evidence.findings)
+    .find((f) => f.needed && f.status !== "explained");
+  if (finding) {
+    return {
+      icon: "finding",
+      text:
+        finding.status === "asked" ? "Deposit explanation asked" : "Large deposit needs sourcing",
+      tone: "attention",
+    };
+  }
+  // Its evidence passed and it is Ready: say what made it so, rather than a blank cell.
+  if (condition.prep_status === "ready" && (condition.evidence ?? []).length > 0) {
+    return { icon: "file", text: "Evidence checked", tone: "action" };
+  }
   if (step === "lender_doing_it")
     return { icon: "lender", text: "Lender is doing it", tone: "quiet" };
   if (step === "information_only") return { icon: "info", text: "Information only", tone: "quiet" };

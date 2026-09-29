@@ -12,7 +12,7 @@ import { ConditionsSummaryBar } from "./conditions-summary-bar";
 
 afterEach(cleanup);
 
-/** S3-12's numbers (LP-934's summary row), less "Failed a check", which arrives with LP-923. */
+/** S3-12's numbers (LP-934's summary row). "Failed a check" is D1's 2 (LP-934 M1), here 1 as drawn. */
 const S3_12: ConditionSummary = {
   total: 11,
   open: 11,
@@ -30,6 +30,7 @@ const S3_12: ConditionSummary = {
   waiting_on_others: 7,
   your_tasks: 2,
   ready_to_send: 1,
+  failed_check: 1,
   has_plan: true,
   latest_round: null,
 };
@@ -52,6 +53,7 @@ describe("ConditionsSummaryBar", () => {
       "Waiting on others",
       "Your tasks",
       "Ready to send",
+      "Failed a check",
       "Prior to docs open",
       "Prior to funding open",
     ]);
@@ -80,6 +82,7 @@ describe("ConditionsSummaryBar", () => {
     ["Waiting on others", { prepStatus: ["waiting"] }],
     ["Your tasks", { step: ["i_will_do_it"] }],
     ["Ready to send", { prepStatus: ["ready"] }],
+    ["Failed a check", { check: "failed" }],
   ] as const)("%s sets its own filter on open conditions", (label, want) => {
     const onFilter = vi.fn<(next: ConditionListUrlState) => void>();
     render(

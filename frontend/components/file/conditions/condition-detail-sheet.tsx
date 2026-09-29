@@ -1,5 +1,6 @@
 "use client";
 
+import { EvidenceSection } from "@/components/file/conditions/evidence-section";
 import { ReadingBox, ReadingItems } from "@/components/file/conditions/reading-box";
 import { StatusToken } from "@/components/status-token";
 import { Button } from "@/components/ui/button";
@@ -190,6 +191,7 @@ export function ConditionDetailSheet({
   onSetNextStep,
   onMarkItemDone,
   onOpenDraft,
+  fileId,
 }: {
   /** The list's rows, in the list's order — the filter and sort come with them. */
   conditions: Condition[];
@@ -221,6 +223,8 @@ export function ConditionDetailSheet({
   onMarkItemDone?: (condition: Condition, item: ConditionItem, done: boolean) => void;
   /** LP-922 — opens the draft an item is in. */
   onOpenDraft?: (draftId: string) => void;
+  /** LP-923 — the file, for the evidence section's actions and its Open link. */
+  fileId?: string;
 }) {
   const index = conditions.findIndex((row) => row.id === openId);
   const row = index >= 0 ? conditions[index] : undefined;
@@ -280,6 +284,7 @@ export function ConditionDetailSheet({
             onSetNextStep={onSetNextStep}
             onMarkItemDone={onMarkItemDone}
             onOpenDraft={onOpenDraft}
+            fileId={fileId}
           />
         ) : null}
       </SheetContent>
@@ -304,6 +309,7 @@ function SheetBody({
   onSetNextStep,
   onMarkItemDone,
   onOpenDraft,
+  fileId,
   conditions,
 }: {
   row: Condition;
@@ -324,6 +330,7 @@ function SheetBody({
   onSetNextStep?: (condition: Condition, option: PlanOption | null) => void;
   onMarkItemDone?: (condition: Condition, item: ConditionItem, done: boolean) => void;
   onOpenDraft?: (draftId: string) => void;
+  fileId?: string;
 }) {
   const detail = useCondition(row.id);
   const events = useConditionEvents(row.id);
@@ -368,8 +375,13 @@ function SheetBody({
           <SheetTitle className="flex min-w-0 items-baseline gap-2">
             <span className="font-mono text-sm">{condition.lender_code ?? "No code"}</span>
             <span className="truncate text-xs font-normal text-muted-foreground">
-              {[condition.lender_category, condition.bucket_heading].filter(Boolean).join(" · ") ||
-                "No heading given"}
+              {/* "Assets · evidence arrived" once a document came in for it (S3-07, S3-08). */}
+              {[
+                condition.lender_category,
+                condition.evidence.length > 0 ? "evidence arrived" : condition.bucket_heading,
+              ]
+                .filter(Boolean)
+                .join(" · ") || "No heading given"}
             </span>
           </SheetTitle>
           <div className="flex shrink-0 items-center gap-1">
@@ -438,6 +450,8 @@ function SheetBody({
             <OwnerCell hint={condition.effective_owner} source={condition.effective_owner_source} />
           </div>
         </section>
+
+        {fileId ? <EvidenceSection fileId={fileId} condition={condition} /> : null}
 
         <ReadingBox
           condition={condition}

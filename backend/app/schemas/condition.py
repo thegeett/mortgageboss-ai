@@ -772,6 +772,119 @@ class LibraryTypePublic(BaseModel):
         )
 
 
+class EvidenceCheckPublic(BaseModel):
+    """One check on one document (S3-07): passed, failed or not run, with a plain reason."""
+
+    check: str
+    label: str
+    result: Literal["passed", "failed", "not_run"]
+    reason: str
+
+
+class EvidenceFindingPublic(BaseModel):
+    """What the document itself showed (S3-08): a large deposit, with every figure computed by code."""
+
+    kind: str
+    citation: str | None = None
+    date: date_type | None = None
+    amount: Decimal
+    description: str
+    income: Decimal | None = None
+    threshold: Decimal | None = None
+    assets_without: Decimal | None = None
+    required: Decimal | None = None
+    needed: bool
+    status: Literal["open", "asked", "explained"]
+    reason: str | None = None
+
+
+class ConditionEvidencePublic(BaseModel):
+    """A document that arrived for one of the condition's items, and what code found (LP-923)."""
+
+    id: UUID
+    item_id: UUID
+    document_id: UUID
+    #: "Capital One statement ··9912 · August 2026 · 5 pages".
+    title: str
+    arrived_at: datetime
+    #: Arrived through the borrower upload link (S3-07's "Arrived through the borrower upload link").
+    via_upload_link: bool
+    status: Literal["checked", "accepted"]
+    checks: list[EvidenceCheckPublic]
+    findings: list[EvidenceFindingPublic]
+    #: True while a check has failed and she has not accepted it.
+    failed: bool
+    accepted_reason: str | None = None
+    #: The re-ask S3-07's button names: "please send page 6". Null when nothing failed.
+    reask: str | None = None
+
+    @classmethod
+    def build(cls, row: Any, *, document: Any, statement: Any) -> "ConditionEvidencePublic":
+        from app.models.condition_vocabulary import EvidenceCheck
+        from app.models.document import UploadSource
+        from app.services.condition_evidence import (
+            FAILED,
+            LABEL,
+            deposit_check,
+            document_title,
+            reask_name,
+        )
+
+        checks = [
+            EvidenceCheckPublic(
+                check=c["check"],
+                label=LABEL.get(c["check"], c["check"]),
+                result=c["result"],
+                reason=c.get("reason") or "",
+            )
+            for c in row.checks or []
+        ]
+        failed = [c for c in checks if c.result == FAILED]
+        # S3-08'S "No unexplained large deposit" ROW, DERIVED FROM THE FINDINGS on the evidence that
+        # proves funds to close. After `failed` on purpose: it is a finding, never a failed check.
+        if any(c.check == EvidenceCheck.COVERS_REQUIRED_FUNDS.value for c in checks):
+            row_ = deposit_check(row.findings or [])
+            checks.append(
+                EvidenceCheckPublic(
+                    check=row_["check"],
+                    label=LABEL[row_["check"]],
+                    result=row_["result"],  # type: ignore[arg-type]
+                    reason=row_["reason"],
+                )
+            )
+        accepted = row.status.value == "accepted"
+        reask = None
+        if failed and not accepted:
+            name = reask_name(failed[0].check, statement)
+            reask = name[0].lower() + name[1:]
+            if reask.startswith("page") and " of the " in reask:
+                reask = reask.split(" of the ", 1)[0]
+        return cls(
+            id=row.id,
+            item_id=row.item_id,
+            document_id=row.document_id,
+            title=document_title(document, statement),
+            arrived_at=document.created_at,
+            via_upload_link=document.upload_source is UploadSource.SECURE_LINK,
+            status=row.status.value,
+            checks=checks,
+            findings=[EvidenceFindingPublic.model_validate(f) for f in row.findings or []],
+            failed=bool(failed) and not accepted,
+            accepted_reason=row.accepted_reason,
+            reask=reask,
+        )
+
+
+class EvidenceAcceptRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class FindingAnswerRequest(BaseModel):
+    index: int = Field(ge=0, le=50)
+    answer: Literal["ask", "explained"]
+    reason: str | None = Field(default=None, max_length=1000)
+
+
 class DraftTailPublic(BaseModel):
     """LP-922 — a draft as a row's tail shows it: "In borrower email · draft", "· sent 08/28"."""
 
@@ -979,6 +1092,8 @@ class ConditionPublic(BaseModel):
     items: list[ConditionItemPublic] = Field(default_factory=list)
     #: LP-922 — the question to the underwriter on this condition (push back / ask the underwriter).
     question_draft: DraftTailPublic | None = None
+    #: LP-923 — the documents that arrived for its items, their checks and findings (S3-07, S3-08).
+    evidence: list[ConditionEvidencePublic] = Field(default_factory=list)
 
     @classmethod
     def from_model(
@@ -992,6 +1107,7 @@ class ConditionPublic(BaseModel):
         round_numbers: list[int] | None = None,
         items: list[ConditionItemPublic] | None = None,
         question_draft: DraftTailPublic | None = None,
+        evidence: list[ConditionEvidencePublic] | None = None,
     ) -> "ConditionPublic":
         """Build the public view.
 
@@ -1078,6 +1194,7 @@ class ConditionPublic(BaseModel):
             plan_reason=condition.plan_reason,
             items=items or [],
             question_draft=question_draft,
+            evidence=evidence or [],
         )
 
 
@@ -1392,6 +1509,8 @@ class ConditionSummaryPublic(BaseModel):
     waiting_on_others: int
     your_tasks: int
     ready_to_send: int
+    #: LP-923 (S3-12) — open conditions with a failed, unaccepted evidence check.
+    failed_check: int
     #: Whether any round of this file has a plan — the bar shows Stage 3's numbers only then.
     has_plan: bool
 

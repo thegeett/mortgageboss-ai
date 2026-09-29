@@ -63,6 +63,21 @@ def _no_reading_queued(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 
 @pytest.fixture(autouse=True)
+def _no_document_processing_queued(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """LP-923 queues processing for a document the borrower sends through the upload link.
+
+    The same reason as `_no_reading_queued`: without it every upload-link test pushed a real task into
+    whatever Redis the environment points at. Tests that assert on the enqueue set their own stub,
+    which runs after this and wins; this one records calls so a test can read them instead.
+    """
+    from app.tasks import document_processing
+
+    queued: list[str] = []
+    monkeypatch.setattr(document_processing.process_document, "delay", queued.append)
+    return queued
+
+
+@pytest.fixture(autouse=True)
 def _pin_ai_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     """Deterministic AI-provider baseline for the WHOLE suite.
 

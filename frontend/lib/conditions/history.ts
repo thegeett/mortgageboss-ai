@@ -211,6 +211,14 @@ export function conditionHistoryLine(
       return event.draft_recipient
         ? `The ${EMAIL_NAME[event.draft_recipient]} was polished by AI${by(event)}`
         : `A draft email was polished by AI${by(event)}`;
+    // LP-923. NO FIGURE, NO REASON: the detail carries counts, and her reason stays on the evidence
+    // row (the sheet shows it) rather than travelling in the history's allow-list.
+    case "condition_evidence_checked":
+      return "A document arrived and was checked by code";
+    case "condition_evidence_accepted":
+      return `A failed check was accepted${by(event)}`;
+    case "condition_finding_answered":
+      return `A finding on the evidence was answered${by(event)}`;
     case "condition_drafted":
       return event.draft_recipient
         ? `Added to the ${EMAIL_NAME[event.draft_recipient]}`

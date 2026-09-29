@@ -317,7 +317,10 @@ export type ConditionEventKind =
   | "condition_plan_changed"
   | "round_plan_confirmed"
   | "condition_drafted"
-  | "condition_draft_polished";
+  | "condition_draft_polished"
+  | "condition_evidence_checked"
+  | "condition_evidence_accepted"
+  | "condition_finding_answered";
 
 /**
  * One line of a round's history (S1-09).
@@ -582,6 +585,8 @@ export interface Condition {
   items: ConditionItem[];
   /** LP-922 — the question to the underwriter on this condition (push back / ask the underwriter). */
   question_draft: DraftTail | null;
+  /** LP-923 — the documents that arrived for its items, their checks and findings (S3-07, S3-08). */
+  evidence: ConditionEvidence[];
   /**
    * Every round this condition appeared on — the `R1 R2` chips.
    *
@@ -758,6 +763,8 @@ export interface ConditionSummary {
   waiting_on_others: number;
   your_tasks: number;
   ready_to_send: number;
+  /** LP-923 (S3-12): open conditions with a failed, unaccepted evidence check. */
+  failed_check: number;
   /** Whether any round of the file has a plan — the bar shows S3-12's numbers only then. */
   has_plan: boolean;
   /** The newest imported round, for the rail's "from round 2, printed 09/10". */
@@ -1143,4 +1150,49 @@ export interface DraftPolish {
   warnings: { kind: "dropped" | "added" | "items"; fact: string; sentence: string }[];
   /** Why there is no proposal, as a sentence. */
   refusal: string | null;
+}
+
+// --- Stage 3: evidence arrives and is checked (LP-923) ----------------------------------------- //
+
+export interface EvidenceCheckResult {
+  check: string;
+  /** "Right account", "All pages", "No unexplained large deposit". */
+  label: string;
+  result: "passed" | "failed" | "not_run";
+  /** "pages 1–5 of 6 — page 6 is missing". */
+  reason: string;
+}
+
+/** A large deposit (B3-4.2-02) with every figure computed by code. Money as Decimal strings. */
+export interface EvidenceFinding {
+  kind: string;
+  citation: string | null;
+  date: string | null;
+  amount: string;
+  description: string;
+  income: string | null;
+  threshold: string | null;
+  assets_without: string | null;
+  required: string | null;
+  needed: boolean;
+  status: "open" | "asked" | "explained";
+  reason: string | null;
+}
+
+export interface ConditionEvidence {
+  id: string;
+  item_id: string;
+  document_id: string;
+  /** "Capital One statement ··9912 · August 2026 · 5 pages". */
+  title: string;
+  arrived_at: string;
+  via_upload_link: boolean;
+  status: "checked" | "accepted";
+  checks: EvidenceCheckResult[];
+  findings: EvidenceFinding[];
+  /** A check failed and she has not accepted it. */
+  failed: boolean;
+  accepted_reason: string | null;
+  /** What S3-07's button asks for: "page 6". */
+  reask: string | null;
 }

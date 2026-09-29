@@ -1,9 +1,10 @@
 "use client";
 
-import { type NextStepIcon, nextStepToken } from "@/lib/conditions/next-step";
+import { type NextStepIcon, type NextStepToken, nextStepToken } from "@/lib/conditions/next-step";
 import type { Condition } from "@/lib/types/conditions";
 import { cn } from "@/lib/utils";
 import {
+  CircleX,
   ClipboardList,
   Clock,
   FileCheck,
@@ -12,9 +13,19 @@ import {
   type LucideIcon,
   Mail,
   MessageSquare,
+  TriangleAlert,
 } from "lucide-react";
 
+const TONE: Record<NextStepToken["tone"], string> = {
+  action: "text-primary",
+  quiet: "text-muted-foreground",
+  blocking: "text-destructive",
+  attention: "text-warning",
+};
+
 const ICON: Record<NextStepIcon, LucideIcon> = {
+  failed: CircleX,
+  finding: TriangleAlert,
   lender: Landmark,
   info: Info,
   question: MessageSquare,
@@ -48,7 +59,7 @@ export function NextStepCell({
         onClick={() => onOpenDraft(draftId)}
         className={cn(
           "flex items-start gap-1.5 pt-0.5 text-left text-sm hover:underline",
-          token.tone === "action" ? "text-primary" : "text-muted-foreground",
+          TONE[token.tone],
         )}
       >
         <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -57,12 +68,7 @@ export function NextStepCell({
     );
   }
   return (
-    <span
-      className={cn(
-        "flex items-start gap-1.5 pt-0.5 text-sm",
-        token.tone === "action" ? "text-primary" : "text-muted-foreground",
-      )}
-    >
+    <span className={cn("flex items-start gap-1.5 pt-0.5 text-sm", TONE[token.tone])}>
       <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
       <span>{token.text}</span>
     </span>

@@ -231,3 +231,36 @@ describe("draft tails (LP-922)", () => {
     expect(tail([])).toBe("");
   });
 });
+
+describe("evidence tokens (LP-923)", () => {
+  it("a failed check comes first, red, naming what to ask for", () => {
+    const token = nextStepToken(
+      condition({
+        items: [item({ draft: { id: "d1", status: "sent", sent_on: "2026-08-28" } })],
+        evidence: [{ failed: true, reask: "page 6", checks: [], findings: [] }],
+      } as unknown as Partial<Condition>),
+    );
+    expect(token).toMatchObject({ text: "Evidence failed a check — page 6", tone: "blocking" });
+  });
+
+  it("a deposit asked about reads as asked", () => {
+    const token = nextStepToken(
+      condition({
+        evidence: [
+          { failed: false, reask: null, checks: [], findings: [{ needed: true, status: "asked" }] },
+        ],
+      } as unknown as Partial<Condition>),
+    );
+    expect(token?.text).toBe("Deposit explanation asked");
+  });
+});
+
+it("a condition its evidence made Ready says so", () => {
+  const token = nextStepToken(
+    condition({
+      prep_status: "ready",
+      evidence: [{ failed: false, reask: null, checks: [], findings: [] }],
+    } as unknown as Partial<Condition>),
+  );
+  expect(token?.text).toBe("Evidence checked");
+});

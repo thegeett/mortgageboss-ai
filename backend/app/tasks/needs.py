@@ -75,6 +75,16 @@ async def _run_needs_update(loan_file_id: str, document_id: str) -> None:
             logger.info("needs_update_document_missing", document_id=document_id)
             return
         await apply_document_to_needs(db, document)  # LP-68 deterministic match
+        # LP-923 — THE CONDITIONS' EVIDENCE, right after the need is linked: link the document to the
+        # condition items it answers and check it for each, by code. Its own failures are logged and
+        # never stop the needs passes, which a borrower's other requests depend on.
+        try:
+            from app.services.condition_evidence import check_document
+
+            async with db.begin_nested():
+                await check_document(db, document_id=document.id)
+        except Exception:
+            logger.exception("condition_evidence_failed", document_id=document_id)
         await apply_ai_needs_for_file_id(db, UUID(loan_file_id))  # LP-69 re-reason
         await consolidate_and_flag(db, loan_file_id=UUID(loan_file_id))  # LP-111 dedup
         # LP-631, LAST of the passes: the three before it ADD, and this one reads what they left

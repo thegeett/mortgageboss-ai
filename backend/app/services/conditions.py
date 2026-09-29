@@ -61,6 +61,7 @@ from app.models.condition import (
     OwnerHintSource,
 )
 from app.models.condition_event import ConditionEvent, ConditionEventKind
+from app.models.condition_evidence import ConditionEvidence, EvidenceStatus
 from app.models.condition_item import ConditionItem
 from app.models.condition_round import ConditionRound, ConditionRoundStatus
 from app.models.condition_vocabulary import ConditionItemStatus, PlanOption
@@ -419,6 +420,8 @@ class ConditionFilters:
     #: LP-921 — conditions with an OPEN step of these options: their own step, or an item with it that
     #: is neither done nor dropped. S3-12's "Your tasks" is `next_step=(i_will_do_it,)`.
     next_step: tuple[PlanOption, ...] = ()
+    #: LP-923 — only conditions with a failed, unaccepted evidence check (S3-12's "Failed a check").
+    failed_check: bool = False
     q: str | None = None
 
     def names(self) -> list[str]:
@@ -439,6 +442,7 @@ class ConditionFilters:
             "info_only": self.info_only is not None,
             "origin": self.origin is not None,
             "next_step": bool(self.next_step),
+            "failed_check": self.failed_check,
             "q": self.q is not None,
         }
         return sorted(name for name, was_set in present.items() if was_set)
@@ -461,6 +465,23 @@ def has_open_step(options: tuple[PlanOption, ...]) -> ColumnElement[bool]:
         .exists()
     )
     return or_(Condition.next_step.in_(options), item_has_it)
+
+
+def has_failed_check() -> ColumnElement[bool]:
+    """A checked (not accepted) evidence row on the condition with a failed check (LP-923).
+
+    THE FILTER'S AND THE COUNT'S ONE PREDICATE, as `has_open_step` is for "Your tasks": "Failed a
+    check 2" and the rows its click shows are the same SQL.
+    """
+    return (
+        select(ConditionEvidence.id)
+        .where(
+            ConditionEvidence.condition_id == Condition.id,
+            ConditionEvidence.status == EvidenceStatus.CHECKED,
+            ConditionEvidence.checks.contains([{"result": "failed"}]),
+        )
+        .exists()
+    )
 
 
 def _effective_owner_column() -> ColumnElement[OwnerHint]:
@@ -507,6 +528,8 @@ def _apply_filters(
         stmt = stmt.where(Condition.origin == filters.origin)
     if filters.next_step:
         stmt = stmt.where(has_open_step(filters.next_step))
+    if filters.failed_check:
+        stmt = stmt.where(has_failed_check())
     if filters.q:
         # AUTOESCAPED, so a processor searching for "50%" or "_" gets those characters rather than
         # wildcards. The value is never logged (ADR-405); `ConditionFilters.names()` is what a log
@@ -640,6 +663,7 @@ class ConditionSummary:
     waiting_on_others: int
     your_tasks: int
     ready_to_send: int
+    failed_check: int
     has_plan: bool
 
 
@@ -649,6 +673,7 @@ def summarise_conditions(
     pending_suggestions: int,
     task_ids: frozenset[UUID],
     has_plan: bool,
+    failed_ids: frozenset[UUID] = frozenset(),
 ) -> ConditionSummary:
     """Count one file's conditions. Pure, so a test can state the rows and read the numbers.
 
@@ -699,6 +724,7 @@ def summarise_conditions(
         # stays pure; intersected with open here as the filter intersects it with the lender's Open.
         your_tasks=sum(1 for condition in open_conditions if condition.id in task_ids),
         ready_to_send=by_prep_status.get(ConditionPrepStatus.READY.value, 0),
+        failed_check=sum(1 for condition in open_conditions if condition.id in failed_ids),
         has_plan=has_plan,
     )
 
@@ -731,6 +757,17 @@ async def condition_summary(db: AsyncSession, *, loan_file_id: UUID) -> Conditio
         pending_suggestions=await pending_suggestion_count(db, loan_file_id=loan_file_id),
         task_ids=frozenset(task_rows.scalars().all()),
         has_plan=planned.first() is not None,
+        failed_ids=frozenset(
+            (
+                await db.execute(
+                    select(Condition.id).where(
+                        Condition.loan_file_id == loan_file_id, has_failed_check()
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        ),
     )
 
 

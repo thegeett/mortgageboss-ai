@@ -16,7 +16,7 @@ scoped, so a round can only ever be opened on a file the caller's company owns.
 
 from collections.abc import Callable
 from datetime import UTC, date, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 import structlog
@@ -67,6 +67,7 @@ from app.schemas.condition import (
     ConditionDraftUpdate,
     ConditionEnrichResult,
     ConditionEventPublic,
+    ConditionEvidencePublic,
     ConditionImportResult,
     ConditionItemCreate,
     ConditionItemPublic,
@@ -84,6 +85,8 @@ from app.schemas.condition import (
     DraftPolishPublic,
     DraftTailPublic,
     DraftUsePolishRequest,
+    EvidenceAcceptRequest,
+    FindingAnswerRequest,
     LenderProcessingRequest,
     NextStepRequest,
     OwnerRequest,
@@ -96,7 +99,7 @@ from app.schemas.condition import (
     UnderwriterNotePublic,
     VerdictRequest,
 )
-from app.services import condition_drafts
+from app.services import condition_drafts, condition_evidence
 from app.services.condition_compare import (
     RoundComparisonRefused,
     confirm_probably_cleared,
@@ -110,6 +113,7 @@ from app.services.condition_drafts import (
     question_tails_for_file,
 )
 from app.services.condition_enrich import RoundNotEnrichable, enrich_round_with_pdf
+from app.services.condition_evidence import EvidenceRefused, evidence_public_for_file
 from app.services.condition_import import (
     RoundNotImportable,
     create_manual_condition,
@@ -598,6 +602,7 @@ def _condition_public(
     today: date,
     items: list[ConditionItemPublic] | None = None,
     question_draft: DraftTailPublic | None = None,
+    evidence: list[ConditionEvidencePublic] | None = None,
 ) -> ConditionPublic:
     """One condition as the wire sees it, with the SERVICE's rules supplying the derived fields.
 
@@ -619,6 +624,7 @@ def _condition_public(
         days_open=condition_days_open(condition, today=today),
         items=items,
         question_draft=question_draft,
+        evidence=evidence,
     )
 
 
@@ -656,6 +662,10 @@ async def list_file_conditions(
         list[PlanOption] | None,
         Query(description="An open step of these options, the condition's own or an item's"),
     ] = None,
+    check: Annotated[
+        Literal["failed"] | None,
+        Query(description="`failed`: a failed, unaccepted evidence check (S3-12)"),
+    ] = None,
     q: Annotated[str | None, Query(description="Text search in the wording and the code")] = None,
     sort: Annotated[ConditionSort, Query()] = ConditionSort.SHEET,
 ) -> list[ConditionPublic]:
@@ -691,6 +701,7 @@ async def list_file_conditions(
         info_only=info_only,
         origin=origin,
         next_step=tuple(next_step or ()),
+        failed_check=check == "failed",
         q=q,
     )
     numbers, _ = await appearances_for_file(db, loan_file_id=loan_file.id)
@@ -729,6 +740,7 @@ async def list_file_conditions(
     # LP-920 — every condition's items in ONE query for the whole file, not one per row.
     items = await items_public_for_file(db, loan_file_id=loan_file.id)
     questions = await question_tails_for_file(db, loan_file_id=loan_file.id)
+    evidence = await evidence_public_for_file(db, loan_file_id=loan_file.id)
     return [
         _condition_public(
             condition,
@@ -736,6 +748,7 @@ async def list_file_conditions(
             today=today,
             items=items.get(condition.id, []),
             question_draft=questions.get(condition.id),
+            evidence=evidence.get(condition.id, []),
         )
         for condition in conditions
     ]
@@ -776,6 +789,7 @@ async def get_conditions_summary(
         waiting_on_others=summary.waiting_on_others,
         your_tasks=summary.your_tasks,
         ready_to_send=summary.ready_to_send,
+        failed_check=summary.failed_check,
         has_plan=summary.has_plan,
         latest_round=(await _round_card(db, latest) if latest is not None else None),
     )
@@ -1258,6 +1272,9 @@ async def add_condition_by_hand(
         question_draft=(await question_tails_for_file(db, loan_file_id=condition.loan_file_id)).get(
             condition.id
         ),
+        evidence=(await evidence_public_for_file(db, loan_file_id=condition.loan_file_id)).get(
+            condition.id, []
+        ),
     )
 
 
@@ -1304,6 +1321,9 @@ async def _condition_response(
         ),
         question_draft=(await question_tails_for_file(db, loan_file_id=condition.loan_file_id)).get(
             condition.id
+        ),
+        evidence=(await evidence_public_for_file(db, loan_file_id=condition.loan_file_id)).get(
+            condition.id, []
         ),
     )
 
@@ -1616,6 +1636,9 @@ async def get_condition(condition: ScopedCondition, db: DbSession) -> ConditionD
         question_draft=(await question_tails_for_file(db, loan_file_id=condition.loan_file_id)).get(
             condition.id
         ),
+        evidence=(await evidence_public_for_file(db, loan_file_id=condition.loan_file_id)).get(
+            condition.id, []
+        ),
     )
     # BUILT FROM THE ROW'S OWN PROJECTION rather than assembled a second time. `ConditionDetailPublic`
     # extends `ConditionPublic` precisely so the sheet cannot carry a different set of fields than the
@@ -1851,3 +1874,74 @@ async def use_condition_draft_polish(
     await db.commit()
     view = await draft_view(db, loan_file=loan_file, draft=draft, actor_user_id=current_user.id)
     return ConditionDraftPublic.model_validate(view)
+
+
+# --------------------------------------------------------------------------- #
+# LP-923 — her answers to what the evidence check found (S3-07, S3-08)
+# --------------------------------------------------------------------------- #
+
+
+@conditions_by_id_router.post(
+    "/{condition_id}/evidence/{evidence_id}/accept", response_model=ConditionPublic
+)
+async def accept_condition_evidence(
+    condition: ScopedCondition,
+    evidence_id: UUID,
+    payload: EvidenceAcceptRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionPublic:
+    """ "Accept anyway…": a failed check accepted with a reason, kept in the history."""
+    try:
+        await condition_evidence.accept_anyway(
+            db,
+            condition=condition,
+            evidence_id=evidence_id,
+            reason=payload.reason,
+            actor_user_id=current_user.id,
+        )
+    except EvidenceRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    return await _condition_response(db, condition)
+
+
+@conditions_by_id_router.post(
+    "/{condition_id}/evidence/{evidence_id}/reask", response_model=ConditionPublic
+)
+async def reask_condition_evidence(
+    condition: ScopedCondition, evidence_id: UUID, db: DbSession, current_user: CurrentUser
+) -> ConditionPublic:
+    """ "Add 'please send page 6' to the borrower email"."""
+    try:
+        await condition_evidence.reask(
+            db, condition=condition, evidence_id=evidence_id, actor_user_id=current_user.id
+        )
+    except EvidenceRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    return await _condition_response(db, condition)
+
+
+@conditions_by_id_router.post(
+    "/{condition_id}/evidence/{evidence_id}/finding", response_model=ConditionPublic
+)
+async def answer_condition_finding(
+    condition: ScopedCondition,
+    evidence_id: UUID,
+    payload: FindingAnswerRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionPublic:
+    """S3-08: "Ask the borrower to explain it" or "It's already explained…"."""
+    try:
+        await condition_evidence.answer_finding(
+            db,
+            condition=condition,
+            evidence_id=evidence_id,
+            index=payload.index,
+            answer=payload.answer,
+            reason=payload.reason,
+            actor_user_id=current_user.id,
+        )
+    except EvidenceRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    return await _condition_response(db, condition)

@@ -28,7 +28,7 @@ type Cell = {
   value: number;
   /** The filter this number sets. `null` means clicking does nothing (see `open_prior_to_*`). */
   filter: Partial<ConditionListUrlState> | null;
-  tone?: "verified" | "attention" | "progress";
+  tone?: "verified" | "attention" | "progress" | "blocking";
 };
 
 const OPEN: Partial<ConditionListUrlState> = { lenderStatus: ["open", "not_cleared"] };
@@ -76,6 +76,13 @@ function planCells(summary: ConditionSummary): Cell[] {
       value: summary.ready_to_send,
       filter: { ...OPEN, prepStatus: ["ready"] },
       tone: "verified",
+    },
+    // LP-923 — red, and the numbers overlap (6132 is both waiting and failed), as S3-12 says.
+    {
+      label: "Failed a check",
+      value: summary.failed_check,
+      filter: { ...OPEN, check: "failed" },
+      tone: "blocking",
     },
     {
       label: "Prior to docs open",
@@ -132,6 +139,7 @@ const CLEARED: Partial<ConditionListUrlState> = {
   bucketKind: [],
   prepStatus: [],
   step: [],
+  check: null,
 };
 
 function SummaryCell({
@@ -156,6 +164,7 @@ function SummaryCell({
           cell.value > 0 && cell.tone === "verified" && "text-success",
           cell.value > 0 && cell.tone === "attention" && "text-warning",
           cell.value > 0 && cell.tone === "progress" && "text-info",
+          cell.value > 0 && cell.tone === "blocking" && "text-destructive",
         )}
       >
         {cell.value}
@@ -207,6 +216,7 @@ function isActive(cell: Cell, state: ConditionListUrlState): boolean {
     sameSet(state.bucketKind, cell.filter.bucketKind ?? []) &&
     sameSet(state.prepStatus, cell.filter.prepStatus ?? []) &&
     sameSet(state.step, cell.filter.step ?? []) &&
+    state.check === (cell.filter.check ?? null) &&
     state.owner.length === 0
   );
 }

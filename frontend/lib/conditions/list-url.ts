@@ -50,6 +50,8 @@ export interface ConditionListUrlState {
   bucketKind: BucketKind[];
   /** LP-921 — an open step of these options; S3-12's "Your tasks" is `["i_will_do_it"]`. */
   step: PlanOption[];
+  /** LP-923 — `failed`: a failed, unaccepted evidence check (S3-12's "Failed a check"). */
+  check: "failed" | null;
   groupBy: ConditionGroupBy;
 }
 
@@ -60,6 +62,7 @@ export const EMPTY_LIST_URL_STATE: ConditionListUrlState = {
   owner: [],
   bucketKind: [],
   step: [],
+  check: null,
   groupBy: "heading",
 };
 
@@ -89,6 +92,7 @@ export function readConditionListUrl(params: URLSearchParams): ConditionListUrlS
     owner: params.getAll("owner").filter(isOwner),
     bucketKind: params.getAll("bucket_kind").filter(isBucketKind),
     step: params.getAll("step").filter(isPlanOption),
+    check: params.get("check") === "failed" ? "failed" : null,
     groupBy: isGroupBy(params.get("group")) ? (params.get("group") as ConditionGroupBy) : "heading",
   };
 }
@@ -121,6 +125,7 @@ export function writeConditionListUrl(state: ConditionListUrlState): string {
   for (const value of state.owner) params.append("owner", value);
   for (const value of state.bucketKind) params.append("bucket_kind", value);
   for (const value of state.step) params.append("step", value);
+  if (state.check) params.set("check", state.check);
   if (state.groupBy !== "heading") params.set("group", state.groupBy);
   const query = params.toString();
   return query ? `?${query}` : "";
@@ -145,6 +150,7 @@ export function isConditionListFiltered(state: ConditionListUrlState, search = "
     state.owner.length > 0 ||
     state.bucketKind.length > 0 ||
     state.step.length > 0 ||
+    state.check !== null ||
     search.trim() !== ""
   );
 }
@@ -173,6 +179,7 @@ export function describeConditionFilters(state: ConditionListUrlState, search = 
     parts.push(value === "unknown" ? "Owner not known" : `Owner: ${OWNER_LABEL[value]}`);
   }
   for (const value of state.bucketKind) parts.push(`Heading: ${BUCKET_KIND_CHIP[value]}`);
+  if (state.check === "failed") parts.push("Failed a check");
   // "Your tasks" rather than "Next step: I'll do it": it is the name of the number she clicked.
   for (const value of state.step) {
     parts.push(value === "i_will_do_it" ? "Your tasks" : `Next step: ${OPTION_LABEL[value]}`);

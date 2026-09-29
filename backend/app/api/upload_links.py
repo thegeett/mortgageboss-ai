@@ -43,6 +43,7 @@ this ticket makes.
 from typing import Annotated
 from uuid import UUID
 
+import structlog
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, EmailStr, Field
 
@@ -211,6 +212,19 @@ async def describe(token: str, db: DbSession) -> UploadPagePublic:
     )
 
 
+logger = structlog.get_logger(__name__)
+
+
+def _enqueue_processing(document_id: UUID) -> None:
+    """Queue classification and extraction; a broker hiccup must not fail the borrower's upload."""
+    try:
+        from app.tasks.document_processing import process_document
+
+        process_document.delay(str(document_id))
+    except Exception:
+        logger.warning("upload_link_enqueue_failed", document_id=str(document_id))
+
+
 @public_router.post("/{token}", status_code=status.HTTP_201_CREATED)
 async def upload(
     token: str,
@@ -229,11 +243,18 @@ async def upload(
 
     content = await file.read()
     try:
-        await redeem_link(db, link=link, filename=file.filename or "document", content=content)
+        document = await redeem_link(
+            db, link=link, filename=file.filename or "document", content=content
+        )
     except UploadLinkError as exc:
         # 400 with OUR OWN sentence. `assess` writes these for a person to act on — "ask for a copy
         # without a password" is a different next step from "send the file rather than a zip" — and
         # a borrower who is only told "rejected" sends the same file again.
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     await db.commit()
+    # LP-923 — AND IT IS READ. LP-815 stored the borrower's document and queued nothing, so a file
+    # sent through the link sat PENDING until somebody reprocessed it by hand, and the condition it
+    # answers could never see it. Queued exactly as an ordinary upload is: fire-and-forget, after the
+    # commit, never failing the borrower's request.
+    _enqueue_processing(document.id)
     return {"status": "received"}

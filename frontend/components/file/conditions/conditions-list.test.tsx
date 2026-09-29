@@ -77,6 +77,7 @@ function condition(overrides: Partial<Condition>): Condition {
     plan_reason: null,
     items: [],
     question_draft: null,
+    evidence: [],
     ...overrides,
   };
 }

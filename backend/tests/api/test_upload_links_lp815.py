@@ -558,3 +558,21 @@ def test_the_panel_says_what_the_constants_actually_permit() -> None:
     )
     # The claim that is not a number, and the one the question was actually about.
     assert "Opening it costs nothing" in copy
+
+
+async def test_a_document_sent_through_the_link_is_queued_for_processing(
+    client: AsyncClient, db: AsyncSession, _no_document_processing_queued: list[str]
+) -> None:
+    """LP-923 — LP-815 stored the borrower's document and queued nothing, so it sat PENDING and no
+    condition could ever see it. It is now read like any other upload."""
+    _company, _jwt, loan_file, minted = await _file_with_link(db, slug="queued")
+    await db.commit()
+    resp = await client.post(
+        f"{API}/upload/{minted.token}",
+        files={"file": ("statement.pdf", _PDF, "application/pdf")},
+    )
+    assert resp.status_code == 201
+    document = (
+        await db.execute(select(Document).where(Document.loan_file_id == loan_file.id))
+    ).scalar_one()
+    assert _no_document_processing_queued == [str(document.id)]

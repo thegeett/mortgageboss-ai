@@ -98,6 +98,7 @@ export function ConditionsListView({
     owner: urlState.owner.length > 0 ? urlState.owner : undefined,
     bucket_kind: urlState.bucketKind.length > 0 ? urlState.bucketKind : undefined,
     next_step: urlState.step.length > 0 ? urlState.step : undefined,
+    check: urlState.check ?? undefined,
     q: search.trim() === "" ? undefined : search.trim(),
   };
 
@@ -403,6 +404,7 @@ export function ConditionsListView({
               owner: [],
               bucketKind: [],
               step: [],
+              check: null,
             });
           }}
         />
@@ -500,6 +502,7 @@ export function ConditionsListView({
         }
         onConfirmReading={(condition) => setConfirmReadingId(condition.id)}
         onOpenDraft={setDraftId}
+        fileId={fileId}
         onAddItem={(condition, name, performer) =>
           addItem.mutate({ conditionId: condition.id, name, performers: [performer] })
         }
