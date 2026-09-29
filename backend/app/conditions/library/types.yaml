@@ -5,7 +5,10 @@
 # shape (`AS-11`, `IN-7`) for verification rules; the two vocabularies never meet. A type id lives only
 # here and in `canonical_type_id` (on the lender code map and on the condition); a rule id lives only in
 # the rule engine. `AS-11` here is "departing residence being sold", whatever the rule engine's `AS-11`
-# is. The loader refuses an id outside the pattern below so a rule id cannot be pasted in unnoticed.
+# is. FIVE ids are already in both vocabularies — AS-10, AS-11, CR-11, CR-12, CR-13 — and the loader's
+# `XX-00` pattern does not stop a sixth: a two-digit rule id fits it exactly, and only the engine's
+# single-digit spellings (`AS-1`) are refused by shape. A test pins those five
+# (`tests/conditions/test_library_ids_against_rule_ids.py`), so a new overlap fails rather than lands.
 #
 # EVERY AGENCY CITATION IS ONE THE STAGE 3 PLAN ITSELF CITES (§2.3 and its Sources): Fannie Mae
 # B3-4.2-02, B3-4.3-09, B3-3.1-04, B3-2-10 and B7-3-07 / B7-3-08, and Reg Z 1026.36(c)(3). Everything
