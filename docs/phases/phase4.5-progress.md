@@ -286,7 +286,7 @@ the "Today" table's clock. Actual and review shots are committed under
 
 `backend/tests/conditions/test_stage3a_acceptance.py` runs on the fictional UWM round 1 with the AI
 mocked. The expected table is written by hand from plan §6, not from the code's output. Status:
-**AWAITING_REVIEW** (the commit titled `Stage 3A acceptance:`).
+**REVIEWED** (build `b5480845`; the commit titled `Stage 3A acceptance review:`).
 
 | §6 requirement | Result |
 |---|---|
@@ -296,6 +296,41 @@ mocked. The expected table is written by hand from plan §6, not from the code's
 | marking the three drafts sent moves exactly those conditions to Waiting on the right owner | **matches**: 7086, 6132, 6637 Borrower; 0132 LO; 1947, 6378 Title. 6178 stays To do until its own question is sent; every lender status stays Open |
 | the same plan with the AI switched off | **matches after one fix**. The fallback gave 0132's disclosure to the LO alone, where §6 says "borrower + LO": a library item could name only one performer. Library items now take `performers` (DI-01 disclosure: borrower, LO), validated at load. The mutation that undoes it fails this test. Every fallback reading is marked to confirm (11 blockers) |
 | after round 2, the six conditions seen again keep their plan | **matches** |
+
+### Review of the acceptance (of `b5480845`)
+
+**No findings.** Walked §6 row by row against the test's output, and checked the thing a hand-written
+expectation puts at risk: that the table itself says what the plan says.
+
+- **The transcription is faithful and complete.** `SECTION_6`'s eleven codes are exactly §6's eleven
+  rows, in the same order, with nothing added or missing (compared mechanically). Every cell was read
+  against the plan by hand: 1228 lender-doing-it, 7086's two `AS-10` items both to the borrower, 6637's
+  borrower/title/borrower split, 6178 push-back, **0132's disclosure as borrower + LO**, 1947 title,
+  1582 and 0007 her tasks, 0006 already in the file, 6378 to title. A test whose expectation is typed
+  by hand is only as good as the typing, which is why this was checked first.
+- **The test asserts §6's Result line too**, not only the per-code table: the draft recipients with
+  their codes, the two tasks, 0006 ready, 1228 lender-doing-it, 0007's wait on 1228, 0006's link to
+  "Credit invoice 07/15" page 1, and that no condition is left without a plan.
+- **The fix is right, and the mutation proves which test earns it.** Reverting `_item_from_library` to
+  the single performer fails `test_the_same_plan_with_the_ai_switched_off` — and only that one. The
+  AI-on path still passes, because the model's reading widened the performer itself. The defect was
+  therefore invisible from every test that existed, and only the fallback could show it: that is this
+  acceptance test paying for itself on its first run.
+- **The library guard holds.** Mutating the DATA rather than the code: `performers` naming an unknown
+  value is refused, `performers` omitting the item's own `performer` is refused, and the shipped
+  `[borrower, lo]` loads. (A first attempt of mine "passed" a case that should fail — I had picked an
+  item whose own performer was already in the list. The guard was right and the probe was wrong.)
+- **Leaving 6178's question unsent is the correct reading.** The plan's Done-when moves conditions when
+  "the three drafts" are marked sent; the question is a fourth message, and LP-921's table moves a
+  push-back only when the question itself is sent. `test_condition_drafts.py` covers that fourth send,
+  so nothing is untested — the split is deliberate, not a gap.
+
+**Counts:** backend **8637 passed, 1 failed, 8 skipped, 1 xfailed**, an exact match, the failure being
+the named pre-existing one; ruff, format and mypy clean (561 files). No frontend change, so none run.
+
+**The arithmetic of the count, for the next baseline.** 8631 after the LP-922 follow-up review
+(`7b50d853`, the parent of this build) + 4 acceptance tests + 2 malformed-library cases = **8637**.
+
 
 
 
