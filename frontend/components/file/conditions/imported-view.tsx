@@ -4,6 +4,7 @@ import { ConfirmReadingFor } from "@/components/file/conditions/confirm-reading-
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  useAddItem,
   useAttachPdf,
   useConditions,
   useOwner,
@@ -89,6 +90,8 @@ export function ImportedView({
 
   const [openConditionId, setOpenConditionId] = useState<string | null>(null);
   // S3-03 (LP-919): the condition whose reading she is confirming, opened from the detail sheet.
+  // S3-01's "Add an item" (LP-920).
+  const addItem = useAddItem(fileId);
   const [confirmReadingId, setConfirmReadingId] = useState<string | null>(null);
   const [answerFor, setAnswerFor] = useState<Condition | null>(null);
   const [moveBack, setMoveBack] = useState<{
@@ -279,6 +282,9 @@ export function ImportedView({
           setMoveBack({ condition, to: null, mode: "reopen" });
         }}
         onConfirmReading={(condition) => setConfirmReadingId(condition.id)}
+        onAddItem={(condition, name, performer) =>
+          addItem.mutate({ conditionId: condition.id, name, performers: [performer] })
+        }
       />
       <ConfirmReadingFor
         fileId={fileId}

@@ -34,8 +34,10 @@ import type {
   OwnerInput,
   PasteConditionsInput,
   Performer,
+  PlanOption,
   PrepStatusInput,
   ReopenInput,
+  RoundPlan,
   VerdictInput,
 } from "@/lib/types/conditions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -582,6 +584,83 @@ function invalidateCondition(
   void queryClient.invalidateQueries({ queryKey: conditionsSummaryQueryKey(fileId) });
   void queryClient.invalidateQueries({ queryKey: conditionQueryKey(conditionId) });
   void queryClient.invalidateQueries({ queryKey: conditionEventsQueryKey(conditionId) });
+}
+
+export const roundPlanQueryKey = (roundId: string) => ["condition-round-plan", roundId] as const;
+
+/** S3-02's plan summary for one round (LP-920). */
+export function useRoundPlan(roundId: string | null) {
+  return useQuery({
+    queryKey: roundPlanQueryKey(roundId ?? "none"),
+    queryFn: async () =>
+      (await apiClient.get<RoundPlan>(`${roundPath(roundId as string)}/plan`)).data,
+    enabled: roundId !== null,
+  });
+}
+
+function invalidatePlan(queryClient: ReturnType<typeof useQueryClient>, fileId: string) {
+  void queryClient.invalidateQueries({ queryKey: ["condition-round-plan"] });
+  void queryClient.invalidateQueries({ queryKey: conditionsQueryPrefix(fileId) });
+  void queryClient.invalidateQueries({ queryKey: conditionsSummaryQueryKey(fileId) });
+}
+
+/** S3-02's "Confirm plan…". 409s with a sentence while a reading still needs her. */
+export function useConfirmPlan(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ roundId }: { roundId: string }) =>
+      (await apiClient.post<RoundPlan>(`${roundPath(roundId)}/plan/confirm`)).data,
+    onSuccess: () => invalidatePlan(queryClient, fileId),
+  });
+}
+
+/** The whole condition's step, or null to let its items carry their own. */
+export function useSetNextStep(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      conditionId,
+      next_step,
+    }: { conditionId: string; next_step: PlanOption | null }) =>
+      (await apiClient.put<Condition>(`${conditionPath(conditionId)}/next-step`, { next_step }))
+        .data,
+    onSuccess: () => invalidatePlan(queryClient, fileId),
+  });
+}
+
+export interface ConditionItemChange {
+  option?: PlanOption;
+  name?: string;
+  performers?: Performer[];
+  due_date?: string;
+}
+
+/** Change one item of the plan. */
+export function useUpdateItem(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      conditionId,
+      itemId,
+      ...body
+    }: { conditionId: string; itemId: string } & ConditionItemChange) =>
+      (await apiClient.patch<Condition>(`${conditionPath(conditionId)}/items/${itemId}`, body))
+        .data,
+    onSuccess: () => invalidatePlan(queryClient, fileId),
+  });
+}
+
+/** S3-01's "Add an item". */
+export function useAddItem(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      conditionId,
+      ...body
+    }: { conditionId: string; name: string; performers: Performer[]; option?: PlanOption }) =>
+      (await apiClient.post<Condition>(`${conditionPath(conditionId)}/items`, body)).data,
+    onSuccess: () => invalidatePlan(queryClient, fileId),
+  });
 }
 
 /** One item as she confirms it on S3-03. */

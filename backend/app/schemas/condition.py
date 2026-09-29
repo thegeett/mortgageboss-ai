@@ -66,7 +66,13 @@ from app.models.condition_round import (
     ConditionSheetFormat,
     ConditionSourceKind,
 )
-from app.models.condition_vocabulary import EvidenceCheck, Performer, PlanOption
+from app.models.condition_vocabulary import (
+    ConditionItemOrigin,
+    ConditionItemStatus,
+    EvidenceCheck,
+    Performer,
+    PlanOption,
+)
 
 #: The paste endpoint's ceiling (spec §LP-907). Enforced here so an oversized body is refused before
 #: it reaches a reader, rather than after.
@@ -743,6 +749,85 @@ class LibraryTypePublic(BaseModel):
         )
 
 
+class ConditionItemPublic(BaseModel):
+    """One item of a condition's plan (LP-920), with what the screens need to draw it (S3-01, S3-02)."""
+
+    id: UUID
+    key: str
+    name: str
+    acceptable: str
+    performer: Performer
+    performers: list[Performer]
+    option: PlanOption
+    status: ConditionItemStatus
+    origin: ConditionItemOrigin
+    need_id: UUID | None = None
+    need_title: str | None = None
+    #: Other conditions whose items ask through the same need ("Same statement as 7086 and 6132").
+    shared_with_codes: list[str] = Field(default_factory=list)
+    document_id: UUID | None = None
+    document_name: str | None = None
+    document_page: int | None = None
+    waits_on_condition_id: UUID | None = None
+    waits_on_code: str | None = None
+    due_date: date_type | None = None
+    specifics: ReadingSpecificsPublic = Field(default_factory=ReadingSpecificsPublic)
+
+
+class ConditionItemUpdate(BaseModel):
+    """Her edit to one item (S3-02's selects, S3-01's item). Every field optional."""
+
+    option: PlanOption | None = None
+    name: str | None = Field(default=None, max_length=200)
+    performers: list[Performer] | None = Field(default=None, min_length=1, max_length=3)
+    due_date: date_type | None = None
+
+
+class ConditionItemCreate(BaseModel):
+    """S3-01's "Add an item"."""
+
+    name: str = Field(min_length=1, max_length=200)
+    performers: list[Performer] = Field(min_length=1, max_length=3)
+    option: PlanOption | None = None
+
+
+class NextStepRequest(BaseModel):
+    """The whole condition's step, or null to let its items carry their own."""
+
+    next_step: PlanOption | None
+
+
+class LenderProcessingRequest(BaseModel):
+    on: bool
+
+
+class RoundPlanDraftPublic(BaseModel):
+    """One email the plan will draft (S3-02's "3 emails to draft: Borrower · Title/attorney · LO")."""
+
+    recipient: str
+    label: str
+    codes: list[str]
+
+
+class RoundPlanPublic(BaseModel):
+    """The plan for one round, as S3-02's panel heads it."""
+
+    round_id: UUID
+    round_number: int | None
+    round_date: date_type
+    planned: int
+    ready_at: datetime | None
+    confirmed_at: datetime | None
+    nothing_sent: bool
+    drafts: list[RoundPlanDraftPublic]
+    your_tasks: int
+    already_in_file: int
+    push_back: int
+    lender_doing_it: int
+    needs_confirmation: int
+    blocking_codes: list[str]
+
+
 class ReadingConfirmItem(BaseModel):
     key: str | None = Field(default=None, max_length=40)
     name: str = Field(min_length=1, max_length=200)
@@ -848,6 +933,11 @@ class ConditionPublic(BaseModel):
     reading_status: ConditionReadingStatus = ConditionReadingStatus.UNREAD
     reading_confidence: float | None = None
     library_type: LibraryTypePublic | None = None
+    #: LP-920 — the plan: the whole condition's step when it takes one, the reason in S3-02's words,
+    #: and its items.
+    next_step: PlanOption | None = None
+    plan_reason: str | None = None
+    items: list[ConditionItemPublic] = Field(default_factory=list)
 
     @classmethod
     def from_model(
@@ -859,6 +949,7 @@ class ConditionPublic(BaseModel):
         is_open: bool,
         days_open: int,
         round_numbers: list[int] | None = None,
+        items: list[ConditionItemPublic] | None = None,
     ) -> "ConditionPublic":
         """Build the public view.
 
@@ -940,6 +1031,9 @@ class ConditionPublic(BaseModel):
                 else None
             ),
             library_type=LibraryTypePublic.for_id(condition.canonical_type_id),
+            next_step=condition.next_step,
+            plan_reason=condition.plan_reason,
+            items=items or [],
         )
 
 

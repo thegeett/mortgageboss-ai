@@ -1,0 +1,1082 @@
+"""The action plan (LP-920, plan §5 LP-920 and §6): items, needs, next steps, reasons.
+
+Built from the reading (LP-919) right after it, so importing round 1 produces the plan with nobody
+creating anything by hand. Everything here is code; the model's part ended with the reading.
+
+WHAT THE PLAN DECIDES, IN ORDER, PER CONDITION:
+
+1. **The whole condition's step**, when it is one: a push-back the reading found (6178), the lender doing
+   it (the reading, the lender's heading, or this lender's setting — UWM orders the final inspection,
+   decision 1), information only.
+2. **Each item's option**, from the reading, then adjusted: the lender's "who does what" setting, and the
+   file's "Lender is processing this file" switch (§4a change 8) turn third-party asks into "Lender is
+   doing it".
+3. **Already in the file**: an item the file already holds a document for (matched by type AND the
+   library's words, so a credit invoice is not taken for a processing invoice) points to it.
+4. **Waits on**: a type that waits on another (0007's invoice on 1228's inspection) links to that
+   condition.
+5. **Needs**: every document item she asks someone for becomes a need with `origin = CONDITION`. One need
+   can serve items on several conditions (§4a change 2): the borrower's statements for one account are
+   ONE need, which is how 7086, 6132 and 6637's source and clearance are "asked for once". An open need
+   the file already has for the same document is reused rather than duplicated.
+6. **The reason** shown under the step, in S3-02's words.
+
+CARRY-OVER (§4a change 3): a condition that already has a plan is not planned again, so a condition seen
+again keeps its plan. A condition that came back has its unfinished items reopened. A replaced condition
+hands its items to its successor (`carry_plan`), for her to confirm.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import UTC, date, datetime
+from typing import Any
+from uuid import UUID
+from zoneinfo import ZoneInfo
+
+import structlog
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.conditions import facts
+from app.conditions.library import ConditionType, load_library
+from app.models.activity_log import ActivityType
+from app.models.borrower import Borrower
+from app.models.condition import (
+    BucketKind,
+    Condition,
+    ConditionLenderStatus,
+    ConditionReadingStatus,
+)
+from app.models.condition_event import ConditionEvent, ConditionEventKind
+from app.models.condition_item import ConditionItem
+from app.models.condition_round import ConditionRound
+from app.models.condition_vocabulary import (
+    ConditionItemOrigin,
+    ConditionItemStatus,
+    Performer,
+    PlanOption,
+)
+from app.models.document import Document
+from app.models.lender import Lender
+from app.models.loan_file import LoanFile
+from app.models.needs_item import NeedsItem, NeedsItemDisposition, NeedsItemOrigin, NeedsItemStatus
+from app.services.activity_log import log_activity
+from app.services.needs_items import create_needs_item
+
+logger = structlog.get_logger(__name__)
+
+ET = ZoneInfo("America/New_York")
+
+#: Business days an ask is due after the plan is made (the build brief's "fixed from the screens": the
+#: borrower email is due 4 business days after the plan; 08/28 gives Thursday 09/03). Editable per item.
+ASK_DUE_BUSINESS_DAYS = 4
+
+_ASKS = frozenset({PlanOption.ASK_BORROWER, PlanOption.ASK_THIRD_PARTY})
+_THIRD_PARTIES = frozenset(
+    {
+        Performer.TITLE,
+        Performer.ATTORNEY,
+        Performer.INSURANCE,
+        Performer.HOA,
+        Performer.EMPLOYER,
+        Performer.APPRAISER,
+        Performer.OTHER_PARTY,
+    }
+)
+_OPEN_NEED = frozenset(
+    {NeedsItemStatus.PENDING, NeedsItemStatus.REQUESTED, NeedsItemStatus.REJECTED}
+)
+
+REASON_CONFIRM = "Please confirm how we read this"
+REASON_LENDER_ORDERS = "Ordered through the lender — confirm on your files"
+REASON_LENDER = "The lender is doing it"
+REASON_PUSH_BACK = "Reason from the letter"
+REASON_SHORTFALL = "Shortfall computed by code"
+REASON_TITLE_INSTRUCTION = "Added to the title email"
+REASON_LENDER_PROCESSING = "Lender is processing this file"
+
+
+# --------------------------------------------------------------------------------------------- #
+# Per-lender settings (decision 1, 4, 5): who orders what, and what the upload asks
+# --------------------------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class LenderConditionSettings:
+    """How conditions are worked at one lender. Stored on `lenders.condition_settings`; LP-925 edits it."""
+
+    lender_orders_final_inspection: bool = False
+    lender_orders_title_insurance_payoffs: bool = False
+    new_files_lender_processing: bool = False
+    upload_cutoff: str | None = None  # "20:00"
+    upload_cutoff_tz: str = "America/New_York"
+    upload_fields: tuple[str, ...] = ("note",)
+    mortgagee_clause: str | None = None
+
+
+#: The defaults a lender starts with, by its canonical key. Decision 1: at UWM the final inspection is
+#: ordered by the lender; title, insurance and payoffs are asked of the party; Processor Assist and
+#: Underwriting+ are off. Decision 4: Sun West's upload asks for a comment, Name of Source and Date
+#: Verified. Every other lender: nothing ticked.
+_CANONICAL_DEFAULTS: dict[str, dict[str, Any]] = {
+    "uwm": {
+        "lender_orders_final_inspection": True,
+        "upload_cutoff": "20:00",
+        "upload_fields": ["note"],
+    },
+    "sunwest": {"upload_fields": ["note", "name_of_source", "date_verified"]},
+}
+
+#: Types the "lender orders the final inspection / appraisal updates" setting covers.
+_FINAL_INSPECTION_TYPES = frozenset({"PA-03"})
+#: Types the Processor Assist setting ("lender orders title updates, insurance, payoffs") covers.
+_PROCESSOR_ASSIST_TYPES = frozenset({"TI-01", "TI-02", "TI-05", "IN-01", "IN-02", "IN-04"})
+
+
+def lender_condition_settings(lender: Lender | None) -> LenderConditionSettings:
+    """The stored settings, or the canonical lender's defaults, or nothing ticked."""
+    if lender is None:
+        return LenderConditionSettings()
+    raw = lender.condition_settings
+    if raw is None:
+        raw = _CANONICAL_DEFAULTS.get(lender.canonical_lender_key or "", {})
+    return LenderConditionSettings(
+        lender_orders_final_inspection=bool(raw.get("lender_orders_final_inspection", False)),
+        lender_orders_title_insurance_payoffs=bool(
+            raw.get("lender_orders_title_insurance_payoffs", False)
+        ),
+        new_files_lender_processing=bool(raw.get("new_files_lender_processing", False)),
+        upload_cutoff=raw.get("upload_cutoff"),
+        upload_cutoff_tz=str(raw.get("upload_cutoff_tz") or "America/New_York"),
+        upload_fields=tuple(raw.get("upload_fields") or ("note",)),
+        mortgagee_clause=raw.get("mortgagee_clause"),
+    )
+
+
+# --------------------------------------------------------------------------------------------- #
+# Building the plan
+# --------------------------------------------------------------------------------------------- #
+
+
+@dataclass
+class PlanOutcome:
+    planned: int = 0
+    needs_created: int = 0
+    needs_reused: int = 0
+    condition_ids: list[UUID] = field(default_factory=list)
+
+
+def _today_et() -> date:
+    return datetime.now(ET).date()
+
+
+def _is_planned(condition: Condition, has_items: bool) -> bool:
+    return has_items or condition.next_step is not None
+
+
+async def _items_by_condition(
+    db: AsyncSession, loan_file_id: UUID
+) -> dict[UUID, list[ConditionItem]]:
+    rows = (
+        await db.execute(
+            select(ConditionItem)
+            .where(ConditionItem.loan_file_id == loan_file_id, ConditionItem.deleted_at.is_(None))
+            .order_by(ConditionItem.sequence, ConditionItem.created_at)
+        )
+    ).scalars()
+    out: dict[UUID, list[ConditionItem]] = {}
+    for item in rows:
+        out.setdefault(item.condition_id, []).append(item)
+    return out
+
+
+def _find_document(
+    item: dict[str, Any], match_words: tuple[str, ...], documents: list[Document]
+) -> Document | None:
+    """A document the file already holds for this item: same type and, if the library gives words,
+    one of them in the document's name. The newest wins."""
+    wanted = set(item.get("documents") or [])
+    if not wanted:
+        return None
+    for document in documents:
+        if document.document_type not in wanted:
+            continue
+        name = (document.document_name or "").lower()
+        if match_words and not any(word in name for word in match_words):
+            continue
+        return document
+    return None
+
+
+def _need_group(item: ConditionItem) -> tuple[str, str, str]:
+    """What makes two items the same ask: who provides it, the document, and the account."""
+    document = item.documents[0] if item.documents else item.key
+    who = "borrower" if item.performer is Performer.BORROWER else item.performer.value
+    account = str(item.specifics.get("account_last4") or "")
+    return who, document, account
+
+
+_MONTH_NAMES = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+]  # fmt: skip
+
+
+def _months_phrase(months: list[str]) -> str:
+    """`["2026-07", "2026-08"]` → `July and August 2026`."""
+    parsed = sorted({m for m in months if len(m) == 7})
+    if not parsed:
+        return ""
+    names = [_MONTH_NAMES[int(m[5:7]) - 1] for m in parsed]
+    year = parsed[-1][:4]
+    return f"{' and '.join(names)} {year}" if len(names) <= 2 else f"{', '.join(names)} {year}"
+
+
+def _need_title(items: list[ConditionItem]) -> str:
+    first = items[0]
+    if first.documents and first.documents[0] == "bank_statement":
+        bank = first.specifics.get("account_bank") or "Bank"
+        last4 = first.specifics.get("account_last4")
+        months = _months_phrase([str(i.specifics.get("month") or "") for i in items])
+        account = f"{bank} ··{last4}" if last4 else bank
+        return f"{account} statements{', ' + months if months else ''}"[:255]
+    return first.name[:255]
+
+
+async def _needs_for_items(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    items: list[ConditionItem],
+    outcome: PlanOutcome,
+) -> None:
+    """Every document item she asks for points at a need; items that are the same ask share one."""
+    asks = [
+        item
+        for item in items
+        if item.option in _ASKS
+        and item.documents
+        and item.status is ConditionItemStatus.OPEN
+        and item.need_id is None
+    ]
+    if not asks:
+        return
+
+    # A borrower bank-statement item that names no account joins the one account the round asks
+    # about, when there is exactly one (6637's source and clearance name none; 6132 names ··9912).
+    accounts = {
+        (str(i.specifics.get("account_bank") or ""), str(i.specifics.get("account_last4")))
+        for i in asks
+        if i.performer is Performer.BORROWER
+        and i.documents[0] == "bank_statement"
+        and i.specifics.get("account_last4")
+    }
+    if len(accounts) == 1:
+        bank, last4 = next(iter(accounts))
+        for item in asks:
+            if (
+                item.performer is Performer.BORROWER
+                and item.documents[0] == "bank_statement"
+                and not item.specifics.get("account_last4")
+                and item.key != "other_accounts"
+            ):
+                item.specifics = {
+                    **item.specifics,
+                    "account_bank": bank or None,
+                    "account_last4": last4,
+                }
+
+    groups: dict[tuple[str, str, str], list[ConditionItem]] = {}
+    for item in asks:
+        groups.setdefault(_need_group(item), []).append(item)
+
+    primary_borrower = await db.scalar(
+        select(Borrower.id).where(
+            Borrower.loan_file_id == loan_file.id, Borrower.is_primary.is_(True)
+        )
+    )
+    existing = list(
+        (
+            await db.execute(
+                select(NeedsItem).where(
+                    NeedsItem.loan_file_id == loan_file.id,
+                    NeedsItem.deleted_at.is_(None),
+                    NeedsItem.status.in_(_OPEN_NEED),
+                )
+            )
+        ).scalars()
+    )
+    for (who, document, account), members in groups.items():
+        reuse = next(
+            (
+                need
+                for need in existing
+                if need.needs_type == document
+                and (not account or account in (need.title or ""))
+                and (
+                    need.origin is not NeedsItemOrigin.CONDITION
+                    or need.title == _need_title(members)
+                )
+            ),
+            None,
+        )
+        if reuse is not None:
+            need = reuse
+            outcome.needs_reused += 1
+        else:
+            need = await create_needs_item(
+                db,
+                loan_file_id=loan_file.id,
+                title=_need_title(members),
+                needs_type=document,
+                borrower_id=primary_borrower if who == "borrower" else None,
+                origin=NeedsItemOrigin.CONDITION,
+                description=members[0].acceptable,
+                disposition=NeedsItemDisposition.CONFIRMED,
+            )
+            existing.append(need)
+            outcome.needs_created += 1
+        for item in members:
+            item.need_id = need.id
+
+
+def _step_and_reason(
+    condition: Condition,
+    condition_type: ConditionType | None,
+    reading: dict[str, Any],
+    settings: LenderConditionSettings,
+    loan_file: LoanFile,
+) -> tuple[PlanOption | None, str | None]:
+    """The whole condition's step (or None when its items carry their own), and the reason for it."""
+    if reading.get("push_back"):
+        return PlanOption.PUSH_BACK, REASON_PUSH_BACK
+    type_id = condition_type.id if condition_type else None
+    if type_id in _FINAL_INSPECTION_TYPES and settings.lender_orders_final_inspection:
+        return PlanOption.LENDER_DOING_IT, REASON_LENDER_ORDERS
+    if reading.get("lender_doing_it") or condition.bucket_kind is BucketKind.LENDER_TO_CLEAR:
+        return PlanOption.LENDER_DOING_IT, REASON_LENDER
+    if reading.get("information_only") or condition.info_only:
+        return PlanOption.INFORMATION_ONLY, None
+    return None, None
+
+
+def _item_option(
+    raw: dict[str, Any],
+    condition_type: ConditionType | None,
+    settings: LenderConditionSettings,
+    loan_file: LoanFile,
+) -> PlanOption:
+    option = PlanOption(str(raw.get("option") or PlanOption.ASK_BORROWER.value))
+    performer = Performer(str((raw.get("performers") or ["borrower"])[0]))
+    type_id = condition_type.id if condition_type else None
+    if (
+        settings.lender_orders_title_insurance_payoffs
+        and type_id in _PROCESSOR_ASSIST_TYPES
+        and performer in _THIRD_PARTIES
+    ):
+        return PlanOption.LENDER_DOING_IT
+    if loan_file.lender_processing and option is PlanOption.ASK_THIRD_PARTY:
+        return PlanOption.LENDER_DOING_IT
+    return option
+
+
+def _event(
+    condition: Condition,
+    kind: ConditionEventKind,
+    detail: dict[str, Any],
+    *,
+    round_id: UUID | None,
+    actor_user_id: UUID | None = None,
+) -> ConditionEvent:
+    return ConditionEvent(
+        company_id=condition.company_id,
+        loan_file_id=condition.loan_file_id,
+        condition_id=condition.id,
+        round_id=round_id,
+        kind=kind,
+        actor_user_id=actor_user_id,
+        detail=detail,
+    )
+
+
+async def build_plan(db: AsyncSession, *, round_id: UUID, today: date | None = None) -> PlanOutcome:
+    """Plan every read, not-yet-planned condition on this round's file. Flushes; the caller commits."""
+    outcome = PlanOutcome()
+    round_ = await db.get(ConditionRound, round_id)
+    if round_ is None:
+        return outcome
+    loan_file = await db.get(LoanFile, round_.loan_file_id)
+    if loan_file is None:
+        return outcome
+    lender = await db.get(Lender, loan_file.lender_id) if loan_file.lender_id else None
+    settings = lender_condition_settings(lender)
+    library = load_library()
+    today = today or _today_et()
+    due = facts.business_days_after(today, ASK_DUE_BUSINESS_DAYS)
+
+    conditions = list(
+        (
+            await db.execute(
+                select(Condition)
+                .where(
+                    Condition.loan_file_id == loan_file.id,
+                    Condition.deleted_at.is_(None),
+                    Condition.lender_status != ConditionLenderStatus.SUPERSEDED,
+                )
+                .order_by(Condition.sequence, Condition.created_at)
+            )
+        ).scalars()
+    )
+    items_by_condition = await _items_by_condition(db, loan_file.id)
+    documents = list(
+        (
+            await db.execute(
+                select(Document)
+                .where(Document.loan_file_id == loan_file.id, Document.deleted_at.is_(None))
+                .order_by(Document.created_at.desc())
+            )
+        ).scalars()
+    )
+    by_type: dict[str, Condition] = {}
+    for condition in conditions:
+        if condition.canonical_type_id and condition.canonical_type_id not in by_type:
+            by_type[condition.canonical_type_id] = condition
+
+    new_items: list[ConditionItem] = []
+    for condition in conditions:
+        if condition.reading is None or condition.reading_status is ConditionReadingStatus.UNREAD:
+            continue
+        if _is_planned(condition, bool(items_by_condition.get(condition.id))):
+            continue
+        condition_type = library.get(condition.canonical_type_id)
+        reading = condition.reading
+        step, reason = _step_and_reason(condition, condition_type, reading, settings, loan_file)
+
+        created: list[ConditionItem] = []
+        for index, raw in enumerate(reading.get("items") or []):
+            performers = [str(p) for p in raw.get("performers") or ["borrower"]]
+            option = _item_option(raw, condition_type, settings, loan_file)
+            status = ConditionItemStatus.OPEN
+            if step in (PlanOption.PUSH_BACK, PlanOption.INFORMATION_ONLY):
+                status = ConditionItemStatus.NOT_NEEDED
+            elif step is PlanOption.LENDER_DOING_IT:
+                option = PlanOption.LENDER_DOING_IT
+            item = ConditionItem(
+                company_id=condition.company_id,
+                loan_file_id=condition.loan_file_id,
+                condition_id=condition.id,
+                round_id=round_.id,
+                key=str(raw.get("key") or f"item_{index + 1}")[:40],
+                name=str(raw.get("name") or "What the lender asks for")[:200],
+                acceptable=str(raw.get("acceptable") or ""),
+                performer=Performer(performers[0]),
+                performers=performers,
+                option=option,
+                status=status,
+                origin=ConditionItemOrigin.READING,
+                documents=list(raw.get("documents") or []),
+                checks=list(raw.get("checks") or []),
+                specifics=dict(raw.get("specifics") or {}),
+                sequence=index,
+                due_date=due if option in _ASKS and status is ConditionItemStatus.OPEN else None,
+            )
+            base = next(
+                (i for i in (condition_type.items if condition_type else ()) if i.key == item.key),
+                None,
+            )
+            # Already in the file (existing coverage, by type and the library's words).
+            if option is PlanOption.I_WILL_DO_IT and status is ConditionItemStatus.OPEN:
+                found = _find_document(raw, base.match_words if base else (), documents)
+                if found is not None:
+                    item.option = PlanOption.ALREADY_IN_FILE
+                    item.document_id = found.id
+                    item.document_page = 1
+                    item.status = ConditionItemStatus.DONE
+                    reason = (
+                        reason or f"Found: {found.document_name or found.document_type}, page 1"
+                    )
+            db.add(item)
+            created.append(item)
+
+        # Waits on another condition (0007's invoice on 1228's inspection).
+        if condition_type is not None and condition_type.waits_on_type:
+            waited = by_type.get(condition_type.waits_on_type)
+            if waited is not None and waited.id != condition.id:
+                for item in created:
+                    item.waits_on_condition_id = waited.id
+                reason = reason or f"Waits on {waited.lender_code or 'another condition'}"
+
+        if reason is None and (reading.get("figures") or {}).get("shortfall"):
+            reason = REASON_SHORTFALL
+        if reason is None and condition_type is not None and condition_type.id == "TI-04":
+            reason = REASON_TITLE_INSTRUCTION
+        if (
+            reason is None
+            and loan_file.lender_processing
+            and any(i.option is PlanOption.LENDER_DOING_IT for i in created)
+        ):
+            reason = REASON_LENDER_PROCESSING
+        if condition.reading_status is ConditionReadingStatus.NEEDS_CONFIRMATION:
+            reason = REASON_CONFIRM
+        if (
+            step is None
+            and created
+            and all(i.option is PlanOption.LENDER_DOING_IT for i in created)
+        ):
+            step = PlanOption.LENDER_DOING_IT
+
+        condition.next_step = step
+        condition.plan_reason = reason
+        new_items.extend(created)
+        db.add(
+            _event(
+                condition,
+                ConditionEventKind.CONDITION_PLANNED,
+                {
+                    "next_step": step.value if step else None,
+                    "items": len(created),
+                    "options": sorted({i.option.value for i in created}),
+                },
+                round_id=round_.id,
+            )
+        )
+        outcome.planned += 1
+        outcome.condition_ids.append(condition.id)
+
+    await db.flush()
+    await _needs_for_items(db, loan_file=loan_file, items=new_items, outcome=outcome)
+
+    # Came back on this round: its unfinished items are asked again (§4a change 3).
+    for condition in conditions:
+        if (
+            condition.lender_status is ConditionLenderStatus.NOT_CLEARED
+            and condition.last_seen_round_id == round_.id
+        ):
+            for item in items_by_condition.get(condition.id, []):
+                if item.status in (ConditionItemStatus.REQUESTED, ConditionItemStatus.RECEIVED):
+                    item.status = ConditionItemStatus.OPEN
+
+    if outcome.planned:
+        round_.plan_ready_at = datetime.now(UTC)
+        await log_activity(
+            db,
+            loan_file_id=loan_file.id,
+            activity_type=ActivityType.CONDITION_PLAN_READY,
+            summary=f"Plan ready for round {round_.round_number}: {outcome.planned} conditions",
+            detail={"round_id": str(round_.id), "planned": outcome.planned},
+        )
+    await db.flush()
+    logger.info(
+        "condition_plan_built",
+        round_id=str(round_id),
+        planned=outcome.planned,
+        needs_created=outcome.needs_created,
+        needs_reused=outcome.needs_reused,
+    )
+    return outcome
+
+
+async def carry_plan(
+    db: AsyncSession,
+    *,
+    from_condition: Condition,
+    to_condition: Condition,
+    actor_user_id: UUID | None,
+) -> int:
+    """A replaced (reworded) condition hands its plan to its successor, for her to confirm (§4a 3)."""
+    existing = await _items_by_condition(db, from_condition.loan_file_id)
+    if existing.get(to_condition.id):
+        return 0
+    carried = 0
+    for item in existing.get(from_condition.id, []):
+        db.add(
+            ConditionItem(
+                company_id=to_condition.company_id,
+                loan_file_id=to_condition.loan_file_id,
+                condition_id=to_condition.id,
+                round_id=item.round_id,
+                key=item.key,
+                name=item.name,
+                acceptable=item.acceptable,
+                performer=item.performer,
+                performers=list(item.performers),
+                option=item.option,
+                status=item.status,
+                origin=ConditionItemOrigin.CARRIED,
+                documents=list(item.documents),
+                checks=list(item.checks),
+                specifics=dict(item.specifics),
+                need_id=item.need_id,
+                document_id=item.document_id,
+                document_page=item.document_page,
+                waits_on_condition_id=item.waits_on_condition_id,
+                due_date=item.due_date,
+                sequence=item.sequence,
+            )
+        )
+        carried += 1
+    to_condition.next_step = from_condition.next_step
+    to_condition.plan_reason = f"Carried from the condition it replaced — {REASON_CONFIRM.lower()}"
+    if to_condition.reading_status is not ConditionReadingStatus.CONFIRMED:
+        to_condition.reading_status = ConditionReadingStatus.NEEDS_CONFIRMATION
+    db.add(
+        _event(
+            to_condition,
+            ConditionEventKind.CONDITION_PLAN_CHANGED,
+            {"change": "carried", "items": carried},
+            round_id=to_condition.last_seen_round_id,
+            actor_user_id=actor_user_id,
+        )
+    )
+    await db.flush()
+    return carried
+
+
+# --------------------------------------------------------------------------------------------- #
+# Her edits (she can change any part of the plan) and confirming the round's plan
+# --------------------------------------------------------------------------------------------- #
+
+
+class PlanRefused(Exception):
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+async def set_next_step(
+    db: AsyncSession, *, condition: Condition, next_step: PlanOption | None, actor_user_id: UUID
+) -> None:
+    before = condition.next_step
+    condition.next_step = next_step
+    db.add(
+        _event(
+            condition,
+            ConditionEventKind.CONDITION_PLAN_CHANGED,
+            {
+                "change": "next_step",
+                "from": before.value if before else None,
+                "to": next_step.value if next_step else None,
+            },
+            round_id=condition.last_seen_round_id,
+            actor_user_id=actor_user_id,
+        )
+    )
+    await db.flush()
+
+
+async def update_item(
+    db: AsyncSession,
+    *,
+    condition: Condition,
+    item: ConditionItem,
+    option: PlanOption | None,
+    name: str | None,
+    performers: list[Performer] | None,
+    due_date: date | None,
+    actor_user_id: UUID,
+) -> None:
+    changed: dict[str, Any] = {"change": "item", "item_key": item.key}
+    if option is not None and option is not item.option:
+        changed["option"] = {"from": item.option.value, "to": option.value}
+        item.option = option
+    if name is not None and name.strip() and name.strip() != item.name:
+        item.name = name.strip()[:200]
+        changed["name"] = True
+    if performers:
+        item.performer = performers[0]
+        item.performers = [p.value for p in performers][:3]
+        changed["performers"] = item.performers
+    if due_date is not None:
+        item.due_date = due_date
+        changed["due_date"] = due_date.isoformat()
+    db.add(
+        _event(
+            condition,
+            ConditionEventKind.CONDITION_PLAN_CHANGED,
+            changed,
+            round_id=condition.last_seen_round_id,
+            actor_user_id=actor_user_id,
+        )
+    )
+    await db.flush()
+
+
+async def add_item(
+    db: AsyncSession,
+    *,
+    condition: Condition,
+    name: str,
+    performers: list[Performer],
+    option: PlanOption | None,
+    actor_user_id: UUID,
+) -> ConditionItem:
+    from app.services.condition_reading import option_for
+
+    if not name.strip():
+        raise PlanRefused("An item needs a few words saying what it is.")
+    if not performers:
+        raise PlanRefused("An item needs someone to act on it.")
+    count = await db.scalar(
+        select(ConditionItem.sequence)
+        .where(ConditionItem.condition_id == condition.id)
+        .order_by(ConditionItem.sequence.desc())
+        .limit(1)
+    )
+    chosen = option or option_for(performers[0])
+    item = ConditionItem(
+        company_id=condition.company_id,
+        loan_file_id=condition.loan_file_id,
+        condition_id=condition.id,
+        round_id=condition.last_seen_round_id,
+        key=f"manual_{(count or 0) + 1}",
+        name=name.strip()[:200],
+        acceptable="",
+        performer=performers[0],
+        performers=[p.value for p in performers][:3],
+        option=chosen,
+        origin=ConditionItemOrigin.MANUAL,
+        documents=[],
+        checks=[],
+        specifics={},
+        sequence=(count or 0) + 1,
+        due_date=facts.business_days_after(_today_et(), ASK_DUE_BUSINESS_DAYS)
+        if chosen in _ASKS
+        else None,
+    )
+    db.add(item)
+    if condition.next_step in (PlanOption.INFORMATION_ONLY, PlanOption.LENDER_DOING_IT):
+        condition.next_step = None
+    db.add(
+        _event(
+            condition,
+            ConditionEventKind.CONDITION_PLAN_CHANGED,
+            {"change": "item_added", "option": chosen.value},
+            round_id=condition.last_seen_round_id,
+            actor_user_id=actor_user_id,
+        )
+    )
+    await db.flush()
+    return item
+
+
+async def remove_item(
+    db: AsyncSession, *, condition: Condition, item: ConditionItem, actor_user_id: UUID
+) -> None:
+    item.deleted_at = datetime.now(UTC)
+    db.add(
+        _event(
+            condition,
+            ConditionEventKind.CONDITION_PLAN_CHANGED,
+            {"change": "item_removed", "item_key": item.key},
+            round_id=condition.last_seen_round_id,
+            actor_user_id=actor_user_id,
+        )
+    )
+    await db.flush()
+
+
+async def set_lender_processing(
+    db: AsyncSession, *, loan_file: LoanFile, on: bool, actor_user_id: UUID
+) -> int:
+    """The file-level switch (§4a change 8). Re-defaults third-party asks that have not gone out yet."""
+    loan_file.lender_processing = on
+    items = list(
+        (
+            await db.execute(
+                select(ConditionItem).where(
+                    ConditionItem.loan_file_id == loan_file.id,
+                    ConditionItem.deleted_at.is_(None),
+                    ConditionItem.status == ConditionItemStatus.OPEN,
+                    ConditionItem.performer.in_([p.value for p in _THIRD_PARTIES]),
+                )
+            )
+        ).scalars()
+    )
+    moved = 0
+    for item in items:
+        if on and item.option is PlanOption.ASK_THIRD_PARTY:
+            item.option = PlanOption.LENDER_DOING_IT
+            moved += 1
+        elif not on and item.option is PlanOption.LENDER_DOING_IT:
+            item.option = PlanOption.ASK_THIRD_PARTY
+            moved += 1
+    await log_activity(
+        db,
+        loan_file_id=loan_file.id,
+        activity_type=ActivityType.FILE_UPDATED,
+        summary=f"Lender is processing this file: {'on' if on else 'off'}",
+        actor_user_id=actor_user_id,
+        detail={"lender_processing": on, "items_changed": moved},
+    )
+    await db.flush()
+    return moved
+
+
+async def round_plan_blockers(db: AsyncSession, *, round_: ConditionRound) -> list[str]:
+    """Codes on this round whose reading still needs her — the plan cannot be confirmed past them."""
+    rows = (
+        await db.execute(
+            select(Condition.lender_code).where(
+                Condition.loan_file_id == round_.loan_file_id,
+                Condition.deleted_at.is_(None),
+                Condition.reading_status == ConditionReadingStatus.NEEDS_CONFIRMATION,
+                Condition.lender_status != ConditionLenderStatus.SUPERSEDED,
+            )
+        )
+    ).all()
+    return [code or "—" for (code,) in rows]
+
+
+async def confirm_round_plan(
+    db: AsyncSession, *, round_: ConditionRound, actor_user_id: UUID
+) -> None:
+    """S3-02's "Confirm plan…". Refused while any reading still needs her (README rule 3)."""
+    blockers = await round_plan_blockers(db, round_=round_)
+    if blockers:
+        first = blockers[0]
+        more = len(blockers) - 1
+        raise PlanRefused(
+            f"Confirm {first}'s reading first — "
+            + (
+                "one condition still needs you."
+                if more == 0
+                else f"{more + 1} conditions still need you."
+            )
+        )
+    if round_.plan_confirmed_at is not None:
+        return
+    round_.plan_confirmed_at = datetime.now(UTC)
+    round_.plan_confirmed_by_user_id = actor_user_id
+    db.add(
+        ConditionEvent(
+            company_id=round_.company_id,
+            loan_file_id=round_.loan_file_id,
+            condition_id=None,
+            round_id=round_.id,
+            kind=ConditionEventKind.ROUND_PLAN_CONFIRMED,
+            actor_user_id=actor_user_id,
+            detail={},
+        )
+    )
+    await log_activity(
+        db,
+        loan_file_id=round_.loan_file_id,
+        activity_type=ActivityType.CONDITION_PLAN_CONFIRMED,
+        summary=f"Plan confirmed for round {round_.round_number}",
+        actor_user_id=actor_user_id,
+        detail={"round_id": str(round_.id)},
+    )
+    await db.flush()
+
+
+# --------------------------------------------------------------------------------------------- #
+# Read side: items as the screens draw them, and the round's plan summary (S3-02)
+# --------------------------------------------------------------------------------------------- #
+
+#: Who an email goes to, by performer. Title and attorney share ONE email (S3-05's "title company /
+#: attorney"); everyone else gets their own. The borrower's email is always its own.
+_RECIPIENT: dict[Performer, tuple[str, str]] = {
+    Performer.BORROWER: ("borrower", "Borrower"),
+    Performer.TITLE: ("title_attorney", "Title/attorney"),
+    Performer.ATTORNEY: ("title_attorney", "Title/attorney"),
+    Performer.LO: ("lo", "LO"),
+    Performer.INSURANCE: ("insurance", "Insurance agent"),
+    Performer.HOA: ("hoa", "HOA"),
+    Performer.EMPLOYER: ("employer", "Employer"),
+    Performer.OTHER_PARTY: ("other_party", "Other party"),
+}
+_RECIPIENT_ORDER = [
+    "borrower",
+    "title_attorney",
+    "lo",
+    "insurance",
+    "hoa",
+    "employer",
+    "other_party",
+]
+
+
+def recipient_for(item: ConditionItem) -> tuple[str, str] | None:
+    """The email an ask goes into. The first performer asks, except a Borrower + LO item, which the LO
+    sends to the borrower (0132's disclosure goes out in the LO email)."""
+    if item.option not in _ASKS:
+        return None
+    performers = [Performer(p) for p in item.performers] or [item.performer]
+    if Performer.LO in performers:
+        return _RECIPIENT[Performer.LO]
+    return _RECIPIENT.get(performers[0])
+
+
+async def items_public_for_file(db: AsyncSession, *, loan_file_id: UUID) -> dict[UUID, list[Any]]:
+    """Every live item on the file, as `ConditionItemPublic`, keyed by condition. ONE query per table."""
+    from app.schemas.condition import ConditionItemPublic, ReadingSpecificsPublic
+
+    by_condition = await _items_by_condition(db, loan_file_id)
+    all_items = [item for items in by_condition.values() for item in items]
+    if not all_items:
+        return {}
+    code_rows = await db.execute(
+        select(Condition.id, Condition.lender_code, Condition.sequence).where(
+            Condition.loan_file_id == loan_file_id
+        )
+    )
+    codes: dict[UUID, str | None] = {}
+    sequence: dict[UUID, int] = {}
+    for condition_id, code, seq in code_rows.tuples().all():
+        codes[condition_id] = code
+        sequence[condition_id] = seq
+    need_ids = {item.need_id for item in all_items if item.need_id}
+    need_titles: dict[UUID, str] = {}
+    if need_ids:
+        need_rows = await db.execute(
+            select(NeedsItem.id, NeedsItem.title).where(NeedsItem.id.in_(need_ids))
+        )
+        need_titles = dict(need_rows.tuples().all())
+    doc_ids = {item.document_id for item in all_items if item.document_id}
+    doc_names = (
+        {
+            doc_id: name or kind
+            for doc_id, name, kind in (
+                await db.execute(
+                    select(Document.id, Document.document_name, Document.document_type).where(
+                        Document.id.in_(doc_ids)
+                    )
+                )
+            ).all()
+        }
+        if doc_ids
+        else {}
+    )
+    need_members: dict[UUID, set[UUID]] = {}
+    for item in all_items:
+        if item.need_id:
+            need_members.setdefault(item.need_id, set()).add(item.condition_id)
+
+    out: dict[UUID, list[Any]] = {}
+    for condition_id, items in by_condition.items():
+        rows = []
+        for item in items:
+            shared: list[str] = []
+            if item.need_id is not None:
+                # SHEET ORDER, as S3-01 prints "Same statement as 7086 and 6132".
+                shared = [
+                    codes.get(other) or "—"
+                    for other in sorted(
+                        need_members.get(item.need_id, set()), key=lambda c: sequence.get(c, 0)
+                    )
+                    if other != condition_id
+                ]
+            rows.append(
+                ConditionItemPublic(
+                    id=item.id,
+                    key=item.key,
+                    name=item.name,
+                    acceptable=item.acceptable,
+                    performer=item.performer,
+                    performers=[Performer(p) for p in item.performers] or [item.performer],
+                    option=item.option,
+                    status=item.status,
+                    origin=item.origin,
+                    need_id=item.need_id,
+                    need_title=need_titles.get(item.need_id) if item.need_id else None,
+                    shared_with_codes=shared,
+                    document_id=item.document_id,
+                    document_name=doc_names.get(item.document_id) if item.document_id else None,
+                    document_page=item.document_page,
+                    waits_on_condition_id=item.waits_on_condition_id,
+                    waits_on_code=codes.get(item.waits_on_condition_id)
+                    if item.waits_on_condition_id
+                    else None,
+                    due_date=item.due_date,
+                    specifics=ReadingSpecificsPublic.model_validate(item.specifics or {}),
+                )
+            )
+        out[condition_id] = rows
+    return out
+
+
+async def round_plan_summary(db: AsyncSession, *, round_: ConditionRound) -> Any:
+    """S3-02's heading and pills, computed from the round's conditions and their items."""
+    from app.schemas.condition import RoundPlanDraftPublic, RoundPlanPublic
+
+    conditions = list(
+        (
+            await db.execute(
+                select(Condition).where(
+                    Condition.loan_file_id == round_.loan_file_id,
+                    Condition.last_seen_round_id == round_.id,
+                    Condition.deleted_at.is_(None),
+                    Condition.lender_status != ConditionLenderStatus.SUPERSEDED,
+                )
+            )
+        ).scalars()
+    )
+    by_condition = await _items_by_condition(db, round_.loan_file_id)
+    drafts: dict[str, tuple[str, set[str]]] = {}
+    your_tasks = already = push_back = lender = confirm = 0
+    for condition in conditions:
+        items = by_condition.get(condition.id, [])
+        code = condition.lender_code or "—"
+        if condition.reading_status is ConditionReadingStatus.NEEDS_CONFIRMATION:
+            confirm += 1
+        if condition.next_step is PlanOption.PUSH_BACK:
+            push_back += 1
+            continue
+        if condition.next_step is PlanOption.LENDER_DOING_IT:
+            lender += 1
+            continue
+        if condition.next_step is PlanOption.INFORMATION_ONLY:
+            continue
+        if any(i.option is PlanOption.I_WILL_DO_IT for i in items):
+            your_tasks += 1
+        if items and all(i.option is PlanOption.ALREADY_IN_FILE for i in items):
+            already += 1
+        for item in items:
+            recipient = recipient_for(item)
+            if recipient is not None and item.status is ConditionItemStatus.OPEN:
+                key, label = recipient
+                drafts.setdefault(key, (label, set()))[1].add(code)
+    planned = sum(1 for c in conditions if c.next_step is not None or by_condition.get(c.id))
+    blockers = await round_plan_blockers(db, round_=round_)
+    return RoundPlanPublic(
+        round_id=round_.id,
+        round_number=round_.round_number,
+        round_date=round_.round_date,
+        planned=planned,
+        ready_at=round_.plan_ready_at,
+        confirmed_at=round_.plan_confirmed_at,
+        nothing_sent=True,
+        drafts=[
+            RoundPlanDraftPublic(recipient=key, label=drafts[key][0], codes=sorted(drafts[key][1]))
+            for key in _RECIPIENT_ORDER
+            if key in drafts
+        ],
+        your_tasks=your_tasks,
+        already_in_file=already,
+        push_back=push_back,
+        lender_doing_it=lender,
+        needs_confirmation=confirm,
+        blocking_codes=blockers,
+    )
+
+
+__all__ = [
+    "ASK_DUE_BUSINESS_DAYS",
+    "LenderConditionSettings",
+    "PlanOutcome",
+    "PlanRefused",
+    "add_item",
+    "build_plan",
+    "carry_plan",
+    "confirm_round_plan",
+    "items_public_for_file",
+    "lender_condition_settings",
+    "recipient_for",
+    "remove_item",
+    "round_plan_blockers",
+    "round_plan_summary",
+    "set_lender_processing",
+    "set_next_step",
+    "update_item",
+]

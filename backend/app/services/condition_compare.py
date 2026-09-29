@@ -42,6 +42,7 @@ from app.models.condition_round import (
     ConditionRoundStatus,
 )
 from app.models.helpers import only_active
+from app.services.condition_plan import carry_plan
 from app.services.conditions import APPEARED_ON
 
 logger = structlog.get_logger(__name__)
@@ -497,6 +498,8 @@ async def confirm_reworded(
                 },
             )
         )
+        # LP-920 — the replaced condition hands its plan to the new one, for her to confirm (§4a 3).
+        await carry_plan(db, from_condition=old, to_condition=new, actor_user_id=actor_user_id)
 
     remaining = [
         pair

@@ -14,6 +14,7 @@ import type {
   Condition,
   ConditionPrepStatus,
   OwnerHint,
+  Performer,
   UnderwriterNote,
   Verdict,
 } from "@/lib/types/conditions";
@@ -127,6 +128,7 @@ export function ConditionDetailSheet({
   suggestedRoundNumber,
   onConfirmSuggestion,
   onConfirmReading,
+  onAddItem,
 }: {
   /** The list's rows, in the list's order — the filter and sort come with them. */
   conditions: Condition[];
@@ -150,6 +152,8 @@ export function ConditionDetailSheet({
   onConfirmSuggestion?: (condition: Condition) => void;
   /** Opens S3-03 for a reading that needs her (LP-919). The caller owns the dialog. */
   onConfirmReading?: (condition: Condition) => void;
+  /** S3-01's "Add an item" (LP-920). */
+  onAddItem?: (condition: Condition, name: string, performer: Performer) => void;
 }) {
   const index = conditions.findIndex((row) => row.id === openId);
   const row = index >= 0 ? conditions[index] : undefined;
@@ -205,6 +209,7 @@ export function ConditionDetailSheet({
             suggestedInRound={suggestedIds?.has(row.id) ? (suggestedRoundNumber ?? null) : null}
             onConfirmSuggestion={onConfirmSuggestion}
             onConfirmReading={onConfirmReading}
+            onAddItem={onAddItem}
           />
         ) : null}
       </SheetContent>
@@ -225,6 +230,7 @@ function SheetBody({
   suggestedInRound,
   onConfirmSuggestion,
   onConfirmReading,
+  onAddItem,
   conditions,
 }: {
   row: Condition;
@@ -241,6 +247,7 @@ function SheetBody({
   suggestedInRound?: number | null;
   onConfirmSuggestion?: (condition: Condition) => void;
   onConfirmReading?: (condition: Condition) => void;
+  onAddItem?: (condition: Condition, name: string, performer: Performer) => void;
 }) {
   const detail = useCondition(row.id);
   const events = useConditionEvents(row.id);
@@ -359,7 +366,16 @@ function SheetBody({
           condition={condition}
           onConfirm={onConfirmReading ? () => onConfirmReading(condition) : undefined}
         />
-        {condition.reading ? <ReadingItems items={condition.reading.items} /> : null}
+        {condition.items.length > 0 || condition.next_step !== null ? (
+          <ReadingItems
+            items={condition.items}
+            onAdd={
+              onAddItem ? (name, performer) => onAddItem(condition, name, performer) : undefined
+            }
+          />
+        ) : condition.reading ? (
+          <ReadingItems items={condition.reading.items} />
+        ) : null}
 
         <section className="rounded-lg border border-input bg-card p-3">
           <div className="grid grid-cols-[6rem_1fr] items-center gap-y-2">

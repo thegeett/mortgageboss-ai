@@ -553,6 +553,7 @@ def split_condition_round(self: Task, round_id: str) -> None:
 
 
 async def _run_read(round_id: str) -> None:
+    from app.services.condition_plan import build_plan
     from app.services.condition_reading import read_round
 
     try:
@@ -561,6 +562,10 @@ async def _run_read(round_id: str) -> None:
         return
     async with task_session() as db:
         await read_round(db, round_id=round_pk)
+        # LP-920 — the plan is built straight from the reading, so importing produces it with nobody
+        # creating anything by hand. One commit: a reading without its plan would show a round with
+        # conditions read and nothing proposed.
+        await build_plan(db, round_id=round_pk)
         await db.commit()
 
 

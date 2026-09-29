@@ -121,6 +121,8 @@ class ActivityType(StrEnum):
     #: `20260924_…_lp909_condition_imported_activity.py`: this is VARCHAR + CHECK (ADR-037), so
     #: adding a member here changes only what the CODE writes, never what the database accepts.
     CONDITION_IMPORTED = "condition_imported"
+    CONDITION_PLAN_READY = "condition_plan_ready"
+    CONDITION_PLAN_CONFIRMED = "condition_plan_confirmed"
 
 
 class ActivityLog(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):

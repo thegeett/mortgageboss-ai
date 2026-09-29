@@ -39,6 +39,9 @@ const ALL_KINDS = [
   "round_completeness_changed",
   "condition_read",
   "condition_reading_confirmed",
+  "condition_planned",
+  "condition_plan_changed",
+  "round_plan_confirmed",
 ] as const satisfies readonly ConditionEventKind[];
 
 /**
@@ -90,7 +93,7 @@ describe("every event kind has a sentence", () => {
 
   it("is exhaustive over the union, checked by the compiler", () => {
     expect(_everyKindIsListed).toBe(true);
-    expect(ALL_KINDS).toHaveLength(21);
+    expect(ALL_KINDS).toHaveLength(24);
   });
 });
 

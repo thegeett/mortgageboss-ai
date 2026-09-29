@@ -22,6 +22,14 @@ const useTimeline = vi.fn();
 
 vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/conditions")>()),
+  // Stage 3 hooks (LP-919, LP-920) — stubbed so these Stage 1/2 screens need no QueryClient for them.
+  useAddItem: () => ({ mutate: vi.fn(), isPending: false }),
+  useRoundPlan: () => ({ data: undefined }),
+  useConfirmPlan: () => ({ mutate: vi.fn(), isPending: false }),
+  useSetNextStep: () => ({ mutate: vi.fn(), isPending: false }),
+  useUpdateItem: () => ({ mutate: vi.fn(), isPending: false }),
+  useConfirmReading: () => ({ mutate: vi.fn(), isPending: false }),
+  useLibraryDefaultReading: () => ({ mutate: vi.fn(), isPending: false }),
   useUploadConditionSheet: () => ({ mutate: uploadMutate, isPending: false }),
 }));
 

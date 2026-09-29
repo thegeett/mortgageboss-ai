@@ -1,9 +1,15 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { OPTION_LABEL, monthLabel, performersLabel } from "@/lib/conditions/plan-words";
-import type { Condition, ReadingItem } from "@/lib/types/conditions";
-import { Building2, ListChecks, Sparkles, TriangleAlert, User } from "lucide-react";
+import {
+  OPTION_LABEL,
+  PERFORMER_LABEL,
+  monthLabel,
+  performersLabel,
+} from "@/lib/conditions/plan-words";
+import type { Condition, ConditionItem, Performer, ReadingItem } from "@/lib/types/conditions";
+import { Building2, Link2, ListChecks, Plus, Sparkles, TriangleAlert, User } from "lucide-react";
+import { useState } from "react";
 
 /**
  * "How we read it" (S3-01, LP-919): the app's reading of the lender's words, always beside them.
@@ -126,15 +132,41 @@ function ReadingChip({
 }
 
 /** The items the reading found (S3-01's "Items · 3"), each with who acts and what is acceptable. */
-export function ReadingItems({ items }: { items: ReadingItem[] }) {
-  if (items.length === 0) return null;
+/** An item as the sheet draws it: the plan's (LP-920) once it exists, the reading's before that. */
+type ShownItem = ReadingItem | ConditionItem;
+
+/**
+ * The items (S3-01's "Items · 3"), each with who acts, the option, and — for a plan item that shares
+ * its need with other conditions — "Same statement as 7086 and 6132 — asked for once" (§4a change 2).
+ */
+export function ReadingItems({
+  items,
+  onAdd,
+}: {
+  items: ShownItem[];
+  /** S3-01's "Add an item" (LP-920). Offered only once the plan exists. */
+  onAdd?: (name: string, performer: Performer) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [who, setWho] = useState<Performer>("borrower");
+  const shown = items.filter((item) => !("status" in item) || item.status !== "not_needed");
+  if (shown.length === 0 && !onAdd) return null;
   return (
     <section className="flex flex-col gap-2">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        Items · {items.length}
-      </p>
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Items · {shown.length}
+        </p>
+        {onAdd ? (
+          <Button type="button" variant="ghost" size="sm" onClick={() => setAdding(true)}>
+            <Plus className="h-3.5 w-3.5" aria-hidden />
+            Add an item
+          </Button>
+        ) : null}
+      </div>
       <ol className="flex flex-col gap-2">
-        {items.map((item, index) => (
+        {shown.map((item, index) => (
           <li
             key={`${item.key}-${index}`}
             className="grid grid-cols-[1.5rem_1fr_9rem] gap-3 rounded-lg border border-input bg-card p-3"
@@ -145,6 +177,20 @@ export function ReadingItems({ items }: { items: ReadingItem[] }) {
             <div className="flex min-w-0 flex-col gap-0.5">
               <p className="text-sm font-semibold text-foreground">{item.name}</p>
               <p className="text-xs text-foreground-2">{itemLine(item)}</p>
+              {"shared_with_codes" in item && item.shared_with_codes.length > 0 ? (
+                <p className="inline-flex items-center gap-1 text-xs text-primary">
+                  <Link2 className="h-3 w-3" aria-hidden />
+                  Same statement as {joinCodes(item.shared_with_codes)} — asked for once
+                </p>
+              ) : null}
+              {"waits_on_code" in item && item.waits_on_code ? (
+                <p className="text-xs text-muted-foreground">Waits on {item.waits_on_code}</p>
+              ) : null}
+              {"document_name" in item && item.document_name ? (
+                <p className="text-xs text-muted-foreground">
+                  Already in the file: {item.document_name}, page {item.document_page ?? 1}
+                </p>
+              ) : null}
             </div>
             <div className="flex flex-col gap-0.5">
               <p className="inline-flex items-center gap-1 text-sm text-foreground">
@@ -160,12 +206,52 @@ export function ReadingItems({ items }: { items: ReadingItem[] }) {
           </li>
         ))}
       </ol>
+      {adding && onAdd ? (
+        <div className="flex items-center gap-2 rounded-lg border border-input bg-card p-2">
+          <input
+            aria-label="New item"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="What else the lender asks for"
+            className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-sm"
+          />
+          <select
+            aria-label="Who acts on the new item"
+            value={who}
+            onChange={(event) => setWho(event.target.value as Performer)}
+            className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+          >
+            {(Object.keys(PERFORMER_LABEL) as Performer[]).map((performer) => (
+              <option key={performer} value={performer}>
+                {PERFORMER_LABEL[performer]}
+              </option>
+            ))}
+          </select>
+          <Button
+            type="button"
+            size="sm"
+            disabled={!name.trim()}
+            onClick={() => {
+              onAdd(name.trim(), who);
+              setName("");
+              setAdding(false);
+            }}
+          >
+            Add
+          </Button>
+        </div>
+      ) : null}
     </section>
   );
 }
 
+function joinCodes(codes: string[]): string {
+  if (codes.length <= 1) return codes.join("");
+  return `${codes.slice(0, -1).join(", ")} and ${codes[codes.length - 1]}`;
+}
+
 /** `Statement showing the funds before the check was written · Capital One ··9912 · Jul 2026`. */
-function itemLine(item: ReadingItem): string {
+function itemLine(item: ShownItem): string {
   const parts = [item.acceptable];
   const { account_bank: bank, account_last4: last4, month } = item.specifics;
   if (bank || last4) parts.push([bank, last4 ? `··${last4}` : null].filter(Boolean).join(" "));

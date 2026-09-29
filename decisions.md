@@ -16569,3 +16569,34 @@ the model.
 The reading is reproducible from its inputs except for the model's specifics, which code has checked.
 
 *Status.* Accepted (LP-919).
+
+## ADR-411
+
+**A condition's plan is its items (one row each in `condition_items`) plus an optional whole-condition
+`next_step`; items ask through needs, and one need may serve items on several conditions.**
+
+*Context.* Plan §5 LP-920 asks for items and actions per condition (kind of action, performer,
+counterparty, due date, status, outcome), needs with `origin = CONDITION` merged with the file's own, an
+"already in the file" pointer, links between conditions, carry-over between rounds, and a file-level
+"lender is processing this file" switch. §4a change 2 adds that one document can answer several
+conditions and must be asked for once.
+
+*Decision (LP-920).*
+
+- **Items are rows**, not JSON on the condition, because later tickets move each one separately (a draft
+  marked sent moves its items to `requested`, evidence moves them to `received`/`done`) and every move is
+  an event. The reading's items (LP-919) are the proposal; the plan materialises them once.
+- **`next_step` on the condition** covers the steps that belong to the whole condition (push back, ask
+  the underwriter, the lender is doing it, information only). With `lender_doing_it` or
+  `information_only` the list uses Stage 2's neutral display; `prep_status` stays `to_do` (§4a change 12).
+- **Needs are shared by the ask, not by the condition.** Items that ask the same person for the same
+  document on the same account point at ONE need (`need_id`); an open need the file already has for the
+  same document is reused. A borrower statement item that names no account joins the round's single
+  account. The borrower is asked for the Capital One ··9912 statements once, for 7086, 6132 and 6637.
+- **Per-lender behaviour is data** (`lenders.condition_settings`), with canonical-key defaults until
+  LP-925's screen stores a lender's own (UWM: the lender orders the final inspection).
+- **Carry-over.** A planned condition is never re-planned, so a condition seen again keeps its plan; a
+  came-back condition's requested items reopen; a replaced condition's items are copied to its successor
+  and the successor's reading is marked for her to confirm.
+
+*Status.* Accepted (LP-920).

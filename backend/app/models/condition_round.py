@@ -29,12 +29,12 @@ text is NPI: the readonly layer has no way to expose the safe part of a JSONB co
 the column.
 """
 
-from datetime import date
+from datetime import date, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import Date, ForeignKey, Index, Text, text
+from sqlalchemy import Date, DateTime, ForeignKey, Index, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -212,6 +212,14 @@ class ConditionRound(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     #: LP-919 — the one AI call that read this round's conditions: model, tokens, `cost_estimate`
     #: (the existing cost tool), how many were read, and whether it fell back to the library. No text.
     reading_run: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    #: LP-920 — when this round's plan was built, and when she confirmed it (S3-02).
+    plan_ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    plan_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    plan_confirmed_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     created_by_user_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True

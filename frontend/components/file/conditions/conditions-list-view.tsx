@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import type { ConditionListParams } from "@/lib/api/conditions";
 import {
+  useAddItem,
   useAttachPdf,
   useBulkConditions,
   useConditions,
@@ -40,6 +41,7 @@ import { ConditionsList } from "./conditions-list";
 import { ConditionsSummaryBar } from "./conditions-summary-bar";
 import { RoundComparisonPanel } from "./round-comparison-panel";
 import { RoundDetailsSheet } from "./round-details-sheet";
+import { RoundPlanPanel } from "./round-plan-panel";
 import { RoundStrip } from "./round-strip";
 
 /**
@@ -112,6 +114,8 @@ export function ConditionsListView({
   const [enrichment, setEnrichment] = useState<ConditionEnrichResult | null>(null);
   const [openConditionId, setOpenConditionId] = useState<string | null>(null);
   // S3-03 (LP-919): the condition whose reading she is confirming, opened from the detail sheet.
+  // S3-01's "Add an item" (LP-920).
+  const addItem = useAddItem(fileId);
   const [confirmReadingId, setConfirmReadingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const [answerFor, setAnswerFor] = useState<Condition[] | null>(null);
@@ -127,6 +131,8 @@ export function ConditionsListView({
   const [hiddenPanelRoundId, setHiddenPanelRoundId] = useState<string | null>(null);
   const [panelRefusal, setPanelRefusal] = useState<string | null>(null);
 
+  // The round whose plan S3-02 shows: the newest imported one (rounds come newest first).
+  const newestImported = rounds.find((round) => round.status === "imported") ?? null;
   const openRound = rounds.find((round) => round.id === openRoundId) ?? null;
   const rows = filtered.data?.rows ?? [];
   const allRows = everything.data?.rows ?? [];
@@ -317,6 +323,17 @@ export function ConditionsListView({
         />
       ) : null}
 
+      {/* S3-02 (LP-920): the newest imported round's plan, until she confirms it. */}
+      {newestImported ? (
+        <RoundPlanPanel
+          fileId={fileId}
+          round={newestImported}
+          conditions={allRows}
+          onOpenCondition={setOpenConditionId}
+          onConfirmReading={setConfirmReadingId}
+        />
+      ) : null}
+
       {summary.data ? (
         <ConditionsSummaryBar summary={summary.data} state={urlState} onFilter={applyUrl} />
       ) : (
@@ -468,6 +485,9 @@ export function ConditionsListView({
                 )
         }
         onConfirmReading={(condition) => setConfirmReadingId(condition.id)}
+        onAddItem={(condition, name, performer) =>
+          addItem.mutate({ conditionId: condition.id, name, performers: [performer] })
+        }
       />
       <ConfirmReadingFor
         fileId={fileId}

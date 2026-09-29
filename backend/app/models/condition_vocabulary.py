@@ -68,3 +68,26 @@ class EvidenceCheck(StrEnum):
     EFFECTIVE_BY_CLOSING = "effective_by_closing"
     INSIDE_VOE_WINDOW = "inside_voe_window"
     NOT_EXPIRED = "not_expired"
+
+
+class ConditionItemStatus(StrEnum):
+    """Where one item stands (LP-920). Our side only; the lender's track is the condition's.
+
+    `requested` is set when the email carrying the item is marked sent (LP-922); `received` when
+    evidence is linked (LP-923); `done` when every check passed, the task was marked done, or the file
+    already held it; `not_needed` when the plan drops it (6178's push-back, an item she removes).
+    """
+
+    OPEN = "open"
+    REQUESTED = "requested"
+    RECEIVED = "received"
+    DONE = "done"
+    NOT_NEEDED = "not_needed"
+
+
+class ConditionItemOrigin(StrEnum):
+    """Where an item came from: the reading, her own "Add an item", or a replaced condition's plan."""
+
+    READING = "reading"
+    MANUAL = "manual"
+    CARRIED = "carried"

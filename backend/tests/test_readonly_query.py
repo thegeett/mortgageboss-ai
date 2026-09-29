@@ -315,6 +315,8 @@ EXCLUDED: dict[str, frozenset[str]] = {
             "loan_officer_email",
             "underwriter_contact_id",
             "legal_hold_reason",
+            # LP-920 — excluded only to avoid a view rebuild for a column no query uses yet.
+            "lender_processing",
         }
     ),
     # LP-808 — `token` is a BEARER CAPABILITY, stored in the clear because an admin types it into a
@@ -403,7 +405,11 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # exposed: `mortgagee_clause` is the lender's own published mailing identity printed on every
     # condition sheet, `canonical_lender_key` is a fixed slug an admin chooses, and
     # `condition_upload_cutoff` is a time of day.
-    "lenders": frozenset({"contact_email", "contact_phone", "condition_handling_notes"}),
+    # LP-920 adds `condition_settings` (who orders what, the upload cutoff, the mortgagee clause):
+    # excluded to avoid a view rebuild for a column no query uses yet.
+    "lenders": frozenset(
+        {"contact_email", "contact_phone", "condition_handling_notes", "condition_settings"}
+    ),
     # LP-904, ADR-405. The lender's WORDS are dropped rather than scrubbed, because `readonly.scrub`
     # matches identifier SHAPES and a condition quoting an employer, a street or an account ending
     # is not digit-shaped — it would cross a scrubbed view intact. What each view exposes instead is
@@ -426,7 +432,18 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # LP-919 adds `reading_run`: model, tokens and cost for one AI call. Not NPI, but not exposed
     # either — it would need a view rebuild for a column nobody queries yet.
     "condition_rounds": frozenset(
-        {"raw_text", "header", "draft_rows", "parse_report", "comparison", "reading_run"}
+        {
+            "raw_text",
+            "header",
+            "draft_rows",
+            "parse_report",
+            "comparison",
+            "reading_run",
+            # LP-920 — the plan's timestamps and who confirmed it; excluded to avoid a view rebuild.
+            "plan_ready_at",
+            "plan_confirmed_at",
+            "plan_confirmed_by_user_id",
+        }
     ),
     # LP-912 adds `prep_note` and `verdict`. `prep_note` is a short line a processor typed about one
     # borrower's file, which is where a name arrives in a shape no scrubber predicts — it is in
@@ -450,6 +467,10 @@ EXCLUDED: dict[str, frozenset[str]] = {
             "reading_status",
             "reading_source",
             "reading_confidence",
+            # LP-920 — `plan_reason` is built by code and names no borrower; `next_step` is a category.
+            # Both excluded only to avoid rebuilding the view.
+            "next_step",
+            "plan_reason",
         }
     ),
     # LP-919 — the items she confirmed for a code: names and performers, no specifics. Excluded rather
@@ -725,7 +746,13 @@ def test_every_view_targets_a_real_table() -> None:
 # A table may legitimately have no readonly view; each one needs a reason here.
 # Empty today, and that is the point: every application table is exposed. Alembic's
 # own bookkeeping table is not in `Base.metadata`, so it never reaches this check.
-EXCLUDED_TABLES: dict[str, str] = {}
+EXCLUDED_TABLES: dict[str, str] = {
+    "condition_items": (
+        "LP-920 — each item's `specifics` restates the lender's amounts, banks and last fours (NPI), "
+        "and `name` can carry the lender's wording. A view would have to drop both; nobody queries "
+        "items yet, so the table is excluded whole rather than half-exposed."
+    ),
+}
 
 
 def _all_tables() -> set[str]:

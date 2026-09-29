@@ -120,6 +120,11 @@ class ConditionEventKind(StrEnum):
     #: text), and she confirmed or replaced that reading (S3-03).
     CONDITION_READ = "condition_read"
     CONDITION_READING_CONFIRMED = "condition_reading_confirmed"
+    #: LP-920 — the plan proposed for a condition (detail: next step, item count, reason key), a change
+    #: she made to it (option, item added or removed, next step), and the round's plan confirmed.
+    CONDITION_PLANNED = "condition_planned"
+    CONDITION_PLAN_CHANGED = "condition_plan_changed"
+    ROUND_PLAN_CONFIRMED = "round_plan_confirmed"
     #: LP-915. An imported round was switched between "full list" and "just some" (A7), which is what
     #: makes a comparison runnable — or withdraws its unconfirmed suggestions.
     ROUND_COMPLETENESS_CHANGED = "round_completeness_changed"

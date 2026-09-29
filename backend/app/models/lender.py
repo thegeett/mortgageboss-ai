@@ -72,6 +72,10 @@ class Lender(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # supported_programs holds LoanProgram values, e.g. ["conventional", "fha"]
     # (ADR-046).
     lender_overlays: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    #: LP-920/925 — how conditions are worked at this lender: who orders what, the upload cutoff, the
+    #: fields its upload asks per condition, the mortgagee clause. Null means the defaults for the
+    #: lender's canonical key (`services/condition_plan.lender_condition_settings`).
+    condition_settings: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     supported_programs: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 

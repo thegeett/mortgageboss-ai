@@ -230,7 +230,14 @@ async function main() {
       const clicked = await evaluate(`(() => {
         const want = ${JSON.stringify(text)};
         const all = [...document.querySelectorAll("button, a, [role=button], [role=row], tr, td, span, div")];
-        const hit = all.find((el) => el.offsetParent !== null && el.textContent.trim() === want);
+        // The INNERMOST element that reads exactly the text: a table cell holding a button reads the
+        // same text as the button, and clicking the cell clicks nothing.
+        const hit = all.find(
+          (el) =>
+            el.offsetParent !== null &&
+            el.textContent.trim() === want &&
+            ![...el.children].some((child) => child.textContent.trim() === want),
+        );
         if (!hit) return false;
         hit.click();
         return true;

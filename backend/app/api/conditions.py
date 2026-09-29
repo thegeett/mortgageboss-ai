@@ -45,6 +45,7 @@ from app.models.condition import (
     ConditionPrepStatus,
     OwnerHint,
 )
+from app.models.condition_item import ConditionItem
 from app.models.condition_round import (
     ConditionRound,
     ConditionRoundCompleteness,
@@ -63,6 +64,9 @@ from app.schemas.condition import (
     ConditionEnrichResult,
     ConditionEventPublic,
     ConditionImportResult,
+    ConditionItemCreate,
+    ConditionItemPublic,
+    ConditionItemUpdate,
     ConditionPasteRequest,
     ConditionPublic,
     ConditionRoundAppearancePublic,
@@ -70,12 +74,15 @@ from app.schemas.condition import (
     ConditionSort,
     ConditionSummaryPublic,
     ConfirmClearedRequest,
+    LenderProcessingRequest,
+    NextStepRequest,
     OwnerRequest,
     PrepStatusRequest,
     ReadingConfirmRequest,
     ReopenRequest,
     RewordedDecisionRequest,
     RoundCompletenessUpdate,
+    RoundPlanPublic,
     UnderwriterNotePublic,
     VerdictRequest,
 )
@@ -90,6 +97,17 @@ from app.services.condition_import import (
     RoundNotImportable,
     create_manual_condition,
     import_round,
+)
+from app.services.condition_plan import (
+    PlanRefused,
+    add_item,
+    confirm_round_plan,
+    items_public_for_file,
+    remove_item,
+    round_plan_summary,
+    set_lender_processing,
+    set_next_step,
+    update_item,
 )
 from app.services.condition_reading import (
     ConfirmedItem,
@@ -504,6 +522,41 @@ async def list_condition_rounds(
     return [_round_public(round_, per_round=per_round, imports=imports) for round_ in rounds]
 
 
+@rounds_router.get("/{round_id}/plan", response_model=RoundPlanPublic)
+async def get_round_plan(round_: ScopedRound, db: DbSession) -> RoundPlanPublic:
+    """S3-02's heading and pills for this round's plan."""
+    summary: RoundPlanPublic = await round_plan_summary(db, round_=round_)
+    return summary
+
+
+@rounds_router.post("/{round_id}/plan/confirm", response_model=RoundPlanPublic)
+async def confirm_plan(
+    round_: ScopedRound, db: DbSession, current_user: CurrentUser
+) -> RoundPlanPublic:
+    """S3-02's "Confirm plan…". Refused, with the sentence, while any reading still needs her."""
+    try:
+        await confirm_round_plan(db, round_=round_, actor_user_id=current_user.id)
+    except PlanRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    await db.commit()
+    summary: RoundPlanPublic = await round_plan_summary(db, round_=round_)
+    return summary
+
+
+@router.put("/{loan_file_id}/lender-processing", status_code=status.HTTP_204_NO_CONTENT)
+async def set_file_lender_processing(
+    loan_file: ScopedLoanFileById,
+    payload: LenderProcessingRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> None:
+    """ "Lender is processing this file" (§4a change 8): third-party asks not yet sent follow it."""
+    await set_lender_processing(
+        db, loan_file=loan_file, on=payload.on, actor_user_id=current_user.id
+    )
+    await db.commit()
+
+
 @rounds_router.get("/{round_id}", response_model=ConditionRoundPublic)
 async def get_condition_round(round_: ScopedRound, db: DbSession) -> ConditionRoundPublic:
     """One round: its draft rows or its imported count, header, expiry dates and parse report.
@@ -522,7 +575,11 @@ async def get_condition_round(round_: ScopedRound, db: DbSession) -> ConditionRo
 
 
 def _condition_public(
-    condition: Condition, *, round_numbers: list[int], today: date
+    condition: Condition,
+    *,
+    round_numbers: list[int],
+    today: date,
+    items: list[ConditionItemPublic] | None = None,
 ) -> ConditionPublic:
     """One condition as the wire sees it, with the SERVICE's rules supplying the derived fields.
 
@@ -542,6 +599,7 @@ def _condition_public(
         effective_owner_source=effective_owner_source(condition),
         is_open=is_open(condition),
         days_open=condition_days_open(condition, today=today),
+        items=items,
     )
 
 
@@ -644,8 +702,15 @@ async def list_file_conditions(
     )
 
     today = datetime.now(UTC).date()
+    # LP-920 — every condition's items in ONE query for the whole file, not one per row.
+    items = await items_public_for_file(db, loan_file_id=loan_file.id)
     return [
-        _condition_public(condition, round_numbers=numbers.get(condition.id, []), today=today)
+        _condition_public(
+            condition,
+            round_numbers=numbers.get(condition.id, []),
+            today=today,
+            items=items.get(condition.id, []),
+        )
         for condition in conditions
     ]
 
@@ -1157,6 +1222,9 @@ async def add_condition_by_hand(
         condition,
         round_numbers=numbers.get(condition.id, []),
         today=datetime.now(UTC).date(),
+        items=(await items_public_for_file(db, loan_file_id=condition.loan_file_id)).get(
+            condition.id, []
+        ),
     )
 
 
@@ -1198,7 +1266,90 @@ async def _condition_response(
         condition,
         round_numbers=numbers.get(condition.id, []),
         today=datetime.now(UTC).date(),
+        items=(await items_public_for_file(db, loan_file_id=condition.loan_file_id)).get(
+            condition.id, []
+        ),
     )
+
+
+async def _scoped_item(db: DbSession, condition: Condition, item_id: UUID) -> ConditionItem:
+    """An item of THIS condition — the condition is already tenant-scoped, and the item is looked up
+    only under it, so another file's item id answers 404 like a missing one."""
+    item = await db.scalar(
+        select(ConditionItem).where(
+            ConditionItem.id == item_id,
+            ConditionItem.condition_id == condition.id,
+            ConditionItem.deleted_at.is_(None),
+        )
+    )
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Item not found.")
+    return item
+
+
+@conditions_by_id_router.put("/{condition_id}/next-step", response_model=ConditionPublic)
+async def set_condition_next_step(
+    condition: ScopedCondition, payload: NextStepRequest, db: DbSession, current_user: CurrentUser
+) -> ConditionPublic:
+    """The whole condition's step (S3-02's select), or null to let its items carry their own."""
+    await set_next_step(
+        db, condition=condition, next_step=payload.next_step, actor_user_id=current_user.id
+    )
+    return await _condition_response(db, condition)
+
+
+@conditions_by_id_router.post("/{condition_id}/items", response_model=ConditionPublic)
+async def add_condition_item(
+    condition: ScopedCondition,
+    payload: ConditionItemCreate,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionPublic:
+    """S3-01's "Add an item"."""
+    try:
+        await add_item(
+            db,
+            condition=condition,
+            name=payload.name,
+            performers=payload.performers,
+            option=payload.option,
+            actor_user_id=current_user.id,
+        )
+    except PlanRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    return await _condition_response(db, condition)
+
+
+@conditions_by_id_router.patch("/{condition_id}/items/{item_id}", response_model=ConditionPublic)
+async def update_condition_item(
+    condition: ScopedCondition,
+    item_id: UUID,
+    payload: ConditionItemUpdate,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionPublic:
+    """Change one item's option, wording, who acts or due date."""
+    item = await _scoped_item(db, condition, item_id)
+    await update_item(
+        db,
+        condition=condition,
+        item=item,
+        option=payload.option,
+        name=payload.name,
+        performers=payload.performers,
+        due_date=payload.due_date,
+        actor_user_id=current_user.id,
+    )
+    return await _condition_response(db, condition)
+
+
+@conditions_by_id_router.delete("/{condition_id}/items/{item_id}", response_model=ConditionPublic)
+async def remove_condition_item(
+    condition: ScopedCondition, item_id: UUID, db: DbSession, current_user: CurrentUser
+) -> ConditionPublic:
+    item = await _scoped_item(db, condition, item_id)
+    await remove_item(db, condition=condition, item=item, actor_user_id=current_user.id)
+    return await _condition_response(db, condition)
 
 
 @conditions_by_id_router.post("/{condition_id}/reading/confirm", response_model=ConditionPublic)
@@ -1419,6 +1570,9 @@ async def get_condition(condition: ScopedCondition, db: DbSession) -> ConditionD
         condition,
         round_numbers=sorted(seen_on),
         today=datetime.now(UTC).date(),
+        items=(await items_public_for_file(db, loan_file_id=condition.loan_file_id)).get(
+            condition.id, []
+        ),
     )
     # BUILT FROM THE ROW'S OWN PROJECTION rather than assembled a second time. `ConditionDetailPublic`
     # extends `ConditionPublic` precisely so the sheet cannot carry a different set of fields than the

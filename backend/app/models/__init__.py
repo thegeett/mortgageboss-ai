@@ -34,6 +34,7 @@ from app.models.condition import (
     OwnerHintSource,
 )
 from app.models.condition_event import ConditionEvent, ConditionEventKind
+from app.models.condition_item import ConditionItem
 from app.models.condition_round import (
     ConditionRound,
     ConditionRoundCompleteness,
@@ -154,6 +155,7 @@ __all__ = [
     "Condition",
     "ConditionEvent",
     "ConditionEventKind",
+    "ConditionItem",
     "ConditionLenderStatus",
     "ConditionOrigin",
     "ConditionPrepStatus",

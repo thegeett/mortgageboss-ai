@@ -290,6 +290,11 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # requires a certain route, DMARC PASS, virus PASS and `is_trusted_sender` on this file. Turning
     # this on does not lower those; it permits the outcome they were already computing.
     auto_accept_inbound: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    #: LP-920 — "Lender is processing this file" (for example a UWM Underwriting+ file, §4a change 8).
+    #: When on, third-party items default to "Lender is doing it" instead of an ask.
+    lender_processing: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
 
     # --- Relationships -----------------------------------------------------
     # No destructive cascade: company/lender are soft-deleted and the FKs are

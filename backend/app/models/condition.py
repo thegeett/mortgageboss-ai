@@ -35,6 +35,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
+from app.models.condition_vocabulary import PlanOption
 from app.models.enums import str_enum
 from app.models.types import MEDIUM_STRING, SHORT_STRING
 
@@ -237,6 +238,15 @@ class Condition(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         str_enum(ConditionReadingSource), nullable=True
     )
     reading_confidence: Mapped[Decimal | None] = mapped_column(Numeric(3, 2), nullable=True)
+
+    #: LP-920 — the step the WHOLE condition takes, when it is one (push back, ask the underwriter, the
+    #: lender is doing it, information only); null when its items each carry their own. With
+    #: `lender_doing_it` or `information_only` the list shows Stage 2's neutral display (§4a change 12)
+    #: and `prep_status` stays `to_do`.
+    next_step: Mapped[PlanOption | None] = mapped_column(str_enum(PlanOption), nullable=True)
+    #: Why the plan proposed what it did, in the screen's words ("Shortfall computed by code",
+    #: "Waits on 1228"). Built by code; names no borrower.
+    plan_reason: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
 
     #: Both created here and NOT MOVED IN STAGE 1 (ADR-404).
     prep_status: Mapped[ConditionPrepStatus] = mapped_column(

@@ -26,7 +26,7 @@ import os
 import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -80,6 +80,7 @@ from app.models.borrower import Borrower  # noqa: E402
 from app.models.condition import Condition  # noqa: E402
 from app.models.condition_event import ConditionEvent, ConditionEventKind  # noqa: E402
 from app.models.condition_round import ConditionRound, ConditionSourceKind  # noqa: E402
+from app.models.document import Document, DocumentStatus  # noqa: E402
 from app.models.lender import Lender, LoanProgram  # noqa: E402
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose  # noqa: E402
 from app.models.property import OccupancyType, Property, PropertyType  # noqa: E402
@@ -259,6 +260,25 @@ async def _housing(db: AsyncSession, loan_file: LoanFile, actor: User) -> None:
     )
 
 
+async def _credit_invoice(db: AsyncSession, loan_file: LoanFile) -> None:
+    """The credit report invoice from 07/15 the file already holds, so 0006 is "Already in the file"
+    (S3-02's "Found: Credit invoice 07/15, page 1"). A record only; fictional, no bytes stored."""
+    db.add(
+        Document(
+            loan_file_id=loan_file.id,
+            original_filename="credit-invoice.pdf",
+            mime_type="application/pdf",
+            file_size_bytes=1024,
+            storage_path=f"{loan_file.company_id}/{loan_file.id}/credit-invoice.pdf",
+            document_type="service_invoice",
+            document_name="Credit invoice 07/15",
+            status=DocumentStatus.COMPLETED,
+            upload_source="user_upload",
+        )
+    )
+    await db.flush()
+
+
 async def _round_1(db: AsyncSession, loan_file: LoanFile, actor: User) -> ConditionRound:
     round_ = await create_round_from_sheet(
         db,
@@ -296,6 +316,7 @@ async def base(db: AsyncSession) -> tuple[LoanFile, User]:
     company, user = await _company_and_processor(db)
     loan_file = await _the_file(db, company)
     await _housing(db, loan_file, user)
+    await _credit_invoice(db, loan_file)
     await _round_1(db, loan_file, user)
     await _stamp(db, loan_file, et(8, 28, 16, 20))
     return loan_file, user
@@ -324,15 +345,34 @@ async def read(db: AsyncSession, loan_file: LoanFile) -> None:
     assert round_ is not None
     condition_reading.complete = fake_complete()  # type: ignore[assignment]
     await condition_reading.read_round(db, round_id=round_.id)
+    # LP-920: the plan is built straight from the reading, as the task does.
+    from app.services.condition_plan import build_plan
+
+    await build_plan(db, round_id=round_.id, today=date(2026, 8, 28))
     when = et(8, 28, 16, 21)
     condition_ids = select(Condition.id).where(Condition.loan_file_id == loan_file.id)
     await db.execute(
         update(ConditionEvent)
         .where(
             ConditionEvent.condition_id.in_(condition_ids),
-            ConditionEvent.kind == ConditionEventKind.CONDITION_READ,
+            ConditionEvent.kind.in_(
+                [ConditionEventKind.CONDITION_READ, ConditionEventKind.CONDITION_PLANNED]
+            ),
         )
         .values(occurred_at=when)
+    )
+    await db.execute(
+        update(ActivityLog)
+        .where(
+            ActivityLog.loan_file_id == loan_file.id,
+            ActivityLog.activity_type == ActivityType.CONDITION_PLAN_READY,
+        )
+        .values(created_at=when, updated_at=when)
+    )
+    await db.execute(
+        update(ConditionRound)
+        .where(ConditionRound.loan_file_id == loan_file.id)
+        .values(plan_ready_at=when)
     )
 
 
@@ -341,6 +381,13 @@ async def state_s3_01(db: AsyncSession) -> Shot:
     loan_file, _ = await base(db)
     await read(db, loan_file)
     return Shot(path=_conditions_tab(), now=et(8, 28, 16, 21), clicks=["6637"])
+
+
+async def state_s3_02(db: AsyncSession) -> Shot:
+    """The plan for round 1, before confirming, at 4:21 PM (0132 needs confirming)."""
+    loan_file, _ = await base(db)
+    await read(db, loan_file)
+    return Shot(path=_conditions_tab(), now=et(8, 28, 16, 21))
 
 
 async def state_s3_03(db: AsyncSession) -> Shot:
@@ -363,7 +410,7 @@ def _later(ticket: str) -> Callable[[AsyncSession], Awaitable[Shot]]:
 STATES: dict[str, Callable[[AsyncSession], Awaitable[Shot]]] = {
     "base": state_base,
     "S3-01": state_s3_01,
-    "S3-02": _later("LP-920, LP-921"),
+    "S3-02": state_s3_02,
     "S3-03": state_s3_03,
     "S3-04": _later("LP-922"),
     "S3-05": _later("LP-922"),

@@ -272,7 +272,7 @@ export type ConditionSort = "sheet" | "code" | "status" | "owner" | "updated";
  * What happened to a round — the history on the round-details sheet (S1-09).
  *
  * Eight are Stage 2's (LP-912, ADR-408; `round_compared` and `round_completeness_changed` are
- * LP-915's), and the last two are Stage 3's reading (LP-919). The detail sheet composes a plain-words history line from `kind`, so a member the
+ * LP-915's), and the last five are Stage 3's reading (LP-919) and plan (LP-920). The detail sheet composes a plain-words history line from `kind`, so a member the
  * client cannot type renders as an unrecognised value — which is what the cross-stack mirror guard
  * exists to prevent.
  *
@@ -312,7 +312,10 @@ export type ConditionEventKind =
   | "round_compared"
   | "round_completeness_changed"
   | "condition_read"
-  | "condition_reading_confirmed";
+  | "condition_reading_confirmed"
+  | "condition_planned"
+  | "condition_plan_changed"
+  | "round_plan_confirmed";
 
 /**
  * One line of a round's history (S1-09).
@@ -564,6 +567,11 @@ export interface Condition {
   reading_confidence: number | null;
   /** The library type behind the reading, for S3-01's "Library: AS-04 Earnest money" chip. */
   library_type: LibraryType | null;
+  /** LP-920 — the whole condition's step when it takes one; null when its items carry their own. */
+  next_step: PlanOption | null;
+  /** Why the plan proposed it, in S3-02's words ("Shortfall computed by code", "Waits on 1228"). */
+  plan_reason: string | null;
+  items: ConditionItem[];
   /**
    * Every round this condition appeared on — the `R1 R2` chips.
    *
@@ -998,4 +1006,57 @@ export interface LibraryType {
   /** `Fannie Mae B3-4.3-09`, or "Lender requirement". */
   rule_label: string;
   rule_note: string | null;
+}
+
+// --- Stage 3: the plan (LP-920) ---------------------------------------------------------------- //
+
+export type ConditionItemStatus = "open" | "requested" | "received" | "done" | "not_needed";
+
+export type ConditionItemOrigin = "reading" | "manual" | "carried";
+
+export interface ConditionItem {
+  id: string;
+  key: string;
+  name: string;
+  acceptable: string;
+  performer: Performer;
+  performers: Performer[];
+  option: PlanOption;
+  status: ConditionItemStatus;
+  origin: ConditionItemOrigin;
+  need_id: string | null;
+  need_title: string | null;
+  /** Other conditions asking through the same need ("Same statement as 7086 and 6132"). */
+  shared_with_codes: string[];
+  document_id: string | null;
+  document_name: string | null;
+  document_page: number | null;
+  waits_on_condition_id: string | null;
+  waits_on_code: string | null;
+  due_date: string | null;
+  specifics: ReadingSpecifics;
+}
+
+export interface RoundPlanDraft {
+  recipient: string;
+  label: string;
+  codes: string[];
+}
+
+/** S3-02's heading and pills for one round's plan. */
+export interface RoundPlan {
+  round_id: string;
+  round_number: number | null;
+  round_date: string;
+  planned: number;
+  ready_at: string | null;
+  confirmed_at: string | null;
+  nothing_sent: boolean;
+  drafts: RoundPlanDraft[];
+  your_tasks: number;
+  already_in_file: number;
+  push_back: number;
+  lender_doing_it: number;
+  needs_confirmation: number;
+  blocking_codes: string[];
 }

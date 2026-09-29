@@ -106,6 +106,10 @@ class LibraryItem:
     #: A name that states the lender's amount ("Source of the {amount}"), used when the lender's text
     #: carries one. CODE fills `{amount}` from the text (LP-919); the model never writes it.
     name_with_amount: str | None = None
+    #: Words that tell THIS document from others of the same type when looking for one the file already
+    #: holds ("credit" for a credit report invoice against a processing invoice). Matched by code
+    #: against the document's name; LP-920's "Already in the file".
+    match_words: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -216,6 +220,7 @@ def _item(raw: Any, where: str, documents_known: frozenset[str]) -> LibraryItem:
             _enum(EvidenceCheck, check, f"{where} check") for check in (raw.get("checks") or ())
         ),
         name_with_amount=_name_with_amount(raw.get("name_with_amount"), where),
+        match_words=tuple(str(word).lower() for word in raw.get("match_words") or ()),
     )
 
 

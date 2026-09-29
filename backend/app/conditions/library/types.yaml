@@ -740,6 +740,7 @@ types:
         performer: processor
         option: i_will_do_it
         documents: [service_invoice]
+        match_words: ["credit"]
         checks: []
 
   - id: IV-02
@@ -754,6 +755,7 @@ types:
         performer: processor
         option: i_will_do_it
         documents: [service_invoice]
+        match_words: ["processing"]
         checks: []
 
   - id: IV-03
@@ -768,6 +770,7 @@ types:
         performer: processor
         option: i_will_do_it
         documents: [service_invoice, appraisal_payment]
+        match_words: ["inspection", "appraisal"]
         checks: []
     waits_on_type: PA-03
 

@@ -179,6 +179,10 @@ export function conditionHistoryLine(
       return "Read into items";
     case "condition_reading_confirmed":
       return `The reading was confirmed${by(event)}`;
+    case "condition_planned":
+      return "Plan proposed";
+    case "condition_plan_changed":
+      return `The plan was changed${by(event)}`;
 
     // --- the round it sits on ---------------------------------------------- //
     //
@@ -208,6 +212,8 @@ export function conditionHistoryLine(
         : `Compared with round ${event.round_number}`;
     case "round_completeness_changed":
       return "The round’s completeness was changed";
+    case "round_plan_confirmed":
+      return "The round’s plan was confirmed";
     default: {
       // EXHAUSTIVENESS, CHECKED BY THE COMPILER. If `ConditionEventKind` grows a member, `kind` is no
       // longer `never` here and `tsc` fails — which is LP-916's Done-when, enforced at build time
