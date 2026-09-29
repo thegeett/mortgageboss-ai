@@ -514,8 +514,9 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   amount for that document type, and correct the reason. Detail in [LP-938](../tickets/LP-938.md)
   "Review".
 
-- **`amount_matches` reads no amount off two more document types** — found by the LP-938 follow-up
-  review, open, latent. The follow-up fixed AS-04 by reading a receipt's own amount; the same gap remains
+- ~~**`amount_matches` reads no amount off two more document types**~~ — **fixed in LP-938's second
+  follow-up**: `OWN_AMOUNT` reads a gift letter's `gift_amount` and a deposit slip's `deposit_total`, as it
+  does a receipt's. Found by the LP-938 follow-up review; originally latent. The follow-up fixed AS-04 by reading a receipt's own amount; the same gap remains
   for **AS-06's `gift_letter` item**, whose only document type is `gift_letter` and whose only check is
   `amount_matches`: `gift_amount` is extracted and never read, so the item can never pass and needs a
   manual accept every time — AS-04's defect in another item. AS-05's `explanation` is degraded, not dead:
@@ -524,8 +525,11 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   own amount field, with `source` following. Detail in [LP-938](../tickets/LP-938.md) "Review of the
   follow-up".
 
-- **Nothing stops a library edit from letting a STATED amount satisfy `amount_matches`** — found by the
-  same review, open. `purchase_agreement` extracts `earnest_money_amount`, and today no item pairs it
+- ~~**Nothing stops a library edit from letting a STATED amount satisfy `amount_matches`**~~ — **fixed
+  structurally in LP-938's second follow-up**: a document's own amount is read only for the types in
+  `OWN_AMOUNT` (receipt, gift letter, deposit slip), keyed by TYPE, so no library pairing can let
+  `purchase_agreement` pass; `test_a_contracts_stated_deposit_never_satisfies_an_amount_check` pins it.
+  Found by the same review; originally open. `purchase_agreement` extracts `earnest_money_amount`, and today no item pairs it
   with `amount_matches` (censused: only AS-11 `sale_evidence` lists it, checks `[signed_and_dated]`), so
   the code is safe by a fact about `types.yaml` that a comment records and nothing enforces. Pair the two
   and a contract's *stated* deposit would satisfy a check that exists to confirm *receipt*. Wants the

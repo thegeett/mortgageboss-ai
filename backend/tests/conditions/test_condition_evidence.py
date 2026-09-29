@@ -758,3 +758,61 @@ async def test_a_receipt_for_another_amount_fails_and_says_receipt(
     assert (
         await _receipt_item(db_session, conditions["6637"])
     ).status is not ConditionItemStatus.DONE
+
+
+def _amount_check(data: dict[str, Any], document_type: str | None, asked: str) -> dict[str, str]:
+    from app.services.condition_evidence import Context, run_check, statement_from
+
+    ctx = Context(None, None, Decimal(asked), [], None, TODAY, None, None, False)
+    return run_check("amount_matches", statement_from(data, document_type), ctx)
+
+
+def test_a_gift_letter_and_a_deposit_slip_are_checked_by_their_own_amounts() -> None:
+    """THE REST OF THE CLASS (LP-938 follow-up review): AS-06's gift letter checked "Amount matches" and
+    had no transactions, so every gift letter was not run and stopped at Received; AS-05's deposit
+    slip likewise. Each document's own stated amount is now read. Built from the real extraction
+    models, so a field they lack raises instead of testing nothing."""
+    from app.ai.extraction.bank_deposit_slip import BankDepositSlipExtraction
+    from app.ai.extraction.gift_letter import GiftLetterExtraction
+    from app.ai.extraction.shape import TypedField
+
+    gift = GiftLetterExtraction(
+        gift_amount=TypedField(value=Decimal("15000.00")),
+        gift_date_or_expected_transfer_date=TypedField(value=date(2026, 8, 12)),
+    ).model_dump(mode="json")
+    assert _amount_check(gift, "gift_letter", "15000.00") == {
+        "check": "amount_matches",
+        "result": "passed",
+        "reason": "$15,000.00 on 08/12/2026",
+    }
+    assert _amount_check(gift, "gift_letter", "20000.00")["reason"] == (
+        "no $20,000.00 on this gift letter"
+    )
+    slip = BankDepositSlipExtraction(
+        deposit_total=TypedField(value=Decimal("4000.00")),
+        deposit_date=TypedField(value=date(2026, 8, 21)),
+    ).model_dump(mode="json")
+    assert (
+        _amount_check(slip, "bank_deposit_slip", "4000.00")["reason"] == "$4,000.00 on 08/21/2026"
+    )
+    assert _amount_check(slip, "bank_deposit_slip", "3000.00")["reason"] == (
+        "no $3,000.00 on this deposit slip"
+    )
+
+
+def test_a_contracts_stated_deposit_never_satisfies_an_amount_check() -> None:
+    """A purchase agreement also extracts `earnest_money_amount`: the deposit the contract SAYS will be
+    paid. It must never pass a check that confirms the deposit was RECEIVED (stated versus verified).
+    The guard is the type, not the library: whatever item might list it, it reads no movement."""
+    from app.ai.extraction.purchase_agreement import PurchaseAgreementExtraction
+    from app.ai.extraction.shape import TypedField
+
+    contract = PurchaseAgreementExtraction(
+        earnest_money_amount=TypedField(value=Decimal("2850.00")),
+    ).model_dump(mode="json")
+    assert _amount_check(contract, "purchase_agreement", "2850.00")["result"] == "not_run"
+    # The positive control: the same figure on a receipt is read.
+    receipt = {"earnest_money_amount": contract["earnest_money_amount"]}
+    assert _amount_check(receipt, "earnest_money_receipt", "2850.00")["result"] == "passed"
+    # And with no type (every caller but the check), nothing is read either.
+    assert _amount_check(receipt, None, "2850.00")["result"] == "not_run"

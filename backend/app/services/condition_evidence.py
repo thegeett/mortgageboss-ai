@@ -188,7 +188,25 @@ class Statement:
     source: str = "statement"
 
 
-def statement_from(data: dict[str, Any] | None) -> Statement:
+#: LP-938 — THE DOCUMENT TYPES WHOSE OWN STATED AMOUNT IS THE MONEY THEY EVIDENCE, and nothing else. A
+#: receipt acknowledges the deposit, a gift letter states the gift, a deposit slip records the deposit;
+#: each has no transactions, so "Amount matches" reads this amount as its one movement: `(amount field,
+#: date fields in order, what the failure calls it)`. A purchase agreement ALSO extracts
+#: `earnest_money_amount`, and is deliberately absent: a contract's stated deposit is a STATED figure,
+#: and letting it satisfy a check that confirms receipt would defeat stated-versus-verified (CLAUDE.md).
+#: Keyed by type rather than by field so no library edit can make it pass (LP-938 follow-up review).
+OWN_AMOUNT: dict[str, tuple[str, tuple[str, ...], str]] = {
+    "earnest_money_receipt": (
+        "earnest_money_amount",
+        ("funds_received_date", "receipt_date"),
+        "receipt",
+    ),
+    "gift_letter": ("gift_amount", ("gift_date_or_expected_transfer_date",), "gift letter"),
+    "bank_deposit_slip": ("deposit_total", ("deposit_date",), "deposit slip"),
+}
+
+
+def statement_from(data: dict[str, Any] | None, document_type: str | None = None) -> Statement:
     data = data or {}
     masked = str(_value(data, "account_number_masked") or "")
     digits = re.sub(r"\D", "", masked)
@@ -207,17 +225,18 @@ def statement_from(data: dict[str, Any] | None) -> Statement:
             deposits.append(
                 Deposit(on=on, amount=amount, description=str(row.get("description") or ""))
             )
-    # AN EARNEST MONEY RECEIPT HAS NO TRANSACTIONS, AND ITS AMOUNT IS THE POINT (LP-938 review). AS-04's
-    # receipt item checks "amount matches"; without this the receipt's own `earnest_money_amount` was
-    # extracted and never read, the check reported "no transactions could be read", and every real
-    # receipt stopped at Received. A document type an item does not take never reaches its checks
-    # (`_takes`), so a purchase agreement's stated deposit cannot pass a receipt item.
+    # A RECEIPT, A GIFT LETTER OR A DEPOSIT SLIP HAS NO TRANSACTIONS, AND ITS AMOUNT IS THE POINT (LP-938
+    # review and follow-up). Without this each one's own amount was extracted and never read, "Amount
+    # matches" was not run, and the item stopped at Received. Only `OWN_AMOUNT`'s types, and only when
+    # the caller says which type this is: the check does, every other caller wants statement facts.
     source = "statement"
-    received = _decimal(_value(data, "earnest_money_amount"))
-    if not movements and received is not None:
-        on = _date(_value(data, "funds_received_date")) or _date(_value(data, "receipt_date"))
-        movements.append((abs(received), on))
-        source = "receipt"
+    own = OWN_AMOUNT.get(document_type or "")
+    if not movements and own is not None:
+        amount_field, date_fields, source = own
+        stated = _decimal(_value(data, amount_field))
+        if stated is not None:
+            on = next((d for f in date_fields if (d := _date(_value(data, f))) is not None), None)
+            movements.append((abs(stated), on))
     return Statement(
         bank=_value(data, "bank_name"),
         last4=digits[-4:] if len(digits) >= 4 else None,
@@ -594,7 +613,7 @@ async def check_document(
     if document is None or document.deleted_at is not None or not document.document_type:
         return []
     today = today or datetime.now(UTC).date()
-    statement = statement_from(_extraction_data(document))
+    statement = statement_from(_extraction_data(document), document.document_type)
     items = list(
         (
             await db.execute(
