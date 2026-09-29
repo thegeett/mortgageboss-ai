@@ -155,8 +155,8 @@ async def test_a_statement_short_on_its_own_is_completed_not_replaced(
     # Not "together with": one account, so August met the total by itself (`_verified` takes its latest
     # balance). July is still evidence because the lender asked for two months (LP-937 review).
     assert card.superseded == (
-        "Still evidence — enough for closing was met by "
-        "Capital One statement ··9912 · August 2026 · 6 pages"
+        "Still evidence — enough for closing was met once "
+        "Capital One statement ··9912 · August 2026 · 6 pages arrived"
     )
     assert card.replaced is False
     assert card.failed is False

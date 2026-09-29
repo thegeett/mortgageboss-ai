@@ -16699,7 +16699,7 @@ S3-08's threshold is 50% of the letter's Verified Income.
 check stops counting once its item is done by a passing document that arrived no earlier. It leaves
 "Failed a check", its filter and the list's Next step token, and stays in the history. On the sheet it
 reads "Replaced by <document>". A statement that failed only the funds total on its own is still
-evidence: it reads "Still evidence — enough for closing was met by <document>", and its findings stay
+evidence: it reads "Still evidence — enough for closing was met once <document> arrived", and its findings stay
 visible and answerable, since they still hold the condition (the LP-937 follow-up; only a `replaced` row's
 findings are hidden, on the sheet and in the Next step). The rule has two statements that must agree:
 `condition_evidence.superseded_by` (Python) and `conditions.has_failed_check` (SQL). The SQL half's

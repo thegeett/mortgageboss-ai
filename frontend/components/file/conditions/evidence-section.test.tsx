@@ -140,11 +140,11 @@ describe("EvidenceSection", () => {
       ...S3_08,
       failed: false,
       superseded:
-        "Still evidence — enough for closing was met by Capital One statement ··9912 · August 2026 · 6 pages",
+        "Still evidence — enough for closing was met once Capital One statement ··9912 · August 2026 · 6 pages arrived",
       replaced: false,
     };
     render(<EvidenceSection fileId="f1" condition={condition([stillEvidence], "7086")} />);
-    expect(screen.getByText(/Still evidence — enough for closing was met by/)).toBeDefined();
+    expect(screen.getByText(/Still evidence — enough for closing was met once/)).toBeDefined();
     expect(screen.getByRole("button", { name: /Ask the borrower to explain it/ })).toBeDefined();
   });
 

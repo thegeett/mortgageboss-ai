@@ -1181,7 +1181,7 @@ async def evidence_public_for_file(
             superseded = (
                 f"Replaced by {title}"
                 if replaced
-                else f"Still evidence — enough for closing was met by {title}"
+                else f"Still evidence — enough for closing was met once {title} arrived"
             )
         out.setdefault(row.condition_id, []).append(
             ConditionEvidencePublic.build(

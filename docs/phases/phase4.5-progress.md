@@ -491,8 +491,8 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
 
 - ~~**A superseded card can hide the finding that is holding its condition**~~ — **fixed in the LP-937
   follow-up**: findings are hidden on replaced rows only (`replaced`, set by the server), and the Next
-  step skips only those. Found by the LP-937 review; originally: `_settle` holds a condition on an open finding carried by any row that `counts_as_evidence`,
-  which includes a statement whose only failed check is "Enough for closing"; LP-937 supersedes that
+  step skips only those. Found by the LP-937 review; originally: `_settle` holds a condition on an open
+  finding carried by any row that `counts_as_evidence`, which includes a statement whose only failed check is "Enough for closing"; LP-937 supersedes that
   same row, and the sheet renders none of a superseded row's findings. So an unexplained deposit on the
   earlier statement holds the condition at Waiting with no way to answer it, while the list still says
   "Large deposit needs sourcing". The Stage 3B dead end through the other door. The fix follows from
@@ -558,7 +558,7 @@ and record it. Each ticket keeps its own table. These are the ones she may want 
 | [LP-925](../tickets/LP-925.md) | A Ready prior-to-funding condition | It goes in the package (S3-10 packages 0006); the ones not yet ready go in the info line |
 | [LP-925](../tickets/LP-925.md) | Lender settings | Their own admin routes, not the lender's PATCH, so saving them cannot touch other lender fields |
 | Stage 3B acceptance | A rejected statement | Is not evidence (`counts_as_evidence`); an answer to a deposit reaches every copy of it on the condition |
-| Stage 3B acceptance, [LP-937](../tickets/LP-937.md) | A superseded failed check | **Decided by the owner, 2026-09-29, and built (LP-937):** once a passing document has done the item, earlier failures for it stop counting and stop showing in the Next step; they stay in the history and on the sheet as "Replaced by <document>". A statement that failed only the funds total on its own is still evidence: it reads "Still evidence — enough for closing was met by <document>", and its findings stay on the sheet, answerable, because they can still hold the condition (LP-937 follow-up; the first wording, "together with", was untrue for two statements of one account). The first reading ("left as it is") is superseded |
+| Stage 3B acceptance, [LP-937](../tickets/LP-937.md) | A superseded failed check | **Decided by the owner, 2026-09-29, and built (LP-937):** once a passing document has done the item, earlier failures for it stop counting and stop showing in the Next step; they stay in the history and on the sheet as "Replaced by <document>". A statement that failed only the funds total on its own is still evidence: it reads "Still evidence — enough for closing was met once <document> arrived", and its findings stay on the sheet, answerable, because they can still hold the condition (LP-937 follow-up; the first wording, "together with", was untrue for two statements of one account). The first reading ("left as it is") is superseded |
 
 ## Stage 3 — screen deviations (for the product owner to redraw)
 
