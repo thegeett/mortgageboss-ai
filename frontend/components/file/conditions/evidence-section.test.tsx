@@ -56,6 +56,7 @@ const S3_07: ConditionEvidence = {
   failed: true,
   accepted_reason: null,
   reask: "page 6",
+  superseded: null,
 };
 
 const S3_08: ConditionEvidence = {
@@ -107,6 +108,29 @@ function condition(evidence: ConditionEvidence[], code = "6132"): Condition {
 }
 
 describe("EvidenceSection", () => {
+  it("keeps a superseded failure as a record, with nothing to act on (LP-937)", () => {
+    const replaced: ConditionEvidence = {
+      ...S3_08,
+      checks: [...S3_07.checks, ...S3_08.checks],
+      failed: false,
+      reask: null,
+      superseded: "Replaced by Capital One statements ··9912 · July and August 2026 · 12 pages",
+    };
+    render(<EvidenceSection fileId="f1" condition={condition([replaced], "7086")} />);
+    expect(
+      screen.getByText(
+        "Replaced by Capital One statements ··9912 · July and August 2026 · 12 pages",
+      ),
+    ).toBeDefined();
+    // Its checks stay as they were: the history of what arrived is not rewritten.
+    expect(screen.getByText(`pages 1${DASH}5 of 6 — page 6 is missing`)).toBeDefined();
+    // Nothing to act on: no re-ask, no accept anyway, no finding answers.
+    expect(screen.queryByRole("button", { name: /please send/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Accept anyway/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Ask the borrower to explain it/ })).toBeNull();
+    expect(screen.queryByText(/New finding/)).toBeNull();
+  });
+
   it("is S3-07: the card, the checks, the callout and its two answers", () => {
     calls.reask = [];
     calls.accept = [];

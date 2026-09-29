@@ -16695,7 +16695,14 @@ S3-08's threshold is 50% of the letter's Verified Income.
 - **Upload-link documents are processed.** LP-815 created them and queued nothing; they are now queued
   like any upload.
 
-*Status.* Accepted (LP-923).
+*Status.* Accepted (LP-923). **Amended (LP-937, 2026-09-29, the product owner's decision).** A failed
+check stops counting once its item is done by a passing document that arrived no earlier. It leaves
+"Failed a check", its filter and the list's Next step token, and stays in the history. On the sheet it
+reads "Replaced by <document>", or "Enough for closing together with <document>" for a statement that
+failed only the funds total on its own. The rule has two statements that must agree:
+`condition_evidence.superseded_by` (Python) and `conditions.has_failed_check` (SQL). The SQL half's
+"passes" and "same item" clauses rest on the invariant that a done item takes no new evidence, and a
+test pins that invariant.
 
 ## ADR-415
 

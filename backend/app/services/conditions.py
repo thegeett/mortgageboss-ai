@@ -49,7 +49,7 @@ from uuid import UUID
 
 from sqlalchemy import ColumnElement, Select, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import InstrumentedAttribute
+from sqlalchemy.orm import InstrumentedAttribute, aliased
 
 from app.models.condition import (
     BucketKind,
@@ -473,12 +473,33 @@ def has_failed_check() -> ColumnElement[bool]:
     THE FILTER'S AND THE COUNT'S ONE PREDICATE, as `has_open_step` is for "Your tasks": "Failed a
     check 2" and the rows its click shows are the same SQL.
     """
-    return (
-        select(ConditionEvidence.id)
+    # LP-937 — A SUPERSEDED FAILURE NO LONGER COUNTS: its item is done, and a later row for the same item
+    # passes (accepted, or no failed check). The SQL half of `condition_evidence.superseded_by`;
+    # `test_superseded_failures.py` asserts the two agree.
+    failed = aliased(ConditionEvidence)
+    later = aliased(ConditionEvidence)
+    replaced = (
+        select(later.id)
         .where(
-            ConditionEvidence.condition_id == Condition.id,
-            ConditionEvidence.status == EvidenceStatus.CHECKED,
-            ConditionEvidence.checks.contains([{"result": "failed"}]),
+            ConditionItem.id == failed.item_id,
+            ConditionItem.status == ConditionItemStatus.DONE,
+            later.item_id == failed.item_id,
+            later.id != failed.id,
+            later.created_at >= failed.created_at,
+            or_(
+                later.status == EvidenceStatus.ACCEPTED,
+                ~later.checks.contains([{"result": "failed"}]),
+            ),
+        )
+        .exists()
+    )
+    return (
+        select(failed.id)
+        .where(
+            failed.condition_id == Condition.id,
+            failed.status == EvidenceStatus.CHECKED,
+            failed.checks.contains([{"result": "failed"}]),
+            ~replaced,
         )
         .exists()
     )

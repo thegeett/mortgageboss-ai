@@ -747,6 +747,35 @@ def counts_as_evidence(row: ConditionEvidence) -> bool:
     )
 
 
+def _passes_alone(row: ConditionEvidence) -> bool:
+    """Accepted by her, or failing no check at all."""
+    if row.status is EvidenceStatus.ACCEPTED:
+        return True
+    return not any(check.get("result") == FAILED for check in row.checks or [])
+
+
+def superseded_by(
+    row: ConditionEvidence, item: ConditionItem | None, rows: list[ConditionEvidence]
+) -> ConditionEvidence | None:
+    """The document that replaced this failed one, or None while the failure still counts (LP-937).
+
+    A failed row is superseded once its item is DONE and another row for the same item, arriving no
+    earlier, passes. THE PYTHON HALF OF ONE RULE: `conditions.has_failed_check()` is the SQL half, and
+    `test_superseded_failures.py` asserts the two agree.
+    """
+    if not _failed(row) or item is None or item.status is not ConditionItemStatus.DONE:
+        return None
+    for other in rows:
+        if (
+            other.id != row.id
+            and other.item_id == row.item_id
+            and other.created_at >= row.created_at
+            and _passes_alone(other)
+        ):
+            return other
+    return None
+
+
 def _failed(evidence: ConditionEvidence) -> bool:
     if evidence.status is EvidenceStatus.ACCEPTED:
         return False
@@ -1125,14 +1154,35 @@ async def evidence_public_for_file(
             )
         ).scalars()
     }
+    items = {
+        i.id: i
+        for i in (
+            await db.execute(
+                select(ConditionItem).where(ConditionItem.id.in_({r.item_id for r in rows}))
+            )
+        ).scalars()
+    }
     out: dict[UUID, list[Any]] = {}
     for row in rows:
         document = documents.get(row.document_id)
         if document is None or document.deleted_at is not None:
             continue
         statement = statement_from(_extraction_data(document))
+        superseded = None
+        replacement = superseded_by(row, items.get(row.item_id), rows)
+        if replacement is not None and (by := documents.get(replacement.document_id)) is not None:
+            title = document_title(by, statement_from(_extraction_data(by)))
+            # A statement short of the total ON ITS OWN is still evidence (it goes in the package), so
+            # "replaced" would be untrue of it: the later statement completed it, not replaced it.
+            superseded = (
+                f"Enough for closing together with {title}"
+                if counts_as_evidence(row)
+                else f"Replaced by {title}"
+            )
         out.setdefault(row.condition_id, []).append(
-            ConditionEvidencePublic.build(row, document=document, statement=statement)
+            ConditionEvidencePublic.build(
+                row, document=document, statement=statement, superseded=superseded
+            )
         )
     return out
 

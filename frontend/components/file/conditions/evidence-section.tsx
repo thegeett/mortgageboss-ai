@@ -52,8 +52,11 @@ function EvidenceCard({
 }) {
   const failed = evidence.checks.filter((check) => check.result === "failed");
   const itemFailures = failed.filter((check) => check.check !== "no_large_deposit");
+  // LP-937 — a later document did this item. The card stays, as the record of what arrived and what
+  // its checks found; it offers nothing to act on, because the answer belongs on the document that did.
+  const superseded = evidence.superseded;
   return (
-    <div className="flex flex-col gap-3">
+    <div className={cn("flex flex-col gap-3", superseded && "opacity-70")}>
       <div className="flex items-start gap-3 rounded-lg border border-input bg-card p-3">
         <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
         <div className="min-w-0 flex-1">
@@ -80,7 +83,12 @@ function EvidenceCard({
         </ul>
       </div>
 
-      {evidence.status === "accepted" ? (
+      {superseded ? (
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <CircleCheckBig className="h-3.5 w-3.5 text-success" aria-hidden />
+          {superseded}
+        </p>
+      ) : evidence.status === "accepted" ? (
         <p className="text-xs text-muted-foreground">Accepted anyway: {evidence.accepted_reason}</p>
       ) : itemFailures.length > 0 ? (
         <FailedCallout
@@ -91,7 +99,7 @@ function EvidenceCard({
         />
       ) : null}
 
-      {evidence.findings.map((finding, index) => (
+      {(superseded ? [] : evidence.findings).map((finding, index) => (
         <FindingBox
           key={`${finding.date}-${finding.amount}`}
           fileId={fileId}

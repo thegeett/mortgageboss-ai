@@ -817,9 +817,14 @@ class ConditionEvidencePublic(BaseModel):
     accepted_reason: str | None = None
     #: The re-ask S3-07's button names: "please send page 6". Null when nothing failed.
     reask: str | None = None
+    #: LP-937 — "Replaced by <document>" (or "Enough for closing together with <document>") once a
+    #: passing document has done the item. The failure then no longer counts and `failed` is false.
+    superseded: str | None = None
 
     @classmethod
-    def build(cls, row: Any, *, document: Any, statement: Any) -> "ConditionEvidencePublic":
+    def build(
+        cls, row: Any, *, document: Any, statement: Any, superseded: str | None = None
+    ) -> "ConditionEvidencePublic":
         from app.models.condition_vocabulary import EvidenceCheck
         from app.models.document import UploadSource
         from app.services.condition_evidence import (
@@ -854,7 +859,7 @@ class ConditionEvidencePublic(BaseModel):
             )
         accepted = row.status.value == "accepted"
         reask = None
-        if failed and not accepted:
+        if failed and not accepted and superseded is None:
             name = reask_name(failed[0].check, statement)
             reask = name[0].lower() + name[1:]
             if reask.startswith("page") and " of the " in reask:
@@ -869,9 +874,10 @@ class ConditionEvidencePublic(BaseModel):
             status=row.status.value,
             checks=checks,
             findings=[EvidenceFindingPublic.model_validate(f) for f in row.findings or []],
-            failed=bool(failed) and not accepted,
+            failed=bool(failed) and not accepted and superseded is None,
             accepted_reason=row.accepted_reason,
             reask=reask,
+            superseded=superseded,
         )
 
 

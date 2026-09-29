@@ -282,7 +282,7 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-925 Package, submit, lender settings | REVIEWED | `b415c136` | the commit titled `LP-925 review:` | S3-10 and S3-11 shot and walked by the reviewer: both match, with D10 and D11 | no defects; the ungated lender-settings routes judged correct; a note-check boundary recorded |
 | LP-935 Stage 3 close | REVIEWED | `5b1582cf` | the commit titled `LP-935 review:` | every screen (24 shots: both sessions, all twelve) | review found 2, fixed: the mortgagee-clause term asserted unsourced domain claims; a decision she may want to overturn was missing from the table |
 | LP-936 DU tolerance (STOP AND ASK 2) | REVIEWED | `0c8090e6` | the commit titled `LP-936 review:` | S3-09 re-shot by the reviewer: the new callout is true as a rule, not only in this state | no findings; the owner's table and the 50% parenthetical both verified, including 47→51 |
-| LP-937 Superseded failures | PENDING | | | S3-12 | |
+| LP-937 Superseded failures | AWAITING_REVIEW | (this commit) | | S3-08, S3-12 re-shot: unchanged (no drawn state shows it) | the owner's decision, 2026-09-29 |
 | LP-938 Library fixes (AS-04, the review table) | PENDING | | | none | |
 | LP-939 Real-model trial | SKIPPED | | | none | skipped for now by the owner, 2026-09-29 |
 | LP-940 Withdraw a hand-added condition | PENDING | | | detail sheet | amends ADR-404 |
@@ -480,12 +480,10 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
 
 ## Stage 3 — open items (not blocking)
 
-- **A failed upload keeps saying so after a better document has done its item** (Stage 3B acceptance).
-  7086, Ready by its 12-page statement, still reads "Evidence failed a check — page 6" in the list, and
-  counts in "Failed a check", because of the 5-page August it replaced (`has_failed_check` and the
-  frontend's first token look at every checked row). LP-923's reviewed rule is "a failed check first".
-  Whether a superseded failure should drop out once its item is done is the owner's call. Not changed
-  here.
+- ~~**A failed upload keeps saying so after a better document has done its item**~~ — **decided by the
+  owner (2026-09-29) and built in [LP-937](../tickets/LP-937.md)**. Once a passing document has done
+  the item, the earlier failures stop counting in "Failed a check" and stop showing in the Next step.
+  They stay in the history, and on the sheet as "Replaced by <document>".
 
 - **The product owner's sign-off on the library's top 20 types** (decision 6), once LP-918 has written
   `phase4.5-library-review.md`.
@@ -545,7 +543,7 @@ and record it. Each ticket keeps its own table. These are the ones she may want 
 | [LP-925](../tickets/LP-925.md) | A Ready prior-to-funding condition | It goes in the package (S3-10 packages 0006); the ones not yet ready go in the info line |
 | [LP-925](../tickets/LP-925.md) | Lender settings | Their own admin routes, not the lender's PATCH, so saving them cannot touch other lender fields |
 | Stage 3B acceptance | A rejected statement | Is not evidence (`counts_as_evidence`); an answer to a deposit reaches every copy of it on the condition |
-| Stage 3B acceptance | A superseded failed check | **Left as it is**: 7086, Ready by its 12-page statement, still reads "Evidence failed a check — page 6" and counts in "Failed a check", because `has_failed_check` looks at every checked row. This changes LP-923's reviewed rule, and a count that stays high after the problem is fixed costs the same trust as one that drifts. Also an open item above |
+| Stage 3B acceptance, [LP-937](../tickets/LP-937.md) | A superseded failed check | **Decided by the owner, 2026-09-29, and built (LP-937):** once a passing document has done the item, earlier failures for it stop counting and stop showing in the Next step; they stay in the history and on the sheet as "Replaced by <document>". A statement that failed only the funds total on its own reads "Enough for closing together with <document>", because it is still evidence. The first reading ("left as it is") is superseded |
 
 ## Stage 3 — screen deviations (for the product owner to redraw)
 
@@ -604,8 +602,8 @@ and its route test, not by a browser test (see [LP-935](../tickets/LP-935.md)).
 - **Re-asking the same deposit across conditions**: an answer reaches every copy on its condition. That
   is enough while one library item carries the funds check, which the review pinned
   (`test_deposit_findings_stay_on_one_item.py`).
-- **A superseded failed upload** still reads "failed a check" on a Ready condition: an open item for the
-  owner (above), not changed.
+- ~~**A superseded failed upload** still reads "failed a check" on a Ready condition~~ — decided and built
+  in LP-937.
 - **The note check's swap blindness** (the LP-925 review): a note that swaps two real figures passes,
   because the check is shared with the finding-prose path. It needs a ticket of its own.
 - **No upload to any lender portal.** The package is downloaded and uploaded by her; Mark submitted is

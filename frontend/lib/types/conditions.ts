@@ -1195,6 +1195,9 @@ export interface ConditionEvidence {
   accepted_reason: string | null;
   /** What S3-07's button asks for: "page 6". */
   reask: string | null;
+  /** LP-937 — "Replaced by <document>" (or "Enough for closing together with <document>") once a
+   *  passing document has done the item; the failure then no longer counts and `failed` is false. */
+  superseded: string | null;
 }
 
 // --- Stage 3: the figures check (LP-924) ------------------------------------------------------- //
