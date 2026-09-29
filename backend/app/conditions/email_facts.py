@@ -51,6 +51,17 @@ def _money(text: str) -> dict[Decimal, str]:
     return found
 
 
+def _money_order(text: str) -> list[Decimal]:
+    """The amounts in the order a reader meets them, for the re-attribution check below."""
+    values: list[Decimal] = []
+    for match in _MONEY.finditer(text):
+        try:
+            values.append(Decimal(f"{match.group(1).replace(',', '')}.{match.group(2) or '00'}"))
+        except InvalidOperation:
+            continue
+    return values
+
+
 def _dates(text: str) -> dict[str, str]:
     """Dates by what they mean: `09/03/2026`, and "Thursday, September 3" as `September 3`."""
     found = {match.group(0): match.group(0) for match in _NUMERIC_DATE.finditer(text)}
@@ -117,6 +128,25 @@ def fact_warnings(before_html: str, after_html: str) -> list[FactWarning]:
         w for w in _DATE_WORDS if w not in words_before and re.search(rf"\b{w}\b", after, re.I)
     )
     warnings += [FactWarning("added", word.capitalize()) for word in new_words]
+
+    # THE SAME AMOUNTS IN A DIFFERENT ORDER ARE NOT THE SAME EMAIL (LP-922 follow-up review). Every
+    # comparison above is by SET, so a polish that keeps both figures and swaps what each one MEANS
+    # passes them all: "$38,210.40 is required and $11,062.18 is verified" reversed still holds both
+    # values, and the borrower is told the opposite of the truth with nothing shown. Order is the
+    # cheapest evidence of re-attribution that does not need the sentence parsed. Only when the sets
+    # match, because a genuine change already warns above and saying it twice buries it.
+    order_before, order_after = _money_order(before), _money_order(after)
+    if set(order_before) == set(order_after) and order_before != order_after:
+        warnings.append(
+            FactWarning(
+                "items",
+                "The amounts are in a different order: "
+                + " then ".join(money_before[v] for v in order_before)
+                + " became "
+                + " then ".join(money_after[v] for v in order_after)
+                + ". Check each one is still attached to the right thing.",
+            )
+        )
 
     items_before = len(_ITEM.findall(before_html or ""))
     items_after = len(_ITEM.findall(after_html or ""))

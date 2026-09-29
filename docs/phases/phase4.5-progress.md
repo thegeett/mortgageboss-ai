@@ -276,7 +276,7 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-919 Reading each condition | REVIEWED | `65cb0617` | the commit titled `LP-919 review:` | S3-01 (this ticket's lines) and S3-03 re-shot by the reviewer: both match | no findings; D5 recorded; 6637 and 0132 item splits confirmed on screen |
 | LP-920 The action plan | REVIEWED | `106de9af` | the commit titled `LP-920 review:` | S3-01, S3-02, S3-03 re-shot by the reviewer; S3-02 matches every line, S3-01 differs on one string (D6) | review found 1, fixed: a Must-match string recorded as a match, now D6 |
 | LP-921 Next-step options | REVIEWED | `0111c5f0` | the commit titled `LP-921 review:` | S3-12 shot and walked by the reviewer: every line this ticket builds matches (sends LP-922, checks LP-923); S3-01 chips match | review found 2, fixed: the suite count was pre-fix (8592), the deviation list named only D1-D4 |
-| LP-922 Asking people (drafts only) | REVIEWED | `29c74a7d` | the commit titled `LP-922 review:` | S3-04, S3-05, S3-06 shot and walked by the reviewer: S3-04 and S3-06 match every line, S3-05 matches except D7 | review found 1, recorded: a pre-existing randomised test flakes ~0.1% and is not this ticket's. STOP AND ASK 1 answered by the owner: the AI polish follow-up is AWAITING_REVIEW (the commit titled `LP-922 follow-up:`) |
+| LP-922 Asking people (drafts only) | REVIEWED | `29c74a7d` + follow-up `35a558f8` | the commits titled `LP-922 review:` and `LP-922 follow-up review:` | S3-04, S3-05, S3-06 shot and walked by the reviewer; D7 and D8 recorded | 2 reviews: a pre-existing flaky test recorded; the polish fact-check could not see a swapped pair, now caught |
 | LP-923 Evidence arrives and is checked | PENDING | | | S3-07, S3-08 | |
 | LP-924 The figures check | PENDING | | | S3-09 | |
 | LP-925 Package, submit, lender settings | PENDING | | | S3-10, S3-11 | then the Stage 3B acceptance test |
@@ -331,10 +331,11 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
 
 - **The product owner's sign-off on the library's top 20 types** (decision 6), once LP-918 has written
   `phase4.5-library-review.md`.
-- **Screen deviations for the product owner to redraw: D1 to D7**, spread across four tickets —
+- **Screen deviations for the product owner to redraw: D1 to D8**, spread across four tickets —
   D1, D2, D4 (S3-12) and D3 (S3-09) in [LP-934](../tickets/LP-934.md); D5 (S3-01's check number) in
   [LP-919](../tickets/LP-919.md); D6 (S3-01's shared line) in [LP-920](../tickets/LP-920.md); D7
-  (S3-05's 6378 label and line) in [LP-922](../tickets/LP-922.md).
+  (S3-05's 6378 label and line) and D8 (the **Polish with AI** button on S3-04, S3-05 and S3-06,
+  which the drawings predate) in [LP-922](../tickets/LP-922.md).
   LP-935's close should gather them into one list rather than leave the owner to find four.
 - **S3-12 outside LP-921 (LP-921 visual check):** the list's status select is Stage 2's native select
   and carries no glyph where S3-12 draws one; the rail's Recent activity shows Stage 2's relative times
