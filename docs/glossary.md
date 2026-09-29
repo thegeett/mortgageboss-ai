@@ -225,10 +225,13 @@ arrives (ADR-409 to ADR-416):
   happens to an upload after it is the lender's rule, not the app's **(verify
   with domain expert)**.
 - **Mortgagee clause** — the lender's name and address as it must appear on the
-  homeowners insurance policy, as the party paid if there is a loss (UWM's
-  begins "United Wholesale Mortgage ISAOA, ATIMA": its successors and/or assigns,
-  as their interests may appear). Set per lender, filled from the approval letter
-  until saved.
+  homeowners insurance policy (UWM's begins "United Wholesale Mortgage ISAOA,
+  ATIMA"). Set per lender, filled from the approval letter until saved. The plan
+  requires the clause on the declarations page (Fannie Mae B7-3-07 / B7-3-08) and
+  the insurance email carries it verbatim from the letter. What the clause does,
+  and what ISAOA and ATIMA stand for, is not stated anywhere in this repository:
+  the app copies the letter's words and never composes them **(verify with domain
+  expert)**.
 - **Lender codes to review** — lender codes seen on sheets that no library type
   covers yet. An admin chooses the type once, and later imports use it.
 

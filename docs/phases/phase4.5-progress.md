@@ -280,7 +280,7 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-923 Evidence arrives and is checked | REVIEWED | `d2a6f43a` | the commit titled `LP-923 review:` | S3-07, S3-08, S3-12 shot and walked by the reviewer; S3-08 matches every line, S3-12 confirms Failed a check 3 | review found 2, fixed: LP-934's D1 still said 2; the per-item open-finding guard had no test |
 | LP-924 The figures check | REVIEWED | `2f848c5f` + follow-up `e7afa680` | the commits titled `LP-924 review:` and `LP-924 follow-up review:` | S3-09 shot and walked by the reviewer: matches every line | review found 1 (Apply ignored the baseline she saw); the builder fixed it and the fix is verified, including that it does not over-refuse. STOP AND ASK 2 open on the 45% reading |
 | LP-925 Package, submit, lender settings | REVIEWED | `b415c136` | the commit titled `LP-925 review:` | S3-10 and S3-11 shot and walked by the reviewer: both match, with D10 and D11 | no defects; the ungated lender-settings routes judged correct; a note-check boundary recorded |
-| LP-935 Stage 3 close | AWAITING_REVIEW | (this commit) | | every screen, gathered in "Stage 3 — every screen" | documentation only |
+| LP-935 Stage 3 close | REVIEWED | `5b1582cf` | the commit titled `LP-935 review:` | every screen (24 shots: both sessions, all twelve) | review found 2, fixed: the mortgagee-clause term asserted unsourced domain claims; a decision she may want to overturn was missing from the table |
 
 ## Stage 3A — acceptance (build prompt §6)
 
@@ -540,6 +540,7 @@ and record it. Each ticket keeps its own table. These are the ones she may want 
 | [LP-925](../tickets/LP-925.md) | A Ready prior-to-funding condition | It goes in the package (S3-10 packages 0006); the ones not yet ready go in the info line |
 | [LP-925](../tickets/LP-925.md) | Lender settings | Their own admin routes, not the lender's PATCH, so saving them cannot touch other lender fields |
 | Stage 3B acceptance | A rejected statement | Is not evidence (`counts_as_evidence`); an answer to a deposit reaches every copy of it on the condition |
+| Stage 3B acceptance | A superseded failed check | **Left as it is**: 7086, Ready by its 12-page statement, still reads "Evidence failed a check — page 6" and counts in "Failed a check", because `has_failed_check` looks at every checked row. This changes LP-923's reviewed rule, and a count that stays high after the problem is fixed costs the same trust as one that drifts. Also an open item above |
 
 ## Stage 3 — screen deviations (for the product owner to redraw)
 
