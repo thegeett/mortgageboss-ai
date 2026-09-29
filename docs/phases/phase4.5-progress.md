@@ -271,7 +271,7 @@ the "Today" table's clock. Actual and review shots are committed under
 
 | Ticket | Status | Build SHA | Review SHA | Visual check | Notes |
 |---|---|---|---|---|---|
-| LP-934 Pre-flight: screens against the plan, visual-check harness | AWAITING_REVIEW | the commit titled `LP-934:` | | harness verified on the base state | 7 mismatches, 4 screen deviations (LP-934.md) |
+| LP-934 Pre-flight: screens against the plan, visual-check harness | REVIEWED | `97c39491` | the commit titled `LP-934 review:` | harness re-run on `base` by the reviewer; no S3 state buildable yet | 7 mismatches, 4 screen deviations (LP-934.md); review found 1, fixed: the dev-database guard had no test |
 | LP-918 Condition library v1 (data) | PENDING | | | none of its own | owner's top-20 sign-off tracked separately (decision 6) |
 | LP-919 Reading each condition | PENDING | | | S3-01, S3-03 | |
 | LP-920 The action plan | PENDING | | | S3-01, S3-02 | |
