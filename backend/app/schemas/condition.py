@@ -1936,7 +1936,10 @@ class FiguresCheckPublic(BaseModel):
 
 
 class FiguresApplyRow(BaseModel):
+    """One row as she saw it: both sides, so a figure changed underneath is refused (LP-924 review)."""
+
     key: str = Field(max_length=40)
+    in_file: str | None = Field(default=None, max_length=40)
     from_evidence: str = Field(max_length=40)
 
 

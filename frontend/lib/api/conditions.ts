@@ -1077,7 +1077,9 @@ export function useFiguresCheck(fileId: string) {
 export function useApplyFigures(fileId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ changes }: { changes: { key: string; from_evidence: string }[] }) =>
+    mutationFn: async ({
+      changes,
+    }: { changes: { key: string; in_file: string | null; from_evidence: string }[] }) =>
       (await apiClient.post<FiguresCheck>(`${filePath(fileId)}/figures-check/apply`, { changes }))
         .data,
     onSuccess: () => {

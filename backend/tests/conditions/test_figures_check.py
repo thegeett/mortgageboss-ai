@@ -195,7 +195,14 @@ async def test_nothing_changes_until_she_applies(db_session: AsyncSession) -> No
     assert asset.value == Decimal("11062.18")
 
     check = await figures_check.figures_check(db_session, loan_file=loan_file)
-    shown = [{"key": c.key, "from_evidence": str(c.from_evidence)} for c in check.changes]
+    shown = [
+        {
+            "key": c.key,
+            "in_file": None if c.in_file is None else str(c.in_file),
+            "from_evidence": str(c.from_evidence),
+        }
+        for c in check.changes
+    ]
     after = await figures_check.apply(
         db_session, loan_file=loan_file, expected=shown, actor_user_id=actor
     )
@@ -267,10 +274,40 @@ async def test_the_routes(db_session: AsyncSession) -> None:
             f"{base}/apply",
             json={
                 "changes": [
-                    {"key": c["key"], "from_evidence": c["from_evidence"]} for c in body["changes"]
+                    {"key": c["key"], "in_file": c["in_file"], "from_evidence": c["from_evidence"]}
+                    for c in body["changes"]
                 ]
             },
             headers=headers,
         )
         assert applied.status_code == 200, applied.text
         assert applied.json()["changes"] == []
+
+
+async def test_a_figure_changed_underneath_is_refused_not_overwritten(
+    db_session: AsyncSession,
+) -> None:
+    """LP-924 review, F1: she reads "$11,062.18 → $41,914.42"; someone edits the stated asset to
+    $20,000.00; her Apply must be refused, and the $20,000.00 must stand."""
+    loan_file, _, actor = await _s3_09(db_session)
+    check = await figures_check.figures_check(db_session, loan_file=loan_file)
+    shown = [
+        {
+            "key": c.key,
+            "in_file": None if c.in_file is None else str(c.in_file),
+            "from_evidence": str(c.from_evidence),
+        }
+        for c in check.changes
+    ]
+    asset = (
+        await db_session.execute(
+            select(StatedAsset).where(StatedAsset.loan_file_id == loan_file.id)
+        )
+    ).scalar_one()
+    asset.value = Decimal("20000.00")
+    await db_session.flush()
+    with pytest.raises(FiguresChanged, match="look again"):
+        await figures_check.apply(
+            db_session, loan_file=loan_file, expected=shown, actor_user_id=actor
+        )
+    assert asset.value == Decimal("20000.00")

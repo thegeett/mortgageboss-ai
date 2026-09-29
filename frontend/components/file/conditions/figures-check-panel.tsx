@@ -99,7 +99,12 @@ export function FiguresCheckPanel({ fileId }: { fileId: string }) {
           onClick={() =>
             apply.mutate(
               {
-                changes: data.changes.map((c) => ({ key: c.key, from_evidence: c.from_evidence })),
+                // BOTH SIDES OF EACH ROW: a figure changed underneath is refused, not overwritten.
+                changes: data.changes.map((c) => ({
+                  key: c.key,
+                  in_file: c.in_file,
+                  from_evidence: c.from_evidence,
+                })),
               },
               { onError: (error) => setNote(getErrorMessage(error)) },
             )

@@ -98,7 +98,11 @@ describe("FiguresCheckPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply 2 changes to the file’s figures" }));
     expect(state.applied).toEqual([
       {
-        changes: S3_09.changes.map((c) => ({ key: c.key, from_evidence: c.from_evidence })),
+        changes: S3_09.changes.map((c) => ({
+          key: c.key,
+          in_file: c.in_file,
+          from_evidence: c.from_evidence,
+        })),
       },
     ]);
   });

@@ -97,8 +97,9 @@ def du_rerun_reasons(
 ) -> tuple[list[str], list[str]]:
     """B3-2-10 by code: `(reasons DU must be re-run, tolerances not checked)`. Pure.
 
-    The guide's own examples: 44% → 46% needs a re-run (it crosses 45%); 46% → 48% does not (already
-    over 45%, and up 2 points).
+    The plan's Done-when examples (§5 LP-924): 44% → 46% needs a re-run (it crosses 45%); 46% → 48% does
+    not (already over 45%, and up 2 points). Whether B3-2-10 treats 45% as a crossing or a level is
+    STOP AND ASK 2 in the progress file: this follows the Done-when, which only the crossing satisfies.
     """
     reasons: list[str] = []
     not_checked: list[str] = []
@@ -335,6 +336,10 @@ async def figures_check(db: AsyncSession, *, loan_file: LoanFile) -> FiguresChec
     return check
 
 
+def _str(value: Decimal | None) -> str | None:
+    return None if value is None else str(value)
+
+
 def _required(condition: Condition) -> Decimal | None:
     from app.services.condition_evidence import _decimal
 
@@ -357,8 +362,13 @@ async def apply(
     from app.services.verifications import mark_verification_stale
 
     check = await figures_check(db, loan_file=loan_file)
-    shown = {(row.get("key"), row.get("from_evidence")) for row in expected}
-    current = {(change.key, str(change.from_evidence)) for change in check.changes}
+    # BOTH SIDES OF EVERY ROW (LP-924 review, F1). The first version compared `from_evidence` only,
+    # so a stated figure edited between her reading "$11,062.18 → $41,914.42" and pressing Apply was
+    # overwritten without a word. The row she reads is the promise, so the whole row is compared.
+    shown = {(row.get("key"), row.get("in_file"), row.get("from_evidence")) for row in expected}
+    current = {
+        (change.key, _str(change.in_file), str(change.from_evidence)) for change in check.changes
+    }
     if not check.applicable or shown != current:
         raise FiguresChanged("The figures changed — look again before applying.")
 
