@@ -38,6 +38,7 @@ import { useState } from "react";
 import { MoveBackDialog, RecordAnswerDialog } from "./condition-answer-dialogs";
 import { ConditionDetailSheet } from "./condition-detail-sheet";
 import { ConditionDraftDialog } from "./condition-draft-dialog";
+import { ConditionPackagePanel } from "./condition-package-panel";
 import { ConditionsBulkBar, bulkResultSummary } from "./conditions-bulk-bar";
 import { ConditionsFilterRow } from "./conditions-filter-row";
 import { ConditionsList } from "./conditions-list";
@@ -347,6 +348,7 @@ export function ConditionsListView({
 
       {/* LP-924: what accepted evidence changes in the file's figures (S3-09), until applied. */}
       <FiguresCheckPanel fileId={fileId} />
+      <ConditionPackagePanel fileId={fileId} />
 
       {/* LP-922: the round's unsent drafts, once the plan panel is gone. */}
       <RoundDrafts fileId={fileId} onOpenDraft={setDraftId} />

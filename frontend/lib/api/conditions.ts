@@ -26,6 +26,7 @@ import type {
   ConditionImportResult,
   ConditionLenderStatus,
   ConditionOrigin,
+  ConditionPackage,
   ConditionPrepStatus,
   ConditionRound,
   ConditionRoundCompleteness,
@@ -1090,4 +1091,88 @@ export function useApplyFigures(fileId: string) {
       void queryClient.invalidateQueries({ queryKey: ["loan-file-activity"] });
     },
   });
+}
+
+// --- LP-925: the package for the lender (S3-10) ------------------------------------------------ //
+
+export const conditionPackageQueryKey = (fileId: string) => ["condition-package", fileId] as const;
+const packagePath = (fileId: string) => `${filePath(fileId)}/condition-package`;
+
+export function useConditionPackage(fileId: string) {
+  return useQuery({
+    queryKey: conditionPackageQueryKey(fileId),
+    queryFn: async () => (await apiClient.get<ConditionPackage | null>(packagePath(fileId))).data,
+  });
+}
+
+function invalidatePackage(queryClient: ReturnType<typeof useQueryClient>, fileId: string) {
+  void queryClient.invalidateQueries({ queryKey: conditionPackageQueryKey(fileId) });
+  void queryClient.invalidateQueries({ queryKey: ["loan-file-activity"] });
+}
+
+export function useBuildPackage(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      (await apiClient.post<ConditionPackage>(`${packagePath(fileId)}/build`)).data,
+    onSuccess: (data) => {
+      queryClient.setQueryData(conditionPackageQueryKey(fileId), data);
+      invalidatePackage(queryClient, fileId);
+    },
+  });
+}
+
+export function useUpdatePackageRow(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      conditionId,
+      ...body
+    }: {
+      conditionId: string;
+      note?: string;
+      included?: boolean;
+      fields?: Record<string, string | null>;
+    }) =>
+      (await apiClient.patch<ConditionPackage>(`${packagePath(fileId)}/rows/${conditionId}`, body))
+        .data,
+    onSuccess: (data) => queryClient.setQueryData(conditionPackageQueryKey(fileId), data),
+  });
+}
+
+export function useMarkDuRerunDone(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      (await apiClient.post<ConditionPackage>(`${packagePath(fileId)}/du-rerun-done`)).data,
+    onSuccess: (data) => queryClient.setQueryData(conditionPackageQueryKey(fileId), data),
+  });
+}
+
+/** "Mark submitted": the ticked conditions move to Sent to lender; the list and summary refresh. */
+export function useSubmitPackage(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      (await apiClient.post<ConditionPackage>(`${packagePath(fileId)}/submit`)).data,
+    onSuccess: (data) => {
+      queryClient.setQueryData(conditionPackageQueryKey(fileId), data);
+      invalidatePlan(queryClient, fileId);
+      invalidatePackage(queryClient, fileId);
+    },
+  });
+}
+
+/** The zip, saved by the browser (the same blob-and-anchor path Phase 4's document download uses). */
+export async function downloadConditionPackage(fileId: string, filename: string): Promise<void> {
+  const response = await apiClient.get(`${packagePath(fileId)}/download`, { responseType: "blob" });
+  const url = URL.createObjectURL(response.data as Blob);
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }

@@ -1947,3 +1947,55 @@ class FiguresApplyRequest(BaseModel):
     """The rows she saw; applied only if the file would still get exactly these."""
 
     changes: list[FiguresApplyRow] = Field(max_length=20)
+
+
+# --------------------------------------------------------------------------- #
+# LP-925 — the package (S3-10)
+# --------------------------------------------------------------------------- #
+
+
+class PackageRowPublic(BaseModel):
+    condition_id: UUID
+    code: str
+    #: "7086 - Assets.pdf"; null for a condition with no document (a push-back).
+    file_name: str | None
+    document_ids: list[UUID]
+    pages: int
+    note: str
+    #: "ai" (drafted · numbers checked by code), "code" (written by code), "edited" (hers).
+    note_source: Literal["ai", "code", "edited"]
+    fields: dict[str, str | None]
+    included: bool
+
+
+class PackageWarningPublic(BaseModel):
+    kind: Literal["open_prior_to_docs", "expiring", "du_rerun"]
+    code: str
+    text: str
+
+
+class PackagePublic(BaseModel):
+    """S3-10's panel: the package (or what would go in), its warnings, and the lender's cutoff."""
+
+    lender_short: str
+    round_number: int | None
+    #: null before it is built; "built", or "submitted" (then the rows are the record of what was sent).
+    status: Literal["built", "submitted"] | None
+    package_id: UUID | None
+    rows: list[PackageRowPublic]
+    ready_count: int
+    warnings: list[PackageWarningPublic]
+    #: Prior-to-funding codes left for the closing package.
+    later_codes: list[str]
+    #: "20:00" and "America/New_York": the client counts down with its own clock.
+    cutoff: str | None
+    cutoff_tz: str | None
+    upload_fields: list[str]
+    du_rerun_open: bool
+    submitted_at: datetime | None
+
+
+class PackageRowUpdate(BaseModel):
+    note: str | None = Field(default=None, max_length=600)
+    included: bool | None = None
+    fields: dict[str, str | None] | None = None

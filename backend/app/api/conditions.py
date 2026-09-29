@@ -47,6 +47,7 @@ from app.models.condition import (
 )
 from app.models.condition_draft import ConditionDraft
 from app.models.condition_item import ConditionItem
+from app.models.condition_package import ConditionPackage
 from app.models.condition_round import (
     ConditionRound,
     ConditionRoundCompleteness,
@@ -92,6 +93,8 @@ from app.schemas.condition import (
     LenderProcessingRequest,
     NextStepRequest,
     OwnerRequest,
+    PackagePublic,
+    PackageRowUpdate,
     PrepStatusRequest,
     ReadingConfirmRequest,
     ReopenRequest,
@@ -1984,3 +1987,127 @@ async def apply_figures_check(
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await db.commit()
     return FiguresCheckPublic.model_validate(figures_check.as_dict(check))
+
+
+# --------------------------------------------------------------------------- #
+# LP-925 — the package for the lender (S3-10). Nothing is uploaded or sent by the app.
+# --------------------------------------------------------------------------- #
+
+
+async def _package_public(db: DbSession, loan_file: LoanFile) -> PackagePublic | None:
+    from dataclasses import asdict
+
+    from app.services import condition_package
+
+    view = await condition_package.view(db, loan_file=loan_file)
+    return PackagePublic.model_validate(asdict(view)) if view is not None else None
+
+
+async def _open_package(db: DbSession, loan_file: LoanFile) -> ConditionPackage:
+    from app.services import condition_package
+
+    round_ = await condition_package.newest_round(db, loan_file.id)
+    package = await condition_package.open_package(db, round_) if round_ is not None else None
+    if package is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Build the package first.")
+    return package
+
+
+@router.get("/{loan_file_id}/condition-package", response_model=PackagePublic | None)
+async def get_condition_package(
+    loan_file: ScopedLoanFileById, db: DbSession
+) -> PackagePublic | None:
+    """The newest round's package, or what would go in it."""
+    return await _package_public(db, loan_file)
+
+
+@router.post("/{loan_file_id}/condition-package/build", response_model=PackagePublic)
+async def build_condition_package(
+    loan_file: ScopedLoanFileById, db: DbSession, current_user: CurrentUser
+) -> PackagePublic:
+    """Build (or rebuild) the package: one PDF and one note per ready condition; her notes kept."""
+    from app.services import condition_package
+
+    try:
+        await condition_package.build(db, loan_file=loan_file, actor_user_id=current_user.id)
+    except condition_package.PackageRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    await db.commit()
+    public = await _package_public(db, loan_file)
+    assert public is not None
+    return public
+
+
+@router.patch("/{loan_file_id}/condition-package/rows/{condition_id}", response_model=PackagePublic)
+async def update_condition_package_row(
+    loan_file: ScopedLoanFileById, condition_id: UUID, payload: PackageRowUpdate, db: DbSession
+) -> PackagePublic:
+    """Her edit to one row: the note, whether it is ticked, a lender field."""
+    from app.services import condition_package
+
+    package = await _open_package(db, loan_file)
+    try:
+        await condition_package.update_row(
+            db,
+            package=package,
+            condition_id=condition_id,
+            note=payload.note,
+            included=payload.included,
+            fields=payload.fields,
+        )
+    except condition_package.PackageRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    await db.commit()
+    public = await _package_public(db, loan_file)
+    assert public is not None
+    return public
+
+
+@router.post("/{loan_file_id}/condition-package/du-rerun-done", response_model=PackagePublic)
+async def mark_condition_package_du_done(
+    loan_file: ScopedLoanFileById, db: DbSession
+) -> PackagePublic:
+    """ "Mark DU re-run done": the warning the figures check raised is cleared for this package."""
+    from app.services import condition_package
+
+    package = await _open_package(db, loan_file)
+    await condition_package.mark_du_rerun_done(db, package=package)
+    await db.commit()
+    public = await _package_public(db, loan_file)
+    assert public is not None
+    return public
+
+
+@router.post("/{loan_file_id}/condition-package/submit", response_model=PackagePublic)
+async def submit_condition_package(
+    loan_file: ScopedLoanFileById, db: DbSession, current_user: CurrentUser
+) -> PackagePublic:
+    """ "Mark submitted": the ticked conditions move to Sent to lender; the package is the record."""
+    from app.services import condition_package
+
+    package = await _open_package(db, loan_file)
+    try:
+        await condition_package.submit(
+            db, loan_file=loan_file, package=package, actor_user_id=current_user.id
+        )
+    except condition_package.PackageRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    await db.commit()
+    public = await _package_public(db, loan_file)
+    assert public is not None
+    return public
+
+
+@router.get("/{loan_file_id}/condition-package/download")
+async def download_condition_package(loan_file: ScopedLoanFileById, db: DbSession) -> Response:
+    """The zip: one merged PDF per condition, and `notes.txt`. A document that could not be read is
+    named in the `X-Package-Missing` header rather than silently left out."""
+    from app.services import condition_package
+
+    package = await _open_package(db, loan_file)
+    content, missing = await condition_package.download(db, package=package)
+    name = f"{loan_file.display_id} package.zip"
+    headers = {"Content-Disposition": f'attachment; filename="{name}"'}
+    if missing:
+        headers["X-Package-Missing"] = str(len(missing))
+    return Response(content=content, media_type="application/zip", headers=headers)

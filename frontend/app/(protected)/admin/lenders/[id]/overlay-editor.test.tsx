@@ -22,6 +22,10 @@ vi.mock("@/lib/api/lenders", () => ({
   useCreateLenderContact: () => ({ mutate: vi.fn(), isPending: false }),
   useDeleteLenderContact: () => ({ mutate: vi.fn(), isPending: false }),
 }));
+// LP-925 added a third: the lender's condition settings. Mocked for the same reason.
+vi.mock("@/components/admin/lender-condition-settings", () => ({
+  LenderConditionSettings: () => null,
+}));
 vi.mock("next/navigation", () => ({ useParams: () => ({ id: "l1" }) }));
 
 const authState = vi.hoisted(() => ({ role: "admin" as string | undefined }));

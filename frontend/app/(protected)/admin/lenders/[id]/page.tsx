@@ -9,6 +9,7 @@
  * (the backend gates it); a save returns the recomposed effect-legible view.
  */
 
+import { LenderConditionSettings } from "@/components/admin/lender-condition-settings";
 import { LenderContacts } from "@/components/admin/lender-contacts";
 import { Button } from "@/components/ui/button";
 import { InlineErrorState } from "@/components/ui/error-state";
@@ -87,6 +88,10 @@ export default function EditLenderOverlayPage() {
       >
         <ArrowLeft className="h-4 w-4" /> All lenders
       </Link>
+      {/* LP-925 (S3-11) — the condition settings the plan, drafts and package read, FIRST: they are
+          in force on every file, where the overlay below is recorded and not yet applied. Rendered
+          once the overlay has loaded, because the lender's name comes from it. */}
+      {data ? <LenderConditionSettings lenderId={id} name={data.name} /> : null}
       {isPending ? (
         <SkeletonText lines={6} />
       ) : isError || !data ? (

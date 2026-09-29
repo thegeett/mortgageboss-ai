@@ -18,9 +18,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.dependencies import CurrentUser, ScopedLoanFile, require_role
 from app.core.database import DbSession
+from app.models.lender import Lender
 from app.models.lender_contact import LenderContact
 from app.models.user import UserRole
 from app.schemas.lender import (
+    LenderCodeMapRequest,
+    LenderCodeToReviewPublic,
+    LenderConditionSettingsPublic,
+    LenderConditionSettingsUpdate,
     LenderContactCreate,
     LenderContactPublic,
     LenderContactUpdate,
@@ -28,6 +33,7 @@ from app.schemas.lender import (
     LenderDetail,
     LenderSummary,
     LenderUpdate,
+    LibraryTypeOptionPublic,
     UnderwriterAssignment,
 )
 from app.services.lender_contacts import (
@@ -90,6 +96,14 @@ async def create(
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await db.commit()
     return LenderDetail.model_validate(lender)
+
+
+@router.get("/library-types", response_model=list[LibraryTypeOptionPublic])
+async def list_library_types(current_user: CurrentUser) -> list[LibraryTypeOptionPublic]:
+    """The condition library's types, for mapping a lender's code (the library is shared data)."""
+    from app.services.lender_settings import library_types
+
+    return [LibraryTypeOptionPublic.model_validate(t) for t in library_types()]
 
 
 @router.get("/{lender_id}", response_model=LenderDetail)
@@ -279,3 +293,80 @@ async def set_underwriter(
     )
     await db.commit()
     return LenderContactPublic.model_validate(contact) if contact else None
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-925 — condition settings (S3-11): entered once per lender, used on every file
+# --------------------------------------------------------------------------------------------- #
+
+
+async def _lender_or_404(db: DbSession, lender_id: UUID, company_id: UUID) -> Lender:
+    lender = await get_scoped_lender(db, lender_id=lender_id, company_id=company_id)
+    if lender is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Lender not found")
+    return lender
+
+
+@router.get("/{lender_id}/condition-settings", response_model=LenderConditionSettingsPublic)
+async def read_condition_settings(
+    lender_id: UUID, db: DbSession, current_user: CurrentUser
+) -> LenderConditionSettingsPublic:
+    from app.services.lender_settings import settings_for
+
+    lender = await _lender_or_404(db, lender_id, current_user.company_id)
+    return LenderConditionSettingsPublic.model_validate(await settings_for(db, lender=lender))
+
+
+@router.put("/{lender_id}/condition-settings", response_model=LenderConditionSettingsPublic)
+async def save_condition_settings(
+    lender_id: UUID,
+    payload: LenderConditionSettingsUpdate,
+    db: DbSession,
+    current_user: CurrentUser,
+    _: None = _ADMIN,
+) -> LenderConditionSettingsPublic:
+    """Save changes (admin)."""
+    from app.services.lender_settings import SettingsRefused, save_settings, settings_for
+
+    lender = await _lender_or_404(db, lender_id, current_user.company_id)
+    try:
+        await save_settings(db, lender=lender, data=payload.model_dump())
+    except SettingsRefused as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.reason) from exc
+    await db.commit()
+    return LenderConditionSettingsPublic.model_validate(await settings_for(db, lender=lender))
+
+
+@router.get("/{lender_id}/codes-to-review", response_model=list[LenderCodeToReviewPublic])
+async def read_codes_to_review(
+    lender_id: UUID, db: DbSession, current_user: CurrentUser
+) -> list[LenderCodeToReviewPublic]:
+    from app.services.lender_settings import codes_to_review
+
+    lender = await _lender_or_404(db, lender_id, current_user.company_id)
+    return [
+        LenderCodeToReviewPublic.model_validate(r) for r in await codes_to_review(db, lender=lender)
+    ]
+
+
+@router.put("/{lender_id}/codes/{code}", response_model=list[LenderCodeToReviewPublic])
+async def map_lender_code(
+    lender_id: UUID,
+    code: str,
+    payload: LenderCodeMapRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+    _: None = _ADMIN,
+) -> list[LenderCodeToReviewPublic]:
+    """Give a code its library type (admin); new imports use it from then on."""
+    from app.services.lender_settings import SettingsRefused, codes_to_review, map_code
+
+    lender = await _lender_or_404(db, lender_id, current_user.company_id)
+    try:
+        await map_code(db, lender=lender, code=code, canonical_type_id=payload.canonical_type_id)
+    except SettingsRefused as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.reason) from exc
+    await db.commit()
+    return [
+        LenderCodeToReviewPublic.model_validate(r) for r in await codes_to_review(db, lender=lender)
+    ]

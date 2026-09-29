@@ -31,6 +31,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -660,6 +661,232 @@ async def state_s3_12(db: AsyncSession) -> Shot:
     return Shot(path=_conditions_tab(), now=et(9, 2, 9, 30))
 
 
+def _pdf_bytes(name: str, pages: int) -> bytes:
+    import pymupdf
+
+    pdf = pymupdf.open()
+    for number in range(pages):
+        pdf.new_page().insert_text((72, 72), f"{name} page {number + 1}")
+    content = bytes(pdf.tobytes())
+    pdf.close()
+    return content
+
+
+async def _stored_document(
+    db: AsyncSession,
+    loan_file: LoanFile,
+    name: str,
+    document_type: str,
+    pages: int,
+    *,
+    title: str | None = None,
+) -> Document:
+    """A completed PDF on the file with `pages` real pages, so the package counts and merges them."""
+    from app.models.document import UploadSource
+    from app.storage import get_storage_backend
+
+    content = _pdf_bytes(name, pages)
+    document = Document(
+        id=uuid4(),
+        loan_file_id=loan_file.id,
+        original_filename=name,
+        mime_type="application/pdf",
+        file_size_bytes=len(content),
+        storage_path="",
+        document_type=document_type,
+        document_name=title,
+        status=DocumentStatus.COMPLETED,
+        upload_source=UploadSource.USER_UPLOAD,
+    )
+    document.storage_path = await get_storage_backend().save(
+        company_id=loan_file.company_id,
+        file_id=loan_file.id,
+        document_id=document.id,
+        filename=name,
+        content=content,
+    )
+    db.add(document)
+    await db.flush()
+    return document
+
+
+async def state_s3_10(db: AsyncSession) -> Shot:
+    """The package on 09/09 at 5:46 PM, 2 h 14 m before UWM's 8 PM ET cutoff: S3-09's state
+    (figures not applied), and 7086, 6132, 6637, 0132, 6178 and 0006 Ready to send. 1228 (lender doing it) is still open.
+
+    SEED SHORTCUTS, not product paths: 6637's receipt and 0132's three items are set done with their
+    documents directly (LP-923 checks statements and declarations, not a title receipt or a signed
+    disclosure), and the notes come from a stand-in model that writes one line per condition.
+    """
+    import json
+    from types import SimpleNamespace
+
+    from app.ai import client
+    from app.models.condition import ConditionPrepStatus
+    from app.models.condition_item import ConditionItemStatus
+    from app.schemas.condition import PrepStatusRequest
+    from app.services import condition_package, figures_check
+    from app.services.condition_plan import remove_item
+    from app.services.condition_status import move_prep_status
+    from app.storage import get_storage_backend
+
+    shot = await state_s3_09(db)
+    loan_file = await db.scalar(select(LoanFile).where(LoanFile.display_id == DISPLAY_ID))
+    user = await db.scalar(select(User).where(User.email == PROCESSOR_EMAIL))
+    assert loan_file is not None and user is not None
+    conditions = {
+        c.lender_code: c
+        for c in (
+            await db.execute(select(Condition).where(Condition.loan_file_id == loan_file.id))
+        ).scalars()
+    }
+
+    async def items(code: str) -> dict[str, ConditionItem]:
+        return {
+            i.key: i
+            for i in (
+                await db.execute(
+                    select(ConditionItem).where(
+                        ConditionItem.condition_id == conditions[code].id,
+                        ConditionItem.deleted_at.is_(None),
+                    )
+                )
+            ).scalars()
+        }
+
+    # The base's credit invoice is a record with no bytes; the package counts and merges real pages.
+    invoice = await db.scalar(
+        select(Document).where(
+            Document.loan_file_id == loan_file.id, Document.document_type == "service_invoice"
+        )
+    )
+    assert invoice is not None
+    invoice.storage_path = await get_storage_backend().save(
+        company_id=loan_file.company_id,
+        file_id=loan_file.id,
+        document_id=invoice.id,
+        filename=invoice.original_filename,
+        content=_pdf_bytes("Credit invoice", 1),
+    )
+    seven = await items("7086")
+    if "other_accounts" in seven:
+        await remove_item(
+            db, condition=conditions["7086"], item=seven["other_accounts"], actor_user_id=user.id
+        )
+    receipt = await _stored_document(
+        db, loan_file, "EMD receipt.pdf", "other", 1, title="Earnest money receipt"
+    )
+    earnest = await items("6637")
+    earnest["receipt"].document_id = receipt.id
+    for item in earnest.values():
+        item.status = ConditionItemStatus.DONE
+    disclosure = await _stored_document(
+        db, loan_file, "SC attorney disclosure.pdf", "other", 3, title="SC attorney disclosure"
+    )
+    wire = await _stored_document(
+        db, loan_file, "Wire instructions.pdf", "other", 2, title="Wire instructions"
+    )
+    attorney = await items("0132")
+    attorney["disclosure"].document_id = disclosure.id
+    attorney["wire_instructions"].document_id = wire.id
+    for item in attorney.values():
+        item.status = ConditionItemStatus.DONE
+    await db.flush()
+    # 7086 was Waiting on Borrower and the plan moves only from To do, so removing its last owed item
+    # leaves it Waiting (Stage 3A's rule); she moves it herself, as she does 6178.
+    for code in ("7086", "6637", "0132", "6178"):
+        condition = conditions[code]
+        await db.refresh(condition)
+        if condition.prep_status is not ConditionPrepStatus.READY:
+            await move_prep_status(
+                db,
+                condition=condition,
+                payload=PrepStatusRequest(to=ConditionPrepStatus.READY),
+                actor_user_id=user.id,
+            )
+
+    notes = {
+        "7086": "Capital One ··9912 July and August statements, all 12 pages; $41,914.42 verified "
+        "against $38,210.40 required. The 08/21 deposit is sourced.",
+        "6132": "Same Capital One ··9912 statements, all pages present; balance after closing "
+        "costs covers the reserves required.",
+        "6637": "Earnest money $2,850.00: title's receipt, and the check cleared on the August "
+        "statement.",
+        "0132": "SC attorney disclosure re-signed with the approved attorney; wire instructions "
+        "match that attorney.",
+        "0006": "Credit report invoice, already in the file.",
+    }
+
+    async def notes_model(**kwargs: Any) -> Any:
+        return SimpleNamespace(text=json.dumps({"notes": notes}))
+
+    # S3-10 follows S3-09 with the two figures applied (the design shows no figures check).
+    check = await figures_check.figures_check(db, loan_file=loan_file)
+    await figures_check.apply(
+        db,
+        loan_file=loan_file,
+        expected=[
+            {
+                "key": c.key,
+                "in_file": None if c.in_file is None else str(c.in_file),
+                "from_evidence": str(c.from_evidence),
+            }
+            for c in check.changes
+        ],
+        actor_user_id=user.id,
+    )
+    client.complete = notes_model  # type: ignore[assignment]
+    await condition_package.build(db, loan_file=loan_file, actor_user_id=user.id)
+    await _stamp_events_since(db, loan_file, et(9, 9, 17, 40), after=et(9, 8, 15, 5))
+    built = et(9, 9, 17, 46)
+    await db.execute(
+        update(ActivityLog)
+        .where(ActivityLog.loan_file_id == loan_file.id, ActivityLog.created_at > et(9, 8, 15, 5))
+        .values(created_at=built, updated_at=built)
+    )
+    return Shot(path=shot.path, now=built)
+
+
+async def state_s3_11(db: AsyncSession) -> Shot:
+    """Administration → Lenders → United Wholesale Mortgage, any day. The processor here is the
+    company's admin (a seed choice; the screen is admin-only). 7812 is mapped to CR-05; 6521 waits."""
+    from app.models.lender_condition_code import LenderCodeStatus, LenderConditionCode
+
+    loan_file, user = await base(db)
+    user.role = UserRole.ADMIN
+    now = et(9, 9, 10, 0)
+    for code, label, status, type_id, seen in (
+        (
+            "7812",
+            "Provide signed and dated letter of explanation for the credit inquiry",
+            LenderCodeStatus.MAPPED,
+            "CR-05",
+            3,
+        ),
+        (
+            "6521",
+            "Provide most recent paystub covering 30 days with year-to-date earnings.",
+            LenderCodeStatus.OBSERVED_UNMAPPED,
+            None,
+            1,
+        ),
+    ):
+        db.add(
+            LenderConditionCode(
+                lender_id=loan_file.lender_id,
+                code=code,
+                label=label,
+                status=status,
+                canonical_type_id=type_id,
+                times_seen=seen,
+                first_seen_at=now,
+                last_seen_at=now,
+            )
+        )
+    await db.flush()
+    return Shot(path=f"/admin/lenders/{loan_file.lender_id}", now=now)
+
+
 async def _drafted(db: AsyncSession, click: str) -> Shot:
     """Round 1 confirmed at 4:40 PM with its drafts made, and one draft opened."""
     loan_file, user = await base(db)
@@ -699,8 +926,8 @@ STATES: dict[str, Callable[[AsyncSession], Awaitable[Shot]]] = {
     "S3-07": state_s3_07,
     "S3-08": state_s3_08,
     "S3-09": state_s3_09,
-    "S3-10": _later("LP-925"),
-    "S3-11": _later("LP-925"),
+    "S3-10": state_s3_10,
+    "S3-11": state_s3_11,
     "S3-12": state_s3_12,
 }
 

@@ -126,3 +126,47 @@ class UnderwriterAssignment(BaseModel):
     """Who the file's underwriter is. ``null`` clears the assignment."""
 
     contact_id: UUID | None = None
+
+
+# --- LP-925: condition settings (S3-11) -------------------------------------------------------- #
+
+
+class LenderConditionSettingsPublic(BaseModel):
+    """How conditions are worked at this lender. Stored values, else the lender's defaults."""
+
+    mortgagee_clause: str | None
+    #: True when the clause shown was filled from the newest approval letter (not yet saved).
+    clause_from_letter: bool
+    upload_cutoff: str | None
+    upload_cutoff_tz: str
+    upload_fields: list[str]
+    lender_orders_final_inspection: bool
+    lender_orders_title_insurance_payoffs: bool
+    new_files_lender_processing: bool
+
+
+class LenderConditionSettingsUpdate(BaseModel):
+    mortgagee_clause: str | None = Field(default=None, max_length=600)
+    upload_cutoff: str | None = Field(default=None, max_length=5)
+    upload_cutoff_tz: str = Field(default="America/New_York", max_length=64)
+    upload_fields: list[str] = Field(default_factory=lambda: ["note"], max_length=3)
+    lender_orders_final_inspection: bool = False
+    lender_orders_title_insurance_payoffs: bool = False
+    new_files_lender_processing: bool = False
+
+
+class LenderCodeToReviewPublic(BaseModel):
+    code: str
+    example_wording: str
+    files: int
+    canonical_type_id: str | None
+
+
+class LenderCodeMapRequest(BaseModel):
+    canonical_type_id: str | None = Field(default=None, max_length=8)
+
+
+class LibraryTypeOptionPublic(BaseModel):
+    id: str
+    name: str
+    label: str

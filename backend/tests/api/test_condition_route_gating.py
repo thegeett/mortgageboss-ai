@@ -48,6 +48,12 @@ _UNGATED_BY_DESIGN: set[tuple[str, str]] = {
     # visible to every company, so its sender, subject and filenames are stripped rather than
     # gated. A file gate here would have no id to scope and would hide the feature.
     ("GET", "/inbound/queue"),
+    # LP-925 (S3-11): a LENDER's condition settings — company-level configuration that reaches no
+    # condition and no loan file, so no file/round/condition gate has anything to scope. Each handler
+    # looks the lender up in the caller's company (`get_scoped_lender`) and answers 404 otherwise;
+    # `test_another_companys_lender_is_not_found` pins that. Saving is admin-only (`require_role`).
+    ("GET", "/lenders/{lender_id}/condition-settings"),
+    ("PUT", "/lenders/{lender_id}/condition-settings"),
 }
 
 
@@ -79,7 +85,23 @@ def _gate_map() -> list[tuple[str, APIRouter, set[Callable[..., Any]]]]:
         ("inbound", inbound_router, {get_scoped_loan_file}),
         # `/inbound/...` — company-level. No gate is correct here; see `_UNGATED_BY_DESIGN`.
         ("inbound-company", inbound_company_router, set()),
+        # `/lenders/{lender_id}/condition-settings` — company-level; see `_UNGATED_BY_DESIGN`. Only
+        # the routes whose path names a condition: the rest of the lenders router is not a
+        # condition route, and listing it here would demand an exemption for each of them.
+        ("lender-condition-settings", _lender_condition_routes(), set()),
     ]
+
+
+def _lender_condition_routes() -> APIRouter:
+    from app.api.lenders import router as lenders_router
+
+    narrowed = APIRouter()
+    narrowed.routes.extend(
+        route
+        for route in lenders_router.routes
+        if isinstance(route, APIRoute) and "condition" in route.path
+    )
+    return narrowed
 
 
 def _routes(router: APIRouter) -> list[APIRoute]:
@@ -206,11 +228,18 @@ def test_an_exemption_actually_silences_the_check() -> None:
     without = _walk(set())
 
     queue = "[inbound-company] GET /inbound/queue (expected <none accepted>)"
+    settings = [
+        f"[lender-condition-settings] {method} /lenders/{{lender_id}}/condition-settings "
+        "(expected <none accepted>)"
+        for method in ("GET", "PUT")
+    ]
 
-    # Listed: silent. Unlisted: reported. The entry is load-bearing, not decorative.
-    assert queue not in with_exemptions
+    # Listed: silent. Unlisted: reported. Every entry is load-bearing, not decorative.
+    assert with_exemptions == []
     assert queue in without, "emptying the list must surface the route the entry covers"
-    assert without == [queue], "only the exempt route should differ between the two walks"
+    assert sorted(without) == sorted([queue, *settings]), (
+        "only the exempt routes should differ between the two walks"
+    )
 
 
 def test_the_gate_detection_would_notice_an_ungated_route() -> None:

@@ -126,6 +126,36 @@ def _first_n_pages_sync(content: bytes, max_pages: int) -> bytes | None:
         src.close()  # type: ignore[no-untyped-call]
 
 
+def _merge_sync(parts: list[bytes]) -> tuple[bytes | None, list[int]]:
+    """One PDF from several, in order. Returns (merged bytes or None, indexes of parts that could not be
+    read). Blocking. Never raises."""
+    unreadable: list[int] = []
+    out = pymupdf.open()  # type: ignore[no-untyped-call]
+    try:
+        for index, content in enumerate(parts):
+            try:
+                src = pymupdf.open(stream=content, filetype="pdf")  # type: ignore[no-untyped-call]
+            except Exception:
+                unreadable.append(index)
+                continue
+            try:
+                out.insert_pdf(src)  # type: ignore[no-untyped-call]
+            except Exception:
+                unreadable.append(index)
+            finally:
+                src.close()  # type: ignore[no-untyped-call]
+        if int(out.page_count) == 0:
+            return None, unreadable
+        return bytes(out.tobytes()), unreadable  # type: ignore[no-untyped-call]
+    finally:
+        out.close()  # type: ignore[no-untyped-call]
+
+
+async def merge_pdfs(parts: list[bytes]) -> tuple[bytes | None, list[int]]:
+    """LP-925 — one PDF per condition from its documents, in order. `(merged or None, unreadable)`."""
+    return await asyncio.to_thread(_merge_sync, parts)
+
+
 async def first_n_pages(content: bytes, max_pages: int) -> bytes | None:
     """The first ``max_pages`` pages of a PDF as new PDF bytes, or None if not a slice-able PDF (LP-462).
 

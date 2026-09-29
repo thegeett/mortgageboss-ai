@@ -1224,3 +1224,43 @@ export interface FiguresCheck {
   du_not_checked: string[];
   citation: string;
 }
+
+// --- Stage 3: the package for the lender (LP-925) ---------------------------------------------- //
+
+export interface PackageRow {
+  condition_id: string;
+  code: string;
+  /** "7086 - Assets.pdf"; null for a condition with no document. */
+  file_name: string | null;
+  document_ids: string[];
+  pages: number;
+  note: string;
+  /** "ai": drafted · numbers checked by code; "code": written by code; "edited": hers. */
+  note_source: "ai" | "code" | "edited";
+  fields: Record<string, string | null>;
+  included: boolean;
+}
+
+export interface PackageWarning {
+  kind: "open_prior_to_docs" | "expiring" | "du_rerun";
+  code: string;
+  text: string;
+}
+
+/** S3-10: the round's package (or what would go in it). Nothing is uploaded by the app. */
+export interface ConditionPackage {
+  lender_short: string;
+  round_number: number | null;
+  status: "built" | "submitted" | null;
+  package_id: string | null;
+  rows: PackageRow[];
+  ready_count: number;
+  warnings: PackageWarning[];
+  later_codes: string[];
+  /** "20:00" and "America/New_York"; the client counts down with its own clock. */
+  cutoff: string | null;
+  cutoff_tz: string | null;
+  upload_fields: string[];
+  du_rerun_open: boolean;
+  submitted_at: string | null;
+}

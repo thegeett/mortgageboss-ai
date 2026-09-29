@@ -752,6 +752,10 @@ EXCLUDED_TABLES: dict[str, str] = {
         "and `name` can carry the lender's wording. A view would have to drop both; nobody queries "
         "items yet, so the table is excluded whole rather than half-exposed."
     ),
+    "condition_packages": (
+        "LP-925 — each row's note restates the file's figures and the documents' names (NPI). "
+        "Excluded whole, like `condition_evidence`."
+    ),
     "condition_evidence": (
         "LP-923 — each check's reason and each finding restate a statement's amounts, dates and "
         "account ending (NPI). Excluded whole, like `condition_items`."

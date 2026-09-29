@@ -16721,3 +16721,32 @@ an in-memory override path (LP-643's ungate preview).
   line naming the conditions. It refuses (409) unless the recomputed rows equal the rows she saw.
 
 *Status.* Accepted (LP-924).
+
+## ADR-416
+
+**The condition package is built by code from the round's Ready conditions and kept as the record of what
+was sent. The AI only words the notes, and code checks every number in them. Nothing is uploaded: Mark
+submitted is her statement that she uploaded, and it moves our track only.**
+
+*Context.* Plan §5 LP-925, §4a change 7, decisions 1, 4 and 5, README rule 9. The lender's portal
+(UWM's EASE) is where conditions are submitted. The app has no integration with it and must not claim
+one.
+
+*Decision (LP-925).*
+- **What goes in** is the newest round's conditions that are Ready to send, open with the lender and not
+  information-only. That includes a Ready prior-to-funding condition. Prior-to-funding conditions not yet
+  ready are named in an info line; open prior-to-docs conditions are warnings.
+- **One PDF per condition** (`{code} - {Category}.pdf`) merges the documents its done items accepted, in
+  item order. The package stores rows (file name, document ids, pages, note, note source, fields,
+  included) in `condition_packages.rows`. A rebuild keeps her edited notes.
+- **Notes:** one model call for all rows, given only each row's facts. The facts are what was asked
+  and the amounts it names, the documents, the verified and required figures, and the sourced deposits.
+  A note carrying a number not in its own row's facts is replaced by the code-written note, as is every
+  note when the model is unavailable.
+- **Mark submitted** moves each included row to Sent to lender through `move_prep_status` (so each writes
+  `condition_prep_moved`) and records who submitted it and when. The lender's track is not touched.
+- **Lender settings** (mortgagee clause, cutoff and zone, upload fields, who does what) live on the lender
+  (`condition_settings`, `mortgagee_clause`) behind their own admin routes. The clause falls back to the
+  newest approval letter's until it is saved. Mapping a lender code sets it `mapped` for new imports.
+
+*Status.* Accepted (LP-925).

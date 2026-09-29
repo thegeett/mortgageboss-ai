@@ -35,6 +35,12 @@ vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   useSetConditionDraftDueDate: () => ({ mutate: vi.fn(), isPending: false }),
   useFiguresCheck: () => ({ data: undefined }),
   useApplyFigures: () => ({ mutate: vi.fn(), isPending: false }),
+  useConditionPackage: () => ({ data: undefined }),
+  useBuildPackage: () => ({ mutate: vi.fn(), isPending: false }),
+  useUpdatePackageRow: () => ({ mutate: vi.fn(), isPending: false }),
+  useMarkDuRerunDone: () => ({ mutate: vi.fn(), isPending: false }),
+  useSubmitPackage: () => ({ mutate: vi.fn(), isPending: false }),
+  downloadConditionPackage: vi.fn(),
   useSetNextStep: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdateItem: () => ({ mutate: vi.fn(), isPending: false }),
   useConfirmReading: () => ({ mutate: vi.fn(), isPending: false }),
@@ -233,7 +239,10 @@ describe("a round being read (S1-02)", () => {
     // THE CASE THE DESIGN DOES NOT DRAW. A round is committed `parsing` before its task is
     // enqueued, so a broker that is down strands it forever. Without this the card polls and spins
     // with no exit — S1-02's "poll until DRAFT or PARSE_FAILED" does not contemplate never.
-    const old = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    // ELEVEN minutes, not ten: the bound is a strict `>` on 600 000 ms, so a round exactly ten
+    // minutes old is stranded only if a millisecond ticks between building it and reading it —
+    // which made this case fail whenever the render landed in the same millisecond.
+    const old = new Date(Date.now() - 11 * 60 * 1000).toISOString();
     const onRetry = vi.fn();
     render(<RoundReading round={round({ created_at: old })} onRetry={onRetry} />);
 
