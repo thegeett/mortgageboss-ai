@@ -598,3 +598,109 @@ async def test_a_deposit_is_a_finding_never_a_failed_check(db_session: AsyncSess
         "result": "failed",
         "reason": "08/21/2026 mobile deposit $4,000.00",
     }
+
+
+# --------------------------------------------------------------------------------------------- #
+# A rejected statement is not evidence (found by the Stage 3B acceptance test)
+# --------------------------------------------------------------------------------------------- #
+
+
+async def _drop_other_accounts(db: AsyncSession, condition: Condition, actor: Any) -> None:
+    """She removes 7086's "any other account" item, so only ··9912 answers it (as in S3-10)."""
+    from app.services.condition_plan import remove_item
+
+    other = next(
+        i
+        for i in (
+            await db.execute(
+                select(ConditionItem).where(ConditionItem.condition_id == condition.id)
+            )
+        ).scalars()
+        if i.key == "other_accounts"
+    )
+    await remove_item(db, condition=condition, item=other, actor_user_id=actor)
+
+
+async def test_a_rejected_statement_adds_nothing_to_the_verified_funds(
+    db_session: AsyncSession,
+) -> None:
+    """A ··4471 upload fails "right account" on 7086's statements item. Its balance used to be summed
+    into the next statement's "covers required funds": verified $83,828.84 for one account's money."""
+    loan_file, conditions, actor = await _asked(db_session)
+    await _drop_other_accounts(db_session, conditions["7086"], actor)
+    wrong = await add_statement(db_session, loan_file, august(last4="4471"))
+    await check_document(db_session, document_id=wrong.id, today=TODAY)
+    both = await add_statement(db_session, loan_file, july_and_august())
+    await check_document(db_session, document_id=both.id, today=TODAY)
+    (row,) = [
+        e for e in await _evidence(db_session, conditions["7086"]) if e.document_id == both.id
+    ]
+    assert _results(row)["covers_required_funds"] == (
+        "passed",
+        "verified $41,914.42 against $38,210.40 required",
+    )
+
+
+async def test_an_answer_reaches_the_same_deposit_on_every_statement_of_the_account(
+    db_session: AsyncSession,
+) -> None:
+    """The 5-page August and the complete July-August statement both show the 08/21 $4,000.00 deposit.
+    Explained once, it is explained on both; the copy on the rejected statement no longer holds 7086."""
+    loan_file, conditions, actor = await _asked(db_session)
+    await _drop_other_accounts(db_session, conditions["7086"], actor)
+    short = await add_statement(db_session, loan_file, august(pages_present=5))
+    await check_document(db_session, document_id=short.id, today=TODAY)
+    both = await add_statement(db_session, loan_file, july_and_august())
+    await check_document(db_session, document_id=both.id, today=TODAY)
+    rows = {e.document_id: e for e in await _evidence(db_session, conditions["7086"])}
+    assert [f["status"] for f in rows[short.id].findings] == ["open"]  # the positive control
+    await condition_evidence.answer_finding(
+        db_session,
+        condition=conditions["7086"],
+        evidence_id=rows[both.id].id,
+        index=0,
+        answer="explained",
+        reason="Gift from a relative",
+        actor_user_id=actor,
+    )
+    assert [(f["status"], f["reason"]) for f in rows[short.id].findings] == [
+        ("explained", "Gift from a relative")
+    ]
+    assert conditions["7086"].prep_status is ConditionPrepStatus.READY
+    answered = (
+        await db_session.execute(
+            select(ConditionEvent.detail).where(
+                ConditionEvent.condition_id == conditions["7086"].id,
+                ConditionEvent.kind == ConditionEventKind.CONDITION_FINDING_ANSWERED,
+            )
+        )
+    ).scalar_one()
+    assert answered["also_answered_on"] == [str(short.id)]
+
+
+async def test_a_deposit_on_a_rejected_statement_does_not_hold_the_condition(
+    db_session: AsyncSession,
+) -> None:
+    """Another account's statement (rejected, "right account") shows its own large deposit. It is not
+    submitted, so it does not hold 7086 once the real statement's deposit is explained."""
+    loan_file, conditions, actor = await _asked(db_session)
+    await _drop_other_accounts(db_session, conditions["7086"], actor)
+    wrong = await add_statement(db_session, loan_file, august(last4="4471"))
+    await check_document(db_session, document_id=wrong.id, today=TODAY)
+    both = await add_statement(db_session, loan_file, july_and_august())
+    await check_document(db_session, document_id=both.id, today=TODAY)
+    rows = {e.document_id: e for e in await _evidence(db_session, conditions["7086"])}
+    # The positive control: the rejected statement's own deposit is open and needed.
+    assert [(f["status"], f["needed"]) for f in rows[wrong.id].findings] == [("open", True)]
+    await condition_evidence.answer_finding(
+        db_session,
+        condition=conditions["7086"],
+        evidence_id=rows[both.id].id,
+        index=0,
+        answer="explained",
+        reason="Gift from a relative",
+        actor_user_id=actor,
+    )
+    # Another account's deposit is not this one: it keeps its own status.
+    assert [f["status"] for f in rows[wrong.id].findings] == ["open"]
+    assert conditions["7086"].prep_status is ConditionPrepStatus.READY

@@ -342,3 +342,104 @@ async def test_the_routes(db_session: AsyncSession, monkeypatch: pytest.MonkeyPa
         assert submitted.json()["status"] == "submitted"
         zipped = await client.get(f"{base}/download", headers=headers)
         assert zipped.headers["content-type"] == "application/zip"
+
+
+async def test_separate_monthly_statements_are_both_packaged_and_a_rejected_one_is_not(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """July alone falls short of the $38,210.40 ("covers required funds" fails on its own row), and is
+    still July's evidence. The package used to take only rows with every check passed, so 7086 went
+    to the lender with August alone. A 5-page August (rejected) never goes in."""
+    from app.services.condition_plan import remove_item
+    from tests.conditions.statement_fixture import august, july
+
+    _model_writes(monkeypatch, {})
+    loan_file, conditions, actor = await _asked(db_session)
+    other = next(
+        i
+        for i in (
+            await db_session.execute(
+                select(ConditionItem).where(ConditionItem.condition_id == conditions["7086"].id)
+            )
+        ).scalars()
+        if i.key == "other_accounts"
+    )
+    await remove_item(db_session, condition=conditions["7086"], item=other, actor_user_id=actor)
+    first = await add_statement(db_session, loan_file, july(), name="july.pdf")
+    short = await add_statement(db_session, loan_file, august(pages_present=5), name="aug-5.pdf")
+    second = await add_statement(db_session, loan_file, august(), name="august.pdf")
+    for document in (first, short, second):
+        await check_document(db_session, document_id=document.id, today=TODAY)
+    rows = {e.document_id: e for e in await _evidence(db_session, conditions["7086"])}
+    # The positive control: July's own row fails only the sum.
+    assert [c["check"] for c in rows[first.id].checks if c["result"] == "failed"] == [
+        "covers_required_funds"
+    ]
+    await condition_evidence.answer_finding(
+        db_session,
+        condition=conditions["7086"],
+        evidence_id=rows[second.id].id,
+        index=0,
+        answer="explained",
+        reason="Gift from a relative",
+        actor_user_id=actor,
+    )
+    assert conditions["7086"].prep_status is ConditionPrepStatus.READY
+    package = await condition_package.build(db_session, loan_file=loan_file, actor_user_id=actor)
+    row = next(r for r in package.rows if r["code"] == "7086")
+    assert row["document_ids"] == [str(first.id), str(second.id)]
+    # One line for the deposit, though the rejected August carries the same one.
+    assert row["note"].count("deposit sourced") == 1
+
+
+async def test_a_deposit_explained_only_on_a_rejected_statement_is_not_in_the_note(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Another account's statement (rejected on "right account") has its own 08/19 $3,500.00 deposit,
+    and she explains it anyway. That statement is not submitted, so the note must not say "sourced"."""
+    from datetime import date
+
+    from app.services.condition_plan import remove_item
+    from tests.conditions.statement_fixture import AUGUST, _tx, august
+
+    _model_writes(monkeypatch, {})
+    loan_file, conditions, actor = await _asked(db_session)
+    other = next(
+        i
+        for i in (
+            await db_session.execute(
+                select(ConditionItem).where(ConditionItem.condition_id == conditions["7086"].id)
+            )
+        ).scalars()
+        if i.key == "other_accounts"
+    )
+    await remove_item(db_session, condition=conditions["7086"], item=other, actor_user_id=actor)
+    other_account = august(
+        last4="4471",
+        transactions=[_tx(date(2026, 8, 19), "Transfer In", "3500.00", "deposit"), *AUGUST[:1]],
+    )
+    wrong = await add_statement(db_session, loan_file, other_account, name="other.pdf")
+    await check_document(db_session, document_id=wrong.id, today=TODAY)
+    both = await add_statement(db_session, loan_file, july_and_august())
+    await check_document(db_session, document_id=both.id, today=TODAY)
+    rows = {e.document_id: e for e in await _evidence(db_session, conditions["7086"])}
+    index = next(i for i, f in enumerate(rows[wrong.id].findings) if f["date"] == "2026-08-19")
+    for evidence_id, at, reason in (
+        (rows[wrong.id].id, index, "Transfer between her own accounts"),
+        (rows[both.id].id, 0, "Gift from a relative"),
+    ):
+        await condition_evidence.answer_finding(
+            db_session,
+            condition=conditions["7086"],
+            evidence_id=evidence_id,
+            index=at,
+            answer="explained",
+            reason=reason,
+            actor_user_id=actor,
+        )
+    assert rows[wrong.id].findings[index]["status"] == "explained"  # the positive control
+    assert conditions["7086"].prep_status is ConditionPrepStatus.READY
+    package = await condition_package.build(db_session, loan_file=loan_file, actor_user_id=actor)
+    note = next(r for r in package.rows if r["code"] == "7086")["note"]
+    assert "08/19" not in note
+    assert note.count("deposit sourced") == 1

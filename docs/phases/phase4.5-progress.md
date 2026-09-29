@@ -354,6 +354,51 @@ Also fixed, from the screens:
 - "Lender is doing it" and "Information only" are **plan options** shown with Stage 2's display rule. They
   are not new `prep_status` values (plan §4a change 12).
 
+## Stage 3B — acceptance (build prompt §6)
+
+`backend/tests/conditions/test_stage3b_acceptance.py` runs round 1 of the fictional UWM file from
+the statements arriving to the submit, in screen order, on one file. The statement PDFs are generated
+in the test (real pages: 6, 5, 6, 12, and a 1-page invoice), so page counts and merges are measured. The
+expected values are written by hand from build prompt §6 and the screens. Status: **AWAITING_REVIEW**.
+
+| §6 requirement | Result |
+|---|---|
+| the August statement with 5 of 6 pages cannot reach Ready (S3-07) | **matches**: "pages 1–5 of 6 — page 6 is missing"; 6132 and 7086 stay Waiting |
+| a wrong-account statement is rejected with the reason | **matches**: "Capital One ending 4471 — the condition asks for ending 9912"; the item is not done |
+| the $4,000.00 deposit on 08/21 is flagged against the $2,870.66 threshold (S3-08) | **matches**, and "Enough for closing" reads verified $41,914.42 against $38,210.40, **after fix 1** |
+| accepting the evidence proposes the S3-09 figures and changes nothing until applied; applying goes through the stated-financials edits | **matches after fixes 2 and 3**: nothing proposed before the deposit is answered; the four S3-09 rows; the stated asset and the ratios unchanged until Apply, then $41,914.42 and 33.12% / 40.97%, with "Edited a stated asset" and "Applied 2 changes…" |
+| DTI 44% → 46% flagged "re-run DU", 46% → 48% not | **matches** (the crossing reading; STOP AND ASK 2 stays open) |
+| one named PDF and one note per ready condition (S3-10) | **matches after fixes 4 and 5**: 7086, 6132, 6178, 0006 in sheet order; `7086 - Assets.pdf` holds only the passing 12-page statement; 6178 has no file; an invented $45,000.00 note is refused; the zip has 3 PDFs and `notes.txt`, nothing missing |
+| Mark submitted moves exactly those to Sent to lender, and the lender's track never moves | **matches**: 4 moves, 4 `condition_prep_moved` events, every other condition unchanged, every lender status Open |
+
+**What the acceptance test found: one class, "a rejected statement treated as evidence", in five
+places.** Each fix has a test at its own layer, and a mutation undoing it fails that test:
+1. **The funds sum** (`_statements_for_item`) added every statement checked against the item. A ··4471
+   upload rejected on "right account" made 7086's check read "verified $83,828.84".
+2. **The figures check** (`_funds_evidence`) did the same, and proposed $83,828.84 as verified assets.
+3. **An answer reached one copy of a deposit.** The rejected 5-page August showed the same 08/21
+   $4,000.00 deposit; she explained it on the complete statement, and the copy kept 7086 at Waiting
+   with nothing left to answer. An answer now reaches the same deposit (the same account, date and
+   amount) on the condition's other statements, and the event names them (`also_answered_on`).
+4. **A finding on a rejected statement held the condition** (`_settle`). Another account's statement
+   with its own deposit kept 7086 Waiting. Only findings on documents that are evidence hold it now.
+5. **The package's documents** took only rows with every check passed. That excluded a real July
+   statement whose only failure is "covers required funds" on its own, so 7086 would have gone to the
+   lender with August alone. The package's note also said "deposit sourced" once per copy.
+
+All five now ask one predicate, `counts_as_evidence`: accepted by her, or failing no check but the funds
+sum. New tests: 3 in `test_condition_evidence.py`, 2 in `test_condition_package.py`, 1 in
+`test_figures_check.py`. There were 8 mutations. The one that survived first (the package note's
+filter, masked by the de-duplication) is killed by a deposit explained only on a rejected statement.
+
+**Re-shot after the fixes:** S3-07, S3-08, S3-09 and S3-12 differ from their committed shots only
+behind the drawers or below the fold. The difference is LP-925's package bar ("1 condition ready to
+send · Build package"), which the LP-923 and LP-924 shots predate (**D12**). S3-08's list also shows
+6132's "Evidence checked" where the older shot had "—". S3-10 is byte-identical.
+
+**Verification on the finished tree:** backend 8689 passed, 1 failed (the named sonnet test), 8
+skipped, 1 xfailed. ruff, format and mypy (567 files) are clean. No frontend change.
+
 ## Stage 3 — tests that already failed before Stage 3
 
 Named so a later ticket is not blamed for them (baseline at `840df131`):
@@ -381,6 +426,13 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
 | 2 | plan §2.3 and §5 LP-924 (B3-2-10) against LP-924's own **Done when** | Is DU resubmission required when the DTI *is* above 45%, or only when it *crosses* 45% from at or under it? | **The plan says both and they cannot both hold.** §2.3 and §5 state a LEVEL ("exceeds 45%" / "now over 45%"); the Done-when requires 46% → 48% NOT to be flagged, which a level reading would flag. The build follows the Done-when (crossing), and is coherent: 44→46 flags, 46→48 does not, 46→49 flags on the 3-point limb, 50→51 does not. **Reading taken: the Done-when's**, because it is the ticket's acceptance criterion and the 3-point limb still catches large rises above 45%. B3-2-10 itself is not in this repository, so the guide cannot be checked from here — this is a domain question for the resident expert (CLAUDE.md), not a reading either session should settle. Raised by the LP-924 review; see [LP-924](../tickets/LP-924.md) "STOP AND ASK". |
 
 ## Stage 3 — open items (not blocking)
+
+- **A failed upload keeps saying so after a better document has done its item** (Stage 3B acceptance).
+  7086, Ready by its 12-page statement, still reads "Evidence failed a check — page 6" in the list, and
+  counts in "Failed a check", because of the 5-page August it replaced (`has_failed_check` and the
+  frontend's first token look at every checked row). LP-923's reviewed rule is "a failed check first".
+  Whether a superseded failure should drop out once its item is done is the owner's call. Not changed
+  here.
 
 - **The product owner's sign-off on the library's top 20 types** (decision 6), once LP-918 has written
   `phase4.5-library-review.md`.

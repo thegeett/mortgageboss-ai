@@ -41,7 +41,7 @@ from app.models.condition import (
     ConditionLenderStatus,
     ConditionPrepStatus,
 )
-from app.models.condition_evidence import ConditionEvidence, EvidenceStatus
+from app.models.condition_evidence import ConditionEvidence
 from app.models.condition_item import ConditionItem
 from app.models.condition_package import ConditionPackage, PackageStatus
 from app.models.condition_round import ConditionRound, ConditionRoundStatus
@@ -132,6 +132,8 @@ def _category(condition: Condition) -> str:
 
 async def _documents(db: AsyncSession, condition: Condition) -> list[Document]:
     """The documents the condition's done items accepted, then any found already in the file."""
+    from app.services.condition_evidence import counts_as_evidence
+
     items = list(
         (
             await db.execute(
@@ -155,10 +157,7 @@ async def _documents(db: AsyncSession, condition: Condition) -> list[Document]:
             )
         ).scalars()
         for row in evidence:
-            passed = row.status is EvidenceStatus.ACCEPTED or all(
-                c.get("result") == "passed" for c in row.checks or []
-            )
-            if passed and row.document_id not in ids:
+            if counts_as_evidence(row) and row.document_id not in ids:
                 ids.append(row.document_id)
         if item.document_id and item.document_id not in ids:
             ids.append(item.document_id)
@@ -263,7 +262,19 @@ async def _row_facts(
     if verified is not None and required is not None:
         facts["verified"] = _money(verified)
         facts["required"] = _money(required)
-    explained = [f for e in evidence for f in (e.findings or []) if f.get("status") == "explained"]
+    # From documents that are evidence, once per deposit: an answer reaches the same deposit on every
+    # statement of the account (Stage 3B acceptance), so the rejected copy must not say it twice.
+    from app.services.condition_evidence import counts_as_evidence
+
+    explained = list(
+        {
+            (f.get("date"), f.get("amount")): f
+            for e in evidence
+            if counts_as_evidence(e)
+            for f in (e.findings or [])
+            if f.get("status") == "explained"
+        }.values()
+    )
     if explained:
         facts["deposits_sourced"] = [
             {"date": f.get("date"), "amount": _money(Decimal(f["amount"])), "how": f.get("reason")}

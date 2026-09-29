@@ -126,6 +126,8 @@ async def _funds_evidence(
     db: AsyncSession, loan_file_id: UUID
 ) -> list[tuple[Condition, ConditionItem, list[Document]]]:
     """Items that prove funds to close and are DONE, with the documents they accepted."""
+    from app.services.condition_evidence import counts_as_evidence
+
     rows = list(
         (
             await db.execute(
@@ -155,7 +157,7 @@ async def _funds_evidence(
                     select(Document)
                     .options(selectinload(Document.extractions))
                     .where(
-                        Document.id.in_({e.document_id for e in evidence}),
+                        Document.id.in_({e.document_id for e in evidence if counts_as_evidence(e)}),
                         Document.deleted_at.is_(None),
                     )
                 )

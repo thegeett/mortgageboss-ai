@@ -17,6 +17,7 @@ import pytest
 from app.models.activity_log import ActivityLog
 from app.models.borrower import Borrower
 from app.models.condition import Condition
+from app.models.condition_item import ConditionItem
 from app.models.loan_file import LoanFile
 from app.models.property import OccupancyType, Property
 from app.models.stated_financials import StatedAsset, StatedIncomeItem, StatedLiability
@@ -311,3 +312,40 @@ async def test_a_figure_changed_underneath_is_refused_not_overwritten(
             db_session, loan_file=loan_file, expected=shown, actor_user_id=actor
         )
     assert asset.value == Decimal("20000.00")
+
+
+async def test_a_rejected_statement_is_not_verified_assets(db_session: AsyncSession) -> None:
+    """A ··4471 statement rejected on "right account" used to be summed in: $83,828.84 proposed."""
+    from app.services.condition_plan import remove_item
+
+    loan_file, conditions, actor = await _asked(db_session)
+    await _like_the_letter(db_session, loan_file, actor)
+    other = next(
+        i
+        for i in (
+            await db_session.execute(
+                select(ConditionItem).where(ConditionItem.condition_id == conditions["7086"].id)
+            )
+        ).scalars()
+        if i.key == "other_accounts"
+    )
+    await remove_item(db_session, condition=conditions["7086"], item=other, actor_user_id=actor)
+    wrong = await add_statement(db_session, loan_file, july_and_august(last4="4471"))
+    await check_document(db_session, document_id=wrong.id, today=TODAY)
+    both = await add_statement(db_session, loan_file, july_and_august())
+    await check_document(db_session, document_id=both.id, today=TODAY)
+    (row,) = [
+        e for e in await _evidence(db_session, conditions["7086"]) if e.document_id == both.id
+    ]
+    await condition_evidence.answer_finding(
+        db_session,
+        condition=conditions["7086"],
+        evidence_id=row.id,
+        index=0,
+        answer="explained",
+        reason="Gift from a relative",
+        actor_user_id=actor,
+    )
+    check = await figures_check.figures_check(db_session, loan_file=loan_file)
+    assets = next(c for c in check.changes if c.key == "verified_assets")
+    assert assets.from_evidence == Decimal("41914.42")

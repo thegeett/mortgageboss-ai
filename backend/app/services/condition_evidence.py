@@ -516,14 +516,14 @@ async def _statements_for_item(
     db: AsyncSession, item: ConditionItem, extra: tuple[Document, Statement] | None
 ) -> list[tuple[Document, Statement]]:
     rows = (
-        await db.execute(
-            select(ConditionEvidence.document_id).where(ConditionEvidence.item_id == item.id)
-        )
+        await db.execute(select(ConditionEvidence).where(ConditionEvidence.item_id == item.id))
     ).scalars()
     out: list[tuple[Document, Statement]] = []
     seen: set[UUID] = set()
-    for document_id in rows:
-        document = await _document(db, document_id)
+    for row in rows:
+        if not counts_as_evidence(row):
+            continue
+        document = await _document(db, row.document_id)
         if document is not None and document.deleted_at is None:
             out.append((document, statement_from(_extraction_data(document))))
             seen.add(document.id)
@@ -728,6 +728,25 @@ def _condition_last4(condition: Condition) -> str | None:
     return None
 
 
+def counts_as_evidence(row: ConditionEvidence) -> bool:
+    """Whether this document is evidence for its item: accepted by her, or failing none of its own checks.
+
+    A REJECTED STATEMENT VERIFIES NOTHING (Stage 3B acceptance). Every statement checked against an
+    item used to count, so a ··4471 upload that failed "right account" added its balance to 7086's
+    "verified $83,828.84", in the check and in the figures check. "Covers required funds" is the one
+    check that does not reject: it is the sum across the item's statements, so a real July statement
+    short of the total on its own is still July's evidence. The funds sum, the figures check and the
+    package all ask this one question.
+    """
+    if row.status is EvidenceStatus.ACCEPTED:
+        return True
+    return not any(
+        check.get("result") == FAILED
+        and check.get("check") != EvidenceCheck.COVERS_REQUIRED_FUNDS.value
+        for check in row.checks or []
+    )
+
+
 def _failed(evidence: ConditionEvidence) -> bool:
     if evidence.status is EvidenceStatus.ACCEPTED:
         return False
@@ -771,7 +790,11 @@ async def _settle(db: AsyncSession, *, condition: Condition, actor_user_id: UUID
     )
     if not items or any(i.status is not ConditionItemStatus.DONE for i in items):
         return False
-    if any(_open_finding(e) for e in evidence) or condition.next_step is not None:
+    # Only findings on documents that ARE evidence hold it: a rejected statement (the wrong account, a
+    # page missing) is not submitted, so a deposit only it shows is not one the lender will see
+    # (Stage 3B acceptance: the ··4471 upload held 7086 at Waiting with nothing left to answer).
+    held = any(_open_finding(e) for e in evidence if counts_as_evidence(e))
+    if held or condition.next_step is not None:
         return False
     if condition.prep_status not in (ConditionPrepStatus.TO_DO, ConditionPrepStatus.WAITING):
         return False
@@ -942,15 +965,19 @@ async def answer_finding(
         raise EvidenceRefused("Unknown answer.")
     findings[index] = finding
     evidence.findings = findings
+    also = await _answer_the_same_deposit_elsewhere(db, condition, evidence, finding)
+    detail: dict[str, Any] = {
+        "document_id": str(evidence.document_id),
+        "answer": answer,
+        "kind": finding.get("kind"),
+    }
+    if also:
+        detail["also_answered_on"] = also
     db.add(
         _event(
             condition,
             ConditionEventKind.CONDITION_FINDING_ANSWERED,
-            {
-                "document_id": str(evidence.document_id),
-                "answer": answer,
-                "kind": finding.get("kind"),
-            },
+            detail,
             actor_user_id=actor_user_id,
         )
     )
@@ -961,6 +988,56 @@ async def answer_finding(
     await _settle(db, condition=condition, actor_user_id=actor_user_id)
     await db.flush()
     return item
+
+
+async def _answer_the_same_deposit_elsewhere(
+    db: AsyncSession, condition: Condition, answered: ConditionEvidence, finding: dict[str, Any]
+) -> list[str]:
+    """Her answer is about the DEPOSIT, not the upload: the same deposit (the same account, date and
+    amount) on this condition's other statements gets the same answer. Returns their document ids.
+
+    Stage 3B acceptance found the gap: a 5-page August statement (rejected, a page missing) carried the
+    08/21 $4,000.00 deposit as an open finding. She explained it on the complete statement, and the copy
+    on the rejected one held 7086 at Waiting with nothing left for her to answer.
+    """
+    if finding.get("kind") != "large_deposit":
+        return []
+    source = await _document(db, answered.document_id)
+    last4 = statement_from(_extraction_data(source)).last4 if source is not None else None
+    if not last4:
+        return []
+    others = (
+        await db.execute(
+            select(ConditionEvidence).where(
+                ConditionEvidence.condition_id == condition.id,
+                ConditionEvidence.id != answered.id,
+            )
+        )
+    ).scalars()
+    touched: list[str] = []
+    for row in others:
+        document = await _document(db, row.document_id)
+        if document is None or statement_from(_extraction_data(document)).last4 != last4:
+            continue
+        changed = False
+        updated = []
+        for other in row.findings or []:
+            same = (
+                other.get("kind") == "large_deposit"
+                and other.get("date") == finding.get("date")
+                and other.get("amount") == finding.get("amount")
+                and other.get("status") in _UNANSWERED
+            )
+            if same:
+                other = {**other, "status": finding["status"]}
+                if "reason" in finding:
+                    other["reason"] = finding["reason"]
+                changed = True
+            updated.append(other)
+        if changed:
+            row.findings = updated
+            touched.append(str(row.document_id))
+    return touched
 
 
 async def _add_ask(
