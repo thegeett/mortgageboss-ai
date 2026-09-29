@@ -16496,3 +16496,41 @@ cost, and it is the same trade ADR-404 made in refusing to let Stage 1 say anyth
 `docs/phases/phase4.5-stage2-tickets.md` §1 were accepted by the product owner in the Stage 2 build
 instruction, recorded in `docs/tickets/phase4.5-stage2-survey.md` §5.0 rather than in a conversation
 the tickets file holds.
+
+## ADR-409
+
+**The condition library is reviewed data in the repository: a versioned YAML file of condition TYPES,
+keyed by ids of the form `AS-04`, and those ids are a different vocabulary from the verification rules'.**
+
+*Context.* Stage 3's plan (principle 5) says the library beats the AI: a known (lender, code) or a known
+condition type decides the plan, and the AI only fills in specifics. Stage 1's code maps already had a
+`canonical_type_id` column, left null because the taxonomy it named (`phase4.5-appendix-C-condition-
+taxonomy`) is not in the repository, and because `docs/rule-engine.md` uses ids of the same shape
+(`AS-11`, `IN-7`) for verification rules.
+
+*Decision (LP-918).*
+
+- **Data, not code, and not a table.** `backend/app/conditions/library/types.yaml`, validated by
+  `app/conditions/library/loader.py` and cached per process. A change is a reviewed diff; the product
+  owner marks up a table generated from the file (`docs/phases/phase4.5-library-review.md`). A company
+  does not edit types; what a company decides per lender (which codes map to which type, who orders what)
+  is lender data (LP-925).
+- **The ids are condition types.** They live only in the library and in `canonical_type_id` (on the code
+  map rows and the conditions). They never meet rule ids; the loader refuses any id not shaped `XX-00`, so
+  a rule id such as `IN-7` cannot be pasted in. The 14 ids the Stage 1 spec's table named are kept.
+- **Closed vocabularies shared with the database.** Performers, plan options and evidence checks are
+  enums in `app/models/condition_vocabulary.py`, because later tickets store them in `VARCHAR` + `CHECK`
+  columns (ADR-037); the library is written in the same enums, so the two cannot drift.
+- **Citations are limited to what the plan cites.** A type's rule is either an agency section from the
+  Stage 3 plan's sources (Fannie Mae B3-4.2-02, B3-4.3-09, B3-3.1-04, B3-2-10, B7-3-07/B7-3-08, Reg Z
+  1026.36(c)(3)) or "lender requirement". The loader refuses anything else. A processor quotes these to
+  underwriters; an invented section would be worse than none.
+- **Every type yields a plan.** Items carry their own performer and option; a type with no items carries
+  `lender_doing_it` or `information_only`.
+
+*Consequences.* Every mapped UWM and Champions code resolves to a type, and an imported condition carries
+it. Lender-specific behaviour (UWM orders the final inspection) is not in the library: the library's
+PA-03 proposes "I'll do it", and the lender setting changes it (LP-920, LP-925). The product owner's
+sign-off on the top 20 is an open item that does not block later tickets.
+
+*Status.* Accepted (LP-918).

@@ -17,21 +17,13 @@
 # `!`, `%` or `@`, and to the bare words yes/no/on/off/true/false. When in doubt, quote it: a quoted
 # string is never wrong here, and an unquoted one is wrong in a way that reads as correct.
 #
-# `canonical_type_id` IS NULL ON EVERY ROW, AND THE SPEC'S TABLE IS NOT. Spec §6 LP-910's UWM
-# table populates its Type column on **14 rows** (13 distinct ids — `CR-02` appears on both 5868 and
-# 7383): 0471 AS-11, 1228 PA-03, 1594 ID-05, 1741 PA-08, 1812 IE-03, 4235 IE-05, 5868 CR-02, 6132
-# AS-01, 6140 CR-11, 6178 IN-01, 6457 IN-02, 6637 AS-04, 7086 AS-10, 7383 CR-02.
-#
-# They are DELIBERATELY NOT TRANSCRIBED, and the reason is the trap rather than the omission. Those
-# ids come from `phase4.5-appendix-C-condition-taxonomy`, which is NOT in this repository — while
-# `docs/rule-engine.md` and `docs/stage2-rule-classification.md` carry ids of exactly that shape
-# (`AS-11`, `IN-7`) that are VERIFICATION RULE ids, a different vocabulary. Pasting the spec's column
-# in would attach a DTI rule's identity to a lender condition, and nothing downstream could tell.
-#
-# So: null until the taxonomy lands (Stage 3, LP-918). If you are here because the spec shows values
-# and the YAML shows none, that gap is the decision, not a missed step.
-#
-# (Champions' table has no Type column at all — five columns, not six — so this applies to UWM only.)
+# `canonical_type_id` NAMES A TYPE IN THE CONDITION LIBRARY (LP-918, `app/conditions/library/types.yaml`),
+# and every row carries one. Stage 1 left the column null because the taxonomy
+# (`phase4.5-appendix-C-condition-taxonomy`) was not in this repository; LP-918's library is now the
+# source. The 14 rows spec §6 LP-910's table typed keep exactly those ids (0471 AS-11, 1228 PA-03, 1594
+# ID-05, 1741 PA-08, 1812 IE-03, 4235 IE-05, 5868 CR-02, 6132 AS-01, 6140 CR-11, 6178 IN-01, 6457 IN-02,
+# 6637 AS-04, 7086 AS-10, 7383 CR-02). They are CONDITION TYPES: `docs/rule-engine.md`'s `AS-11` and
+# `IN-7` are verification rule ids, a different vocabulary that happens to look alike.
 #
 # `default_owner_hint` is a HINT and never a decision — Stage 3 decides who acts. It is the weakest
 # of the three hint sources (a `TC:` prefix the lender typed beats it, and the bucket beats it), and
@@ -43,141 +35,169 @@ lender_label: United Wholesale Mortgage
 codes:
   - code: "0006"
     label: Credit report invoice
+    canonical_type_id: IV-01
     default_bucket_kind: prior_to_funding
     default_owner_hint: processor
 
   - code: "0007"
     label: Final inspection invoice
+    canonical_type_id: IV-03
     default_bucket_kind: prior_to_funding
     default_owner_hint: processor
 
   - code: "0132"
     label: SC attorney & insurance preference disclosure
+    canonical_type_id: DI-01
     default_bucket_kind: prior_to_docs
     default_owner_hint: broker
 
   - code: "0471"
     label: Evidence departing property is being sold
+    canonical_type_id: AS-11
     default_bucket_kind: prior_to_docs
     default_owner_hint: borrower
 
   - code: "0562"
     label: Loan restructure required (deadline)
+    canonical_type_id: LN-01
     default_bucket_kind: master
     default_owner_hint: broker
 
   - code: "0571"
     label: Underwriter to approve change of circumstance
+    canonical_type_id: DI-02
     default_bucket_kind: lender_to_clear
     default_owner_hint: lender
 
   - code: "0973"
     label: Appraisal waiver accepted
+    canonical_type_id: PA-05
     default_bucket_kind: master
     default_owner_hint: lender
     info_only: true
 
   - code: "1228"
     label: Final inspection (new construction)
+    canonical_type_id: PA-03
     default_bucket_kind: prior_to_docs
     default_owner_hint: unknown
 
   - code: "1582"
     label: Third-party processing invoice
+    canonical_type_id: IV-02
     default_bucket_kind: prior_to_funding
     default_owner_hint: processor
 
   - code: "1594"
     label: Proof of non-ownership of undisclosed address
+    canonical_type_id: ID-05
     default_bucket_kind: prior_to_docs
     default_owner_hint: borrower
 
   - code: "1741"
     label: HOA dues documentation (appraisal waiver)
+    canonical_type_id: PA-08
     default_bucket_kind: prior_to_docs
     default_owner_hint: borrower
 
   - code: "1760"
     label: Appraisal desk review ordered
+    canonical_type_id: PA-04
     default_bucket_kind: lender_to_clear
     default_owner_hint: lender
 
   - code: "1812"
     label: Verbal VOE before note date
+    canonical_type_id: IE-03
     default_bucket_kind: prior_to_funding
     default_owner_hint: processor
 
   - code: "1818"
     label: Title to confirm seller pays county taxes on CD
+    canonical_type_id: TI-05
     default_bucket_kind: prior_to_funding
     default_owner_hint: title
 
   - code: "1947"
     label: Title to provide final seller CD
+    canonical_type_id: TI-03
     default_bucket_kind: prior_to_funding
     default_owner_hint: title
 
   - code: "4235"
     label: W-2 / final paystub / WVOE for prior employer
+    canonical_type_id: IE-05
     default_bucket_kind: prior_to_docs
     default_owner_hint: borrower
 
   - code: "5853"
     label: REO mortgage statement / escrow of taxes & insurance
+    canonical_type_id: CR-13
     default_bucket_kind: prior_to_docs
     default_owner_hint: borrower
 
   - code: "5868"
     label: Liability missing from credit report
+    canonical_type_id: CR-02
     default_bucket_kind: prior_to_docs
     default_owner_hint: borrower
 
   - code: "6006"
     label: Letter explaining source of funds for a payoff
+    canonical_type_id: AS-13
     default_bucket_kind: prior_to_docs
     default_owner_hint: borrower
 
   - code: "6132"
     label: Additional consecutive bank statement
+    canonical_type_id: AS-01
     default_bucket_kind: prior_to_docs
     default_owner_hint: borrower
 
   - code: "6140"
     label: Contingent liability paid by others
+    canonical_type_id: CR-11
     default_bucket_kind: prior_to_docs
     default_owner_hint: borrower
 
   - code: "6174"
     label: "Processor Assist: title commitment, CPL, wire, taxes"
+    canonical_type_id: TI-10
     default_bucket_kind: prior_to_docs
     default_owner_hint: lender
 
   - code: "6178"
     label: Updated HOI declarations (effective date)
+    canonical_type_id: IN-01
     default_bucket_kind: prior_to_docs
     default_owner_hint: insurance
 
   - code: "6378"
     label: "Title: loan number on checks to lender"
+    canonical_type_id: TI-04
     default_bucket_kind: prior_to_funding
     default_owner_hint: title
 
   - code: "6457"
     label: HOI declarations with mortgagee clause, replacement cost
+    canonical_type_id: IN-02
     default_bucket_kind: prior_to_docs
     default_owner_hint: insurance
 
   - code: "6637"
     label: "Earnest money: source, receipt, clearance"
+    canonical_type_id: AS-04
     default_bucket_kind: prior_to_docs
     default_owner_hint: borrower
 
   - code: "7086"
     label: Short funds to close / reserves
+    canonical_type_id: AS-10
     default_bucket_kind: prior_to_docs
     default_owner_hint: borrower
 
   - code: "7383"
     label: Bank statement deductions not on credit report
+    canonical_type_id: CR-02
     default_bucket_kind: prior_to_docs
     default_owner_hint: borrower

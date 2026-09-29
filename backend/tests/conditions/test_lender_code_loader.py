@@ -55,15 +55,32 @@ def test_every_enum_value_in_the_shipped_files_is_real() -> None:
             assert row.default_owner_hint is None or isinstance(row.default_owner_hint, OwnerHint)
 
 
-def test_canonical_type_ids_are_absent_and_that_is_deliberate() -> None:
-    """Not a gap — the taxonomy is not in this repository (spec §LP-910).
+def test_every_mapped_code_resolves_to_a_library_type() -> None:
+    """LP-918's "Done when": every UWM and Champions code in the code maps names a library type.
 
-    The `AS-11`-style ids in `docs/rule-engine.md` are VERIFICATION RULE ids, a different vocabulary
-    that happens to look alike. Pinned so that when Stage 3's library lands, filling these is a
-    visible change rather than something that drifts in.
+    Replaces Stage 1's pin that these were deliberately empty: the taxonomy was not in the repository,
+    and LP-918's library is now where the ids come from. They are CONDITION TYPES, not the look-alike
+    verification rule ids in `docs/rule-engine.md`.
     """
+    from app.conditions.library import load_library
+
+    library = load_library()
     for key in seeded_lender_keys():
-        assert all(row.canonical_type_id is None for row in load_seed(key))
+        rows = load_seed(key)
+        assert rows, f"{key}: the code map is empty"
+        unresolved = [row.code for row in rows if library.get(row.canonical_type_id) is None]
+        assert not unresolved, f"{key}: codes with no library type: {unresolved}"
+
+
+def test_the_specs_fourteen_uwm_types_are_the_ones_mapped() -> None:
+    """Spec §LP-910's UWM table named a type on 14 rows; the map carries exactly those."""
+    expected = {
+        "0471": "AS-11", "1228": "PA-03", "1594": "ID-05", "1741": "PA-08", "1812": "IE-03",
+        "4235": "IE-05", "5868": "CR-02", "6132": "AS-01", "6140": "CR-11", "6178": "IN-01",
+        "6457": "IN-02", "6637": "AS-04", "7086": "AS-10", "7383": "CR-02",
+    }  # fmt: skip
+    mapped = {row.code: row.canonical_type_id for row in load_seed("uwm")}
+    assert {code: mapped[code] for code in expected} == expected
 
 
 def test_an_unknown_lender_key_is_refused() -> None:

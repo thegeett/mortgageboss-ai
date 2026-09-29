@@ -53,10 +53,9 @@ class LenderCodeSeedError(Exception):
 class LenderCodeRow:
     """One validated row: what this lender's code means.
 
-    `canonical_type_id` is absent from both shipped files and is therefore always ``None`` today.
-    That is deliberate rather than unfinished — the taxonomy it refers to
-    (`phase4.5-appendix-C-condition-taxonomy`) is not in this repository, and the rule ids that look
-    like it in `docs/rule-engine.md` are a different vocabulary. Stage 3 fills it.
+    `canonical_type_id` names a type in the condition library (`app/conditions/library/types.yaml`,
+    LP-918). Every shipped row carries one. The rule ids that look like it in `docs/rule-engine.md`
+    are a different vocabulary.
     """
 
     code: str

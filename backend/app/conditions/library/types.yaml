@@ -1,0 +1,807 @@
+# The condition library v1 (LP-918, plan §5): what each KIND of condition asks for, who provides it,
+# what satisfies it, what evidence must pass, the rule behind it, and the plan the app proposes.
+#
+# THESE IDS ARE CONDITION TYPES, NOT VERIFICATION RULES. `docs/rule-engine.md` uses ids of the same
+# shape (`AS-11`, `IN-7`) for verification rules; the two vocabularies never meet. A type id lives only
+# here and in `canonical_type_id` (on the lender code map and on the condition); a rule id lives only in
+# the rule engine. `AS-11` here is "departing residence being sold", whatever the rule engine's `AS-11`
+# is. The loader refuses an id outside the pattern below so a rule id cannot be pasted in unnoticed.
+#
+# EVERY AGENCY CITATION IS ONE THE STAGE 3 PLAN ITSELF CITES (§2.3 and its Sources): Fannie Mae
+# B3-4.2-02, B3-4.3-09, B3-3.1-04, B3-2-10 and B7-3-07 / B7-3-08, and Reg Z 1026.36(c)(3). Everything
+# else says `lender_requirement`: the lender's own condition, with no agency section claimed. A
+# citation this file cannot back is worse than none — it is what a processor would quote to an
+# underwriter.
+#
+# THE PLAN IS A PROPOSAL (principle 1). `option` on an item is what the app pre-selects; she changes it.
+# Performers, options and checks are closed lists (`app/models/condition_vocabulary.py`).
+#
+# Fictional throughout; nothing here names a borrower.
+
+version: 1
+
+types:
+  # ------------------------------------------------------------------------------------------------ #
+  # Assets
+  # ------------------------------------------------------------------------------------------------ #
+  - id: AS-01
+    name: Bank statements
+    category: assets
+    rule: {kind: agency, citation: Fannie Mae B3-4.2-02, note: "Depository accounts: the most recent statements, all pages, covering the period the lender asks for."}
+    playbook: Ask for the full statement PDF from the bank's website, every page, for the month the lender names. Check it is the month right after the one already in the file.
+    items:
+      - key: statement
+        name: Bank statement
+        acceptable: The full monthly statement, all pages, downloaded as a PDF from the bank's website (not a screenshot)
+        performer: borrower
+        option: ask_borrower
+        documents: [bank_statement]
+        checks: [right_account, right_period, right_borrower, inside_lender_dates, all_pages]
+
+  - id: AS-04
+    name: Earnest money
+    category: assets
+    rule: {kind: agency, citation: Fannie Mae B3-4.3-09, note: "Receipt by a copy of the canceled check or a written statement from the holder of the deposit; source from statements covering up to the date the check cleared."}
+    playbook: Three separate things. The source and the clearance come from the borrower's statements; the receipt comes from whoever holds the deposit.
+    items:
+      - key: source
+        name: Source of the earnest money
+        acceptable: Statement showing the funds before the check was written
+        performer: borrower
+        option: ask_borrower
+        documents: [bank_statement]
+        checks: [right_account, right_period, right_borrower, inside_lender_dates, all_pages]
+      - key: receipt
+        name: Receipt of the deposit
+        acceptable: Copy of the canceled check, or a written statement from the holder of the deposit
+        performer: title
+        option: ask_third_party
+        documents: [earnest_money_receipt, cancelled_checks_evidencing_receipt_of_note_income]
+        checks: [amount_matches]
+      - key: clearance
+        name: Clearance
+        acceptable: Statement showing the check cleared
+        performer: borrower
+        option: ask_borrower
+        documents: [bank_statement]
+        checks: [right_account, right_period, right_borrower, inside_lender_dates, all_pages, amount_matches]
+
+  - id: AS-05
+    name: Large deposit explanation
+    category: assets
+    rule: {kind: agency, citation: Fannie Mae B3-4.2-02, note: "A single deposit over 50% of total monthly qualifying income must be sourced on a purchase when the funds are needed; deposits the statement itself explains need nothing more."}
+    playbook: The threshold is computed by code from the file's income. Ask only for deposits the statement does not explain (payroll, SSA and IRS refunds explain themselves).
+    items:
+      - key: explanation
+        name: Explanation of the deposit
+        acceptable: A signed and dated letter saying where the money came from, with the document that shows it
+        performer: borrower
+        option: ask_borrower
+        documents: [letter_of_explanation_asset, bank_statement, bank_deposit_slip]
+        checks: [signed_and_dated, amount_matches]
+
+  - id: AS-06
+    name: Gift funds
+    category: assets
+    rule: {kind: lender_requirement}
+    playbook: The gift letter comes from the donor; the transfer shows on a statement or a wire receipt.
+    items:
+      - key: gift_letter
+        name: Gift letter
+        acceptable: Signed gift letter with the amount and the donor's relationship
+        performer: borrower
+        option: ask_borrower
+        documents: [gift_letter]
+        checks: [signed_and_dated, amount_matches]
+      - key: transfer
+        name: Evidence of the transfer
+        acceptable: Donor's statement or wire receipt showing the gift leaving, and the borrower's showing it arrive
+        performer: borrower
+        option: ask_borrower
+        documents: [bank_statement, wire_instructions]
+        checks: [amount_matches, inside_lender_dates]
+
+  - id: AS-07
+    name: Retirement or investment statements
+    category: assets
+    rule: {kind: lender_requirement}
+    playbook: Quarterly statements are common; ask for the most recent, all pages, and the plan's withdrawal terms if the funds are needed to close.
+    items:
+      - key: statement
+        name: Account statement
+        acceptable: The most recent statement, all pages
+        performer: borrower
+        option: ask_borrower
+        documents: [investment_account, ira_401k, retirement_account]
+        checks: [right_borrower, inside_lender_dates, all_pages]
+
+  - id: AS-10
+    name: Short funds to close or reserves
+    category: assets
+    rule: {kind: agency, citation: Fannie Mae B3-4.2-02, note: "Funds to close and reserves are verified from the most recent statements."}
+    playbook: The shortfall is computed by code (required minus verified). Ask once for the statements that close the gap, including any other account she plans to use.
+    items:
+      - key: statements
+        name: More verified assets
+        acceptable: The two most recent monthly statements, all pages, for each account used for closing
+        performer: borrower
+        option: ask_borrower
+        documents: [bank_statement, investment_account, ira_401k]
+        checks: [right_account, right_period, right_borrower, inside_lender_dates, all_pages, covers_required_funds]
+      - key: other_accounts
+        name: Any other account used for closing
+        acceptable: The two most recent monthly statements, all pages
+        performer: borrower
+        option: ask_borrower
+        documents: [bank_statement, investment_account]
+        checks: [right_borrower, inside_lender_dates, all_pages]
+
+  - id: AS-11
+    name: Departing residence being sold
+    category: assets
+    rule: {kind: lender_requirement}
+    playbook: Before closing, a listing or a fully executed sales contract; after the sale, the settlement statement showing the net proceeds.
+    items:
+      - key: sale_evidence
+        name: Evidence the departing residence is being sold
+        acceptable: Fully executed sales contract, or the final settlement statement
+        performer: borrower
+        option: ask_borrower
+        documents: [purchase_agreement, closing_disclosure]
+        checks: [signed_and_dated]
+
+  - id: AS-13
+    name: Source of funds for a payoff
+    category: assets
+    rule: {kind: lender_requirement}
+    playbook: A short signed letter saying where the payoff money came from, with the statement showing it.
+    items:
+      - key: letter
+        name: Letter explaining the source of funds
+        acceptable: Signed and dated letter, with the statement that shows the funds
+        performer: borrower
+        option: ask_borrower
+        documents: [letter_of_explanation_asset, bank_statement]
+        checks: [signed_and_dated]
+
+  - id: AS-15
+    name: Verification of deposit ordered by the lender
+    category: assets
+    rule: {kind: lender_requirement}
+    playbook: The lender orders the VOD. Watch for it; nothing to ask.
+    items: []
+    default_option: lender_doing_it
+
+  # ------------------------------------------------------------------------------------------------ #
+  # Credit
+  # ------------------------------------------------------------------------------------------------ #
+  - id: CR-02
+    name: Liability not on the credit report
+    category: credit
+    rule: {kind: lender_requirement}
+    playbook: The statement for the debt the lender found (a payment on a bank statement, a new account), or a letter saying what it is.
+    items:
+      - key: statement
+        name: Statement or explanation for the liability
+        acceptable: The most recent statement for the account, or a signed letter explaining the payment
+        performer: borrower
+        option: ask_borrower
+        documents: [statement_of_account, letter_of_explanation]
+        checks: [signed_and_dated]
+
+  - id: CR-05
+    name: Credit inquiry letter
+    category: credit
+    rule: {kind: lender_requirement}
+    playbook: One signed letter covering each inquiry the lender lists, saying whether new credit was opened.
+    items:
+      - key: letter
+        name: Letter explaining the credit inquiry
+        acceptable: Signed and dated letter naming each inquiry and whether new credit was opened
+        performer: borrower
+        option: ask_borrower
+        documents: [letter_of_explanation]
+        checks: [signed_and_dated]
+
+  - id: CR-11
+    name: Contingent liability paid by others
+    category: credit
+    rule: {kind: lender_requirement}
+    playbook: Twelve months of proof that someone else makes the payment, usually their bank statements.
+    items:
+      - key: proof
+        name: Proof someone else pays it
+        acceptable: The most recent 12 months of statements from the person who pays
+        performer: borrower
+        option: ask_borrower
+        documents: [bank_statement, evidence_of_payment]
+        checks: [right_period]
+
+  - id: CR-12
+    name: Residence history or mortgage verification
+    category: credit
+    rule: {kind: lender_requirement}
+    playbook: A letter explaining the gap or discrepancy, and a verification of mortgage or rent where the lender asks for one.
+    items:
+      - key: explanation
+        name: Letter explaining the residence history
+        acceptable: Signed and dated letter
+        performer: borrower
+        option: ask_borrower
+        documents: [letter_of_explanation_misc]
+        checks: [signed_and_dated]
+      - key: verification
+        name: Verification of mortgage or rent
+        acceptable: Completed VOM or VOR from the servicer or landlord
+        performer: other_party
+        option: ask_third_party
+        documents: [verification_of_mortgage, verification_of_rent]
+        checks: []
+
+  - id: CR-13
+    name: Mortgage statement for another property
+    category: credit
+    rule: {kind: lender_requirement}
+    playbook: The most recent mortgage statement, which shows whether taxes and insurance are escrowed.
+    items:
+      - key: statement
+        name: Mortgage statement
+        acceptable: The most recent statement, all pages
+        performer: borrower
+        option: ask_borrower
+        documents: [mortgage_statement]
+        checks: [inside_lender_dates, all_pages]
+
+  # ------------------------------------------------------------------------------------------------ #
+  # Income and employment
+  # ------------------------------------------------------------------------------------------------ #
+  - id: IE-01
+    name: Pay stubs
+    category: income
+    rule: {kind: lender_requirement}
+    playbook: The most recent pay stubs covering 30 days, with year-to-date earnings.
+    items:
+      - key: paystubs
+        name: Recent pay stubs
+        acceptable: Pay stubs covering the most recent 30 days, showing year-to-date earnings
+        performer: borrower
+        option: ask_borrower
+        documents: [pay_stub]
+        checks: [right_borrower, inside_lender_dates, right_period]
+
+  - id: IE-02
+    name: W-2s
+    category: income
+    rule: {kind: lender_requirement}
+    playbook: The W-2s for the years the lender names.
+    items:
+      - key: w2
+        name: W-2s
+        acceptable: W-2 for each year the lender names
+        performer: borrower
+        option: ask_borrower
+        documents: [w2]
+        checks: [right_borrower, right_period]
+
+  - id: IE-03
+    name: Verbal verification of employment
+    category: income
+    rule: {kind: agency, citation: Fannie Mae B3-3.1-04, note: "Within 10 business days before the note date (self-employed: 120 calendar days)."}
+    playbook: Your call. Find the employer's number independently (not from the borrower), log who you spoke to and when, and redo it if closing moves past the window.
+    items:
+      - key: call
+        name: Verbal VOE call
+        acceptable: A logged call with the employer, from an independently found number, inside the window before the note date
+        performer: processor
+        option: i_will_do_it
+        documents: [verbal_voe]
+        checks: [inside_voe_window]
+
+  - id: IE-05
+    name: Prior employer documentation
+    category: income
+    rule: {kind: lender_requirement}
+    playbook: A W-2 or final pay stub from the previous job, or a written VOE the lender accepts instead.
+    items:
+      - key: prior_employment
+        name: W-2, final pay stub or written VOE from the prior employer
+        acceptable: Any one of the three, for the employer the lender names
+        performer: borrower
+        option: ask_borrower
+        documents: [w2, pay_stub, voe]
+        checks: [right_borrower]
+
+  - id: IE-06
+    name: Written verification of employment
+    category: income
+    rule: {kind: lender_requirement}
+    playbook: Order it (The Work Number or the employer's HR); attach the result.
+    items:
+      - key: wvoe
+        name: Written VOE
+        acceptable: Completed written VOE from the employer or a verification vendor
+        performer: processor
+        option: i_will_do_it
+        documents: [voe]
+        checks: [right_borrower, inside_lender_dates]
+
+  - id: IE-07
+    name: Tax returns or transcripts
+    category: income
+    rule: {kind: lender_requirement}
+    playbook: Signed returns for the years named; transcripts usually come from the lender's own 4506-C order.
+    items:
+      - key: returns
+        name: Tax returns
+        acceptable: Complete signed returns, all schedules, for the years the lender names
+        performer: borrower
+        option: ask_borrower
+        documents: [tax_return, form_1040_personal_tax_transcripts]
+        checks: [right_borrower, right_period, signed_and_dated]
+
+  # ------------------------------------------------------------------------------------------------ #
+  # Insurance
+  # ------------------------------------------------------------------------------------------------ #
+  - id: IN-01
+    name: Homeowners insurance declarations (effective date)
+    category: insurance
+    rule: {kind: agency, citation: Fannie Mae B7-3-07 / B7-3-08, note: "Property insurance in force at closing, with the lender's mortgagee clause."}
+    playbook: Compare the policy's start date with the closing date. If closing cannot happen before the policy starts, the second half does not apply; say so to the underwriter.
+    items:
+      - key: declarations
+        name: Declarations page in force at closing
+        acceptable: Declarations page showing coverage in force on the closing date, with the lender's mortgagee clause
+        performer: insurance
+        option: ask_third_party
+        documents: [homeowners_insurance]
+        checks: [effective_by_closing, mortgagee_clause_matches]
+
+  - id: IN-02
+    name: Homeowners insurance with mortgagee clause and replacement cost
+    category: insurance
+    rule: {kind: agency, citation: Fannie Mae B7-3-07 / B7-3-08, note: "The declarations page must show the wholesale lender's mortgagee clause (ISAOA/ATIMA) and sufficient coverage."}
+    playbook: Send the agent the mortgagee clause exactly as the approval letter prints it, and ask for the replacement cost estimate if coverage is below the loan amount.
+    items:
+      - key: declarations
+        name: Declarations page with the mortgagee clause
+        acceptable: Declarations page showing the lender's mortgagee clause, the premium and the coverage amount
+        performer: insurance
+        option: ask_third_party
+        documents: [homeowners_insurance]
+        checks: [mortgagee_clause_matches, effective_by_closing]
+      - key: replacement_cost
+        name: Replacement cost estimate
+        acceptable: The insurer's replacement cost estimate, if coverage is below the loan amount
+        performer: insurance
+        option: ask_third_party
+        documents: [homeowners_insurance, homeowner_s_insurance_quote]
+        checks: []
+
+  - id: IN-03
+    name: Condo master insurance policy
+    category: insurance
+    rule: {kind: lender_requirement}
+    playbook: From the HOA's insurance agent; it must name the loan number and the mortgagee clause.
+    items:
+      - key: master_policy
+        name: Master policy with loan number and mortgagee clause
+        acceptable: Master policy certificate naming the loan number and the lender's mortgagee clause
+        performer: hoa
+        option: ask_third_party
+        documents: [master_insurance_policy_for_condominium]
+        checks: [mortgagee_clause_matches]
+
+  - id: IN-04
+    name: Flood insurance
+    category: insurance
+    rule: {kind: lender_requirement}
+    playbook: Only when the flood certificate puts the property in a special flood hazard area.
+    items:
+      - key: flood_policy
+        name: Flood insurance declarations
+        acceptable: Flood policy declarations with the lender's mortgagee clause
+        performer: insurance
+        option: ask_third_party
+        documents: [flood_insurance_policy]
+        checks: [mortgagee_clause_matches, effective_by_closing]
+
+  # ------------------------------------------------------------------------------------------------ #
+  # Property and appraisal
+  # ------------------------------------------------------------------------------------------------ #
+  - id: PA-01
+    name: Appraisal from an acceptable AMC
+    category: property
+    rule: {kind: lender_requirement}
+    playbook: The lender orders or reviews the appraisal. Watch for the report; nothing to ask.
+    items: []
+    default_option: lender_doing_it
+
+  - id: PA-02
+    name: Appraisal delivered before closing, or waiver
+    category: property
+    rule: {kind: lender_requirement}
+    playbook: The LO sends the appraisal to the borrower at least three business days before closing, or gets the signed waiver.
+    items:
+      - key: delivery
+        name: Proof of appraisal delivery, or the signed waiver
+        acceptable: Delivery confirmation dated at least three business days before closing, or the borrower's signed waiver
+        performer: lo
+        option: ask_third_party
+        documents: [miscellaneous_document]
+        checks: [signed_and_dated]
+
+  - id: PA-03
+    name: Final inspection
+    category: property
+    rule: {kind: lender_requirement}
+    playbook: A completion report (1004D) from the appraiser. At some lenders the lender orders it through its AMC; the lender setting decides.
+    items:
+      - key: inspection
+        name: Final inspection
+        acceptable: Completion report (1004D) confirming the work matches the plans and specs
+        performer: appraiser
+        option: i_will_do_it
+        documents: [appraisal]
+        checks: []
+
+  - id: PA-04
+    name: Appraisal review ordered by the lender
+    category: property
+    rule: {kind: lender_requirement}
+    playbook: The lender's desk review. Watch for the result; nothing to ask.
+    items: []
+    default_option: lender_doing_it
+
+  - id: PA-05
+    name: Appraisal waiver accepted
+    category: property
+    rule: {kind: lender_requirement}
+    playbook: Information only. No appraisal is needed.
+    items: []
+    default_option: information_only
+
+  - id: PA-08
+    name: HOA dues documentation
+    category: property
+    rule: {kind: lender_requirement}
+    playbook: A statement from the HOA showing the dues, when no appraisal reports them.
+    items:
+      - key: dues
+        name: HOA dues statement
+        acceptable: Statement or letter from the HOA showing the dues and how often they are paid
+        performer: borrower
+        option: ask_borrower
+        documents: [hoa_statement]
+        checks: []
+
+  - id: PA-09
+    name: Condo questionnaire
+    category: property
+    rule: {kind: lender_requirement}
+    playbook: From the HOA or its management company; there is usually a fee.
+    items:
+      - key: questionnaire
+        name: Completed condo questionnaire
+        acceptable: The lender's questionnaire, completed and signed by the HOA
+        performer: hoa
+        option: ask_third_party
+        documents: [condo_questionnaire]
+        checks: [signed_and_dated]
+
+  - id: PA-10
+    name: Condo project approval
+    category: property
+    rule: {kind: lender_requirement}
+    playbook: The lender reviews the project. Watch for the approval; nothing to ask.
+    items: []
+    default_option: lender_doing_it
+
+  # ------------------------------------------------------------------------------------------------ #
+  # Identity
+  # ------------------------------------------------------------------------------------------------ #
+  - id: ID-01
+    name: Government ID
+    category: identity
+    rule: {kind: lender_requirement}
+    playbook: An unexpired driver's license or passport, both sides.
+    items:
+      - key: id
+        name: Unexpired government ID
+        acceptable: Driver's license or passport, both sides, not expired
+        performer: borrower
+        option: ask_borrower
+        documents: [drivers_license, passport, government_issued_id]
+        checks: [right_borrower, not_expired]
+
+  - id: ID-02
+    name: SSN verification
+    category: identity
+    rule: {kind: lender_requirement}
+    playbook: The lender pulls the SSA-89. Watch only.
+    items: []
+    default_option: lender_doing_it
+
+  - id: ID-05
+    name: Non-ownership of an undisclosed address
+    category: identity
+    rule: {kind: lender_requirement}
+    playbook: A signed letter saying the borrower does not own the address, with a property profile if the lender asks for one.
+    items:
+      - key: letter
+        name: Letter of non-ownership
+        acceptable: Signed and dated letter naming the address
+        performer: borrower
+        option: ask_borrower
+        documents: [letter_of_explanation_property]
+        checks: [signed_and_dated]
+
+  # ------------------------------------------------------------------------------------------------ #
+  # Title and closing
+  # ------------------------------------------------------------------------------------------------ #
+  - id: TI-01
+    name: Title package
+    category: title
+    rule: {kind: lender_requirement}
+    playbook: One ask to the title company for everything on the list (commitment, CPL, E&O, tax certificate, wire instructions, settlement statement).
+    items:
+      - key: package
+        name: Title documents the lender lists
+        acceptable: Each document the condition names, from the title company
+        performer: title
+        option: ask_third_party
+        documents: [title_commitment, wire_instructions, closing_disclosure]
+        checks: []
+
+  - id: TI-02
+    name: Title report with chain of title
+    category: title
+    rule: {kind: lender_requirement}
+    playbook: Ask the title company for a report dated inside the lender's window, with the chain of title.
+    items:
+      - key: report
+        name: Title report with chain of title
+        acceptable: Title report dated inside the lender's window, with the chain of title
+        performer: title
+        option: ask_third_party
+        documents: [title_commitment]
+        checks: [inside_lender_dates]
+
+  - id: TI-03
+    name: Final seller Closing Disclosure
+    category: title
+    rule: {kind: lender_requirement}
+    playbook: From title with the closing package; needed before funding, not before docs.
+    items:
+      - key: seller_cd
+        name: Final seller Closing Disclosure
+        acceptable: The final seller CD, with the closing package
+        performer: title
+        option: ask_third_party
+        documents: [closing_disclosure]
+        checks: []
+
+  - id: TI-04
+    name: Instruction to title
+    category: title
+    rule: {kind: lender_requirement}
+    playbook: Information to pass on (for example the loan number on every check). Add it to the title email; there is nothing to collect.
+    items:
+      - key: instruction
+        name: Instruction passed to title
+        acceptable: Title acknowledges the instruction
+        performer: title
+        option: ask_third_party
+        documents: []
+        checks: []
+
+  - id: TI-05
+    name: Title to confirm a closing figure
+    category: title
+    rule: {kind: lender_requirement}
+    playbook: Ask title to confirm the item on the CD (for example who pays county taxes).
+    items:
+      - key: confirmation
+        name: Title's confirmation
+        acceptable: Written confirmation from title, or a corrected CD
+        performer: title
+        option: ask_third_party
+        documents: [closing_disclosure, miscellaneous_document]
+        checks: []
+
+  - id: TI-10
+    name: Processor Assist (lender orders title items)
+    category: title
+    rule: {kind: lender_requirement}
+    playbook: The lender's processing team orders the title commitment, CPL, wire and taxes. Watch only.
+    items: []
+    default_option: lender_doing_it
+
+  - id: CL-01
+    name: Closing package or closer review
+    category: closing
+    rule: {kind: lender_requirement}
+    playbook: The lender's closer handles it at closing. Watch only.
+    items: []
+    default_option: lender_doing_it
+
+  - id: CL-03
+    name: Signed at closing
+    category: closing
+    rule: {kind: lender_requirement}
+    playbook: Signed at the closing table. Information only until then.
+    items: []
+    default_option: information_only
+
+  - id: CL-04
+    name: Closing request form and invoices
+    category: closing
+    rule: {kind: lender_requirement}
+    playbook: The LO completes the lender's closing request; attach the invoices it lists.
+    items:
+      - key: request
+        name: Closing request form with invoices
+        acceptable: The lender's form, completed, with each invoice it lists
+        performer: lo
+        option: ask_third_party
+        documents: [service_invoice, miscellaneous_document]
+        checks: []
+
+  - id: CL-05
+    name: Lender review of contract terms
+    category: closing
+    rule: {kind: lender_requirement}
+    playbook: The lender checks the contract's terms (seller credits, first-lien position). Watch only.
+    items: []
+    default_option: lender_doing_it
+
+  # ------------------------------------------------------------------------------------------------ #
+  # Disclosures
+  # ------------------------------------------------------------------------------------------------ #
+  - id: DI-01
+    name: State attorney and insurance preference disclosure
+    category: disclosure
+    rule: {kind: lender_requirement}
+    playbook: The borrower and LO re-sign with an attorney on the lender's approved list, and the attorney's wire instructions must match the form.
+    items:
+      - key: disclosure
+        name: Re-signed disclosure naming an approved attorney
+        acceptable: The state disclosure signed by the borrower and the LO, with the LO's NMLS ID on the signature page
+        performer: lo
+        option: ask_third_party
+        documents: [miscellaneous_document]
+        checks: [signed_and_dated]
+      - key: attorney
+        name: An attorney on the lender's approved list
+        acceptable: The attorney or law firm named on the new disclosure appears on the lender's approved list
+        performer: lo
+        option: ask_third_party
+        documents: []
+        checks: []
+      - key: wire_instructions
+        name: Wire instructions that match the attorney
+        acceptable: Wire instructions from the attorney named on the new disclosure
+        performer: attorney
+        option: ask_third_party
+        documents: [wire_instructions]
+        checks: []
+
+  - id: DI-02
+    name: Change of circumstance
+    category: disclosure
+    rule: {kind: lender_requirement}
+    playbook: The LO or the lender issues the change of circumstance; the underwriter approves it. No disclosure work in the app.
+    items: []
+    default_option: lender_doing_it
+
+  - id: DI-03
+    name: E-sign certificate
+    category: disclosure
+    rule: {kind: lender_requirement}
+    playbook: The e-sign platform's certificate for the document the lender names, from the LO.
+    items:
+      - key: certificate
+        name: E-sign certificate
+        acceptable: The platform's completion certificate for the named document
+        performer: lo
+        option: ask_third_party
+        documents: [e_consent_disclosure, miscellaneous_document]
+        checks: []
+
+  - id: DI-04
+    name: Homeownership counseling certificate
+    category: disclosure
+    rule: {kind: lender_requirement}
+    playbook: The certificate from an approved counseling agency, and its invoice if the lender asks.
+    items:
+      - key: certificate
+        name: Counseling certificate
+        acceptable: Completion certificate from the counseling agency
+        performer: borrower
+        option: ask_borrower
+        documents: [borrower_s_authorization_for_counseling, miscellaneous_document]
+        checks: [right_borrower]
+
+  # ------------------------------------------------------------------------------------------------ #
+  # Invoices
+  # ------------------------------------------------------------------------------------------------ #
+  - id: IV-01
+    name: Credit report invoice
+    category: invoice
+    rule: {kind: lender_requirement}
+    playbook: Usually already in the file from when credit was pulled; point to it.
+    items:
+      - key: invoice
+        name: Credit report invoice
+        acceptable: The credit vendor's invoice for this file
+        performer: processor
+        option: i_will_do_it
+        documents: [service_invoice]
+        checks: []
+
+  - id: IV-02
+    name: Third-party processing invoice
+    category: invoice
+    rule: {kind: lender_requirement}
+    playbook: Your company's invoice for processing this file. Upload it.
+    items:
+      - key: invoice
+        name: Processing invoice
+        acceptable: The processing company's invoice for this file
+        performer: processor
+        option: i_will_do_it
+        documents: [service_invoice]
+        checks: []
+
+  - id: IV-03
+    name: Inspection or appraisal invoice
+    category: invoice
+    rule: {kind: lender_requirement}
+    playbook: Arrives once the inspection is done; it waits on the inspection condition.
+    items:
+      - key: invoice
+        name: Inspection invoice
+        acceptable: The appraiser's or AMC's invoice for the inspection
+        performer: processor
+        option: i_will_do_it
+        documents: [service_invoice, appraisal_payment]
+        checks: []
+    waits_on_type: PA-03
+
+  # ------------------------------------------------------------------------------------------------ #
+  # Lender-side and catch-all
+  # ------------------------------------------------------------------------------------------------ #
+  - id: LN-01
+    name: Loan restructure required
+    category: lender
+    rule: {kind: lender_requirement}
+    playbook: The LO restructures the loan by the lender's deadline; ask the underwriter if it is unclear what must change.
+    items:
+      - key: restructure
+        name: Restructure by the deadline
+        acceptable: The restructured loan submitted by the lender's deadline
+        performer: lo
+        option: ask_third_party
+        documents: []
+        checks: []
+
+  - id: LN-02
+    name: Lender compliance or document review
+    category: lender
+    rule: {kind: lender_requirement}
+    playbook: The lender's own check (high-cost test, document expiry, first-lien position). Watch; ask the underwriter if it names something for you to fix.
+    items: []
+    default_option: lender_doing_it
+
+  - id: LN-03
+    name: Document review upload
+    category: lender
+    rule: {kind: lender_requirement}
+    playbook: A catch-all upload slot. Put here what the underwriter asked for by note.
+    items:
+      - key: upload
+        name: Documents the underwriter asked for
+        acceptable: Whatever the underwriter's note names
+        performer: processor
+        option: i_will_do_it
+        documents: []
+        checks: []
