@@ -276,7 +276,7 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-919 Reading each condition | REVIEWED | `65cb0617` | the commit titled `LP-919 review:` | S3-01 (this ticket's lines) and S3-03 re-shot by the reviewer: both match | no findings; D5 recorded; 6637 and 0132 item splits confirmed on screen |
 | LP-920 The action plan | REVIEWED | `106de9af` | the commit titled `LP-920 review:` | S3-01, S3-02, S3-03 re-shot by the reviewer; S3-02 matches every line, S3-01 differs on one string (D6) | review found 1, fixed: a Must-match string recorded as a match, now D6 |
 | LP-921 Next-step options | REVIEWED | `0111c5f0` | the commit titled `LP-921 review:` | S3-12 shot and walked by the reviewer: every line this ticket builds matches (sends LP-922, checks LP-923); S3-01 chips match | review found 2, fixed: the suite count was pre-fix (8592), the deviation list named only D1-D4 |
-| LP-922 Asking people (drafts only) | AWAITING_REVIEW | the commit titled `LP-922:` | | S3-04, S3-06 match every line; S3-05 all but 6378 (D7); S3-01 now matches its "· draft" line; S3-12 sends real (LP-923 lines remain) | then the Stage 3A acceptance test; STOP AND ASK 1 (AI polish) |
+| LP-922 Asking people (drafts only) | REVIEWED | `29c74a7d` | the commit titled `LP-922 review:` | S3-04, S3-05, S3-06 shot and walked by the reviewer: S3-04 and S3-06 match every line, S3-05 matches except D7 | review found 1, recorded: a pre-existing randomised test flakes ~0.1% and is not this ticket's |
 | LP-923 Evidence arrives and is checked | PENDING | | | S3-07, S3-08 | |
 | LP-924 The figures check | PENDING | | | S3-09 | |
 | LP-925 Package, submit, lender settings | PENDING | | | S3-10, S3-11 | then the Stage 3B acceptance test |
@@ -312,6 +312,14 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   this machine's `backend/.env` sets its own `ANTHROPIC_MODEL_*` values, so the test's premise fails here.
 - `frontend/components/file/conditions/conditions-screens.test.tsx` › "offers a way out once the round
   is stranded" — fixture on the threshold (Stage 2 follow-ups).
+- `backend/tests/services/test_loan_file_ids.py::test_inbox_token_is_independent_of_display_id` —
+  **randomised, and it fails about once in a thousand runs** (measured by the LP-922 review: 2 trips in
+  2000 simulated runs, 0.100%). It draws 1000 display ids and asserts the 4-character code is not a
+  SUBSTRING of that iteration's inbox token; both are random, so chance alone produces a hit
+  (`RAKSTDzq1DNBKVL5PyKWmQ` contains `AKST`). Nothing to do with the token being derived from the
+  display id, which is what the test is for. It surfaced in the LP-922 review's suite run and is
+  recorded here so the next ticket is not blamed for it. The fix belongs in its own change: assert
+  independence by generating two tokens for one display id rather than by substring.
 
 ## Stage 3 — STOP AND ASK
 
