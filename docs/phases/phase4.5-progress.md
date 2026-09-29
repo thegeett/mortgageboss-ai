@@ -282,7 +282,22 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-925 Package, submit, lender settings | PENDING | | | S3-10, S3-11 | then the Stage 3B acceptance test |
 | LP-935 Stage 3 close | PENDING | | | every screen | |
 
-## Stage 3 — decisions pre-made (plan §8), so nothing blocks
+## Stage 3A — acceptance (build prompt §6)
+
+`backend/tests/conditions/test_stage3a_acceptance.py` runs on the fictional UWM round 1 with the AI
+mocked. The expected table is written by hand from plan §6, not from the code's output. Status:
+**AWAITING_REVIEW** (the commit titled `Stage 3A acceptance:`).
+
+| §6 requirement | Result |
+|---|---|
+| items and who acts, the proposed option per code | **matches** all eleven rows. 7086's $27,148.22 is required less verified, by code; 0006 is the credit invoice 07/15, page 1; 0007 waits on 1228; 6178's item is dropped, with the push-back dates 09/30/2026 and 09/30/2026 |
+| three drafts: borrower 7086, 6132, 6637; title/attorney 6637, 0132, 1947, 6378; LO 0132 | **matches**, plus the question on 6178 |
+| 1582 and 0007 her tasks; 0006 in the file; 6178 push-back; 1228 lender; 0132 to confirm at 0.64 | **matches**; 0132 is the only reading that needs her, and it blocks the confirm |
+| marking the three drafts sent moves exactly those conditions to Waiting on the right owner | **matches**: 7086, 6132, 6637 Borrower; 0132 LO; 1947, 6378 Title. 6178 stays To do until its own question is sent; every lender status stays Open |
+| the same plan with the AI switched off | **matches after one fix**. The fallback gave 0132's disclosure to the LO alone, where §6 says "borrower + LO": a library item could name only one performer. Library items now take `performers` (DI-01 disclosure: borrower, LO), validated at load. The mutation that undoes it fails this test. Every fallback reading is marked to confirm (11 blockers) |
+| after round 2, the six conditions seen again keep their plan | **matches** |
+
+
 
 Each is reversible and stored as data where it can be. The reviewer does not reopen them.
 

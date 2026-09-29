@@ -146,7 +146,7 @@ def _item_from_library(item: LibraryItem) -> dict[str, Any]:
         "key": item.key,
         "name": item.name,
         "acceptable": item.acceptable,
-        "performers": [item.performer.value],
+        "performers": [performer.value for performer in item.all_performers],
         "option": item.option.value,
         "documents": list(item.documents),
         "checks": [check.value for check in item.checks],

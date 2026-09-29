@@ -87,6 +87,12 @@ def test_the_minimal_library_loads() -> None:
             lambda d: d["types"][0]["items"][0].update(option="i_will_do_it"),
             "task must be non-empty",
         ),
+        # Stage 3A acceptance: everyone who acts is listed, and it includes the item's performer.
+        (lambda d: d["types"][0]["items"][0].update(performers=["lo"]), "must include"),
+        (
+            lambda d: d["types"][0]["items"][0].update(performers=["borrower", "uncle"]),
+            "performers",
+        ),
     ],
 )
 def test_a_malformed_library_is_refused(mutate: Any, message: str) -> None:

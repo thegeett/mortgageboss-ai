@@ -694,6 +694,7 @@ types:
         label: "Re-signed disclosure"
         email: "**The attorney and insurance preference disclosure**, re-signed by the borrower and you, naming an attorney on the lender's approved list, with your NMLS ID on the signature page."
         performer: lo
+        performers: [borrower, lo]
         option: ask_third_party
         documents: [miscellaneous_document]
         checks: [signed_and_dated]

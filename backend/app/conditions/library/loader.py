@@ -118,6 +118,14 @@ class LibraryItem:
     #: are `EMAIL_PLACEHOLDERS`, filled by code.
     label: str | None = None
     email: str | None = None
+    #: Everyone who acts, when it is more than `performer` (Stage 3A acceptance: 0132's re-signed
+    #: disclosure is "borrower + LO" in plan §6 — the reading without the AI must say so too).
+    performers: tuple[Performer, ...] = ()
+
+    @property
+    def all_performers(self) -> tuple[Performer, ...]:
+        return self.performers or (self.performer,)
+
     #: A whole "Why:" sentence for this item, when the type's phrase does not fit (7086's other
     #: accounts: "closing needs {required} and {verified} is verified so far.").
     why: str | None = None
@@ -232,6 +240,7 @@ def _item(raw: Any, where: str, documents_known: frozenset[str]) -> LibraryItem:
     unknown = [doc for doc in documents if doc not in documents_known]
     if unknown:
         raise LibraryError(f"{where}: documents {unknown} are not document types the app files")
+    performer = _enum(Performer, raw.get("performer"), f"{where} performer")
     option = _enum(PlanOption, raw.get("option"), f"{where} option")
     task = raw.get("task")
     if option is PlanOption.I_WILL_DO_IT:
@@ -242,7 +251,7 @@ def _item(raw: Any, where: str, documents_known: frozenset[str]) -> LibraryItem:
         key=_text(raw, "key", where),
         name=_text(raw, "name", where),
         acceptable=_text(raw, "acceptable", where),
-        performer=_enum(Performer, raw.get("performer"), f"{where} performer"),
+        performer=performer,
         option=option,
         documents=documents,
         checks=tuple(
@@ -254,7 +263,19 @@ def _item(raw: Any, where: str, documents_known: frozenset[str]) -> LibraryItem:
         label=_wording(raw.get("label"), where, "label"),
         email=_wording(raw.get("email"), where, "email"),
         why=_wording(raw.get("why"), where, "why"),
+        performers=_all_performers(raw, performer, where),
     )
+
+
+def _all_performers(raw: dict[str, Any], performer: Performer, where: str) -> tuple[Performer, ...]:
+    """An item's `performers`, when listed: known values, and including its own `performer`."""
+    listed = raw.get("performers")
+    if listed is None:
+        return ()
+    found = tuple(_enum(Performer, value, f"{where} performers") for value in listed)
+    if performer not in found:
+        raise LibraryError(f"{where}: performers must include the item's performer ({performer})")
+    return found
 
 
 def _wording(value: Any, where: str, field: str) -> str | None:
