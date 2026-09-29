@@ -232,11 +232,12 @@ def statement_from(data: dict[str, Any] | None, document_type: str | None = None
     source = "statement"
     own = OWN_AMOUNT.get(document_type or "")
     if not movements and own is not None:
-        amount_field, date_fields, source = own
+        amount_field, date_fields, word = own
         stated = _decimal(_value(data, amount_field))
         if stated is not None:
             on = next((d for f in date_fields if (d := _date(_value(data, f))) is not None), None)
             movements.append((abs(stated), on))
+            source = word
     return Statement(
         bank=_value(data, "bank_name"),
         last4=digits[-4:] if len(digits) >= 4 else None,
@@ -952,7 +953,10 @@ async def reask(
     if not failed:
         raise EvidenceRefused("Nothing failed on this document.")
     document = await _document(db, evidence.document_id)
-    statement = statement_from(_extraction_data(document) if document else None)
+    statement = statement_from(
+        _extraction_data(document) if document else None,
+        document.document_type if document else None,
+    )
     name = reask_name(failed[0]["check"], statement)
     item = await _add_ask(
         db,
@@ -984,7 +988,12 @@ def reask_name(check: str, statement: Statement) -> str:
             else f"Pages {first}{_DASH}{statement.pages_declared}"
         )
         return f"{pages} of the {what}{month} statement"
-    return f"A corrected {what}{month} statement"[:200]
+    # THE DOCUMENT'S OWN NAME, AND A SENTENCE (LP-938 second follow-up review). With no bank and last four,
+    # `what` was "the", giving "A corrected the statement", and for a receipt, gift letter or deposit slip
+    # it named the wrong document; this name goes into the email the other party reads.
+    if statement.bank and statement.last4:
+        return f"A corrected {what}{month} {statement.source}"[:200]
+    return f"A corrected {statement.source}"[:200]
 
 
 async def answer_finding(
@@ -1113,7 +1122,22 @@ async def _add_ask(
     source: ConditionItem | None,
     actor_user_id: UUID,
 ) -> ConditionItem:
-    """A new borrower item on the condition; the round's drafts pick it up (LP-922's accumulation)."""
+    """A new ask on the condition; the round's drafts pick it up (LP-922's accumulation).
+
+    IT GOES TO WHOEVER THE FAILED ITEM ASKED (LP-938 follow-up). It went to the borrower always, which was
+    right while only statements could fail; a receipt fails now, and title sent it. A deposit explanation
+    has no source item and is the borrower's."""
+    asked = source is not None and source.option in (
+        PlanOption.ASK_BORROWER,
+        PlanOption.ASK_THIRD_PARTY,
+    )
+    performer = source.performer if asked and source is not None else Performer.BORROWER
+    performers = (
+        list(source.performers or [source.performer.value])
+        if asked and source is not None
+        else [Performer.BORROWER.value]
+    )
+    option = source.option if asked and source is not None else PlanOption.ASK_BORROWER
     last = (
         await db.execute(
             select(ConditionItem.sequence)
@@ -1130,9 +1154,9 @@ async def _add_ask(
         key=key[:40],
         name=name[:200],
         acceptable=acceptable,
-        performer=Performer.BORROWER,
-        performers=[Performer.BORROWER.value],
-        option=PlanOption.ASK_BORROWER,
+        performer=performer,
+        performers=performers,
+        option=option,
         status=ConditionItemStatus.OPEN,
         origin=ConditionItemOrigin.MANUAL,
         documents=list(source.documents) if source is not None else [],
@@ -1145,7 +1169,7 @@ async def _add_ask(
         _event(
             condition,
             ConditionEventKind.CONDITION_PLAN_CHANGED,
-            {"change": "item_added", "option": PlanOption.ASK_BORROWER.value, "why": "evidence"},
+            {"change": "item_added", "option": option.value, "why": "evidence"},
             actor_user_id=actor_user_id,
         )
     )
@@ -1196,12 +1220,15 @@ async def evidence_public_for_file(
             )
         ).scalars()
     }
+    from app.services.condition_plan import recipient_for
+
     out: dict[UUID, list[Any]] = {}
     for row in rows:
         document = documents.get(row.document_id)
         if document is None or document.deleted_at is not None:
             continue
-        statement = statement_from(_extraction_data(document))
+        # Typed, as the check is: the card's re-ask names the document by its own word.
+        statement = statement_from(_extraction_data(document), document.document_type)
         superseded = None
         replaced = False
         replacement = superseded_by(row, items.get(row.item_id), rows)
@@ -1217,6 +1244,10 @@ async def evidence_public_for_file(
                 if replaced
                 else f"Still evidence — enough for closing was met once {title} arrived"
             )
+        # Where "Add 'please send …'" puts the re-ask: the failed item's own email (`_add_ask`).
+        item = items.get(row.item_id)
+        email = recipient_for(item) if item is not None else None
+        label = email[1] if email is not None else "Borrower"
         out.setdefault(row.condition_id, []).append(
             ConditionEvidencePublic.build(
                 row,
@@ -1224,6 +1255,7 @@ async def evidence_public_for_file(
                 statement=statement,
                 superseded=superseded,
                 replaced=replaced,
+                reask_to=label if label.isupper() else label.lower(),
             )
         )
     return out

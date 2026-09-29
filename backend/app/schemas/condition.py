@@ -824,6 +824,9 @@ class ConditionEvidencePublic(BaseModel):
     #: stop mattering: `_settle` ignores them, so the sheet hides them and the Next step skips them. A
     #: superseded row that is still evidence keeps its findings, which can still hold the condition.
     replaced: bool = False
+    #: LP-938 follow-up — the email the re-ask goes into ("borrower", "title/attorney", "LO"): the failed
+    #: item's own asker. Null when there is nothing to re-ask.
+    reask_to: str | None = None
 
     @classmethod
     def build(
@@ -834,6 +837,7 @@ class ConditionEvidencePublic(BaseModel):
         statement: Any,
         superseded: str | None = None,
         replaced: bool = False,
+        reask_to: str | None = None,
     ) -> "ConditionEvidencePublic":
         from app.models.condition_vocabulary import EvidenceCheck
         from app.models.document import UploadSource
@@ -889,6 +893,7 @@ class ConditionEvidencePublic(BaseModel):
             reask=reask,
             superseded=superseded,
             replaced=replaced,
+            reask_to=reask_to if reask is not None else None,
         )
 
 

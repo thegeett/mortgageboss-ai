@@ -58,6 +58,7 @@ const S3_07: ConditionEvidence = {
   reask: "page 6",
   superseded: null,
   replaced: false,
+  reask_to: "borrower",
 };
 
 const S3_08: ConditionEvidence = {
@@ -109,6 +110,29 @@ function condition(evidence: ConditionEvidence[], code = "6132"): Condition {
 }
 
 describe("EvidenceSection", () => {
+  it("re-asks in the failed item's own email (LP-938 follow-up)", () => {
+    const receipt: ConditionEvidence = {
+      ...S3_07,
+      title: "Earnest money receipt",
+      checks: [
+        {
+          check: "amount_matches",
+          label: "Amount matches",
+          result: "failed",
+          reason: "no $2,850.00 on this receipt",
+        },
+      ],
+      reask: "a corrected receipt",
+      reask_to: "title/attorney",
+    };
+    render(<EvidenceSection fileId="f1" condition={condition([receipt], "6637")} />);
+    expect(
+      screen.getByRole("button", {
+        name: "Add “please send a corrected receipt” to the title/attorney email",
+      }),
+    ).toBeDefined();
+  });
+
   it("keeps a superseded failure as a record, with nothing to act on (LP-937)", () => {
     const replaced: ConditionEvidence = {
       ...S3_08,

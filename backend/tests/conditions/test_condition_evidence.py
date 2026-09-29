@@ -816,3 +816,69 @@ def test_a_contracts_stated_deposit_never_satisfies_an_amount_check() -> None:
     assert _amount_check(receipt, "earnest_money_receipt", "2850.00")["result"] == "passed"
     # And with no type (every caller but the check), nothing is read either.
     assert _amount_check(receipt, None, "2850.00")["result"] == "not_run"
+
+
+def test_the_documents_that_read_their_own_amount_are_exactly_these() -> None:
+    """THE TRIPWIRE, NOW WHERE THE GUARD LIVES (LP-938 second follow-up review). Keying OWN_AMOUNT by type
+    keeps a contract's stated deposit out whatever the library says; the list itself is the new thing
+    to guard. Adding a type here is a decision that its stated figure IS the money it evidences
+    (stated versus verified): make it on purpose, and update this set."""
+    from app.services.condition_evidence import OWN_AMOUNT
+
+    assert set(OWN_AMOUNT) == {"earnest_money_receipt", "gift_letter", "bank_deposit_slip"}
+
+
+def test_a_reask_names_the_document_and_is_a_sentence() -> None:
+    """ "A corrected the statement" named every one of these documents wrongly, and was not English.
+    This name goes into the email the other party reads."""
+    from app.ai.extraction.gift_letter import GiftLetterExtraction
+    from app.ai.extraction.shape import TypedField
+    from app.services.condition_evidence import reask_name, statement_from
+
+    receipt = {"earnest_money_amount": {"value": "2500.00"}}
+    assert reask_name("amount_matches", statement_from(receipt, "earnest_money_receipt")) == (
+        "A corrected receipt"
+    )
+    gift = GiftLetterExtraction(gift_amount=TypedField(value=Decimal("100.00"))).model_dump(
+        mode="json"
+    )
+    assert reask_name("amount_matches", statement_from(gift, "gift_letter")) == (
+        "A corrected gift letter"
+    )
+    # A statement with its bank and account keeps the full name; one without reads plainly.
+    assert reask_name("right_period", statement_from(august())) == (
+        "A corrected Capital One ··9912 August 2026 statement"
+    )
+    assert reask_name("amount_matches", statement_from({}, "purchase_agreement")) == (
+        "A corrected statement"
+    )
+    # The source follows a READ amount: a gift letter whose amount could not be read is not one.
+    unread = statement_from({}, "gift_letter")
+    assert (unread.source, unread.movements) == ("statement", ())
+
+
+async def test_a_wrong_receipt_is_reasked_as_a_receipt_of_title(db_session: AsyncSession) -> None:
+    """End to end: the sheet's card and the action both name it a receipt, typed as the check is."""
+    from tests.conditions.statement_fixture import add_receipt
+
+    loan_file, conditions, actor = await _asked(db_session)
+    receipt = await add_receipt(db_session, loan_file, amount="2500.00")
+    await check_document(db_session, document_id=receipt.id, today=TODAY)
+    public = await condition_evidence.evidence_public_for_file(
+        db_session, loan_file_id=loan_file.id
+    )
+    (card,) = [c for c in public[conditions["6637"].id] if c.document_id == receipt.id]
+    assert card.reask == "a corrected receipt"
+    # Title sent the receipt, so title is asked again, not the borrower (it went to the borrower always).
+    assert card.reask_to == "title/attorney"
+    (row,) = [
+        e for e in await _evidence(db_session, conditions["6637"]) if e.document_id == receipt.id
+    ]
+    item = await condition_evidence.reask(
+        db_session, condition=conditions["6637"], evidence_id=row.id, actor_user_id=actor
+    )
+    assert item.name == "A corrected receipt"
+    assert (item.performer.value, item.option.value) == ("title", "ask_third_party")
+    from app.services.condition_plan import recipient_for
+
+    assert recipient_for(item) == ("title_attorney", "Title/attorney")

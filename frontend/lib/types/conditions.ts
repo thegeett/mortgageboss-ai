@@ -1201,6 +1201,8 @@ export interface ConditionEvidence {
   /** Superseded AND no longer evidence ("Replaced by …"): its findings hold nothing, so they are hidden
    *  here and skipped by the Next step. A superseded row that is still evidence keeps them. */
   replaced: boolean;
+  /** The email a re-ask goes into — the failed item's own asker ("borrower", "title/attorney"). */
+  reask_to: string | null;
 }
 
 // --- Stage 3: the figures check (LP-924) ------------------------------------------------------- //

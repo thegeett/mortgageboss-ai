@@ -535,8 +535,10 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   and a contract's *stated* deposit would satisfy a check that exists to confirm *receipt*. Wants the
   tripwire shape of `test_deposit_findings_stay_on_one_item.py`.
 
-- **The re-ask calls a receipt, a gift letter and a deposit slip "A corrected the statement"** — found by
-  the LP-938 second-follow-up review, open. `reask` is newly reachable for those three types (before, their
+- ~~**The re-ask calls a receipt, a gift letter and a deposit slip "A corrected the statement"**~~ —
+  **fixed in LP-938's third follow-up** ("A corrected receipt"; and the re-ask now goes to the failed
+  item's own asker: a receipt title sent is asked of title). Found by the LP-938 second-follow-up
+  review; originally open. `reask` is newly reachable for those three types (before, their
   `amount_matches` was not_run and `reask` refuses when nothing failed), and `reask_name`'s fallback is
   `f"A corrected {what}{month} statement"`, where `what` collapses to "the" without a bank and last4. So
   the item name — the one the borrower or third party reads in the email — is both false about the
@@ -546,7 +548,8 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   is currently set before the `stated is not None` guard, which is unobservable only while `source` has no
   other reader. Detail in [LP-938](../tickets/LP-938.md) "Review of the second follow-up".
 
-- **`OWN_AMOUNT`'s keyset is not pinned** — same review, open, low stakes. The guard against a stated
+- ~~**`OWN_AMOUNT`'s keyset is not pinned**~~ — **fixed in LP-938's third follow-up**
+  (`test_the_documents_that_read_their_own_amount_are_exactly_these`). Same review; originally open, low stakes. The guard against a stated
   amount confirming receipt is now structural and keyed by document type, which is right; but only
   `purchase_agreement` is pinned, by name. Adding a future stated-amount type to `OWN_AMOUNT` passes every
   test. This is where a keyset tripwire now belongs, in the shape
