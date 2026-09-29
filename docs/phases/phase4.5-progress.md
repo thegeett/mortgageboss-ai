@@ -359,7 +359,8 @@ Also fixed, from the screens:
 `backend/tests/conditions/test_stage3b_acceptance.py` runs round 1 of the fictional UWM file from
 the statements arriving to the submit, in screen order, on one file. The statement PDFs are generated
 in the test (real pages: 6, 5, 6, 12, and a 1-page invoice), so page counts and merges are measured. The
-expected values are written by hand from build prompt §6 and the screens. Status: **AWAITING_REVIEW**.
+expected values are written by hand from build prompt §6 and the screens. Status: **REVIEWED**
+(build `82c8f9b1`; the commit titled `Stage 3B acceptance review:`).
 
 | §6 requirement | Result |
 |---|---|
@@ -370,6 +371,53 @@ expected values are written by hand from build prompt §6 and the screens. Statu
 | DTI 44% → 46% flagged "re-run DU", 46% → 48% not | **matches** (the crossing reading; STOP AND ASK 2 stays open) |
 | one named PDF and one note per ready condition (S3-10) | **matches after fixes 4 and 5**: 7086, 6132, 6178, 0006 in sheet order; `7086 - Assets.pdf` holds only the passing 12-page statement; 6178 has no file; an invented $45,000.00 note is refused; the zip has 3 PDFs and `notes.txt`, nothing missing |
 | Mark submitted moves exactly those to Sent to lender, and the lender's track never moves | **matches**: 4 moves, 4 `condition_prep_moved` events, every other condition unchanged, every lender status Open |
+
+### Review of the acceptance (of `82c8f9b1`)
+
+**One finding, fixed: the scoping decision in (a) is right, and rested on nothing.** The three
+judgments asked for, each checked against the data rather than the reasoning:
+
+**(a) Condition-scoped propagation is correct today, and now pinned.** It holds because a large-deposit
+finding can only be raised on an item whose checks include `covers_required_funds`, and **exactly one
+library item declares that check** — `AS-10`'s `statements`. Measured: of 55 types, one. So every copy
+of a given deposit lives under one condition and a condition-scoped sweep reaches all of them.
+
+That is a fact about `types.yaml`, not a property of the code, and nothing guarded it. Give a second
+type the same check — a reserves type, or a lender that splits the short-funds ask — and two conditions
+can each carry a copy of the same deposit; answering it on one leaves the other open and holding, which
+is fix 3's defect returning through a different door. **Fixed:**
+`tests/conditions/test_deposit_findings_stay_on_one_item.py` pins the set with a positive control and
+the reason written out. Mutation-checked: giving a second type the check fails it, and the library file
+is restored byte-identical.
+
+**(b) The `covers_required_funds` exception is right**, and for a sharper reason than "it is a sum".
+Every other stored check is a property of the DOCUMENT — `right_account`, `right_period`,
+`right_borrower`, `inside_lender_dates`, `all_pages`, `amount_matches` — so failing one means the paper
+is wrong. `covers_required_funds` is the only one about the aggregate, so a real July statement short
+on its own must stay evidence. Checked on seeded data: `no_large_deposit` is **not** among the stored
+checks at all (it is a finding, and only 7086's item carries one), so an unexplained deposit does not
+stop a statement counting as evidence — which is right, since the money is there whether or not it is
+sourced.
+
+**(c) Leaving the token alone and recording it is the right call** — it changes a rule reviewed in
+LP-923, and reviewed behaviour should not move without the owner. Worth sharpening for whoever reads
+that open item: a condition that is **Ready to send** while reading "Evidence failed a check — page 6"
+is not a cosmetic wrinkle. `snapshot_findings/fingerprint.py` already makes the argument this repo
+believes — *"a count that drifts for no reason teaches people to stop reading the tab at all"* — and a
+count that stays high after the problem is fixed does the same damage from the other side. The decision
+is the owner's; the stakes are trust in the number, not tidiness.
+
+**The five fixes are one predicate, used in five places:** `condition_evidence` (the funds sum and
+`_settle`), `figures_check` (`_funds_evidence`), and `condition_package` (the documents and the notes).
+Confirmed by grep across `app/`, so the class is closed at one place rather than patched five times.
+
+**Reverting the `is_evidence` flag was right too**, for the reason given: a row with `is_evidence`
+false always has `failed` true, so the filter sat behind an unreachable branch. Dead code that looks
+like a guard is worse than no code.
+
+**Counts:** backend **8691 passed, 1 failed** — their 8689 plus this review's 2; the failure is the
+named pre-existing one. ruff, format and mypy clean (567 files). No frontend change in the commit, so
+none run.
 
 **What the acceptance test found: one class, "a rejected statement treated as evidence", in five
 places.** Each fix has a test at its own layer, and a mutation undoing it fails that test:
