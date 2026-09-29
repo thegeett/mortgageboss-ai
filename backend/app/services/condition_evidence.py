@@ -183,6 +183,9 @@ class Statement:
     deposits: tuple[Deposit, ...] = ()
     #: Every transaction's absolute amount and date, for "amount matches" (6637's check clearing).
     movements: tuple[tuple[Decimal, date | None], ...] = field(default_factory=tuple)
+    #: What the document is, in the check's words: "statement", or "receipt" for an earnest money
+    #: receipt, whose one movement is the amount it acknowledges (LP-938 review).
+    source: str = "statement"
 
 
 def statement_from(data: dict[str, Any] | None) -> Statement:
@@ -204,6 +207,17 @@ def statement_from(data: dict[str, Any] | None) -> Statement:
             deposits.append(
                 Deposit(on=on, amount=amount, description=str(row.get("description") or ""))
             )
+    # AN EARNEST MONEY RECEIPT HAS NO TRANSACTIONS, AND ITS AMOUNT IS THE POINT (LP-938 review). AS-04's
+    # receipt item checks "amount matches"; without this the receipt's own `earnest_money_amount` was
+    # extracted and never read, the check reported "no transactions could be read", and every real
+    # receipt stopped at Received. A document type an item does not take never reaches its checks
+    # (`_takes`), so a purchase agreement's stated deposit cannot pass a receipt item.
+    source = "statement"
+    received = _decimal(_value(data, "earnest_money_amount"))
+    if not movements and received is not None:
+        on = _date(_value(data, "funds_received_date")) or _date(_value(data, "receipt_date"))
+        movements.append((abs(received), on))
+        source = "receipt"
     return Statement(
         bank=_value(data, "bank_name"),
         last4=digits[-4:] if len(digits) >= 4 else None,
@@ -215,6 +229,7 @@ def statement_from(data: dict[str, Any] | None) -> Statement:
         ending_balance=_decimal(_value(data, "ending_balance")),
         deposits=tuple(deposits),
         movements=tuple(movements),
+        source=source,
     )
 
 
@@ -342,12 +357,12 @@ def _run(check: str, s: Statement, ctx: Context) -> tuple[str, str]:
         if ctx.item_amount is None:
             return NOT_RUN, "the condition names no amount"
         if not s.movements:
-            return NOT_RUN, "no transactions could be read"
+            return NOT_RUN, "no amount could be read on this document"
         for amount, on in s.movements:
             if amount == ctx.item_amount:
                 when = f" on {_us(on)}" if on else ""
                 return PASSED, f"{_money(amount)}{when}"
-        return FAILED, f"no {_money(ctx.item_amount)} on this statement"
+        return FAILED, f"no {_money(ctx.item_amount)} on this {s.source}"
 
     if check == EvidenceCheck.COVERS_REQUIRED_FUNDS.value:
         if ctx.required_funds is None or ctx.verified_funds is None:

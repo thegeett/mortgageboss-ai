@@ -715,8 +715,10 @@ async def state_s3_10(db: AsyncSession) -> Shot:
     (figures not applied), and 7086, 6132, 6637, 0132, 6178 and 0006 Ready to send. 1228 (lender doing it) is still open.
 
     SEED SHORTCUTS, not product paths: 6637's receipt and 0132's three items are set done with their
-    documents directly (LP-923 checks statements and declarations, not a title receipt or a signed
-    disclosure), and the notes come from a stand-in model that writes one line per condition.
+    documents directly: the seed's receipt and disclosure are bare PDFs with no extraction, and nothing
+    checks a signed disclosure. (Since the LP-938 follow-up a real `earnest_money_receipt` IS checked,
+    by its own amount; the seed does not build one.) The notes come from a stand-in model that writes
+    one line per condition.
     """
     import json
     from types import SimpleNamespace

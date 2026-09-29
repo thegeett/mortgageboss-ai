@@ -11,7 +11,13 @@ Regenerate after editing the library:
 
 THE TOP 20 ARE A CHOICE, NOT A COMPUTATION. LP-918 picked and ordered the types most often seen on the
 sheets it had. That choice is kept here as `TOP_20`; everything in each row comes from the library and
-the lender code maps.
+the lender code maps. Nothing notices a new type that SHOULD be in the top 20: the product owner
+revisits the list at each sign-off.
+
+`REVIEW_TABLE` WALKS UP TO THE REPOSITORY ROOT, WHICH ONLY THE CHECKOUT HAS. In the container the package
+root is /app and there is no `backend/` directory. `distrust.py` records the same `parents[4]` walk
+landing on an empty directory there. Read this path only from `__main__` and tests, never from
+anything the app runs.
 """
 
 from __future__ import annotations

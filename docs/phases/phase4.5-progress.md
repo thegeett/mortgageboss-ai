@@ -503,7 +503,9 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
 - **The product owner's sign-off on the library's top 20 types** (decision 6), once LP-918 has written
   `phase4.5-library-review.md`.
 
-- **AS-04's receipt item cannot verify the receipt it asks for** — found by the LP-938 review, open,
+- ~~**AS-04's receipt item cannot verify the receipt it asks for**~~ — **fixed in the LP-938 follow-up**:
+  a receipt's own `earnest_money_amount` is now its movement for "Amount matches". Found by the LP-938 review;
+  originally open,
   pre-existing (not caused by LP-938). Its only check is `amount_matches`, which reads
   `Statement.movements`; `statement_from()` builds a Statement from bank-statement fields, so an
   `earnest_money_receipt` yields no movements and the check returns `not_run` — "no transactions could

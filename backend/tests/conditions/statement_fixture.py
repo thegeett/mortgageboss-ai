@@ -184,3 +184,47 @@ async def add_declarations(
     )
     await db.flush()
     return document
+
+
+async def add_receipt(
+    db: AsyncSession,
+    loan_file: LoanFile,
+    *,
+    amount: str = "2850.00",
+    received: date = date(2026, 8, 3),
+) -> Document:
+    """Title's earnest money receipt for 6637: the $2,850.00 deposit received 08/03/2026, as the
+    `earnest_money_receipt` extractor stores it (LP-938 review)."""
+    from app.ai.extraction.earnest_money_receipt import EarnestMoneyReceiptExtraction
+
+    document = Document(
+        id=uuid4(),
+        loan_file_id=loan_file.id,
+        original_filename="emd-receipt.pdf",
+        mime_type="application/pdf",
+        file_size_bytes=10,
+        storage_path=f"{loan_file.company_id}/{loan_file.id}/emd-receipt.pdf",
+        document_type="earnest_money_receipt",
+        document_name="Earnest money receipt",
+        status=DocumentStatus.COMPLETED,
+        upload_source=UploadSource.USER_UPLOAD,
+    )
+    db.add(document)
+    await db.flush()
+    data = EarnestMoneyReceiptExtraction(
+        earnest_money_amount=TypedField(value=Decimal(amount)),
+        funds_received_date=TypedField(value=received),
+        check_number=TypedField(value="1042"),
+    ).model_dump(mode="json")
+    db.add(
+        Extraction(
+            document_id=document.id,
+            version=1,
+            is_current=True,
+            extracted_data=data,
+            extraction_status=ExtractionStatus.SUCCEEDED,
+            model_used="fixture",
+        )
+    )
+    await db.flush()
+    return document

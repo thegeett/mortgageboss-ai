@@ -704,3 +704,57 @@ async def test_a_deposit_on_a_rejected_statement_does_not_hold_the_condition(
     # Another account's deposit is not this one: it keeps its own status.
     assert [f["status"] for f in rows[wrong.id].findings] == ["open"]
     assert conditions["7086"].prep_status is ConditionPrepStatus.READY
+
+
+# --------------------------------------------------------------------------------------------- #
+# AS-04's receipt is checked against the receipt's own amount (LP-938 review)
+# --------------------------------------------------------------------------------------------- #
+
+
+async def _receipt_item(db: AsyncSession, condition: Condition) -> ConditionItem:
+    return (
+        await db.execute(
+            select(ConditionItem).where(
+                ConditionItem.condition_id == condition.id, ConditionItem.key == "receipt"
+            )
+        )
+    ).scalar_one()
+
+
+async def test_an_earnest_money_receipt_is_checked_against_its_own_amount(
+    db_session: AsyncSession,
+) -> None:
+    """Title's receipt for the $2,850.00 deposit. Before LP-938's follow-up its amount was extracted and
+    never read: "Amount matches" was not run ("no transactions could be read"), so every real receipt
+    stopped at Received. With the statements, 6637 is now Ready by evidence alone."""
+    from tests.conditions.statement_fixture import add_receipt
+
+    loan_file, conditions, _ = await _asked(db_session)
+    receipt = await add_receipt(db_session, loan_file)
+    await check_document(db_session, document_id=receipt.id, today=TODAY)
+    (row,) = [
+        e for e in await _evidence(db_session, conditions["6637"]) if e.document_id == receipt.id
+    ]
+    assert _results(row) == {"amount_matches": ("passed", "$2,850.00 on 08/03/2026")}
+    assert (await _receipt_item(db_session, conditions["6637"])).status is ConditionItemStatus.DONE
+
+    both = await add_statement(db_session, loan_file, july_and_august())
+    await check_document(db_session, document_id=both.id, today=TODAY)
+    assert conditions["6637"].prep_status is ConditionPrepStatus.READY
+
+
+async def test_a_receipt_for_another_amount_fails_and_says_receipt(
+    db_session: AsyncSession,
+) -> None:
+    from tests.conditions.statement_fixture import add_receipt
+
+    loan_file, conditions, _ = await _asked(db_session)
+    receipt = await add_receipt(db_session, loan_file, amount="2500.00")
+    await check_document(db_session, document_id=receipt.id, today=TODAY)
+    (row,) = [
+        e for e in await _evidence(db_session, conditions["6637"]) if e.document_id == receipt.id
+    ]
+    assert _results(row) == {"amount_matches": ("failed", "no $2,850.00 on this receipt")}
+    assert (
+        await _receipt_item(db_session, conditions["6637"])
+    ).status is not ConditionItemStatus.DONE
