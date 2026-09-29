@@ -45,6 +45,13 @@ vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   useAddItem: () => ({ mutate: vi.fn(), isPending: false }),
   useRoundPlan: () => ({ data: undefined }),
   useConfirmPlan: () => ({ mutate: vi.fn(), isPending: false }),
+  // LP-922's draft hooks: no drafts in these screens.
+  useConditionDrafts: () => ({ data: [] }),
+  useConditionDraft: () => ({ data: undefined }),
+  useMarkConditionDraftSent: () => ({ mutate: vi.fn(), isPending: false }),
+  useDeleteConditionDraft: () => ({ mutate: vi.fn(), isPending: false }),
+  useSetConditionDraftAddress: () => ({ mutate: vi.fn(), isPending: false }),
+  useSetConditionDraftDueDate: () => ({ mutate: vi.fn(), isPending: false }),
   useSetNextStep: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdateItem: () => ({ mutate: vi.fn(), isPending: false }),
   useConfirmReading: () => ({ mutate: vi.fn(), isPending: false }),

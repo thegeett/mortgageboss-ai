@@ -61,6 +61,7 @@ export function ConditionsList({
   onSelectedChange,
   onOpen,
   onMovePrepStatus,
+  onOpenDraft,
   onClearFilters,
   suggestedIds,
   suggestedRoundNumber,
@@ -86,6 +87,8 @@ export function ConditionsList({
   onSelectedChange: (next: ReadonlySet<string>) => void;
   onOpen: (conditionId: string) => void;
   onMovePrepStatus: (condition: Condition, to: ConditionPrepStatus) => void;
+  /** LP-922 — opens a draft email from its Next step token. */
+  onOpenDraft?: (draftId: string) => void;
   onClearFilters: () => void;
   /**
    * Conditions a round's comparison suggests probably cleared (LP-915, S2-06).
@@ -227,6 +230,7 @@ export function ConditionsList({
             onToggle={toggle}
             onOpen={onOpen}
             onMovePrepStatus={onMovePrepStatus}
+            onOpenDraft={onOpenDraft}
             suggestedIds={suggestedIds}
             suggestedRoundNumber={suggestedRoundNumber}
           />
@@ -255,6 +259,7 @@ function ConditionGroup({
   onToggle,
   onOpen,
   onMovePrepStatus,
+  onOpenDraft,
   suggestedIds,
   suggestedRoundNumber,
 }: {
@@ -265,6 +270,8 @@ function ConditionGroup({
   onToggle: (id: string) => void;
   onOpen: (id: string) => void;
   onMovePrepStatus: (condition: Condition, to: ConditionPrepStatus) => void;
+  /** LP-922 — opens a draft email from its Next step token. */
+  onOpenDraft?: (draftId: string) => void;
   suggestedIds?: ReadonlySet<string>;
   suggestedRoundNumber?: number | null;
 }) {
@@ -305,6 +312,7 @@ function ConditionGroup({
           onToggle={() => onToggle(condition.id)}
           onOpen={() => onOpen(condition.id)}
           onMovePrepStatus={onMovePrepStatus}
+          onOpenDraft={onOpenDraft}
           suggestedInRound={suggestedIds?.has(condition.id) ? (suggestedRoundNumber ?? null) : null}
         />
       ))}
@@ -318,6 +326,7 @@ function ConditionRow({
   onToggle,
   onOpen,
   onMovePrepStatus,
+  onOpenDraft,
   suggestedInRound,
 }: {
   condition: Condition;
@@ -325,6 +334,8 @@ function ConditionRow({
   onToggle: () => void;
   onOpen: () => void;
   onMovePrepStatus: (condition: Condition, to: ConditionPrepStatus) => void;
+  /** LP-922 — opens a draft email from its Next step token. */
+  onOpenDraft?: (draftId: string) => void;
   /** The round that suggests this one probably cleared, or null when none does. */
   suggestedInRound?: number | null;
 }) {
@@ -407,7 +418,7 @@ function ConditionRow({
         </span>
       </button>
 
-      <NextStepCell condition={condition} />
+      <NextStepCell condition={condition} onOpenDraft={onOpenDraft} />
 
       {/* A DISPLAY-ONLY STEP HAS NO STATUS OF ITS OWN (S3-12, LP-934 M4): "Lender is doing it" stays in
           its heading group, neutral, with no select — it is not ours to move. */}

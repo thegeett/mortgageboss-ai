@@ -315,7 +315,8 @@ export type ConditionEventKind =
   | "condition_reading_confirmed"
   | "condition_planned"
   | "condition_plan_changed"
-  | "round_plan_confirmed";
+  | "round_plan_confirmed"
+  | "condition_drafted";
 
 /**
  * One line of a round's history (S1-09).
@@ -359,6 +360,8 @@ export interface ConditionEvent {
   waiting_on: OwnerHint | null;
   /** The step that moved it, when the plan moved it (LP-921): "Moved to Ready to send (Already in the file)". */
   plan_option: PlanOption | null;
+  /** LP-922 — which email: on `condition_drafted`, and on a move that email's send made. */
+  draft_recipient: DraftRecipient | null;
   /** The lender's track's move. */
   lender_status_from: ConditionLenderStatus | null;
   lender_status_to: ConditionLenderStatus | null;
@@ -576,6 +579,8 @@ export interface Condition {
   /** Why the plan proposed it, in S3-02's words ("Shortfall computed by code", "Waits on 1228"). */
   plan_reason: string | null;
   items: ConditionItem[];
+  /** LP-922 — the question to the underwriter on this condition (push back / ask the underwriter). */
+  question_draft: DraftTail | null;
   /**
    * Every round this condition appeared on — the `R1 R2` chips.
    *
@@ -1047,6 +1052,8 @@ export interface ConditionItem {
   specifics: ReadingSpecifics;
   /** LP-921 — what she does, from the library ("upload the invoice"); null on an ask or her own item. */
   task: string | null;
+  /** LP-922 — the draft that asks for it, while one does. */
+  draft: DraftTail | null;
 }
 
 export interface RoundPlanDraft {
@@ -1071,4 +1078,58 @@ export interface RoundPlan {
   lender_doing_it: number;
   needs_confirmation: number;
   blocking_codes: string[];
+}
+
+// --- Stage 3: the round's draft emails (LP-922) ------------------------------------------------ //
+
+export type DraftRecipient =
+  | "borrower"
+  | "title_attorney"
+  | "lo"
+  | "insurance"
+  | "hoa"
+  | "employer"
+  | "other_party"
+  | "underwriter";
+
+/** A draft as a row's tail shows it: "In borrower email · draft", "· sent 08/28". */
+export interface DraftTail {
+  id: string;
+  status: "draft" | "sent";
+  /** `2026-08-28`, the send's date in Eastern time. */
+  sent_on: string | null;
+}
+
+export interface ConditionDraftSummary {
+  id: string;
+  recipient: DraftRecipient;
+  label: string;
+  round_number: number | null;
+  status: "draft" | "sent";
+  sent_at: string | null;
+  codes: string[];
+}
+
+export interface ConditionDraft {
+  id: string;
+  communication_id: string;
+  recipient: DraftRecipient;
+  round_number: number | null;
+  title: string;
+  status: "draft" | "sent";
+  sent_at: string | null;
+  to: string;
+  needs_address: boolean;
+  subject: string;
+  /** Sanitised HTML, built by code from the library's wording. */
+  body_html: string;
+  in_this_email: { condition_id: string; code: string | null; label: string }[];
+  asked_once: { what: string; codes: string[] }[];
+  other_drafts: { draft_id: string; recipient: DraftRecipient; label: string; summary: string }[];
+  mortgagee_clause: string | null;
+  why_facts: { label: string; value: string }[];
+  /** "Waiting on Borrower" — what our status becomes when this is marked sent. */
+  becomes: string;
+  /** `2026-09-03`: the date the email asks for, editable while unsent. Null for a question. */
+  due_date: string | null;
 }

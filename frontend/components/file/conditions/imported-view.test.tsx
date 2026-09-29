@@ -28,6 +28,13 @@ vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   useAddItem: () => ({ mutate: vi.fn(), isPending: false }),
   useRoundPlan: () => ({ data: undefined }),
   useConfirmPlan: () => ({ mutate: vi.fn(), isPending: false }),
+  // LP-922's draft hooks: no drafts in these screens.
+  useConditionDrafts: () => ({ data: [] }),
+  useConditionDraft: () => ({ data: undefined }),
+  useMarkConditionDraftSent: () => ({ mutate: vi.fn(), isPending: false }),
+  useDeleteConditionDraft: () => ({ mutate: vi.fn(), isPending: false }),
+  useSetConditionDraftAddress: () => ({ mutate: vi.fn(), isPending: false }),
+  useSetConditionDraftDueDate: () => ({ mutate: vi.fn(), isPending: false }),
   useSetNextStep: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdateItem: () => ({ mutate: vi.fn(), isPending: false }),
   useConfirmReading: () => ({ mutate: vi.fn(), isPending: false }),
@@ -108,6 +115,7 @@ function condition(overrides: Partial<Condition> = {}): Condition {
     next_step: null,
     plan_reason: null,
     items: [],
+    question_draft: null,
     ...overrides,
   };
 }
@@ -208,6 +216,7 @@ function event(overrides: Partial<ConditionEvent> = {}): ConditionEvent {
     prep_status_to: null,
     waiting_on: null,
     plan_option: null,
+    draft_recipient: null,
     lender_status_from: null,
     lender_status_to: null,
     verdict_source_kind: null,

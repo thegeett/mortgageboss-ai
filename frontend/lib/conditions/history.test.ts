@@ -42,6 +42,7 @@ const ALL_KINDS = [
   "condition_planned",
   "condition_plan_changed",
   "round_plan_confirmed",
+  "condition_drafted",
 ] as const satisfies readonly ConditionEventKind[];
 
 /**
@@ -71,6 +72,7 @@ function makeEvent(overrides: Partial<ConditionEvent> = {}): ConditionEvent {
     prep_status_to: null,
     waiting_on: null,
     plan_option: null,
+    draft_recipient: null,
     lender_status_from: null,
     lender_status_to: null,
     verdict_source_kind: null,
@@ -94,7 +96,7 @@ describe("every event kind has a sentence", () => {
 
   it("is exhaustive over the union, checked by the compiler", () => {
     expect(_everyKindIsListed).toBe(true);
-    expect(ALL_KINDS).toHaveLength(24);
+    expect(ALL_KINDS).toHaveLength(25);
   });
 });
 
@@ -251,5 +253,27 @@ describe("the lines that carry a round", () => {
     expect(conditionHistoryLine(makeEvent({ kind: "condition_seen_again", round_number: 2 }))).toBe(
       "Seen again in round 2",
     );
+  });
+});
+
+describe("LP-922's lines", () => {
+  it("names the email a condition was put into", () => {
+    expect(
+      conditionHistoryLine(makeEvent({ kind: "condition_drafted", draft_recipient: "borrower" })),
+    ).toBe("Added to the borrower email");
+  });
+
+  it("says which send moved it", () => {
+    expect(
+      conditionHistoryLine(
+        makeEvent({
+          kind: "condition_prep_moved",
+          prep_status_to: "waiting",
+          waiting_on: "broker",
+          draft_recipient: "lo",
+          actor_name: "Priya Raman",
+        }),
+      ),
+    ).toBe("Moved to Waiting on LO (LO email marked sent) — Priya Raman");
   });
 });

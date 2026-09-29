@@ -33,6 +33,7 @@ function item(overrides: Partial<ConditionItem>): ConditionItem {
     due_date: null,
     specifics: { amounts: [], account_bank: null, account_last4: null, month: null, names: [] },
     task: null,
+    draft: null,
     ...overrides,
   };
 }
@@ -75,6 +76,7 @@ function condition(overrides: Partial<Condition>): Condition {
     next_step: null,
     plan_reason: null,
     items: [],
+    question_draft: null,
     ...overrides,
   };
 }

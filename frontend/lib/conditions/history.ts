@@ -37,6 +37,7 @@ import type {
   ConditionEvent,
   ConditionRoundAppearance,
   ConditionSourceKind,
+  DraftRecipient,
 } from "@/lib/types/conditions";
 
 /** How a round arrived, in the words S2-03 uses ("PDF upload"). */
@@ -76,6 +77,18 @@ function inRound(event: ConditionEvent): string {
 }
 
 /** " — Priya Raman", or nothing for a system event. Never a placeholder: "—" reads as a name. */
+/** How a history line names a draft email (LP-922). */
+const EMAIL_NAME: Record<DraftRecipient, string> = {
+  borrower: "borrower email",
+  title_attorney: "title email",
+  lo: "LO email",
+  insurance: "insurance email",
+  hoa: "HOA email",
+  employer: "employer email",
+  other_party: "email to the other party",
+  underwriter: "question to the underwriter",
+};
+
 function by(event: ConditionEvent): string {
   return event.actor_name ? ` — ${event.actor_name}` : "";
 }
@@ -155,9 +168,13 @@ export function conditionHistoryLine(
       const to = event.prep_status_to;
       // "Moved to Waiting on Borrower" (S2-03) names the owner. `unknown` keeps the generic label:
       // "Waiting on Owner not known" would read worse than "Waiting on someone".
+      // THE SEND MOVED IT (LP-922): "Moved to Waiting on Borrower (borrower email marked sent)".
+      const sent = event.draft_recipient
+        ? ` (${EMAIL_NAME[event.draft_recipient]} marked sent)`
+        : "";
       if (to === "waiting" && event.waiting_on && event.waiting_on !== "unknown") {
         // "Waiting on LO", as the status select says it (LP-934 M5).
-        return `Moved to Waiting on ${waitingLabel(event.waiting_on)}${by(event)}`;
+        return `Moved to Waiting on ${waitingLabel(event.waiting_on)}${sent}${by(event)}`;
       }
       // THE PLAN MOVED IT (LP-921), SO THE LINE SAYS WHICH STEP: "Moved to Ready to send (Already in
       // the file)". Without it the line reads as though she picked the status herself.
@@ -190,6 +207,10 @@ export function conditionHistoryLine(
       return "Plan proposed";
     case "condition_plan_changed":
       return `The plan was changed${by(event)}`;
+    case "condition_drafted":
+      return event.draft_recipient
+        ? `Added to the ${EMAIL_NAME[event.draft_recipient]}`
+        : "Added to a draft email";
 
     // --- the round it sits on ---------------------------------------------- //
     //

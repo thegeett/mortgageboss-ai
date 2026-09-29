@@ -33,6 +33,7 @@ from app.models.condition import (
     OwnerHint,
     OwnerHintSource,
 )
+from app.models.condition_draft import ConditionDraft, DraftRecipient
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_item import ConditionItem
 from app.models.condition_round import (
@@ -153,6 +154,7 @@ __all__ = [
     "CommunicationStatus",
     "Company",
     "Condition",
+    "ConditionDraft",
     "ConditionEvent",
     "ConditionEventKind",
     "ConditionItem",
@@ -171,6 +173,7 @@ __all__ = [
     "DocumentFindingStatus",
     "DocumentFindingType",
     "DocumentStatus",
+    "DraftRecipient",
     "DtiCustomLine",
     "DtiOverride",
     "EmailDraftProse",

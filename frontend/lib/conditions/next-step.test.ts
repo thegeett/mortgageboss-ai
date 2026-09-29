@@ -6,7 +6,7 @@
  */
 import type { Condition, ConditionItem } from "@/lib/types/conditions";
 import { describe, expect, it } from "vitest";
-import { becomes, itemWhere, nextStepToken, stepOptions, waitingLabel } from "./next-step";
+import { becomes, itemWhere, nextStepToken, stepOptions, tail, waitingLabel } from "./next-step";
 
 function item(overrides: Partial<ConditionItem> = {}): ConditionItem {
   return {
@@ -30,6 +30,7 @@ function item(overrides: Partial<ConditionItem> = {}): ConditionItem {
     due_date: null,
     specifics: { amounts: [], account_bank: null, account_last4: null, month: null, names: [] },
     task: null,
+    draft: null,
     ...overrides,
   };
 }
@@ -39,6 +40,7 @@ function condition(overrides: Partial<Condition> = {}): Condition {
     prep_status: "to_do",
     next_step: null,
     items: [],
+    question_draft: null,
     ...overrides,
   } as Condition;
 }
@@ -181,5 +183,51 @@ describe("words", () => {
   it("an ask says which email it is in; a task says nothing here", () => {
     expect(itemWhere(item())).toBe("In borrower email");
     expect(itemWhere(item({ option: "i_will_do_it" }))).toBeNull();
+  });
+});
+
+describe("draft tails (LP-922)", () => {
+  const drafted = { id: "d1", status: "draft" as const, sent_on: null };
+  const sent = (on: string, id = "d1") => ({ id, status: "sent" as const, sent_on: on });
+
+  it("reads · draft while any carrying draft is unsent", () => {
+    const items = [
+      item({ draft: sent("2026-08-28") }),
+      item({
+        performer: "title",
+        performers: ["title"],
+        option: "ask_third_party",
+        draft: { ...drafted, id: "d2" },
+      }),
+    ];
+    expect(nextStepToken(condition({ items }))?.text).toBe("Borrower + title emails · draft");
+  });
+
+  it("reads · sent 08/28 once every one was marked sent, and opens the draft", () => {
+    const items = [
+      item({ draft: sent("2026-08-28") }),
+      item({
+        performer: "title",
+        performers: ["title"],
+        option: "ask_third_party",
+        draft: sent("2026-08-28", "d2"),
+      }),
+    ];
+    const token = nextStepToken(condition({ items }));
+    expect(token?.text).toBe("Borrower + title emails · sent 08/28");
+    expect(token?.draftId).toBe("d1");
+  });
+
+  it("6178: the question's own tail", () => {
+    const token = nextStepToken(
+      condition({ next_step: "push_back", question_draft: sent("2026-08-28", "q1") }),
+    );
+    expect(token?.text).toBe("Question to UW · sent 08/28");
+    expect(token?.draftId).toBe("q1");
+  });
+
+  it("an item says which email it is in, with its state", () => {
+    expect(itemWhere(item({ draft: drafted }))).toBe("In borrower email · draft");
+    expect(tail([])).toBe("");
   });
 });

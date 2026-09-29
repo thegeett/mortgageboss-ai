@@ -14,6 +14,7 @@ import {
   Check,
   Link2,
   ListChecks,
+  Mail,
   Plus,
   Sparkles,
   TriangleAlert,
@@ -153,12 +154,15 @@ export function ReadingItems({
   items,
   onAdd,
   onMarkDone,
+  onOpenDraft,
 }: {
   items: ShownItem[];
   /** S3-01's "Add an item" (LP-920). Offered only once the plan exists. */
   onAdd?: (name: string, performer: Performer) => void;
   /** LP-921 — her own task done (or not). Offered on an "I'll do it" item only. */
   onMarkDone?: (item: ConditionItem, done: boolean) => void;
+  /** LP-922 — "In borrower email · draft" opens that draft. */
+  onOpenDraft?: (draftId: string) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
@@ -215,7 +219,9 @@ export function ReadingItems({
                 {performersLabel(item.performers)}
               </p>
               <p className="text-xs text-muted-foreground">{OPTION_LABEL[item.option]}</p>
-              {"id" in item ? <ItemWhere item={item} onMarkDone={onMarkDone} /> : null}
+              {"id" in item ? (
+                <ItemWhere item={item} onMarkDone={onMarkDone} onOpenDraft={onOpenDraft} />
+              ) : null}
             </div>
           </li>
         ))}
@@ -263,11 +269,26 @@ export function ReadingItems({
 function ItemWhere({
   item,
   onMarkDone,
+  onOpenDraft,
 }: {
   item: ConditionItem;
   onMarkDone?: (item: ConditionItem, done: boolean) => void;
+  onOpenDraft?: (draftId: string) => void;
 }) {
   const where = itemWhere(item);
+  const draftId = item.draft?.id;
+  if (where && draftId && onOpenDraft) {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenDraft(draftId)}
+        className="inline-flex w-fit items-center gap-1 text-left text-xs text-primary hover:underline"
+      >
+        <Mail className="h-3 w-3" aria-hidden />
+        {where}
+      </button>
+    );
+  }
   if (where) return <p className="text-xs text-primary">{where}</p>;
   if (item.option !== "i_will_do_it" || !onMarkDone) return null;
   const done = item.status === "done";

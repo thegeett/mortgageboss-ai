@@ -191,6 +191,10 @@ describe("the only way HTML reaches the DOM", () => {
   const ALLOWED = new Set([
     'data.body_format === "html" ? data.body : emailBodyToHtml(data.body)',
     "emailBodyToHtml(proposal)",
+    // LP-922 — a condition draft's body, resting on the SECOND argument: the server builds it from
+    // the library's wording with every value escaped (`condition_drafts.fill`), then passes it through
+    // the same `sanitise_html` allow-list before storing it (`condition_drafts.render`).
+    "draft.body_html",
   ]);
 
   it("feeds every dangerouslySetInnerHTML from a renderer or a sanitised column, and nothing else", () => {

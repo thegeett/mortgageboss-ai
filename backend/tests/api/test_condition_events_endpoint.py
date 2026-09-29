@@ -275,6 +275,9 @@ async def test_only_the_named_scalars_are_exposed(
         # LP-921: a `PlanOption` member, projected on `CONDITION_PREP_MOVED` only when the PLAN made
         # the move (`by: "plan"`) — "Moved to Ready to send (Already in the file)". A closed set.
         "plan_option",
+        # LP-922: a `DraftRecipient` member, on `CONDITION_DRAFTED` and on a move a send made —
+        # "Added to the borrower email". A closed set.
+        "draft_recipient",
     }
     # THREE FIELDS CAME OFF THIS LIST AND THAT IS THE POINT. `reader_version`,
     # `duplicates_dropped` and `filled_from` were projected and read by no sentence — three open

@@ -37,12 +37,14 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { MoveBackDialog, RecordAnswerDialog } from "./condition-answer-dialogs";
 import { ConditionDetailSheet } from "./condition-detail-sheet";
+import { ConditionDraftDialog } from "./condition-draft-dialog";
 import { ConditionsBulkBar, bulkResultSummary } from "./conditions-bulk-bar";
 import { ConditionsFilterRow } from "./conditions-filter-row";
 import { ConditionsList } from "./conditions-list";
 import { ConditionsSummaryBar } from "./conditions-summary-bar";
 import { RoundComparisonPanel } from "./round-comparison-panel";
 import { RoundDetailsSheet } from "./round-details-sheet";
+import { RoundDrafts } from "./round-drafts";
 import { RoundPlanPanel } from "./round-plan-panel";
 import { RoundStrip } from "./round-strip";
 
@@ -122,6 +124,8 @@ export function ConditionsListView({
   const setNextStep = useSetNextStep(fileId);
   const updateItem = useUpdateItem(fileId);
   const [confirmReadingId, setConfirmReadingId] = useState<string | null>(null);
+  // LP-922 — the draft email open in S3-04's dialog, from a token, an item or the drafts line.
+  const [draftId, setDraftId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const [answerFor, setAnswerFor] = useState<Condition[] | null>(null);
   const [moveBack, setMoveBack] = useState<{
@@ -339,6 +343,9 @@ export function ConditionsListView({
         />
       ) : null}
 
+      {/* LP-922: the round's unsent drafts, once the plan panel is gone. */}
+      <RoundDrafts fileId={fileId} onOpenDraft={setDraftId} />
+
       {summary.data ? (
         <ConditionsSummaryBar summary={summary.data} state={urlState} onFilter={applyUrl} />
       ) : (
@@ -384,6 +391,7 @@ export function ConditionsListView({
           selected={selectedIds}
           onSelectedChange={setSelectedIds}
           onOpen={setOpenConditionId}
+          onOpenDraft={setDraftId}
           onMovePrepStatus={movePrep}
           onClearFilters={() => {
             setSearchInput("");
@@ -394,6 +402,7 @@ export function ConditionsListView({
               prepStatus: [],
               owner: [],
               bucketKind: [],
+              step: [],
             });
           }}
         />
@@ -490,6 +499,7 @@ export function ConditionsListView({
                 )
         }
         onConfirmReading={(condition) => setConfirmReadingId(condition.id)}
+        onOpenDraft={setDraftId}
         onAddItem={(condition, name, performer) =>
           addItem.mutate({ conditionId: condition.id, name, performers: [performer] })
         }
@@ -515,6 +525,7 @@ export function ConditionsListView({
           )
         }
       />
+      <ConditionDraftDialog fileId={fileId} draftId={draftId} onClose={() => setDraftId(null)} />
       <ConfirmReadingFor
         fileId={fileId}
         conditions={rows}

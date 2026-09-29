@@ -82,5 +82,9 @@ class ConditionItem(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     )
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     sequence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    #: LP-922 — the condition draft that asks for it, while one does.
+    draft_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("condition_drafts.id", ondelete="SET NULL"), nullable=True
+    )
 
     condition: Mapped["Condition"] = relationship(foreign_keys=[condition_id])

@@ -42,6 +42,7 @@ from app.models.condition import (
     OwnerHint,
     OwnerHintSource,
 )
+from app.models.condition_draft import DraftRecipient
 from app.models.condition_event import ConditionEventKind
 from app.models.condition_round import (
     ConditionRoundCompleteness,
@@ -81,6 +82,7 @@ _MIRRORED: dict[str, type[StrEnum]] = {
     #: on who acts, the option and the reading's state.
     "Performer": Performer,
     "PlanOption": PlanOption,
+    "DraftRecipient": DraftRecipient,
     "EvidenceCheck": EvidenceCheck,
     "ConditionReadingStatus": ConditionReadingStatus,
     "ConditionReadingSource": ConditionReadingSource,

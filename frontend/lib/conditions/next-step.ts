@@ -12,6 +12,7 @@ import { OWNER_LABEL } from "@/lib/conditions/owners";
 import type {
   Condition,
   ConditionItem,
+  DraftTail,
   OwnerHint,
   Performer,
   PlanOption,
@@ -80,7 +81,29 @@ function emailKey(performer: Performer): string {
  */
 export function itemWhere(item: ConditionItem): string | null {
   if (!ASKS.includes(item.option)) return null;
-  return `In ${EMAIL_WORD[recipient(item)]} email`;
+  return `In ${EMAIL_WORD[recipient(item)]} email${tail(item.draft ? [item.draft] : [])}`;
+}
+
+/** The drafts carrying the condition's asks, once each. */
+function askDrafts(condition: Condition): DraftTail[] {
+  const out: DraftTail[] = [];
+  for (const item of condition.items) {
+    if (!live(item) || !ASKS.includes(item.option) || !item.draft) continue;
+    if (!out.some((each) => each.id === item.draft?.id)) out.push(item.draft);
+  }
+  return out;
+}
+
+/**
+ * S3-12's tail: " · sent 08/28" once every draft carrying it was marked sent (the latest date),
+ * " · draft" while any is unsent, nothing before the plan made one.
+ */
+export function tail(drafts: readonly DraftTail[]): string {
+  if (drafts.length === 0) return "";
+  if (drafts.some((draft) => draft.status === "draft")) return " · draft";
+  const dates = drafts.map((draft) => draft.sent_on ?? "").sort();
+  const last = dates[dates.length - 1];
+  return last ? ` · sent ${last.slice(5).replace("-", "/")}` : " · sent";
 }
 
 /** The recipients of the condition's open asks, in item order, one per email. */
@@ -103,6 +126,8 @@ export type NextStepIcon = "lender" | "info" | "question" | "mail" | "task" | "w
 export interface NextStepToken {
   icon: NextStepIcon;
   text: string;
+  /** LP-922 — the draft this token opens, when it is about an email. */
+  draftId?: string;
   /** `action` is ours to do or already under way (primary); `quiet` is watching or waiting (muted). */
   tone: "action" | "quiet";
 }
@@ -120,17 +145,35 @@ export function nextStepToken(condition: Condition): NextStepToken | null {
     return { icon: "lender", text: "Lender is doing it", tone: "quiet" };
   if (step === "information_only") return { icon: "info", text: "Information only", tone: "quiet" };
   if (step !== null && QUESTIONS.includes(step)) {
-    return { icon: "question", text: "Question to UW", tone: "action" };
+    const question = condition.question_draft;
+    return {
+      icon: "question",
+      text: `Question to UW${tail(question ? [question] : [])}`,
+      tone: "action",
+      draftId: question?.id,
+    };
   }
 
   const recipients = askRecipients(condition);
+  const drafts = askDrafts(condition);
+  const opens = (drafts.find((draft) => draft.status === "draft") ?? drafts[0])?.id;
   if (recipients.length === 1 && recipients[0]) {
-    return { icon: "mail", text: `In ${EMAIL_WORD[recipients[0]]} email`, tone: "action" };
+    return {
+      icon: "mail",
+      text: `In ${EMAIL_WORD[recipients[0]]} email${tail(drafts)}`,
+      tone: "action",
+      draftId: opens,
+    };
   }
   if (recipients.length > 1) {
     const words = recipients.map((each) => EMAIL_WORD[each]);
     words[0] = capitalise(words[0] ?? "");
-    return { icon: "mail", text: `${words.join(" + ")} emails`, tone: "action" };
+    return {
+      icon: "mail",
+      text: `${words.join(" + ")} emails${tail(drafts)}`,
+      tone: "action",
+      draftId: opens,
+    };
   }
 
   const task = condition.items.find(

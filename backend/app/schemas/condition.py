@@ -40,11 +40,11 @@ from datetime import date as date_type
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 import structlog
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationError
 
 from app.conditions.library import load_library
 from app.models.condition import (
@@ -58,6 +58,7 @@ from app.models.condition import (
     OwnerHint,
     OwnerHintSource,
 )
+from app.models.condition_draft import DraftRecipient
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_round import (
     ConditionRound,
@@ -445,6 +446,9 @@ class ConditionEventPublic(BaseModel):
     #: The step that moved our status, when the PLAN moved it (LP-921: `by: "plan"`), for "Moved to
     #: Ready to send (Already in the file)". A CLOSED enum, projected for `CONDITION_PREP_MOVED` only.
     plan_option: PlanOption | None = None
+    #: LP-922 — which email: on `CONDITION_DRAFTED`, and on a `CONDITION_PREP_MOVED` the send of that
+    #: email made (`by: "email"`). A CLOSED enum (`DraftRecipient`).
+    draft_recipient: DraftRecipient | None = None
     #: The lender's track's move, on the three events that state one. CLOSED enums.
     lender_status_from: ConditionLenderStatus | None = None
     lender_status_to: ConditionLenderStatus | None = None
@@ -512,6 +516,14 @@ class ConditionEventPublic(BaseModel):
                 PlanOption,
             )
             if kind is ConditionEventKind.CONDITION_PREP_MOVED and detail.get("by") == "plan"
+            else None,
+            draft_recipient=_as_vocab(
+                detail.get("recipient"),
+                frozenset(member.value for member in DraftRecipient),
+                DraftRecipient,
+            )
+            if kind is ConditionEventKind.CONDITION_DRAFTED
+            or (kind is ConditionEventKind.CONDITION_PREP_MOVED and detail.get("by") == "email")
             else None,
             lender_status_from=_as_vocab(
                 detail.get("lender_status_from"), lender_values, ConditionLenderStatus
@@ -759,6 +771,14 @@ class LibraryTypePublic(BaseModel):
         )
 
 
+class DraftTailPublic(BaseModel):
+    """LP-922 — a draft as a row's tail shows it: "In borrower email · draft", "· sent 08/28"."""
+
+    id: UUID
+    status: Literal["draft", "sent"]
+    sent_on: date_type | None = None
+
+
 class ConditionItemPublic(BaseModel):
     """One item of a condition's plan (LP-920), with what the screens need to draw it (S3-01, S3-02)."""
 
@@ -784,6 +804,8 @@ class ConditionItemPublic(BaseModel):
     specifics: ReadingSpecificsPublic = Field(default_factory=ReadingSpecificsPublic)
     #: LP-921 — what she does, from the library ("upload the invoice"); None on an ask or her own item.
     task: str | None = None
+    #: LP-922 — the draft that asks for it: its id (to open it), "draft" or "sent", and the send date.
+    draft: DraftTailPublic | None = None
 
 
 class ConditionItemUpdate(BaseModel):
@@ -954,6 +976,8 @@ class ConditionPublic(BaseModel):
     next_step: PlanOption | None = None
     plan_reason: str | None = None
     items: list[ConditionItemPublic] = Field(default_factory=list)
+    #: LP-922 — the question to the underwriter on this condition (push back / ask the underwriter).
+    question_draft: DraftTailPublic | None = None
 
     @classmethod
     def from_model(
@@ -966,6 +990,7 @@ class ConditionPublic(BaseModel):
         days_open: int,
         round_numbers: list[int] | None = None,
         items: list[ConditionItemPublic] | None = None,
+        question_draft: DraftTailPublic | None = None,
     ) -> "ConditionPublic":
         """Build the public view.
 
@@ -1051,6 +1076,7 @@ class ConditionPublic(BaseModel):
             next_step=condition.next_step,
             plan_reason=condition.plan_reason,
             items=items or [],
+            question_draft=question_draft,
         )
 
 
@@ -1651,3 +1677,80 @@ class ConditionImportResult(BaseModel):
     created: int
     seen_again: int
     unmapped_codes: list[str] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
+# LP-922 — condition drafts
+# --------------------------------------------------------------------------- #
+
+
+class DraftConditionPublic(BaseModel):
+    condition_id: UUID
+    code: str | None
+    label: str
+
+
+class DraftAskedOncePublic(BaseModel):
+    """S3-04's "The July and August statements answer 7086, 6132 and 6637"."""
+
+    what: str
+    codes: list[str]
+
+
+class DraftOtherPublic(BaseModel):
+    draft_id: UUID
+    recipient: DraftRecipient
+    label: str
+    summary: str
+
+
+class DraftFactPublic(BaseModel):
+    """S3-06's "Why we think so": a fact read by code, and where from."""
+
+    label: str
+    value: str
+
+
+class ConditionDraftPublic(BaseModel):
+    """One condition draft as the dialog shows it (S3-04 to S3-06). The body is sanitised HTML."""
+
+    id: UUID
+    communication_id: UUID
+    recipient: DraftRecipient
+    round_number: int | None
+    title: str
+    status: Literal["draft", "sent"]
+    sent_at: datetime | None
+    to: str
+    needs_address: bool
+    subject: str
+    body_html: str
+    in_this_email: list[DraftConditionPublic]
+    asked_once: list[DraftAskedOncePublic]
+    other_drafts: list[DraftOtherPublic]
+    mortgagee_clause: str | None
+    why_facts: list[DraftFactPublic]
+    becomes: str
+    #: The date the email asks for, editable in the dialog while unsent (§8). Null for a question.
+    due_date: date_type | None = None
+
+
+class ConditionDraftSummaryPublic(BaseModel):
+    id: UUID
+    recipient: DraftRecipient
+    label: str
+    round_number: int | None
+    status: Literal["draft", "sent"]
+    sent_at: datetime | None
+    codes: list[str]
+
+
+class DraftAddressRequest(BaseModel):
+    """A missing address, given once (LP-922). Remembered on the file."""
+
+    email: EmailStr
+    name: str | None = Field(default=None, max_length=200)
+
+
+class DraftDueDateRequest(BaseModel):
+    due_date: date_type

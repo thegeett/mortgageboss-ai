@@ -72,12 +72,14 @@ sys.path.insert(0, str(_BACKEND))
 from app.core.database import async_session_maker  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.models import Company, User, UserRole  # noqa: E402
+from app.models.user import MailClient  # noqa: E402
 from app.models.activity_log import (  # noqa: E402
     ActivityLog,
     ActivityType,
 )
 from app.models.borrower import Borrower  # noqa: E402
-from app.models.condition import Condition, ConditionPrepStatus, OwnerHint  # noqa: E402
+from app.models.communication import Communication  # noqa: E402
+from app.models.condition import Condition  # noqa: E402
 from app.models.condition_event import ConditionEvent, ConditionEventKind  # noqa: E402
 from app.models.condition_item import ConditionItem  # noqa: E402
 from app.models.condition_round import ConditionRound, ConditionSourceKind  # noqa: E402
@@ -164,6 +166,8 @@ async def _company_and_processor(db: AsyncSession) -> tuple[Company, User]:
         last_name="Raman",
         role=UserRole.PROCESSOR,
         is_active=True,
+        # She writes her email in Gmail (S3-04's "Copy & open Gmail"), a choice Phase 4 asks once.
+        mail_client=MailClient.GMAIL,
     )
     db.add(user)
     await db.flush()
@@ -281,6 +285,32 @@ async def _credit_invoice(db: AsyncSession, loan_file: LoanFile) -> None:
     await db.flush()
 
 
+async def _contacts(db: AsyncSession, loan_file: LoanFile) -> None:
+    """LP-922: who the round's emails go to. Fictional (ADR-405); the underwriter is the letter's."""
+    from app.models.lender_contact import LenderContact, LenderContactRole
+    from app.models.loan_file_participant import LoanFileParticipant, ParticipantRole
+
+    db.add(
+        LoanFileParticipant(
+            loan_file_id=loan_file.id,
+            role=ParticipantRole.TITLE,
+            name="Example Title & Escrow",
+            email="closings@exampletitle.example",
+        )
+    )
+    assert loan_file.lender_id is not None
+    db.add(
+        LenderContact(
+            lender_id=loan_file.lender_id,
+            name="Lena Brennan",
+            email="underwriting@lender.example",
+            role=LenderContactRole.UNDERWRITER,
+            is_active=True,
+        )
+    )
+    await db.flush()
+
+
 async def _round_1(db: AsyncSession, loan_file: LoanFile, actor: User) -> ConditionRound:
     round_ = await create_round_from_sheet(
         db,
@@ -319,6 +349,7 @@ async def base(db: AsyncSession) -> tuple[LoanFile, User]:
     loan_file = await _the_file(db, company)
     await _housing(db, loan_file, user)
     await _credit_invoice(db, loan_file)
+    await _contacts(db, loan_file)
     await _round_1(db, loan_file, user)
     await _stamp(db, loan_file, et(8, 28, 16, 20))
     return loan_file, user
@@ -379,10 +410,9 @@ async def read(db: AsyncSession, loan_file: LoanFile) -> None:
 
 
 async def state_s3_01(db: AsyncSession) -> Shot:
-    """6637's detail sheet: the reading, its three items and who acts (LP-919's part of S3-01)."""
-    loan_file, _ = await base(db)
-    await read(db, loan_file)
-    return Shot(path=_conditions_tab(), now=et(8, 28, 16, 21), clicks=["6637"])
+    """6637's detail sheet once the plan is confirmed: its items sit in drafts ("In borrower email ·
+    draft", LP-922), the chips and the "Becomes …" line (LP-921), the reading (LP-919)."""
+    return await _drafted(db, "6637")
 
 
 async def state_s3_02(db: AsyncSession) -> Shot:
@@ -462,52 +492,70 @@ async def _stamp_events_since(
     )
 
 
-#: Our statuses on S3-12, once the round's emails and the question were marked sent on 08/28.
-S3_12_WAITING: dict[str, OwnerHint] = {
-    "7086": OwnerHint.BORROWER,
-    "6132": OwnerHint.BORROWER,
-    "6637": OwnerHint.BORROWER,
-    "6178": OwnerHint.LENDER,
-    "0132": OwnerHint.BROKER,
-    "1947": OwnerHint.TITLE,
-    "6378": OwnerHint.TITLE,
-}
+async def mark_round_sent(db: AsyncSession, loan_file: LoanFile, actor: User) -> None:
+    """LP-922: the four drafts marked sent at 5:02 PM on 08/28 (borrower first, as S3-12 implies)."""
+    from app.models.condition_draft import ConditionDraft
+    from app.services.condition_drafts import mark_sent
+
+    drafts = list(
+        (
+            await db.execute(
+                select(ConditionDraft)
+                .where(ConditionDraft.loan_file_id == loan_file.id)
+                .order_by(ConditionDraft.created_at)
+            )
+        ).scalars()
+    )
+    order = ["borrower", "title_attorney", "lo", "underwriter"]
+    for draft in sorted(drafts, key=lambda d: order.index(d.recipient.value)):
+        await mark_sent(db, loan_file=loan_file, draft=draft, actor_user_id=actor.id)
+    when = et(8, 28, 17, 2)
+    await _stamp_events_since(db, loan_file, when, after=et(8, 28, 16, 41))
+    await db.execute(
+        update(Communication)
+        .where(Communication.loan_file_id == loan_file.id, Communication.sent_at.is_not(None))
+        .values(sent_at=when)
+    )
+    await db.execute(
+        update(ActivityLog)
+        .where(
+            ActivityLog.loan_file_id == loan_file.id,
+            ActivityLog.activity_type == ActivityType.COMMUNICATION_SENT,
+        )
+        .values(created_at=when, updated_at=when)
+    )
 
 
 async def state_s3_12(db: AsyncSession) -> Shot:
-    """The list on 09/02 with the plan confirmed and the round's asks out (LP-921's part of S3-12).
+    """The list on 09/02, the plan confirmed and the round's four emails marked sent on 08/28.
 
-    THE SENDS ARE LP-922's. Until it lands, the seven Waiting statuses are set the way she can set
-    them today — Stage 2's status control (`move_prep_status`) — at 5:02 PM on 08/28, so the list, the
-    "Waiting on LO" wording and the summary numbers can be checked. The "· sent 08/28" tails, the
-    "3 emails marked sent" activity (D4) and 6132's failed check (LP-923) are not here yet.
+    LP-923 adds what arrived on 09/02 (6132's failed check, 7086's deposit): not here yet.
     """
-    from app.schemas.condition import PrepStatusRequest
-    from app.services.condition_status import move_prep_status
-
     loan_file, user = await base(db)
     await read(db, loan_file)
     await confirm_plan(db, loan_file, user)
-    rows = (
-        await db.execute(
-            select(Condition).where(
-                Condition.loan_file_id == loan_file.id,
-                Condition.lender_code.in_(list(S3_12_WAITING)),
-            )
-        )
-    ).scalars()
-    for condition in rows:
-        await move_prep_status(
-            db,
-            condition=condition,
-            payload=PrepStatusRequest(
-                to=ConditionPrepStatus.WAITING,
-                waiting_on=S3_12_WAITING[condition.lender_code or ""],
-            ),
-            actor_user_id=user.id,
-        )
-    await _stamp_events_since(db, loan_file, et(8, 28, 17, 2), after=et(8, 28, 16, 41))
+    await mark_round_sent(db, loan_file, user)
     return Shot(path=_conditions_tab(), now=et(9, 2, 9, 30))
+
+
+async def _drafted(db: AsyncSession, click: str) -> Shot:
+    """Round 1 confirmed at 4:40 PM with its drafts made, and one draft opened."""
+    loan_file, user = await base(db)
+    await read(db, loan_file)
+    await confirm_plan(db, loan_file, user)
+    return Shot(path=_conditions_tab(), now=et(8, 28, 16, 41), clicks=[click])
+
+
+async def state_s3_04(db: AsyncSession) -> Shot:
+    return await _drafted(db, "Borrower · draft")
+
+
+async def state_s3_05(db: AsyncSession) -> Shot:
+    return await _drafted(db, "Title/attorney · draft")
+
+
+async def state_s3_06(db: AsyncSession) -> Shot:
+    return await _drafted(db, "Question 6178 · draft")
 
 
 def _later(ticket: str) -> Callable[[AsyncSession], Awaitable[Shot]]:
@@ -523,9 +571,9 @@ STATES: dict[str, Callable[[AsyncSession], Awaitable[Shot]]] = {
     "S3-01": state_s3_01,
     "S3-02": state_s3_02,
     "S3-03": state_s3_03,
-    "S3-04": _later("LP-922"),
-    "S3-05": _later("LP-922"),
-    "S3-06": _later("LP-922"),
+    "S3-04": state_s3_04,
+    "S3-05": state_s3_05,
+    "S3-06": state_s3_06,
     "S3-07": _later("LP-923"),
     "S3-08": _later("LP-923"),
     "S3-09": _later("LP-924"),

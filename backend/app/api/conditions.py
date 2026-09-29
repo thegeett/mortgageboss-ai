@@ -45,6 +45,7 @@ from app.models.condition import (
     ConditionPrepStatus,
     OwnerHint,
 )
+from app.models.condition_draft import ConditionDraft
 from app.models.condition_item import ConditionItem
 from app.models.condition_round import (
     ConditionRound,
@@ -61,6 +62,8 @@ from app.schemas.condition import (
     BulkResultPublic,
     ConditionCreateRequest,
     ConditionDetailPublic,
+    ConditionDraftPublic,
+    ConditionDraftSummaryPublic,
     ConditionDraftUpdate,
     ConditionEnrichResult,
     ConditionEventPublic,
@@ -75,6 +78,9 @@ from app.schemas.condition import (
     ConditionSort,
     ConditionSummaryPublic,
     ConfirmClearedRequest,
+    DraftAddressRequest,
+    DraftDueDateRequest,
+    DraftTailPublic,
     LenderProcessingRequest,
     NextStepRequest,
     OwnerRequest,
@@ -87,11 +93,18 @@ from app.schemas.condition import (
     UnderwriterNotePublic,
     VerdictRequest,
 )
+from app.services import condition_drafts
 from app.services.condition_compare import (
     RoundComparisonRefused,
     confirm_probably_cleared,
     confirm_reworded,
     switch_completeness,
+)
+from app.services.condition_drafts import (
+    DraftRefused,
+    draft_view,
+    drafts_for_file,
+    question_tails_for_file,
 )
 from app.services.condition_enrich import RoundNotEnrichable, enrich_round_with_pdf
 from app.services.condition_import import (
@@ -581,6 +594,7 @@ def _condition_public(
     round_numbers: list[int],
     today: date,
     items: list[ConditionItemPublic] | None = None,
+    question_draft: DraftTailPublic | None = None,
 ) -> ConditionPublic:
     """One condition as the wire sees it, with the SERVICE's rules supplying the derived fields.
 
@@ -601,6 +615,7 @@ def _condition_public(
         is_open=is_open(condition),
         days_open=condition_days_open(condition, today=today),
         items=items,
+        question_draft=question_draft,
     )
 
 
@@ -710,12 +725,14 @@ async def list_file_conditions(
     today = datetime.now(UTC).date()
     # LP-920 — every condition's items in ONE query for the whole file, not one per row.
     items = await items_public_for_file(db, loan_file_id=loan_file.id)
+    questions = await question_tails_for_file(db, loan_file_id=loan_file.id)
     return [
         _condition_public(
             condition,
             round_numbers=numbers.get(condition.id, []),
             today=today,
             items=items.get(condition.id, []),
+            question_draft=questions.get(condition.id),
         )
         for condition in conditions
     ]
@@ -1235,6 +1252,9 @@ async def add_condition_by_hand(
         items=(await items_public_for_file(db, loan_file_id=condition.loan_file_id)).get(
             condition.id, []
         ),
+        question_draft=(await question_tails_for_file(db, loan_file_id=condition.loan_file_id)).get(
+            condition.id
+        ),
     )
 
 
@@ -1278,6 +1298,9 @@ async def _condition_response(
         today=datetime.now(UTC).date(),
         items=(await items_public_for_file(db, loan_file_id=condition.loan_file_id)).get(
             condition.id, []
+        ),
+        question_draft=(await question_tails_for_file(db, loan_file_id=condition.loan_file_id)).get(
+            condition.id
         ),
     )
 
@@ -1587,6 +1610,9 @@ async def get_condition(condition: ScopedCondition, db: DbSession) -> ConditionD
         items=(await items_public_for_file(db, loan_file_id=condition.loan_file_id)).get(
             condition.id, []
         ),
+        question_draft=(await question_tails_for_file(db, loan_file_id=condition.loan_file_id)).get(
+            condition.id
+        ),
     )
     # BUILT FROM THE ROW'S OWN PROJECTION rather than assembled a second time. `ConditionDetailPublic`
     # extends `ConditionPublic` precisely so the sheet cannot carry a different set of fields than the
@@ -1654,3 +1680,125 @@ async def list_condition_events(
         )
         for event in events
     ]
+
+
+# --------------------------------------------------------------------------- #
+# LP-922 — the round's draft emails. Drafts only: nothing here sends anything.
+# --------------------------------------------------------------------------- #
+
+
+async def _scoped_draft(db: DbSession, loan_file: LoanFile, draft_id: UUID) -> ConditionDraft:
+    """A draft of THIS file — the file is tenant-scoped, and the draft is looked up under it."""
+    draft = await db.get(ConditionDraft, draft_id)
+    if draft is None or draft.loan_file_id != loan_file.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No such draft on this file.")
+    return draft
+
+
+@router.get("/{loan_file_id}/condition-drafts", response_model=list[ConditionDraftSummaryPublic])
+async def list_condition_drafts(
+    loan_file: ScopedLoanFileById, db: DbSession
+) -> list[ConditionDraftSummaryPublic]:
+    """Every draft the plan made on this file, sent or not ("Drafts for round 1")."""
+    rows = await drafts_for_file(db, loan_file_id=loan_file.id)
+    return [ConditionDraftSummaryPublic.model_validate(row) for row in rows]
+
+
+@router.get("/{loan_file_id}/condition-drafts/{draft_id}", response_model=ConditionDraftPublic)
+async def get_condition_draft(
+    loan_file: ScopedLoanFileById, draft_id: UUID, db: DbSession, current_user: CurrentUser
+) -> ConditionDraftPublic:
+    """One draft as S3-04 to S3-06 draw it."""
+    draft = await _scoped_draft(db, loan_file, draft_id)
+    view = await draft_view(db, loan_file=loan_file, draft=draft, actor_user_id=current_user.id)
+    return ConditionDraftPublic.model_validate(view)
+
+
+@router.post(
+    "/{loan_file_id}/condition-drafts/{draft_id}/mark-sent", response_model=ConditionDraftPublic
+)
+async def mark_condition_draft_as_sent(
+    loan_file: ScopedLoanFileById, draft_id: UUID, db: DbSession, current_user: CurrentUser
+) -> ConditionDraftPublic:
+    """She sent it from her own mail. Records it, and moves the conditions to Waiting on …."""
+    from app.services.email_send import CannotSendError
+
+    draft = await _scoped_draft(db, loan_file, draft_id)
+    try:
+        await condition_drafts.mark_sent(
+            db, loan_file=loan_file, draft=draft, actor_user_id=current_user.id
+        )
+    except (DraftRefused, CannotSendError) as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, detail=getattr(exc, "reason", None) or str(exc)
+        ) from exc
+    await db.commit()
+    view = await draft_view(db, loan_file=loan_file, draft=draft, actor_user_id=current_user.id)
+    return ConditionDraftPublic.model_validate(view)
+
+
+@router.delete(
+    "/{loan_file_id}/condition-drafts/{draft_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_condition_draft_route(
+    loan_file: ScopedLoanFileById, draft_id: UUID, db: DbSession
+) -> None:
+    """Delete draft. Its items wait for a new draft; nothing moves."""
+    draft = await _scoped_draft(db, loan_file, draft_id)
+    try:
+        await condition_drafts.delete(db, loan_file=loan_file, draft=draft)
+    except DraftRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    await db.commit()
+
+
+@router.put(
+    "/{loan_file_id}/condition-drafts/{draft_id}/address", response_model=ConditionDraftPublic
+)
+async def set_condition_draft_address_route(
+    loan_file: ScopedLoanFileById,
+    draft_id: UUID,
+    payload: DraftAddressRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionDraftPublic:
+    """A missing address, given once and remembered on the file."""
+    draft = await _scoped_draft(db, loan_file, draft_id)
+    await condition_drafts.set_address(
+        db,
+        loan_file=loan_file,
+        draft=draft,
+        email=str(payload.email),
+        name=payload.name,
+        actor_user_id=current_user.id,
+    )
+    await db.commit()
+    view = await draft_view(db, loan_file=loan_file, draft=draft, actor_user_id=current_user.id)
+    return ConditionDraftPublic.model_validate(view)
+
+
+@router.put(
+    "/{loan_file_id}/condition-drafts/{draft_id}/due-date", response_model=ConditionDraftPublic
+)
+async def set_condition_draft_due_date(
+    loan_file: ScopedLoanFileById,
+    draft_id: UUID,
+    payload: DraftDueDateRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionDraftPublic:
+    """The due date the email asks for, edited in the draft."""
+    draft = await _scoped_draft(db, loan_file, draft_id)
+    try:
+        await condition_drafts.set_due_date(
+            db,
+            loan_file=loan_file,
+            draft=draft,
+            due=payload.due_date,
+            actor_user_id=current_user.id,
+        )
+    except DraftRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    await db.commit()
+    view = await draft_view(db, loan_file=loan_file, draft=draft, actor_user_id=current_user.id)
+    return ConditionDraftPublic.model_validate(view)

@@ -32,6 +32,8 @@ types:
     category: assets
     rule: {kind: agency, citation: Fannie Mae B3-4.2-02, note: "Depository accounts: the most recent statements, all pages, covering the period the lender asks for."}
     playbook: Ask for the full statement PDF from the bank's website, every page, for the month the lender names. Check it is the month right after the one already in the file.
+    short: "One more consecutive month"
+    why: "the next month in a row"
     items:
       - key: statement
         name: Bank statement
@@ -46,6 +48,8 @@ types:
     category: assets
     rule: {kind: agency, citation: Fannie Mae B3-4.3-09, note: "Receipt by a copy of the canceled check or a written statement from the holder of the deposit; source from statements covering up to the date the check cleared."}
     playbook: Three separate things. The source and the clearance come from the borrower's statements; the receipt comes from whoever holds the deposit.
+    short: "Earnest money"
+    why: "the {amount_short} earnest money check clearing"
     items:
       - key: source
         name: Source of the earnest money
@@ -58,6 +62,8 @@ types:
       - key: receipt
         name: Receipt of the deposit
         acceptable: Copy of the canceled check, or a written statement from the holder of the deposit
+        label: "Earnest money receipt"
+        email: "**Earnest money receipt** — a written statement that you received the {amount} earnest money deposit, or a copy of the canceled check."
         performer: title
         option: ask_third_party
         documents: [earnest_money_receipt, cancelled_checks_evidencing_receipt_of_note_income]
@@ -124,6 +130,8 @@ types:
     category: assets
     rule: {kind: agency, citation: Fannie Mae B3-4.2-02, note: "Funds to close and reserves are verified from the most recent statements."}
     playbook: The shortfall is computed by code (required minus verified). Ask once for the statements that close the gap, including any other account she plans to use.
+    short: "More assets for closing"
+    why: "enough funds for closing"
     items:
       - key: statements
         name: More verified assets
@@ -135,6 +143,8 @@ types:
       - key: other_accounts
         name: Any other account used for closing
         acceptable: The two most recent monthly statements, all pages
+        email: "**Any other account you plan to use for closing** — the two most recent monthly statements, all pages."
+        why: "closing needs {required} and {verified} is verified so far."
         performer: borrower
         option: ask_borrower
         documents: [bank_statement, investment_account]
@@ -353,10 +363,13 @@ types:
     category: insurance
     rule: {kind: agency, citation: Fannie Mae B7-3-07 / B7-3-08, note: "Property insurance in force at closing, with the lender's mortgagee clause."}
     playbook: Compare the policy's start date with the closing date. If closing cannot happen before the policy starts, the second half does not apply; say so to the underwriter.
+    short: "Updated HOI declarations"
     items:
       - key: declarations
         name: Declarations page in force at closing
         acceptable: Declarations page showing coverage in force on the closing date, with the lender's mortgagee clause
+        label: "Declarations page"
+        email: "**Declarations page** in force on the closing date, showing the lender's mortgagee clause."
         performer: insurance
         option: ask_third_party
         documents: [homeowners_insurance]
@@ -578,10 +591,12 @@ types:
     category: title
     rule: {kind: lender_requirement}
     playbook: From title with the closing package; needed before funding, not before docs.
+    short: "Final seller CD"
     items:
       - key: seller_cd
         name: Final seller Closing Disclosure
         acceptable: The final seller CD, with the closing package
+        email: "**Final seller Closing Disclosure** with the final closing package."
         performer: title
         option: ask_third_party
         documents: [closing_disclosure]
@@ -592,10 +607,12 @@ types:
     category: title
     rule: {kind: lender_requirement}
     playbook: Information to pass on (for example the loan number on every check). Add it to the title email; there is nothing to collect.
+    short: "Instruction to title"
     items:
       - key: instruction
         name: Instruction passed to title
         acceptable: Title acknowledges the instruction
+        email: "Please note this instruction from the lender: **{instruction}**"
         performer: title
         option: ask_third_party
         documents: []
@@ -669,10 +686,13 @@ types:
     category: disclosure
     rule: {kind: lender_requirement}
     playbook: The borrower and LO re-sign with an attorney on the lender's approved list, and the attorney's wire instructions must match the form.
+    short: "Attorney preference disclosure"
     items:
       - key: disclosure
         name: Re-signed disclosure naming an approved attorney
         acceptable: The state disclosure signed by the borrower and the LO, with the LO's NMLS ID on the signature page
+        label: "Re-signed disclosure"
+        email: "**The attorney and insurance preference disclosure**, re-signed by the borrower and you, naming an attorney on the lender's approved list, with your NMLS ID on the signature page."
         performer: lo
         option: ask_third_party
         documents: [miscellaneous_document]
@@ -680,6 +700,8 @@ types:
       - key: attorney
         name: An attorney on the lender's approved list
         acceptable: The attorney or law firm named on the new disclosure appears on the lender's approved list
+        label: "Approved attorney"
+        email: "**An attorney on the lender's approved list** — the one named on the new disclosure."
         performer: lo
         option: ask_third_party
         documents: []
@@ -687,6 +709,8 @@ types:
       - key: wire_instructions
         name: Wire instructions that match the attorney
         acceptable: Wire instructions from the attorney named on the new disclosure
+        label: "Matching wire instructions"
+        email: "**Wire instructions** that match the attorney named on the updated attorney and insurance preference disclosure."
         performer: attorney
         option: ask_third_party
         documents: [wire_instructions]

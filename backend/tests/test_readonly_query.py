@@ -752,6 +752,11 @@ EXCLUDED_TABLES: dict[str, str] = {
         "and `name` can carry the lender's wording. A view would have to drop both; nobody queries "
         "items yet, so the table is excluded whole rather than half-exposed."
     ),
+    "condition_drafts": (
+        "LP-922 — links a round's conditions to their draft emails (the `communications` rows, "
+        "whose readonly view already carries the send metadata). Only ids, a recipient and "
+        "timestamps, which that view answers; excluded rather than a second view of the same sends."
+    ),
 }
 
 

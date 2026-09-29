@@ -113,6 +113,22 @@ class LibraryItem:
     #: What she does, in the list's words ("upload the invoice"), for S3-12's "Your task · …". Required
     #: on an "I'll do it" item and refused on any other: an ask is not her task.
     task: str | None = None
+    #: LP-922 — how an email's side column names this item when the email carries it alone ("Earnest
+    #: money receipt"), and its numbered line in the email, the bold part between `**`. Placeholders
+    #: are `EMAIL_PLACEHOLDERS`, filled by code.
+    label: str | None = None
+    email: str | None = None
+    #: A whole "Why:" sentence for this item, when the type's phrase does not fit (7086's other
+    #: accounts: "closing needs {required} and {verified} is verified so far.").
+    why: str | None = None
+
+
+#: LP-922 — the only words code fills into library wording. Anything else in braces is refused, so a
+#: template cannot name a fact nothing supplies.
+EMAIL_PLACEHOLDERS = frozenset(
+    {"amount", "amount_short", "loan_number", "required", "verified", "instruction"}
+)
+_PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
 
 
 @dataclass(frozen=True)
@@ -125,6 +141,10 @@ class ConditionType:
     items: tuple[LibraryItem, ...]
     default_option: PlanOption | None
     waits_on_type: str | None
+    #: LP-922 — the short name an email's side column uses ("More assets for closing"), and why the
+    #: lender asks, as the borrower email's grey "Why:" line finishes "the lender needs to see …".
+    short: str | None = None
+    why: str | None = None
 
     @property
     def label(self) -> str:
@@ -231,7 +251,22 @@ def _item(raw: Any, where: str, documents_known: frozenset[str]) -> LibraryItem:
         name_with_amount=_name_with_amount(raw.get("name_with_amount"), where),
         match_words=tuple(str(word).lower() for word in raw.get("match_words") or ()),
         task=task,
+        label=_wording(raw.get("label"), where, "label"),
+        email=_wording(raw.get("email"), where, "email"),
+        why=_wording(raw.get("why"), where, "why"),
     )
+
+
+def _wording(value: Any, where: str, field: str) -> str | None:
+    """Optional library wording: non-empty text using only the placeholders code fills (LP-922)."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise LibraryError(f"{where}: {field} must be non-empty text when present")
+    unknown = set(_PLACEHOLDER.findall(value)) - EMAIL_PLACEHOLDERS
+    if unknown:
+        raise LibraryError(f"{where}: {field} uses {sorted(unknown)}, which code does not fill")
+    return value.strip()
 
 
 def parse_library(data: Any, *, documents_known: frozenset[str] | None = None) -> Library:
@@ -281,6 +316,8 @@ def parse_library(data: Any, *, documents_known: frozenset[str] | None = None) -
             items=items,
             default_option=default_option,
             waits_on_type=raw.get("waits_on_type"),
+            short=_wording(raw.get("short"), where, "short"),
+            why=_wording(raw.get("why"), where, "why"),
         )
 
     for condition_type in types.values():

@@ -675,6 +675,17 @@ def ready_because(condition: Condition, items: list[ConditionItem]) -> PlanOptio
     return live[0].option
 
 
+async def _resync_drafts(
+    db: AsyncSession, *, condition: Condition, actor_user_id: UUID | None
+) -> None:
+    """LP-922 — after a plan edit on a confirmed round, the round's unsent drafts follow the edit."""
+    if not await _plan_in_force(db, condition):
+        return
+    from app.services.condition_drafts import resync_file
+
+    await resync_file(db, loan_file_id=condition.loan_file_id, actor_user_id=actor_user_id)
+
+
 async def _plan_in_force(db: AsyncSession, condition: Condition) -> bool:
     """Whether the condition's round has a confirmed plan. Before that, every step is a proposal."""
     if condition.last_seen_round_id is None:
@@ -760,6 +771,7 @@ async def set_next_step(
     )
     await db.flush()
     await apply_step_status(db, condition=condition, actor_user_id=actor_user_id)
+    await _resync_drafts(db, condition=condition, actor_user_id=actor_user_id)
 
 
 async def update_item(
@@ -809,6 +821,7 @@ async def update_item(
     )
     await db.flush()
     await apply_step_status(db, condition=condition, actor_user_id=actor_user_id)
+    await _resync_drafts(db, condition=condition, actor_user_id=actor_user_id)
 
 
 async def add_item(
@@ -866,6 +879,7 @@ async def add_item(
         )
     )
     await db.flush()
+    await _resync_drafts(db, condition=condition, actor_user_id=actor_user_id)
     return item
 
 
@@ -884,6 +898,7 @@ async def remove_item(
     )
     await db.flush()
     await apply_step_status(db, condition=condition, actor_user_id=actor_user_id)
+    await _resync_drafts(db, condition=condition, actor_user_id=actor_user_id)
 
 
 async def set_lender_processing(
@@ -996,6 +1011,10 @@ async def confirm_round_plan(
             actor_user_id=actor_user_id,
             in_force=True,
         )
+    # LP-922 — "Confirm plan and draft 3 emails": the drafts are made now, from the confirmed steps.
+    from app.services.condition_drafts import sync_round_drafts
+
+    await sync_round_drafts(db, round_=round_, actor_user_id=actor_user_id)
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -1057,6 +1076,9 @@ async def items_public_for_file(db: AsyncSession, *, loan_file_id: UUID) -> dict
         sequence[condition_id] = seq
         type_ids[condition_id] = type_id
     library = load_library()
+    from app.services.condition_drafts import draft_tails
+
+    tails = await draft_tails(db, {item.draft_id for item in all_items if item.draft_id})
     need_ids = {item.need_id for item in all_items if item.need_id}
     need_titles: dict[UUID, str] = {}
     if need_ids:
@@ -1126,6 +1148,7 @@ async def items_public_for_file(db: AsyncSession, *, loan_file_id: UUID) -> dict
                     # THE LIBRARY'S WORDS WHILE THE ITEM IS STILL ITS TASK: an item she re-pointed to an
                     # ask is no longer hers to do.
                     task=tasks.get(item.key) if item.option is PlanOption.I_WILL_DO_IT else None,
+                    draft=tails.get(item.draft_id) if item.draft_id else None,
                 )
             )
         out[condition_id] = rows

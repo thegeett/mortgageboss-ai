@@ -19,6 +19,8 @@ import type {
   BulkResult,
   Condition,
   ConditionDetail,
+  ConditionDraft,
+  ConditionDraftSummary,
   ConditionEnrichResult,
   ConditionEvent,
   ConditionImportResult,
@@ -880,5 +882,88 @@ export function useAttachPdf(fileId: string) {
       ).data;
     },
     onSuccess: (result) => invalidateRound(queryClient, fileId, result.round_id),
+  });
+}
+
+// --- LP-922: the round's draft emails. Drafts only — nothing here sends. ---------------------- //
+
+export const conditionDraftsQueryKey = (fileId: string) => ["condition-drafts", fileId] as const;
+export const conditionDraftQueryKey = (fileId: string, draftId: string) =>
+  ["condition-draft", fileId, draftId] as const;
+
+const draftsPath = (fileId: string) => `${filePath(fileId)}/condition-drafts`;
+
+export function useConditionDrafts(fileId: string) {
+  return useQuery({
+    queryKey: conditionDraftsQueryKey(fileId),
+    queryFn: async () => (await apiClient.get<ConditionDraftSummary[]>(draftsPath(fileId))).data,
+  });
+}
+
+export function useConditionDraft(fileId: string, draftId: string | null) {
+  return useQuery({
+    queryKey: conditionDraftQueryKey(fileId, draftId ?? ""),
+    queryFn: async () =>
+      (await apiClient.get<ConditionDraft>(`${draftsPath(fileId)}/${draftId}`)).data,
+    enabled: Boolean(draftId),
+  });
+}
+
+function invalidateDrafts(queryClient: ReturnType<typeof useQueryClient>, fileId: string) {
+  invalidatePlan(queryClient, fileId);
+  void queryClient.invalidateQueries({ queryKey: ["condition-drafts", fileId] });
+  void queryClient.invalidateQueries({ queryKey: ["condition-draft", fileId] });
+}
+
+/** "Mark as sent": she sent it from her own mail. Our status moves to Waiting on …. */
+export function useMarkConditionDraftSent(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ draftId }: { draftId: string }) =>
+      (await apiClient.post<ConditionDraft>(`${draftsPath(fileId)}/${draftId}/mark-sent`)).data,
+    onSuccess: () => invalidateDrafts(queryClient, fileId),
+  });
+}
+
+export function useDeleteConditionDraft(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ draftId }: { draftId: string }) => {
+      await apiClient.delete(`${draftsPath(fileId)}/${draftId}`);
+    },
+    onSuccess: () => invalidateDrafts(queryClient, fileId),
+  });
+}
+
+/** A missing address, given once and remembered on the file. */
+export function useSetConditionDraftAddress(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      draftId,
+      email,
+      name,
+    }: { draftId: string; email: string; name?: string }) =>
+      (
+        await apiClient.put<ConditionDraft>(`${draftsPath(fileId)}/${draftId}/address`, {
+          email,
+          name,
+        })
+      ).data,
+    onSuccess: () => invalidateDrafts(queryClient, fileId),
+  });
+}
+
+/** The due date the email asks for, edited in the draft (§8). */
+export function useSetConditionDraftDueDate(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ draftId, due_date }: { draftId: string; due_date: string }) =>
+      (
+        await apiClient.put<ConditionDraft>(`${draftsPath(fileId)}/${draftId}/due-date`, {
+          due_date,
+        })
+      ).data,
+    onSuccess: () => invalidateDrafts(queryClient, fileId),
   });
 }

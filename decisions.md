@@ -16600,3 +16600,35 @@ conditions and must be asked for once.
   and the successor's reading is marked for her to confirm.
 
 *Status.* Accepted (LP-920).
+
+## ADR-412
+
+**A round's condition emails are Phase 4 drafts (`communications`), linked to their conditions by a new
+`condition_drafts` table and kept off `communications.party`; marking one sent moves our status to
+Waiting on whoever holds each condition's first asked item.**
+
+*Context.* Plan §5 LP-922 asks for one borrower email per round, one accumulating email per third party,
+questions and push-backs to the underwriter, "using the Phase 4 email features as they are", drafts only.
+Phase 4 finds "the open draft for a party" by `communications.party`, and its compose appends needs to
+that draft and regenerates its body.
+
+*Decision (LP-922).*
+
+- **The message is Phase 4's.** A condition draft is a `Communication` (`template_key` `condition_request`
+  or `condition_question`, `v1`, HTML body). "Mark as sent" is `email_send.send_draft`: the record, the
+  needs' `requested_at`, `communication_sent`, the evidence row, and no transmission. Delete is a soft
+  delete; the borrower draft's upload link is Phase 4's and is revoked with it.
+- **`party` stays empty** on a condition draft, so Phase 4's compose never appends to it or re-renders it.
+  The link to conditions is `condition_drafts` (recipient, round, the question's condition) plus
+  `condition_items.draft_id`.
+- **The words are the library's, filled by code** (`short`, `why`, item `label`, `email`; placeholders
+  `amount`, `amount_short`, `loan_number`, `required`, `verified`, `instruction`, checked at load). A
+  template missing a value falls back to the item's name and acceptable form. Every value is escaped and
+  the body passes Phase 4's `sanitise_html` before it is stored. The letter's loan number, surname and
+  underwriter are read by code from its title line and header.
+- **The borrower email is one line per need** (§4a change 2), so shared statements are asked for once.
+- **Waiting on follows the first asked item**, not the send order. S3-12's 0132 waits on the LO (its
+  disclosure) though the title email carrying its wire instructions may go first. The owner follows only
+  while the last move was a send; a move she made is never overridden. The lender's track never moves.
+
+*Status.* Accepted (LP-922).

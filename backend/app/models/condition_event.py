@@ -125,6 +125,9 @@ class ConditionEventKind(StrEnum):
     CONDITION_PLANNED = "condition_planned"
     CONDITION_PLAN_CHANGED = "condition_plan_changed"
     ROUND_PLAN_CONFIRMED = "round_plan_confirmed"
+    #: LP-922 — a condition was put into a draft email (detail: recipient, communication id). The
+    #: send is Phase 4's `communication_sent` activity plus this condition's `condition_prep_moved`.
+    CONDITION_DRAFTED = "condition_drafted"
     #: LP-915. An imported round was switched between "full list" and "just some" (A7), which is what
     #: makes a comparison runnable — or withdraws its unconfirmed suggestions.
     ROUND_COMPLETENESS_CHANGED = "round_completeness_changed"

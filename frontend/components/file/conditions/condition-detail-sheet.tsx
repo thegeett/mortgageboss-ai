@@ -189,6 +189,7 @@ export function ConditionDetailSheet({
   onAddItem,
   onSetNextStep,
   onMarkItemDone,
+  onOpenDraft,
 }: {
   /** The list's rows, in the list's order — the filter and sort come with them. */
   conditions: Condition[];
@@ -218,6 +219,8 @@ export function ConditionDetailSheet({
   onSetNextStep?: (condition: Condition, option: PlanOption | null) => void;
   /** LP-921 — her own task done or not. */
   onMarkItemDone?: (condition: Condition, item: ConditionItem, done: boolean) => void;
+  /** LP-922 — opens the draft an item is in. */
+  onOpenDraft?: (draftId: string) => void;
 }) {
   const index = conditions.findIndex((row) => row.id === openId);
   const row = index >= 0 ? conditions[index] : undefined;
@@ -276,6 +279,7 @@ export function ConditionDetailSheet({
             onAddItem={onAddItem}
             onSetNextStep={onSetNextStep}
             onMarkItemDone={onMarkItemDone}
+            onOpenDraft={onOpenDraft}
           />
         ) : null}
       </SheetContent>
@@ -299,6 +303,7 @@ function SheetBody({
   onAddItem,
   onSetNextStep,
   onMarkItemDone,
+  onOpenDraft,
   conditions,
 }: {
   row: Condition;
@@ -318,6 +323,7 @@ function SheetBody({
   onAddItem?: (condition: Condition, name: string, performer: Performer) => void;
   onSetNextStep?: (condition: Condition, option: PlanOption | null) => void;
   onMarkItemDone?: (condition: Condition, item: ConditionItem, done: boolean) => void;
+  onOpenDraft?: (draftId: string) => void;
 }) {
   const detail = useCondition(row.id);
   const events = useConditionEvents(row.id);
@@ -446,6 +452,7 @@ function SheetBody({
             onMarkDone={
               onMarkItemDone ? (item, done) => onMarkItemDone(condition, item, done) : undefined
             }
+            onOpenDraft={onOpenDraft}
           />
         ) : condition.reading ? (
           <ReadingItems items={condition.reading.items} />
