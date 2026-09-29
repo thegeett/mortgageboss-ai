@@ -40,6 +40,8 @@ B3_2_10 = "Fannie Mae B3-2-10"
 _DASH = "\u2013"
 #: B3-2-10: DU must be re-run when the DTI rises above this from at or under it …
 DTI_CEILING = Decimal("45")
+#: Over this, a recalculated DTI always needs DU re-run; the 3-point limb applies only at or under it.
+DTI_LIMIT = Decimal("50")
 #: … or rises by this many percentage points or more.
 DTI_POINTS = Decimal("3")
 #: Reserves short of what DU required and below this share of it.
@@ -97,9 +99,10 @@ def du_rerun_reasons(
 ) -> tuple[list[str], list[str]]:
     """B3-2-10 by code: `(reasons DU must be re-run, tolerances not checked)`. Pure.
 
-    The plan's Done-when examples (§5 LP-924): 44% → 46% needs a re-run (it crosses 45%); 46% → 48% does
-    not (already over 45%, and up 2 points). Whether B3-2-10 treats 45% as a crossing or a level is
-    STOP AND ASK 2 in the progress file: this follows the Done-when, which only the crossing satisfies.
+    B3-2-10 as the product owner quoted it (LP-936, closing STOP AND ASK 2): the recalculated DTI "now
+    exceeds 45%, or increases by 3 percentage points or more (if the recalculated DTI ratio is 50% or
+    less)". Three limbs, from the guide's own table: crossing 45% (44 → 46 yes, 46 → 48 no); 3 points or
+    more while at or under 50% (35 → 40 yes, 46 → 50 yes); and over 50% always (50 → 51 yes).
     """
     reasons: list[str] = []
     not_checked: list[str] = []
@@ -108,7 +111,9 @@ def du_rerun_reasons(
     else:
         if old_dti <= DTI_CEILING < new_dti:
             reasons.append(f"the DTI rises above 45% ({old_dti}% → {new_dti}%)")
-        if new_dti - old_dti >= DTI_POINTS:
+        if new_dti > DTI_LIMIT:
+            reasons.append(f"the DTI is over 50% ({old_dti}% → {new_dti}%)")
+        elif new_dti - old_dti >= DTI_POINTS:
             reasons.append(f"the DTI rises {new_dti - old_dti} points")
     if income_used is not None and income_verified is not None and income_verified < income_used:
         reasons.append("the verified income is lower than the income DU used")

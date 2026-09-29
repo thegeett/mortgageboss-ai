@@ -52,6 +52,42 @@ def test_the_guides_own_examples() -> None:
     assert du_rerun_reasons(old_dti=Decimal("46"), new_dti=Decimal("48")) == ([], [])
 
 
+@pytest.mark.parametrize(
+    ("old", "new", "reasons"),
+    [
+        # B3-2-10's own table, as the product owner quoted it (LP-936).
+        ("35", "40", ["the DTI rises 5 points"]),
+        ("44", "46", ["the DTI rises above 45% (44% → 46%)"]),
+        ("46", "48", []),
+        ("46", "50", ["the DTI rises 4 points"]),
+        # Over 50% always, whatever the rise.
+        ("50", "51", ["the DTI is over 50% (50% → 51%)"]),
+    ],
+)
+def test_the_guides_table(old: str, new: str, reasons: list[str]) -> None:
+    assert du_rerun_reasons(old_dti=Decimal(old), new_dti=Decimal(new)) == (reasons, [])
+
+
+def test_the_50_percent_boundaries() -> None:
+    # Exactly 50% is not over it, and a 3-point rise to it still counts.
+    assert du_rerun_reasons(old_dti=Decimal("47.00"), new_dti=Decimal("50.00"))[0] == [
+        "the DTI rises 3.00 points"
+    ]
+    # Over 50%, the 3-point limb gives way: one reason, "over 50%".
+    assert du_rerun_reasons(old_dti=Decimal("47.00"), new_dti=Decimal("51.00"))[0] == [
+        "the DTI is over 50% (47.00% → 51.00%)"
+    ]
+    # Already over 50% and unchanged is still over 50%.
+    assert du_rerun_reasons(old_dti=Decimal("52.00"), new_dti=Decimal("52.00"))[0] == [
+        "the DTI is over 50% (52.00% → 52.00%)"
+    ]
+    # Crossing 45% and over 50% at once: both are true, both are said.
+    assert du_rerun_reasons(old_dti=Decimal("44.00"), new_dti=Decimal("51.00"))[0] == [
+        "the DTI rises above 45% (44.00% → 51.00%)",
+        "the DTI is over 50% (44.00% → 51.00%)",
+    ]
+
+
 def test_three_points_is_a_rerun_even_under_45() -> None:
     reasons, _ = du_rerun_reasons(old_dti=Decimal("38.00"), new_dti=Decimal("41.00"))
     assert reasons == ["the DTI rises 3.00 points"]

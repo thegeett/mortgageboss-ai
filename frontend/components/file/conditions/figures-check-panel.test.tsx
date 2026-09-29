@@ -95,6 +95,11 @@ describe("FiguresCheckPanel", () => {
     expect(screen.getByText("computed · +0.61 points")).toBeDefined();
     expect(screen.getByText("Assets now cover closing.")).toBeDefined();
     expect(screen.getByText("DU re-run not needed.")).toBeDefined();
+    // LP-936: the old sentence ("DTI stays at or under 45%") was untrue for 46% → 48%, which needs no
+    // re-run and is over 45%. It now says what B3-2-10 actually checks.
+    expect(
+      screen.getByText(/DTI did not cross 45%, is not over 50%, and rose less than 3 points/),
+    ).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Apply 2 changes to the file’s figures" }));
     expect(state.applied).toEqual([
       {

@@ -76,8 +76,8 @@ export function FiguresCheckPanel({ fileId }: { fileId: string }) {
           </Callout>
         ) : (
           <Callout tone="ok">
-            <b className="font-semibold">DU re-run not needed.</b> DTI stays at or under 45% and
-            rose less than 3 points ({data.citation}).
+            <b className="font-semibold">DU re-run not needed.</b> DTI did not cross 45%, is not
+            over 50%, and rose less than 3 points ({data.citation}).
           </Callout>
         )}
       </div>
@@ -87,7 +87,7 @@ export function FiguresCheckPanel({ fileId }: { fileId: string }) {
         </p>
       ) : null}
       <p className="text-xs text-muted-foreground">
-        If DTI went over 45%, or rose 3 points or more, this would say{" "}
+        If DTI crossed 45%, went over 50%, or rose 3 points or more (at 50% or less), this would say{" "}
         <b className="font-semibold text-foreground">“Re-run DU before submitting”</b> and the
         package would warn until you mark it done.
       </p>

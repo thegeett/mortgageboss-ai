@@ -281,6 +281,11 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-924 The figures check | REVIEWED | `2f848c5f` + follow-up `e7afa680` | the commits titled `LP-924 review:` and `LP-924 follow-up review:` | S3-09 shot and walked by the reviewer: matches every line | review found 1 (Apply ignored the baseline she saw); the builder fixed it and the fix is verified, including that it does not over-refuse. STOP AND ASK 2 open on the 45% reading |
 | LP-925 Package, submit, lender settings | REVIEWED | `b415c136` | the commit titled `LP-925 review:` | S3-10 and S3-11 shot and walked by the reviewer: both match, with D10 and D11 | no defects; the ungated lender-settings routes judged correct; a note-check boundary recorded |
 | LP-935 Stage 3 close | REVIEWED | `5b1582cf` | the commit titled `LP-935 review:` | every screen (24 shots: both sessions, all twelve) | review found 2, fixed: the mortgagee-clause term asserted unsourced domain claims; a decision she may want to overturn was missing from the table |
+| LP-936 DU tolerance (closes STOP AND ASK 2) | AWAITING_REVIEW | (this commit) | | S3-09 wording | the owner's answer, 2026-09-29 |
+| LP-937 Superseded failures | PENDING | | | S3-12 | |
+| LP-938 Library fixes (AS-04, the review table) | PENDING | | | none | |
+| LP-939 Real-model trial | SKIPPED | | | none | skipped for now by the owner, 2026-09-29 |
+| LP-940 Withdraw a hand-added condition | PENDING | | | detail sheet | amends ADR-404 |
 
 ## Stage 3A — acceptance (build prompt §6)
 
@@ -368,7 +373,7 @@ expected values are written by hand from build prompt §6 and the screens. Statu
 | a wrong-account statement is rejected with the reason | **matches**: "Capital One ending 4471 — the condition asks for ending 9912"; the item is not done |
 | the $4,000.00 deposit on 08/21 is flagged against the $2,870.66 threshold (S3-08) | **matches**, and "Enough for closing" reads verified $41,914.42 against $38,210.40, **after fix 1** |
 | accepting the evidence proposes the S3-09 figures and changes nothing until applied; applying goes through the stated-financials edits | **matches after fixes 2 and 3**: nothing proposed before the deposit is answered; the four S3-09 rows; the stated asset and the ratios unchanged until Apply, then $41,914.42 and 33.12% / 40.97%, with "Edited a stated asset" and "Applied 2 changes…" |
-| DTI 44% → 46% flagged "re-run DU", 46% → 48% not | **matches** (the crossing reading; STOP AND ASK 2 stays open) |
+| DTI 44% → 46% flagged "re-run DU", 46% → 48% not | **matches** (the crossing reading; STOP AND ASK 2 since answered: correct, LP-936) |
 | one named PDF and one note per ready condition (S3-10) | **matches after fixes 4 and 5**: 7086, 6132, 6178, 0006 in sheet order; `7086 - Assets.pdf` holds only the passing 12-page statement; 6178 has no file; an invented $45,000.00 note is refused; the zip has 3 PDFs and `notes.txt`, nothing missing |
 | Mark submitted moves exactly those to Sent to lender, and the lender's track never moves | **matches**: 4 moves, 4 `condition_prep_moved` events, every other condition unchanged, every lender status Open |
 
@@ -471,7 +476,7 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
 | # | Where | Question | Reading taken (never idle) |
 |---|---|---|---|
 | 1 | plan §5 LP-922 "The AI polishes the wording and does not invent new requests" | Should condition emails get an AI polish pass? | **Answered by the product owner, 2026-09-29: yes, as a button.** The AI's version is shown as a proposal. A changed or dropped fact is shown with a warning, not refused. It applies to every draft and is always on. Built as the LP-922 follow-up (ADR-413, [LP-922](../tickets/LP-922.md) "Follow-up"). The reading first taken (no pass) is superseded. |
-| 2 | plan §2.3 and §5 LP-924 (B3-2-10) against LP-924's own **Done when** | Is DU resubmission required when the DTI *is* above 45%, or only when it *crosses* 45% from at or under it? | **The plan says both and they cannot both hold.** §2.3 and §5 state a LEVEL ("exceeds 45%" / "now over 45%"); the Done-when requires 46% → 48% NOT to be flagged, which a level reading would flag. The build follows the Done-when (crossing), and is coherent: 44→46 flags, 46→48 does not, 46→49 flags on the 3-point limb, 50→51 does not. **Reading taken: the Done-when's**, because it is the ticket's acceptance criterion and the 3-point limb still catches large rises above 45%. B3-2-10 itself is not in this repository, so the guide cannot be checked from here — this is a domain question for the resident expert (CLAUDE.md), not a reading either session should settle. Raised by the LP-924 review; see [LP-924](../tickets/LP-924.md) "STOP AND ASK". |
+| 2 | plan §2.3 and §5 LP-924 (B3-2-10) against LP-924's own **Done when** | Is DU resubmission required when the DTI *is* above 45%, or only when it *crosses* 45% from at or under it? | **Answered by the product owner, 2026-09-29: the crossing reading is correct.** B3-2-10 reads "the DTI ratio recalculated by the lender to now exceed 45%, or increase by 3 percentage points or more (if the recalculated DTI ratio is 50% or less)", with the table 35→40 yes, 44→46 yes, 46→48 no, 46→50 yes. She added a limb: a recalculated DTI over 50% always flags, and the 3-point limb applies only at 50% or less. Built in [LP-936](../tickets/LP-936.md), all four rows and 50→51 pinned. The first reading (LP-924's) stands. |
 
 ## Stage 3 — open items (not blocking)
 
@@ -536,7 +541,7 @@ and record it. Each ticket keeps its own table. These are the ones she may want 
 | [LP-922](../tickets/LP-922.md) #2 | Whose "Waiting on" a sent email sets | The first asked item's (ADR-412), which is S3-12's "Waiting on LO" for 0132 |
 | [LP-922](../tickets/LP-922.md) #7 | The due date on an ask draft | Editable in the draft, an addition to S3-04 |
 | [LP-923](../tickets/LP-923.md) | A re-ask: drafted by the app, or her button? | Her button (S3-07), never auto-drafted |
-| [LP-924](../tickets/LP-924.md) | The 45% DU tolerance | The crossing reading. **STOP AND ASK 2, open** |
+| [LP-924](../tickets/LP-924.md), [LP-936](../tickets/LP-936.md) | The 45% DU tolerance | The crossing reading, **confirmed by the owner** (STOP AND ASK 2, answered 2026-09-29); over 50% always flags, and the 3-point limb applies only at 50% or less |
 | [LP-925](../tickets/LP-925.md) | A Ready prior-to-funding condition | It goes in the package (S3-10 packages 0006); the ones not yet ready go in the info line |
 | [LP-925](../tickets/LP-925.md) | Lender settings | Their own admin routes, not the lender's PATCH, so saving them cannot touch other lender fields |
 | Stage 3B acceptance | A rejected statement | Is not evidence (`counts_as_evidence`); an answer to a deposit reaches every copy of it on the condition |
@@ -605,5 +610,5 @@ and its route test, not by a browser test (see [LP-935](../tickets/LP-935.md)).
   because the check is shared with the finding-prose path. It needs a ticket of its own.
 - **No upload to any lender portal.** The package is downloaded and uploaded by her; Mark submitted is
   her statement that she did.
-- **Owner sign-offs:** the library's top 20 (`phase4.5-library-review.md`), STOP AND ASK 2, and the
-  deviations above.
+- **Owner sign-offs:** the library's top 20 (`phase4.5-library-review.md`) and the deviations above.
+  (STOP AND ASK 2 was answered on 2026-09-29: LP-936.)

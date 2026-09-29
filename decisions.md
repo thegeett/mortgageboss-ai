@@ -16720,7 +16720,11 @@ an in-memory override path (LP-643's ungate preview).
   calculator's insurance override, each with the audit its existing edit writes. It adds one activity
   line naming the conditions. It refuses (409) unless the recomputed rows equal the rows she saw.
 
-*Status.* Accepted (LP-924).
+*Status.* Accepted (LP-924). **Amended (LP-936, 2026-09-29).** The product owner answered STOP AND ASK
+2 from B3-2-10: the crossing reading is correct, and there is a third DTI limb. A recalculated DTI over
+50% always needs DU re-run, and the 3-point limb applies only when the recalculated DTI is 50% or less.
+The guide's table (35 → 40, 44 → 46, 46 → 50 yes; 46 → 48 no) and 50 → 51 are pinned in
+`test_figures_check.py`.
 
 ## ADR-416
 

@@ -210,10 +210,11 @@ arrives (ADR-409 to ADR-416):
   (verified assets, the insurance premium, the ratios), computed by code and
   shown as a proposal. Nothing changes until she applies it (ADR-415).
 - **DU re-run** — whether the loan must be resubmitted to Desktop Underwriter
-  after the figures change: Fannie Mae B3-2-10's tolerances (the DTI rising over
-  45%, or by 3 points or more; income or reserves falling short). Whether "over
-  45%" means crossing it or being above it is an open question for the domain
-  expert (**STOP AND ASK 2 — verify with domain expert**).
+  after the figures change: Fannie Mae B3-2-10's tolerances. The recalculated
+  DTI crossing 45% (44% → 46% yes, 46% → 48% no); rising 3 points or more while
+  it is 50% or less (35% → 40%, 46% → 50%); any recalculated DTI over 50%; or
+  income or reserves falling short. Confirmed by the product owner, 2026-09-29
+  (LP-936).
 - **Condition package** — what goes to the lender for a round: one PDF per Ready
   condition, named with the lender's code (`7086 - Assets.pdf`), and one note per
   condition for the underwriter. She downloads it and uploads it herself, in the
