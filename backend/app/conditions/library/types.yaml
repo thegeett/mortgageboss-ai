@@ -66,7 +66,10 @@ types:
         email: "**Earnest money receipt** — a written statement that you received the {amount} earnest money deposit, or a copy of the canceled check."
         performer: title
         option: ask_third_party
-        documents: [earnest_money_receipt, cancelled_checks_evidencing_receipt_of_note_income]
+        # LP-938: `earnest_money_receipt` is the classifier's type for BOTH forms the rule names: "an
+        # escrow/agent acknowledgment of receipt of monies, or a canceled check evidencing the
+        # earnest-money deposit". The note-income check type it used to list is a different document.
+        documents: [earnest_money_receipt]
         checks: [amount_matches]
       - key: clearance
         name: Clearance
