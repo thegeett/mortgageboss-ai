@@ -613,7 +613,8 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   the uniqueness test can widen for free. Detail in [LP-943](../tickets/LP-943.md) "Review of the
   follow-up".
 
-- **Item KEYS are rendered with `replace("_", " ")` in two processor-facing places** — same review, open,
+- ~~**Item KEYS are rendered with `replace("_", " ")` in two processor-facing places**~~ — **fixed in
+  [LP-948](../tickets/LP-948.md) (a)**: `item_words` replaced both. Same review, originally open,
   low stakes and a different vocabulary from document types. `condition_drafts.condition_label` (the draft
   dialog's side column) and the "Other drafts this round" summary render item keys that way, so a generated
   re-ask key shows as "6132 reask 3f2a9b1c".
@@ -644,8 +645,9 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   "verbal verification of employment" is the agency's own phrasing (B3-3.1-04), so expanding both is
   probably right, but it is a mortgage-wording call and CLAUDE.md says to flag rather than guess.
 
-- **`condition_enrich` lets the query planner pick between identical-text conditions** — found by the
-  LP-944 review, open. `condition_enrich.py:185` builds `{c.text_fingerprint: c for c in existing}` from a
+- ~~**`condition_enrich` lets the query planner pick between identical-text conditions**~~ — **fixed in
+  [LP-948](../tickets/LP-948.md) (b)**: both sites go through `_choose`, and a tie is asked, not picked. The
+  dict cited below no longer exists. Found by the LP-944 review, originally open. `condition_enrich.py:185` builds `{c.text_fingerprint: c for c in existing}` from a
   query with no `ORDER BY`; `text_fingerprint` is a sha256 with only a non-unique index
   (`ix_conditions_file_fingerprint`), so two conditions with identical verbatim text on one file share a
   key and the LAST row wins — whichever the planner returned. The same mechanism LP-944 fixed in `_drafts`,
@@ -654,7 +656,9 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   question; it makes the answer reproducible while somebody decides." Fix: order the query. Detail in
   [LP-944](../tickets/LP-944.md) "Review".
 
-- **`test_insurance_wiring.py:63` asserts something that cannot fail** — same review, open, one line.
+- ~~**`test_insurance_wiring.py:63` asserts something that cannot fail**~~ — **fixed in
+  [LP-948](../tickets/LP-948.md) (d)**, with the mutation the old assertion survives and the new one
+  catches. Same review, originally open, one line.
   `assert "1200" in reason and "12" in reason`: the second conjunct holds whenever the first does, because
   "1200" contains "12". Not flaky — vacuous. It reads as "the reason names the divisor" and asserts nothing;
   assert the division (`"÷ 12"`) instead of the digits.
