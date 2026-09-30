@@ -631,8 +631,9 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   become shared user-facing vocabulary rather than rule-engine wording, so `app/documents/` (beside
   `catalog.py` and `naming.py`) is arguably its home; `docs/project-structure.md` is where that is decided.
 
-- **Screen deviations for the product owner to redraw: D1 to D12**, gathered in one list below
-  ("Stage 3 — screen deviations").
+- ~~**Screen deviations for the product owner to redraw: D1 to D12**~~ — **accepted as built by the
+  owner, 2026-09-29; no redraw.** The list below stays as the record of where the build and the drawings
+  differ.
 - **S3-12 outside LP-921 (LP-921 visual check):** the list's status select is Stage 2's native select
   and carries no glyph where S3-12 draws one; the rail's Recent activity shows Stage 2's relative times
   ("5 days ago") where S3-12 prints "Aug 28, 5:02 PM". Neither is a Stage 3 change; both are for the
@@ -689,9 +690,10 @@ and record it. Each ticket keeps its own table. These are the ones she may want 
 | Stage 3B acceptance | A rejected statement | Is not evidence (`counts_as_evidence`); an answer to a deposit reaches every copy of it on the condition |
 | Stage 3B acceptance, [LP-937](../tickets/LP-937.md) | A superseded failed check | **Decided by the owner, 2026-09-29, and built (LP-937):** once a passing document has done the item, earlier failures for it stop counting and stop showing in the Next step; they stay in the history and on the sheet as "Replaced by <document>". A statement that failed only the funds total on its own is still evidence: it reads "Still evidence — enough for closing was met once <document> arrived", and its findings stay on the sheet, answerable, because they can still hold the condition (LP-937 follow-up; the first wording, "together with", was untrue for two statements of one account). The first reading ("left as it is") is superseded |
 
-## Stage 3 — screen deviations (for the product owner to redraw)
+## Stage 3 — screen deviations (accepted as built, 2026-09-29)
 
-Every Must-match line the build made untrue, and why. The reference PNGs are in
+**Accepted as built by the product owner, 2026-09-29: no redraw.** Every Must-match line the build made
+untrue, and why. The reference PNGs are in
 `docs/design/phase4.5-conditions/stage3/screens/`. The build's shots and the reviewer's are in `checks/`.
 
 | # | Screen | The line | Why | Recorded in |
@@ -752,5 +754,24 @@ and its route test, not by a browser test (see [LP-935](../tickets/LP-935.md)).
   because the check is shared with the finding-prose path. It needs a ticket of its own.
 - **No upload to any lender portal.** The package is downloaded and uploaded by her; Mark submitted is
   her statement that she did.
-- **Owner sign-offs:** the library's top 20 (`phase4.5-library-review.md`) and the deviations above.
-  (STOP AND ASK 2 was answered on 2026-09-29: LP-936.)
+- **Owner sign-offs:** the library's top 20 (`phase4.5-library-review.md`, now generated from the library,
+  LP-938). STOP AND ASK 2 was answered (LP-936) and the deviations accepted as built, both 2026-09-29.
+
+## Stage 3 follow-ups (the owner's list of 2026-09-29)
+
+| Ticket | Result | Commits |
+|---|---|---|
+| [LP-936](../tickets/LP-936.md) DU tolerance | **Done.** B3-2-10's table pinned (35→40, 44→46, 46→50 flag; 46→48 does not); over 50% always flags; the 3-point limb only at 50% or less. STOP AND ASK 2 closed; ADR-415 amended | `0c8090e6`, review `8014e5a8` |
+| [LP-937](../tickets/LP-937.md) Superseded failures | **Done.** A failure whose item a later passing document did stops counting and stops showing in the Next step; it stays on the sheet as "Replaced by …". The follow-up keeps a still-evidence statement's deposit visible (`replaced`). ADR-414 amended | `770d2513`, `da6fbd19`, `247aab18`, reviews `c0837ace`, `e5ef4e65` |
+| [LP-938](../tickets/LP-938.md) Library fixes | **Done.** AS-04's receipt takes `earnest_money_receipt`; the review table is generated from `types.yaml` and a test keeps them equal. Four follow-ups from the reviews: receipts, gift letters and deposit slips are checked by their own amount (`OWN_AMOUNT`, keyed by type so a contract's stated deposit never counts); a re-ask names the document and goes to whoever was asked | `37f5aa9f` … `341f9c54`, closing review `4370ad8b` |
+| LP-939 Real-model trial | **Skipped for now** by the owner | — |
+| [LP-940](../tickets/LP-940.md) Withdraw a hand-added condition | **Done.** Withdraw with a reason, a collapsed "Withdrawn (n)" section with Undo, refused for sheet conditions, a recorded verdict or a submitted package. The follow-up makes a submitted package record exactly what it sent. ADR-404 amended | `faea58ad`, `e8265768`, reviews `5cc5212f`, `c8af1e79` |
+| Screen deviations D1–D12 | **Accepted as built**, no redraw | — |
+
+**Left for the owner** (each in the open items above): the library's top-20 sign-off; after an Undo the
+withdrawal reason is on no screen; `_RECIPIENT` has no email for the appraiser, the processor or the
+lender; five `document_label` wordings that read badly to a third party (four on mapped sheets); the note
+check's swap blindness; three intermittent tests that probably share one cause.
+
+**Last full runs on the finished tree:** backend 8724 passed, 1 failed (the named sonnet test), 8 skipped,
+1 xfailed. Frontend 2135 / 2135. ruff, format, mypy, biome, tsc and the build are clean.
