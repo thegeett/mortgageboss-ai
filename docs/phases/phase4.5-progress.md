@@ -288,7 +288,7 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-940 Withdraw a hand-added condition | REVIEWED | `faea58ad` | the review section in [LP-940](../tickets/LP-940.md) (written, not yet committed) | detail sheet | amends ADR-404. Review found 1: `submit` never rewrites `package.rows`, so a condition withdrawn while the package was BUILT stays in the submitted record — the refusal then tells her it went to the lender (false) and the Undo becomes one-way. Census verified complete for the 40 Condition-row readers, plus one class it did not name (child-table queries that do not filter the parent). Counts verified (8723/1, 2135/2135). **Follow-up `e8265768` reviewed: no findings** — the record now stores exactly what was sent (verified on the reviewer's own sequence: the row is gone, `_submitted_on` is None, the second withdrawal succeeds), and the restored Undo guard is unpinned only in the branch that cannot fire — `_was_withdrawn` always-False fails 4 tests |
 | LP-941 Withdrawal history | REVIEWED | `44d9fbfa` | the review section in [LP-941](../tickets/LP-941.md) (written, not yet committed) | detail sheet history | batch 2, the owner's list of 2026-09-29. No defect: the free-text exception is contained — traced to two company-scoped routes and ruled out of the log, the activity log, the timeline, the package, any export and `readonly.condition_events` (whose `detail` is dropped, verified against the live view). Two notes: the new allow-list justification is a *different* kind of exception from `actor_name`'s (that one is safe because it is never read from `detail`; this one is), and the 500 cap is written twice |
 | LP-942 Asks with no email | REVIEWED | `ac4f6d58` | the review section in [LP-942](../tickets/LP-942.md) (written, not yet committed) | an item line | No defect; the invariant verified for all 11 performers x both asks (0 stranded). Review found 1: `emailKey`'s appraiser→lender merge is UNPINNED — removing it leaves the frontend suite green at 2137/2137. Also: the processor-sourced re-ask should be her task (`route_ask` in `_add_ask`), and the round-1/page-break tests do not hold the processor rule (no library item is processor-first). **Follow-up `66f60857` reviewed: 1 finding** — both items are fixed and the LP-938 test rewrite is sound (it keeps both halves of the invariant and adds the item's own performer/option), but `_hers` reads `performers[0]` while `recipient_for` prefers the LO anywhere, so a `[processor, lo]` ask goes in the LO's email while its re-ask becomes her task; fix by making `_hers` the predicate `route_ask` already uses. **Second follow-up `b072d36b` reviewed: no findings** — the seam is closed (re-verified on the reviewer's own probe: both orders now give "LO", matching where `route_ask` leaves the item, with her own task untouched) |
-| LP-943 Document display names | AWAITING_REVIEW | (this commit) | | none (emails and notes) | |
+| LP-943 Document display names | REVIEWED | `8af848c6` | the review section in [LP-943](../tickets/LP-943.md) (written, not yet committed) | none (emails and notes) | All 41 library types rendered and checked. Review found 2: `letter_of_explanation` and `letter_of_explanation_misc` share the display name "Letter of explanation" and the test does not check uniqueness ("(other)" fixes both); and `attention.py`'s `_document_label` still shows her "Borrower s authorization…", "Hoa statement", "Voe" from a helper whose docstring says "never the raw enum". (c) verified: no slug reaches a third party |
 | LP-944 Flaky tests | PENDING | | | | |
 
 ## Stage 3A — acceptance (build prompt §6)
@@ -570,6 +570,31 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   click — and a mirror test would freeze the duplication rather than remove it. The proper fix, if it is
   ever worth one, is the server sending the `waiting_on` it will set, so the client renders a value
   instead of recomputing the rule.
+
+- **Two document types share one display name, unchecked** — found by the LP-943 review, open.
+  `letter_of_explanation` and `letter_of_explanation_misc` both render "Letter of explanation"; both are on
+  mapped sheets (CR-02 UWM 5868/7383 and CR-05; CR-12 Champions 245), so one file can carry two conditions
+  asking for the same-named document and a package note cannot tell them apart. Cleanliness says nothing
+  about uniqueness, so the test written to catch bad names missed it. Fix: name `_misc` "Letter of
+  explanation (other)" — matching its parenthesised siblings — and add a uniqueness guard with an
+  allow-list of deliberate duplicates.
+
+- **`attention.py` shows the processor the strings LP-943 removes** — same review, open.
+  `_document_label` is `document_type.replace("_", " ").capitalize()` under a docstring reading "A
+  processor's name for the document, never the raw enum": her attention list says "Borrower s authorization
+  for counseling", "Hoa statement", "Voe", "Ira 401k". Outside the owner's words ("emails and notes") since
+  it is her screen, but a one-line substitution to `display_name`, and leaving it means the app spells one
+  document two ways in two panels.
+
+- **Item KEYS are rendered with `replace("_", " ")` in two processor-facing places** — same review, open,
+  low stakes and a different vocabulary from document types. `condition_drafts.condition_label` (the draft
+  dialog's side column) and the "Other drafts this round" summary render item keys that way, so a generated
+  re-ask key shows as "6132 reask 3f2a9b1c".
+
+- **"Verbal VOE" and "Verification of employment (VOE)" are inconsistent** — same review, open, for the
+  DOMAIN EXPERT rather than either session. One of the pair expands the acronym and the other does not;
+  "verbal verification of employment" is the agency's own phrasing (B3-3.1-04), so expanding both is
+  probably right, but it is a mortgage-wording call and CLAUDE.md says to flag rather than guess.
 
 - **The product owner's sign-off on the library's top 20 types** (decision 6), once LP-918 has written
   `phase4.5-library-review.md`.
