@@ -580,6 +580,11 @@ def first_asked_owner(
     email has gone (`gone` says which recipient's email that was, or None). Dropped items do not
     count. ONE function, called by the move (`_wait_on_first_asked`, with the emails really sent) and
     by the prediction (`waiting_on_when_sent`, with the named email treated as sent) — LP-947 review.
+
+    THE NOT_NEEDED SKIP IS DEAD FOR ONE CALLER AND LOAD-BEARING FOR THE OTHER. The move's items come
+    from `_condition_items`, which already leaves dropped items out; the prediction's come from the
+    payload (`_items_by_condition`), which keeps them. Removing the skip because it looks dead from
+    the move breaks the prediction (`test_a_dropped_ask_decides_nothing_even_if_its_email_went`).
     """
     for item in items:
         if item.status is ConditionItemStatus.NOT_NEEDED or item.option not in _ASKS:
