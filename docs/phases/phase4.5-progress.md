@@ -607,7 +607,9 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   dialog's side column) and the "Other drafts this round" summary render item keys that way, so a generated
   re-ask key shows as "6132 reask 3f2a9b1c".
 
-- **Two catalogued names are still unreadable, and no rule can catch them** — found by the LP-943
+- ~~**Two catalogued names are still unreadable, and no rule can catch them**~~ — **named in LP-943's third
+  follow-up** ("Prior Closing Disclosure (final CD from the purchase)", and a neutral "Business existence
+  verification"; the second's wording is still for the domain expert). Originally — found by the LP-943
   second-follow-up review, open. `business_existence_verification_cpa_ltr_bus_lic` renders "Business
   existence verification cpa ltr bus lic" and `prior_closing_disclosure_final_cd_from_purchase` renders
   "Prior closing disclosure final cd from purchase"; both pass the widened cleanliness rule because `cpa`,

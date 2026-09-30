@@ -11,7 +11,10 @@ A name is CLEAN when it reads as English to a title company or an underwriter:
   base is not in the library would pass;
 - no two library types share a name.
 
-`ACRONYMS` is the maintained artefact: an acronym it does not list is invisible to the check.
+So the guarantee is "CLEAN BY THE RULE, AND UNIQUE", not "reads well": `ACRONYMS` is the maintained
+artefact, and an abbreviation it does not list ("cpa", "ltr", "cd") is invisible to the check. No rule
+closes that class; a human reading the list is the mechanism (the LP-943 reviews found seven that way),
+and the names found are pinned by exact string below.
 
 A type added to the library without one fails here.
 """
@@ -70,7 +73,7 @@ def test_every_catalogued_document_type_reads_cleanly(document_type: str) -> Non
     assert _problems(name) == [], f"{document_type} → {name!r}"
 
 
-def test_the_five_catalogue_names_the_rule_cannot_see() -> None:
+def test_the_catalogue_names_the_rule_cannot_see() -> None:
     """Four of these pass the cleanliness rule even without their entries ("K1 statement", "Form
     4506c"): a form number is not a pattern the rule knows. So they are pinned by name."""
     assert display_name("social_security_administration_ssa_89") == "Form SSA-89"
@@ -80,6 +83,12 @@ def test_the_five_catalogue_names_the_rule_cannot_see() -> None:
     assert display_name("k1_statement") == "K-1 statement"
     assert display_name("form_4506c") == "Form 4506-C"
     assert display_name("form_4506t_request_for_transcript") == "Form 4506-T request for transcript"
+    assert display_name("business_existence_verification_cpa_ltr_bus_lic") == (
+        "Business existence verification"
+    )
+    assert display_name("prior_closing_disclosure_final_cd_from_purchase") == (
+        "Prior Closing Disclosure (final CD from the purchase)"
+    )
 
 
 def test_a_discriminated_type_has_an_explicit_name() -> None:

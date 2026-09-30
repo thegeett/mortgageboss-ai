@@ -38,6 +38,11 @@ DISPLAY_NAMES: dict[str, str] = {
     "k1_statement": "K-1 statement",
     "form_4506c": "Form 4506-C",
     "form_4506t_request_for_transcript": "Form 4506-T request for transcript",
+    # Found by READING the 166 (LP-943 second-follow-up review): abbreviations the rule cannot see. The
+    # first drops the classifier's tags ("cpa ltr bus lic") without claiming which document proves it;
+    # its wording is flagged for the domain expert.
+    "business_existence_verification_cpa_ltr_bus_lic": "Business existence verification",
+    "prior_closing_disclosure_final_cd_from_purchase": "Prior Closing Disclosure (final CD from the purchase)",
     "verbal_voe": "Verbal VOE",
     "voe": "Verification of employment (VOE)",
     "w2": "W-2",
