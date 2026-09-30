@@ -32,7 +32,7 @@ from app.models.loan_file import LoanFile
 
 logger = structlog.get_logger(__name__)
 
-REASON_MAX = 500
+from app.schemas.condition import WITHDRAWAL_REASON_MAX as REASON_MAX  # noqa: E402  (one cap)
 
 NOT_HAND_ADDED = (
     "Only a condition you added by hand can be withdrawn. One from the lender's sheet stays until the "

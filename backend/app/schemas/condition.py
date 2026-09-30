@@ -84,6 +84,11 @@ MAX_PASTE_CHARS = 100_000
 #: invert the direction this repo's imports run.
 
 
+#: LP-940/941 — the withdrawal reason's ONE cap: the request, what `condition_withdraw` stores, and the
+#: history's projection all read it, so the history never truncates a reason the service kept whole.
+WITHDRAWAL_REASON_MAX = 500
+
+
 class ConditionSort(StrEnum):
     """How the conditions list is ordered (spec §LP-911).
 
@@ -468,6 +473,10 @@ class ConditionEventPublic(BaseModel):
     #: event, deliberately (see the class docstring). Follows `timeline.py`'s existing `actor_name`
     #: rather than inventing a second attribution shape.
     actor_name: str | None = None
+    #: NOT `actor_name`'s kind of exception (LP-941 review): that one is safe by its SOURCE, never read
+    #: from `detail`; this one IS read from `detail`. It is safe by WHO WRITES IT (she, about her own
+    #: entry) and HOW FAR IT TRAVELS (two company-scoped event routes; the readonly view drops `detail`),
+    #: which was traced, not assumed. A third free-text field needs its own trace, not either precedent.
     #: LP-941 — HER REASON FOR WITHDRAWING A CONDITION SHE ADDED BY HAND, and ONLY for
     #: `condition_withdrawn`. The one free-text string in this projection, by the product owner's
     #: decision (the history line shows why, and keeps showing it after an Undo). It is her own words
@@ -549,7 +558,7 @@ class ConditionEventPublic(BaseModel):
             if kind in _VERDICT_SOURCE_KINDS
             else None,
             notes_added=_as_int(detail.get("notes_added"), kind=kind, key="notes_added"),
-            withdrawal_reason=str(detail["reason"])[:500]
+            withdrawal_reason=str(detail["reason"])[:WITHDRAWAL_REASON_MAX]
             if kind is ConditionEventKind.CONDITION_WITHDRAWN
             and isinstance(detail.get("reason"), str)
             else None,
@@ -1619,7 +1628,7 @@ class WithdrawRequest(BaseModel):
     """LP-940 — withdraw a hand-added condition entered in error. The service refuses an empty reason with
     its sentence (a 409 she reads), so the schema only bounds the length."""
 
-    reason: str = Field(default="", max_length=500)
+    reason: str = Field(default="", max_length=WITHDRAWAL_REASON_MAX)
 
 
 class WithdrawnConditionPublic(BaseModel):
