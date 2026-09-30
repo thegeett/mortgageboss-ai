@@ -528,7 +528,11 @@ async def submit(
         raise PackageRefused("This package was already submitted.")
     now = datetime.now(UTC)
     moved: list[str] = []
-    for row in await live_rows(db, package):
+    # THE RECORD IS WHAT WAS SENT (LP-940 review). A condition withdrawn while the package was only built
+    # is not sent, so it is not frozen into the record either; otherwise its refusal would later say it
+    # "went to the lender", and an Undo could never be withdrawn again. Her reason is in its event.
+    sent = await live_rows(db, package)
+    for row in sent:
         if not row.get("included", True):
             continue
         condition = await db.get(Condition, UUID(row["condition_id"]))
@@ -545,6 +549,7 @@ async def submit(
         moved.append(row["code"])
     if not moved:
         raise PackageRefused("Tick at least one condition to submit.")
+    package.rows = sent
     package.status = PackageStatus.SUBMITTED
     package.submitted_at = now
     package.submitted_by_user_id = actor_user_id

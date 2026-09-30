@@ -5,9 +5,10 @@ the counts, the plan, the drafts and the package, and keeps it in a "Withdrawn (
 Refused for a sheet condition (ADR-404), for one the lender answered on, and for one in a submitted
 package.
 
-TWO TESTS MARK A SHEET CONDITION AS HAND-ADDED (`origin = manual`), and say so. That is the only way to
-put a hand-added condition into a confirmed plan's draft, or into a package, without building stored
-rows by hand. Everything else uses a real hand-added condition (`create_manual_condition`).
+TWO TESTS MARK A SHEET CONDITION AS HAND-ADDED (`origin = manual`), and say so: the draft test and the
+figures test, which need a condition with a confirmed plan's asks or accepted statements, which a
+hand-added condition only reaches through the whole reading path. The package tests use a genuinely
+hand-added condition (LP-940 review). Everything else uses `create_manual_condition`.
 """
 
 from __future__ import annotations
@@ -151,34 +152,66 @@ async def test_it_leaves_the_unsent_draft_and_returns_on_undo(db_session: AsyncS
     assert await in_borrower_email()
 
 
-async def test_it_leaves_a_built_package_and_is_refused_once_submitted(
+async def _ready_by_hand(db: AsyncSession, loan_file: LoanFile, actor: Any) -> Condition:
+    """A GENUINELY hand-added condition, Ready to send, so it goes in the package (LP-940 review)."""
+    from app.models.condition import ConditionPrepStatus
+    from app.schemas.condition import PrepStatusRequest
+    from app.services.condition_status import move_prep_status
+
+    added = await _hand_added(db, loan_file, actor)
+    await move_prep_status(
+        db,
+        condition=added,
+        payload=PrepStatusRequest(to=ConditionPrepStatus.READY),
+        actor_user_id=actor,
+    )
+    return added
+
+
+async def test_withdrawn_while_built_it_is_not_sent_and_can_be_withdrawn_again(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """6178, MARKED HAND-ADDED here (see the module docstring), is Ready and in the built package."""
+    """THE LP-940 REVIEW'S SEQUENCE. Withdrawn while the package was only built: it leaves the view, Mark
+    submitted does not send it AND does not freeze it into the record, so after Undo it can be
+    withdrawn again. Before the fix the stored rows kept it, and the refusal said it had gone to the
+    lender, which it had not."""
     _model_writes(monkeypatch, {})
     db = db_session
-    loan_file, conditions, actor = await _ready(db)
-    six = conditions["6178"]
-    six.origin = ConditionOrigin.MANUAL
+    loan_file, _, actor = await _ready(db)
+    added = await _ready_by_hand(db, loan_file, actor)
     package = await condition_package.build(db, loan_file=loan_file, actor_user_id=actor)
-    assert "6178" in [r["code"] for r in package.rows]  # the positive control
-    await condition_withdraw.withdraw(db, condition=six, reason=REASON, actor_user_id=actor)
+    assert "9001" in [r["code"] for r in package.rows]  # the positive control
+    await condition_withdraw.withdraw(db, condition=added, reason=REASON, actor_user_id=actor)
     view = await condition_package.view(db, loan_file=loan_file)
-    assert view is not None and "6178" not in [r["code"] for r in view.rows]
-    # The stored rows are not rewritten; Mark submitted skips the withdrawn one.
-    assert "6178" in [r["code"] for r in package.rows]
+    assert view is not None and "9001" not in [r["code"] for r in view.rows]
     moved = await condition_package.submit(
         db, loan_file=loan_file, package=package, actor_user_id=actor
     )
-    assert "6178" not in moved
-    # Back, and now in a SUBMITTED package's record: it stays on the file.
-    await condition_withdraw.restore(db, condition=six, actor_user_id=actor)
-    seven = conditions["7086"]
-    seven.origin = ConditionOrigin.MANUAL
+    assert "9001" not in moved
+    # The record is what was sent.
+    assert "9001" not in [r["code"] for r in package.rows]
+    await condition_withdraw.restore(db, condition=added, actor_user_id=actor)
+    await condition_withdraw.withdraw(db, condition=added, reason=REASON, actor_user_id=actor)
+    assert added.deleted_at is not None
+
+
+async def test_once_sent_in_a_package_it_stays_on_the_file(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _model_writes(monkeypatch, {})
+    db = db_session
+    loan_file, _, actor = await _ready(db)
+    added = await _ready_by_hand(db, loan_file, actor)
+    package = await condition_package.build(db, loan_file=loan_file, actor_user_id=actor)
+    moved = await condition_package.submit(
+        db, loan_file=loan_file, package=package, actor_user_id=actor
+    )
+    assert "9001" in moved  # the positive control: it really went
     with pytest.raises(WithdrawRefused) as sent:
-        await condition_withdraw.withdraw(db, condition=seven, reason=REASON, actor_user_id=actor)
+        await condition_withdraw.withdraw(db, condition=added, reason=REASON, actor_user_id=actor)
     assert sent.value.reason.startswith("It went to the lender in the package submitted on ")
     assert sent.value.reason.endswith(", so it stays on the file.")
+    assert added.deleted_at is None
 
 
 @pytest.fixture(autouse=True)

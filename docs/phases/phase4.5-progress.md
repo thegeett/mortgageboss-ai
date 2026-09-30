@@ -494,6 +494,14 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
 
 ## Stage 3 — open items (not blocking)
 
+- **After a withdrawal is undone, her reason is on no screen** (LP-940 review). The Withdrawn row is gone
+  and the history line ("Withdrawn as entered in error") never carried the reason; it stays in the event's
+  detail. If "stays in the history" meant she can see later why, the history line should carry it. The
+  owner's call.
+- **Child-table queries that do not filter the parent condition** (LP-940 review): `_items_by_condition`
+  returns a withdrawn condition's items. Safe today because every caller keys in by a condition that is on
+  no list; a caller that iterates the map would show them.
+
 - ~~**A failed upload keeps saying so after a better document has done its item**~~ — **decided by the
   owner (2026-09-29) and built in [LP-937](../tickets/LP-937.md)**. Once a passing document has done
   the item, the earlier failures stop counting in "Failed a check" and stop showing in the Next step.
@@ -510,7 +518,8 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   evidence is a row whose findings still count. Reproduction and detail in
   [LP-937](../tickets/LP-937.md) "Review".
 
-- **A submitted package's stored rows can claim a condition it did not send** — found by the LP-940
+- ~~**A submitted package's stored rows can claim a condition it did not send**~~ — **fixed in the LP-940
+  follow-up** (submit freezes exactly the rows it sends). Found by the LP-940
   review, open. `submit` sets `status` and `submitted_at` but never assigns `package.rows`, though its
   docstring says "the rows frozen as the record". So a hand-added condition withdrawn while the package was
   BUILT stays in the stored rows once it is submitted: `live_rows` correctly keeps it out of what is sent,

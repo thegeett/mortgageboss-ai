@@ -185,10 +185,11 @@ async def withdraw(
 
 async def restore(db: AsyncSession, *, condition: Condition, actor_user_id: UUID) -> None:
     """Undo a withdrawal: the condition is back, its asks return to the drafts. Flushes."""
-    # WITHDRAWAL IS THE ONLY WAY A CONDITION IS SOFT-DELETED (measured: nothing else sets
-    # `conditions.deleted_at`), so "deleted" is "withdrawn". If another path ever deletes conditions,
-    # this must learn to tell the two apart; `test_only_a_withdrawal_deletes_a_condition` fails first.
-    if condition.deleted_at is None:
+    # ONLY A WITHDRAWAL IS UNDONE HERE. Today nothing else soft-deletes a condition (measured, and
+    # `test_only_a_withdrawal_deletes_a_condition` documents it), so the second clause cannot fire yet;
+    # it is kept because it states the rule and cannot go stale if another deleter appears (LP-940
+    # review).
+    if condition.deleted_at is None or not await _was_withdrawn(db, condition):
         raise WithdrawRefused(NOT_WITHDRAWN)
     condition.deleted_at = None
     db.add(_event(condition, ConditionEventKind.CONDITION_RESTORED, {}, actor_user_id))
@@ -201,6 +202,22 @@ async def restore(db: AsyncSession, *, condition: Condition, actor_user_id: UUID
         condition_id=str(condition.id),
         loan_file_id=str(condition.loan_file_id),
     )
+
+
+async def _was_withdrawn(db: AsyncSession, condition: Condition) -> bool:
+    """Deleted BY A WITHDRAWAL: the latest of its withdrawn / restored events is a withdrawal."""
+    latest = await db.scalar(
+        select(ConditionEvent.kind)
+        .where(
+            ConditionEvent.condition_id == condition.id,
+            ConditionEvent.kind.in_(
+                (ConditionEventKind.CONDITION_WITHDRAWN, ConditionEventKind.CONDITION_RESTORED)
+            ),
+        )
+        .order_by(ConditionEvent.occurred_at.desc())
+        .limit(1)
+    )
+    return latest is ConditionEventKind.CONDITION_WITHDRAWN
 
 
 async def withdrawn_for_file(db: AsyncSession, *, loan_file_id: UUID) -> list[Withdrawn]:
