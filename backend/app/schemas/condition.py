@@ -1080,6 +1080,9 @@ class ConditionPublic(BaseModel):
     lender_status: ConditionLenderStatus
     #: Who we are waiting on while our status is Waiting (LP-921: S3-12's "Waiting on Borrower").
     waiting_on: OwnerHint | None = None
+    #: LP-947 — who we WILL be waiting on when the next email is marked sent (S3-01's "Becomes
+    #: Waiting on Borrower when…"). The server's rule, sent so the client renders it, not recomputes it.
+    waiting_on_when_sent: OwnerHint | None = None
 
     #: WITHOUT THIS, LP-912's `stale` REFUSAL IS UNREACHABLE. Its writes are optimistic on
     #: `updated_at`, and a client cannot echo a value it was never given — which is exactly how
@@ -1155,6 +1158,7 @@ class ConditionPublic(BaseModel):
         items: list[ConditionItemPublic] | None = None,
         question_draft: DraftTailPublic | None = None,
         evidence: list[ConditionEvidencePublic] | None = None,
+        waiting_on_when_sent: OwnerHint | None = None,
     ) -> "ConditionPublic":
         """Build the public view.
 
@@ -1206,6 +1210,7 @@ class ConditionPublic(BaseModel):
             prep_status=condition.prep_status,
             lender_status=condition.lender_status,
             waiting_on=condition.waiting_on,
+            waiting_on_when_sent=waiting_on_when_sent,
             updated_at=condition.updated_at,
             effective_owner=effective_owner,
             effective_owner_source=effective_owner_source,

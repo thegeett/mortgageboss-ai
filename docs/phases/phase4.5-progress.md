@@ -292,7 +292,7 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-944 Flaky tests | REVIEWED | `adf963aa` | the review section in [LP-944](../tickets/LP-944.md) (written, not yet committed) | none | Sweep checked and complete for its class (widened to every spelling; the `"ssn" not in body` hits are dict-KEY checks, not substrings). Review found 1: the ordering mechanism has a live member in app code — `condition_enrich.py:185` keys a dict on `text_fingerprint` (a sha256, non-unique index) from an unordered query, so which of two identical-text conditions enrichment matches is the planner's choice. `email_send.py:482` already carries this repo's doctrine for it |
 | LP-945 Wording for the expert's two questions | REVIEWED | `058d0e7a` + `9392f19f` | | S3-11 checkbox | batch 3, the owner's list of 2026-09-30 | REVIEWED by the reviewer: no defect. Outward text traced surface by surface (emails, the package, the upload link which names nothing, the underwriter question); the sweep's result is right but its gate — type-level text only "when any item is asked" — misses `render_question`, which renders the type's short-or-name for any condition, and 19 of 56 types have no asked item. No VOE member today. IE-08: the owner's third route (regulator listing) has no document type so it cannot arrive, and the 120-day note states a checkable rule the item does not check. IE-08 unmapped is normal — 10 of 56 are |
 | LP-946 Items with more than one performer | AWAITING_REVIEW (follow-up) | `1233372a`, review `9041cb3e` | | reading box: parts under their item | batch 3; an item is split into parts, one per destination (`part_of_item_id`, migration `c4a8e2f1b637`); the LO relays to the borrower (STOP AND ASK 3) | REVIEWED by the reviewer: 1 finding. The split invariants hold for EVERY 1-, 2- and 3-performer combination (zero violations: no stranded ask, her task iff the processor is a performer, one item per destination), and split-before-route at all three call sites is load-bearing. FINDING: `update_item`'s re-split soft-deletes any non-DONE part, so a part whose ask was already SENT is deleted and the file stops showing a request that went out — reproduced, and against LP-940's own doctrine that a sent draft keeps its items. No test covers a re-edit after sending |
-| LP-947 One source for "waiting on" | PENDING | | | | |
+| LP-947 One source for "waiting on" | AWAITING_REVIEW | | | detail sheet's "Becomes …" line | batch 3; the server sends `waiting_on_when_sent` with each condition, computed by the rule its send applies; the client's `WAITING_ON` and its drift check are deleted |
 | LP-948 Four small defects | PENDING | | | | |
 | LP-939 Real-model trial (script only) | PENDING | | | none | un-skipped in batch 3 |
 
@@ -567,8 +567,9 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   `recipient_for(item) is None and performers[0] is PROCESSOR` — so three functions share one rule.
   Reachable only via `update_item`. Detail in [LP-942](../tickets/LP-942.md) "Review of the follow-up".
 
-- **The server's `WAITING_ON` and the client's are two statements of one rule, unpinned** — same review,
-  open, low stakes. They agree on every entry now (verified entry by entry: `hoa`, `employer` and
+- ~~**The server's `WAITING_ON` and the client's are two statements of one rule, unpinned**~~ — **removed
+  in [LP-947](../tickets/LP-947.md)**: the server sends the value and the client renders it. Same review,
+  originally open, low stakes. They agree on every entry now (verified entry by entry: `hoa`, `employer` and
   `other_party` are `UNKNOWN` on both sides, so the appraiser was the only drift), but nothing holds them
   together across the language boundary, and they have drifted once. Contrast `_RECIPIENT` /
   `_RECIPIENT_ORDER`, pinned the same round because both live in Python. **Deliberately NOT guarded by a
@@ -952,8 +953,8 @@ check's swap blindness; three intermittent tests that probably share one cause.
   and whether "Business existence verification" should name the CPA letter or the business licence.
 - **Product questions:** ~~an item edited to [processor, borrower] routes as her task and nothing says the
   borrower was not emailed~~ (answered by the owner, built in LP-946: the borrower is emailed AND she has
-  her task); the server could send the "waiting on" hint so the client stops keeping its own copy
-  (LP-947).
+  her task); ~~the server could send the "waiting on" hint so the client stops keeping its own copy~~
+  (built in LP-947).
 - **Recorded defects, not built:**
   - `condition_enrich` matches sheet rows by a non-unique text fingerprint from an unordered query
     (order it, as `email_send.py` did);

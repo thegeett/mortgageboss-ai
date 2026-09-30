@@ -19,10 +19,11 @@ from __future__ import annotations
 
 import html
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
 import structlog
@@ -70,6 +71,27 @@ TEMPLATE_VERSION = "v1"
 _ASKS = frozenset({PlanOption.ASK_BORROWER, PlanOption.ASK_THIRD_PARTY})
 _QUESTIONS = frozenset({PlanOption.PUSH_BACK, PlanOption.ASK_UNDERWRITER})
 _LIVE_ITEM = frozenset({ConditionItemStatus.OPEN, ConditionItemStatus.REQUESTED})
+#: An ask still to be answered, as S3-01 counts one: neither dropped nor done.
+_OPEN_ASK = frozenset(
+    {ConditionItemStatus.OPEN, ConditionItemStatus.REQUESTED, ConditionItemStatus.RECEIVED}
+)
+
+if TYPE_CHECKING:
+    from app.services.condition_plan import AskShape
+
+
+class AskItemShape(Protocol):
+    """An item as `waiting_on_when_sent` reads it: its routing, and whether it is still open."""
+
+    @property
+    def option(self) -> PlanOption: ...
+    @property
+    def performer(self) -> Performer: ...
+    @property
+    def performers(self) -> Sequence[str]: ...
+    @property
+    def status(self) -> ConditionItemStatus: ...
+
 
 #: `condition_plan.recipient_for`'s keys, as stored.
 _RECIPIENT_KEY: dict[str, DraftRecipient] = {member.value: member for member in DraftRecipient}
@@ -541,12 +563,34 @@ def _iso_date(value: Any) -> date | None:
 # --------------------------------------------------------------------------------------------- #
 
 
-def recipient_key(item: ConditionItem) -> DraftRecipient | None:
+def recipient_key(item: AskShape) -> DraftRecipient | None:
     """The email an ask item goes into — `condition_plan.recipient_for`, as a stored value."""
     from app.services.condition_plan import recipient_for
 
     found = recipient_for(item)
     return _RECIPIENT_KEY.get(found[0]) if found else None
+
+
+def waiting_on_when_sent(
+    next_step: PlanOption | None, items: Sequence[AskItemShape]
+) -> OwnerHint | None:
+    """LP-947 — who the condition will be Waiting on when its next email is marked sent: the ONE
+    statement of the rule, which S3-01's "Becomes Waiting on Borrower when…" line renders.
+
+    The same rule `_wait_on_first_asked` applies when the send happens:
+    - a question to the underwriter waits on the lender;
+    - otherwise the condition waits on the recipient of its FIRST open ask, in item order.
+    So the prediction is what the move will set when that first email is the one marked sent.
+    `None` when there is nothing to send (her task, an item already in the file, display only).
+    """
+    if next_step in _QUESTIONS:
+        return WAITING_ON[DraftRecipient.UNDERWRITER]
+    for item in items:
+        # `recipient_key` is None for anything that is not an ask (her task, already in the file).
+        recipient = recipient_key(item) if item.status in _OPEN_ASK else None
+        if recipient is not None:
+            return WAITING_ON[recipient]
+    return None
 
 
 async def letter_facts(

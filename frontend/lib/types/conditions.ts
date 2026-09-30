@@ -540,6 +540,11 @@ export interface Condition {
   /** Who we are waiting on while our status is Waiting (LP-921: "Waiting on Borrower", "Waiting on LO"). */
   waiting_on: OwnerHint | null;
   /**
+   * LP-947 — who we WILL be waiting on once the next email (or the question) is marked sent: the
+   * server's rule, the one its send applies. Rendered by `becomes`, never recomputed here.
+   */
+  waiting_on_when_sent: OwnerHint | null;
+  /**
    * When the row last changed — the value an LP-912 write must echo back.
    *
    * WITHOUT IT THE STALE-WRITE GUARD IS UNREACHABLE. LP-912's moves are optimistic on `updated_at`,

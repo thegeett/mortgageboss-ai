@@ -118,6 +118,7 @@ from app.services.condition_drafts import (
     draft_view,
     drafts_for_file,
     question_tails_for_file,
+    waiting_on_when_sent,
 )
 from app.services.condition_enrich import RoundNotEnrichable, enrich_round_with_pdf
 from app.services.condition_evidence import EvidenceRefused, evidence_public_for_file
@@ -632,6 +633,8 @@ def _condition_public(
         items=items,
         question_draft=question_draft,
         evidence=evidence,
+        # LP-947: the server's rule for who the next send waits on, not a client copy of it.
+        waiting_on_when_sent=waiting_on_when_sent(condition.next_step, items or []),
     )
 
 

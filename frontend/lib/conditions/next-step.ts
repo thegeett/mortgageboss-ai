@@ -250,22 +250,6 @@ export function waitingLabel(owner: OwnerHint | null): string {
   return OWNER_LABEL[owner];
 }
 
-/** Who a performer's email leaves us waiting on, in Stage 2's owners. */
-const WAITING_ON: Record<Performer, OwnerHint> = {
-  borrower: "borrower",
-  lo: "broker",
-  processor: "processor",
-  lender: "lender",
-  title: "title",
-  attorney: "title",
-  insurance: "insurance",
-  hoa: "unknown",
-  employer: "unknown",
-  // LP-942: the appraiser's ask is in the lender's email, so marking it sent waits on the lender.
-  appraiser: "lender",
-  other_party: "unknown",
-};
-
 export interface Becomes {
   /** "Waiting on Borrower", "Ready to send". */
   status: string;
@@ -280,15 +264,15 @@ export interface Becomes {
 export function becomes(condition: Condition): Becomes | null {
   if (condition.prep_status !== "to_do" || isDisplayOnly(condition)) return null;
   const step = condition.next_step;
+  // LP-947: WHO we will wait on is the server's (`waiting_on_when_sent`, the rule its send applies);
+  // this only words it, and says which email moves it.
+  const status = `Waiting on ${waitingLabel(condition.waiting_on_when_sent)}`;
   if (step !== null && QUESTIONS.includes(step)) {
-    return { status: "Waiting on Lender", when: "the question is marked sent" };
+    return { status, when: "the question is marked sent" };
   }
   const first = askRecipients(condition)[0];
   if (first) {
-    return {
-      status: `Waiting on ${waitingLabel(WAITING_ON[first])}`,
-      when: `the ${EMAIL_WORD[first]} email is marked sent`,
-    };
+    return { status, when: `the ${EMAIL_WORD[first]} email is marked sent` };
   }
   if (stepOptions(condition).includes("i_will_do_it")) {
     return { status: "Ready to send", when: "your task is done" };

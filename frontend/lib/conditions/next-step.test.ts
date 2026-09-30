@@ -49,6 +49,7 @@ function condition(overrides: Partial<Condition> = {}): Condition {
     next_step: null,
     items: [],
     question_draft: null,
+    waiting_on_when_sent: null,
     ...overrides,
   } as Condition;
 }
@@ -152,22 +153,35 @@ describe("becomes (S3-01)", () => {
       item(),
       item({ performer: "title", performers: ["title"], option: "ask_third_party" }),
     ];
-    expect(becomes(condition({ items }))).toEqual({
+    expect(becomes(condition({ items, waiting_on_when_sent: "borrower" }))).toEqual({
       status: "Waiting on Borrower",
       when: "the borrower email is marked sent",
     });
   });
 
-  it("0132: the LO email leaves us waiting on the LO", () => {
+  it("0132: the broker is the LO while we wait (M5)", () => {
     const items = [item({ performers: ["borrower", "lo"], option: "ask_third_party" })];
-    expect(becomes(condition({ items }))?.status).toBe("Waiting on LO");
+    expect(becomes(condition({ items, waiting_on_when_sent: "broker" }))?.status).toBe(
+      "Waiting on LO",
+    );
   });
 
-  it("a question waits on the lender", () => {
-    expect(becomes(condition({ next_step: "ask_underwriter" }))).toEqual({
+  it("a question is worded as the question being sent", () => {
+    expect(
+      becomes(condition({ next_step: "ask_underwriter", waiting_on_when_sent: "lender" })),
+    ).toEqual({
       status: "Waiting on Lender",
       when: "the question is marked sent",
     });
+  });
+
+  it("WHO is the server's value, never recomputed from the items (LP-947)", () => {
+    // A borrower ask, and the server says title: the line says title. There is no client rule left
+    // to disagree with the server's.
+    const items = [item()];
+    expect(becomes(condition({ items, waiting_on_when_sent: "title" }))?.status).toBe(
+      "Waiting on Title",
+    );
   });
 
   it("her task becomes Ready to send", () => {
@@ -188,7 +202,7 @@ describe("words", () => {
     expect(waitingLabel(null)).toBe("someone");
   });
 
-  it("counts an appraiser's ask and a lender's as ONE lender email, waiting on the lender (LP-942)", () => {
+  it("counts an appraiser's ask and a lender's as ONE lender email (LP-942)", () => {
     const appraiser = item({
       performer: "appraiser",
       performers: ["appraiser"],
@@ -208,9 +222,6 @@ describe("words", () => {
       expect(askRecipients(both)).toHaveLength(1);
       expect(nextStepToken(both)?.text).toBe("In lender email");
     }
-    expect(
-      becomes(condition({ items: [appraiser] } as unknown as Partial<Condition>))?.status,
-    ).toBe("Waiting on Lender");
   });
 
   it("an ask says which email it is in; a task says nothing here", () => {

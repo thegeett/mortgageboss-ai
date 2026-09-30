@@ -28,9 +28,10 @@ hands its items to its successor (`carry_plan`), for her to confirm.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
-from typing import Any
+from typing import Any, Protocol
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
@@ -1097,7 +1098,19 @@ _RECIPIENT_ORDER = [
 ]
 
 
-def recipient_for(item: ConditionItem) -> tuple[str, str] | None:
+class AskShape(Protocol):
+    """What routing reads of an item: a stored `ConditionItem`, or the `ConditionItemPublic` the
+    condition payload carries (LP-947 predicts the wait from the public rows)."""
+
+    @property
+    def option(self) -> PlanOption: ...
+    @property
+    def performer(self) -> Performer: ...
+    @property
+    def performers(self) -> Sequence[str]: ...
+
+
+def recipient_for(item: AskShape) -> tuple[str, str] | None:
     """The email an ask goes into. The first performer asks, except a Borrower + LO item, which the LO
     sends to the borrower (0132's disclosure goes out in the LO email)."""
     if item.option not in _ASKS:
