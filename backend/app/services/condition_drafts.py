@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import html
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
@@ -91,6 +91,8 @@ class AskItemShape(Protocol):
     def performers(self) -> Sequence[str]: ...
     @property
     def status(self) -> ConditionItemStatus: ...
+    @property
+    def draft(self) -> Any: ...
 
 
 #: `condition_plan.recipient_for`'s keys, as stored.
@@ -571,26 +573,49 @@ def recipient_key(item: AskShape) -> DraftRecipient | None:
     return _RECIPIENT_KEY.get(found[0]) if found else None
 
 
-def waiting_on_when_sent(
-    next_step: PlanOption | None, items: Sequence[AskItemShape]
+def first_asked_owner(
+    items: Sequence[Any], gone: Callable[[Any], DraftRecipient | None]
 ) -> OwnerHint | None:
-    """LP-947 — who the condition will be Waiting on when its next email is marked sent: the ONE
-    statement of the rule, which S3-01's "Becomes Waiting on Borrower when…" line renders.
-
-    The same rule `_wait_on_first_asked` applies when the send happens:
-    - a question to the underwriter waits on the lender;
-    - otherwise the condition waits on the recipient of its FIRST open ask, in item order.
-    So the prediction is what the move will set when that first email is the one marked sent.
-    `None` when there is nothing to send (her task, an item already in the file, display only).
+    """S3-12's rule: the condition waits on the recipient of its FIRST ask, in item order, whose
+    email has gone (`gone` says which recipient's email that was, or None). Dropped items do not
+    count. ONE function, called by the move (`_wait_on_first_asked`, with the emails really sent) and
+    by the prediction (`waiting_on_when_sent`, with the named email treated as sent) — LP-947 review.
     """
-    if next_step in _QUESTIONS:
-        return WAITING_ON[DraftRecipient.UNDERWRITER]
     for item in items:
-        # `recipient_key` is None for anything that is not an ask (her task, already in the file).
-        recipient = recipient_key(item) if item.status in _OPEN_ASK else None
+        if item.status is ConditionItemStatus.NOT_NEEDED or item.option not in _ASKS:
+            continue
+        recipient = gone(item)
         if recipient is not None:
             return WAITING_ON[recipient]
     return None
+
+
+def waiting_on_when_sent(
+    next_step: PlanOption | None, items: Sequence[AskItemShape]
+) -> OwnerHint | None:
+    """LP-947 — who the condition will be Waiting on when its NEXT email is marked sent, which S3-01's
+    "Becomes Waiting on Borrower when the borrower email is marked sent" line renders.
+
+    The email the sentence names is the first OPEN ask's (the client's `askRecipients(…)[0]`). The
+    prediction is the move's own rule (`first_asked_owner`) with that email treated as sent, beside
+    any already sent, so the two cannot drift: it is the rule, run one send ahead. A question to the
+    underwriter waits on the lender. `None` when nothing will be sent.
+    """
+    if next_step in _QUESTIONS:
+        return WAITING_ON[DraftRecipient.UNDERWRITER]
+    # `recipient_key` is None for anything that is not an ask (her task, already in the file).
+    named = next(
+        (key for item in items if item.status in _OPEN_ASK and (key := recipient_key(item))), None
+    )
+    if named is None:
+        return None
+
+    def gone(item: AskItemShape) -> DraftRecipient | None:
+        key = recipient_key(item)
+        already = item.draft is not None and item.draft.status == "sent"
+        return key if key == named or already else None
+
+    return first_asked_owner(items, gone)
 
 
 async def letter_facts(
@@ -1165,14 +1190,15 @@ async def _wait_on_first_asked(
     if draft.condition_id is not None:
         target = WAITING_ON[draft.recipient]
     else:
-        target = None
-        for item in await _condition_items(db, condition):
+        items = await _condition_items(db, condition)
+        gone: dict[UUID, DraftRecipient] = {}
+        for item in items:
             if item.option not in _ASKS or item.draft_id is None:
                 continue
             owner_draft = await db.get(ConditionDraft, item.draft_id)
             if owner_draft is not None and not await _is_unsent(db, owner_draft):
-                target = WAITING_ON[owner_draft.recipient]
-                break
+                gone[item.id] = owner_draft.recipient
+        target = first_asked_owner(items, lambda item: gone.get(item.id))
         if target is None:
             return False
 

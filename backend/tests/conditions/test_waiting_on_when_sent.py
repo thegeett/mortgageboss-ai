@@ -23,12 +23,13 @@ from tests.conditions.test_condition_drafts import (  # noqa: F401
 )
 
 
-def _ask(performers: list[str], status: str = "open") -> Any:
+def _ask(performers: list[str], status: str = "open", sent: bool = False) -> Any:
     return SimpleNamespace(
         option=PlanOption.ASK_THIRD_PARTY,
         performer=Performer(performers[0]),
         performers=performers,
         status=ConditionItemStatus(status),
+        draft=SimpleNamespace(status="sent") if sent else None,
     )
 
 
@@ -82,5 +83,46 @@ def test_a_question_waits_on_the_lender_and_her_task_on_no_one() -> None:
         performer=Performer.PROCESSOR,
         performers=["processor"],
         status=ConditionItemStatus.OPEN,
+        draft=None,
     )
     assert waiting_on_when_sent(None, [task]) is None
+
+
+@pytest.mark.usefixtures("_drop_db_override")
+async def test_marking_only_the_named_email_sent_waits_on_whom_it_said(
+    db_session: AsyncSession,
+) -> None:
+    """LP-947 review: the sentence names ONE email ("…when the LO email is marked sent"). With two
+    unsent emails, mark only THAT one sent: the condition waits on the predicted owner. Marking every
+    draft sent (the test above) cannot tell "the first open ask" from "the first ask whose email went"."""
+    from tests.conditions.test_condition_reading import _client_for
+
+    db = db_session
+    loan_file, _, _, actor = await _confirmed(db)
+    client, headers = await _client_for(db, loan_file)
+    url = f"/api/v1/loan-files/{loan_file.id}/conditions"
+    async with client:
+        before = {r["lender_code"]: r for r in (await client.get(url, headers=headers)).json()}
+        # The premise: 0132 has asks in TWO emails, neither sent (the LO's disclosure first).
+        drafts = await _drafts(db, loan_file)
+        assert {d.id for d, m in drafts.values() if m.status.value == "draft"} >= {
+            drafts["lo"][0].id,
+            drafts["title_attorney"][0].id,
+        }
+        assert before["0132"]["waiting_on_when_sent"] == "broker"
+        await mark_sent(db, loan_file=loan_file, draft=drafts["lo"][0], actor_user_id=actor)
+        after = {r["lender_code"]: r for r in (await client.get(url, headers=headers)).json()}
+    assert after["0132"]["waiting_on"] == "broker"
+
+
+def test_the_prediction_is_the_moves_rule_one_send_ahead() -> None:
+    """An earlier ask whose email already went decides the move, so it decides the prediction too:
+    one rule (`first_asked_owner`), not "the first open ask" beside "the first ask whose email went"."""
+    items = [_ask(["title"], "done", sent=True), _ask(["borrower"])]
+    assert waiting_on_when_sent(None, items) is OwnerHint.TITLE
+
+
+def test_a_dropped_ask_decides_nothing_even_if_its_email_went() -> None:
+    """The move reads live items only (`_condition_items` leaves out NOT_NEEDED), so the rule does."""
+    items = [_ask(["title"], "not_needed", sent=True), _ask(["borrower"])]
+    assert waiting_on_when_sent(None, items) is OwnerHint.BORROWER
