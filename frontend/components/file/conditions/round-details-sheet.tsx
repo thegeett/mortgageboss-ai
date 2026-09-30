@@ -132,6 +132,14 @@ export function RoundDetailsSheet({
               {enrichSummary(enrichment)}
             </p>
           ) : null}
+          {/* LP-948b: a tie is never picked for her; it is asked. */}
+          {enrichment && enrichment.questions.length > 0 ? (
+            <ul className="mt-2 space-y-1 rounded-lg border border-warning/40 bg-warning/5 p-2 text-xs text-foreground-2">
+              {enrichment.questions.map((question) => (
+                <li key={question}>{question}</li>
+              ))}
+            </ul>
+          ) : null}
 
           <div className="mt-3">
             <LetterDetails round={round} />

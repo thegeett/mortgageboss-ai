@@ -60,7 +60,9 @@ def _snapshot(docs: list[DocumentEntry]) -> Snapshot:
 def test_binder_materializes_annual_over_twelve() -> None:
     value, reason = _housing_insurance_monthly(_snapshot([_binder("1200")]), "loan", None)
     assert value == "100.00"  # 1200 / 12, carried to cents (LP-615)
-    assert "1200" in reason and "12" in reason
+    # LP-948d: the division, whole. It was `"1200" in reason and "12" in reason`, whose second half
+    # cannot fail while the first holds ("1200" contains "12"), so it never checked the divisor.
+    assert reason.endswith("(annual premium 1200 ÷ 12)")
 
 
 def test_non_whole_division_is_carried_to_cents_not_to_a_whole_number() -> None:

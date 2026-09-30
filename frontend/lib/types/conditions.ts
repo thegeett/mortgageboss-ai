@@ -939,6 +939,11 @@ export interface ConditionEnrichResult {
   /** A COUNT, not the texts — those are the lender's words and come back on the round. */
   unmatched_existing: number;
   warnings: string[];
+  /**
+   * LP-948b — a PDF row that matched more than one pasted condition even after the code and the
+   * wording, as the question she answers. Nothing was filled for it. Codes and row numbers only.
+   */
+  questions: string[];
 }
 
 // --- Stage 3: the reading (LP-919) ------------------------------------------------------------- //

@@ -55,7 +55,11 @@ const BORROWER: ConditionDraft = {
   in_this_email: [
     { condition_id: "a", code: "7086", label: "More assets for closing" },
     { condition_id: "b", code: "6132", label: "One more consecutive month" },
-    { condition_id: "c", code: "6637", label: "Earnest money: source and clearance" },
+    {
+      condition_id: "c",
+      code: "6637",
+      label: "Earnest money: source of the earnest money and clearance",
+    },
   ],
   asked_once: [{ what: "July and August statements", codes: ["7086", "6132", "6637"] }],
   other_drafts: [],
@@ -72,7 +76,9 @@ describe("ConditionDraftDialog", () => {
     render(<ConditionDraftDialog fileId="f1" draftId="d1" onClose={vi.fn()} />);
     expect(screen.getByText("Email to the borrower · round 1")).toBeDefined();
     expect(screen.getByText(DRAFT_SUBTITLE)).toBeDefined();
-    expect(screen.getByText("Earnest money: source and clearance")).toBeDefined();
+    expect(
+      screen.getByText("Earnest money: source of the earnest money and clearance"),
+    ).toBeDefined();
     expect(screen.getByText("7086, 6132 and 6637")).toBeDefined();
     expect(screen.getByText(/Account shown as last four only/)).toBeDefined();
     expect(screen.getByText("Alex Rivera <alex.rivera@example.com>")).toBeDefined();

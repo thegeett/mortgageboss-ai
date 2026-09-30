@@ -191,10 +191,18 @@ def _is_planned(condition: Condition, has_items: bool) -> bool:
 async def _items_by_condition(
     db: AsyncSession, loan_file_id: UUID
 ) -> dict[UUID, list[ConditionItem]]:
+    # LP-948c: NOT A WITHDRAWN CONDITION'S ITEMS. Withdrawing (LP-940) soft-deletes the condition and
+    # leaves its items as they were, so Undo brings it back whole; a child-table query must filter the
+    # parent, or a caller that iterates this map shows items of a condition that is on no list.
     rows = (
         await db.execute(
             select(ConditionItem)
-            .where(ConditionItem.loan_file_id == loan_file_id, ConditionItem.deleted_at.is_(None))
+            .join(Condition, Condition.id == ConditionItem.condition_id)
+            .where(
+                ConditionItem.loan_file_id == loan_file_id,
+                ConditionItem.deleted_at.is_(None),
+                Condition.deleted_at.is_(None),
+            )
             .order_by(ConditionItem.sequence, ConditionItem.created_at)
         )
     ).scalars()

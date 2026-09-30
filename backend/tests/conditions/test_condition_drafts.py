@@ -396,7 +396,7 @@ async def test_the_dialog_reads_what_the_screens_show(db_session: AsyncSession) 
         assert [(c["code"], c["label"]) for c in borrower["in_this_email"]] == [
             ("7086", "More assets for closing"),
             ("6132", "One more consecutive month"),
-            ("6637", "Earnest money: source and clearance"),
+            ("6637", "Earnest money: source of the earnest money and clearance"),
         ]
         assert borrower["asked_once"] == [
             {"what": "July and August statements", "codes": ["7086", "6132", "6637"]}
@@ -423,7 +423,7 @@ async def test_the_dialog_reads_what_the_screens_show(db_session: AsyncSession) 
             "LO (Priya → loan officer)",
         ]
         assert title["other_drafts"][0]["summary"] == "3 conditions"
-        assert title["other_drafts"][1]["summary"] == "0132 disclosure"
+        assert title["other_drafts"][1]["summary"] == "0132 re-signed disclosure"
 
         question = (
             await client.get(f"{base}/{by_label['Question 6178']['id']}", headers=headers)

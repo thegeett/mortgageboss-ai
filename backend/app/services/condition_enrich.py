@@ -89,6 +89,10 @@ class EnrichResult:
     #: Pasted rows the PDF does not contain. KEPT, never removed (ADR-404: a partial source may
     #: add and update, never remove or clear), and surfaced as a warning so the processor can look.
     unmatched_existing: list[str] = field(default_factory=list)
+    #: LP-948b — PDF rows that matched MORE THAN ONE pasted condition, even after the code and the
+    #: wording, as the question she answers. Never picked: nothing is filled for them and nothing
+    #: added. Codes and row numbers only, never the lender's wording (ADR-405).
+    questions: list[str] = field(default_factory=list)
 
     @property
     def warnings(self) -> list[str]:
@@ -100,8 +104,33 @@ class EnrichResult:
         ]
 
 
-def _match_key(code: str | None, text: str) -> tuple[str | None, str]:
-    return (code or None, fingerprint(text))
+def _choose[T](pdf_row: ParsedRow, candidates: list[T], code_of: Any, text_of: Any) -> list[T]:
+    """LP-948b — the existing rows a PDF row is: ONE is a match, none is a new row, more is a tie.
+
+    The lender code first: a code the PDF prints and exactly one existing row carries decides it,
+    whatever the wording. Then the wording (the fingerprint), among the rows with that code when
+    there are several, else among all. A tie that survives both is returned whole, for the caller to
+    put to her; it is never settled by row order (the LP-944 review: two identical-text conditions
+    on one file made "which one" the query planner's choice).
+    """
+    text = fingerprint(pdf_row.verbatim_text)
+    code = pdf_row.lender_code or None
+    same_code = [c for c in candidates if code and (code_of(c) or None) == code]
+    if len(same_code) == 1:
+        return same_code
+    pool = same_code or candidates
+    return [c for c in pool if fingerprint(text_of(c) or "") == text]
+
+
+def _question(pdf_row: ParsedRow, sequences: list[int]) -> str:
+    which = (
+        f"the PDF's {pdf_row.lender_code}" if pdf_row.lender_code else f"PDF row {pdf_row.sequence}"
+    )
+    rows = " and ".join(str(n) for n in sorted(sequences))
+    return (
+        f"Which pasted condition is {which}? Conditions {rows} read the same. "
+        "Nothing was filled for it; set the code on the right one."
+    )
 
 
 def _merge_row(existing: dict[str, Any], pdf_row: ParsedRow) -> bool:
@@ -132,16 +161,27 @@ def _merge_draft_rows(round_: ConditionRound, sheet: ParsedSheet, result: Enrich
     # rows the PDF itself just added — they are unmatched by construction, and counting them would
     # report every new condition as a missing one in the same breath.
     was_already_here = {id(row) for row in rows}
-    by_key = {_match_key(row.get("lender_code"), row.get("verbatim_text", "")): row for row in rows}
-    # The second pass the spec asks for: "(code, fingerprint), then fingerprint alone". A pasted row
-    # usually has NO code, so the fingerprint-only pass is the one that does the work here.
-    by_text = {fingerprint(row.get("verbatim_text", "")): row for row in rows}
+    pasted = list(rows)
 
     matched_rows: set[int] = set()
+    asked_rows: set[int] = set()
     for pdf_row in sheet.rows:
-        target = by_key.get(_match_key(pdf_row.lender_code, pdf_row.verbatim_text)) or by_text.get(
-            fingerprint(pdf_row.verbatim_text)
+        # The code, then the wording (`_choose`). A pasted row usually has NO code, so the wording
+        # does the work here. Rows already matched are not candidates twice.
+        found = _choose(
+            pdf_row,
+            [row for row in pasted if id(row) not in matched_rows],
+            lambda row: row.get("lender_code"),
+            lambda row: row.get("verbatim_text", ""),
         )
+        if len(found) > 1:
+            result.questions.append(
+                _question(pdf_row, [int(row.get("sequence") or 0) for row in found])
+            )
+            # STILL CANDIDATES: a second identical PDF row is tied the same way, never "new".
+            asked_rows.update(id(row) for row in found)
+            continue
+        target = found[0] if found else None
         if target is None:
             rows.append(
                 DraftRowPublic.model_validate(pdf_row, from_attributes=True).model_dump(mode="json")
@@ -155,7 +195,7 @@ def _merge_draft_rows(round_: ConditionRound, sheet: ParsedSheet, result: Enrich
     result.unmatched_existing = [
         row.get("verbatim_text", "")[:80]
         for row in rows
-        if id(row) in was_already_here and id(row) not in matched_rows
+        if id(row) in was_already_here and id(row) not in matched_rows | asked_rows
     ]
     # Re-sequence so the review screen reads in sheet order with the added rows in place.
     for index, row in enumerate(rows, start=1):
@@ -181,14 +221,21 @@ async def _merge_conditions(
             )
         ).all()
     )
-    by_key = {_match_key(c.lender_code, c.verbatim_text): c for c in existing}
-    by_text = {c.text_fingerprint: c for c in existing}
-
     matched: set[UUID] = set()
+    asked: set[UUID] = set()
     for pdf_row in sheet.rows:
-        target = by_key.get(_match_key(pdf_row.lender_code, pdf_row.verbatim_text)) or by_text.get(
-            fingerprint(pdf_row.verbatim_text)
+        found = _choose(
+            pdf_row,
+            [c for c in existing if c.id not in matched],
+            lambda c: c.lender_code,
+            lambda c: c.verbatim_text,
         )
+        if len(found) > 1:
+            result.questions.append(_question(pdf_row, [c.sequence for c in found]))
+            # STILL CANDIDATES: a second identical PDF row is tied the same way, never "new".
+            asked.update(c.id for c in found)
+            continue
+        target = found[0] if found else None
         if target is None:
             created = Condition(
                 company_id=round_.company_id,
@@ -265,7 +312,9 @@ async def _merge_conditions(
                 )
             )
 
-    result.unmatched_existing = [c.verbatim_text[:80] for c in existing if c.id not in matched]
+    result.unmatched_existing = [
+        c.verbatim_text[:80] for c in existing if c.id not in matched | asked
+    ]
 
 
 async def enrich_round_with_pdf(

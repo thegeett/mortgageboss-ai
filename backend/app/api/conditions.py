@@ -911,6 +911,7 @@ async def attach_pdf(
         # come back on the round; a response does not need to restate them to report a number.
         unmatched_existing=len(result.unmatched_existing),
         warnings=result.warnings,
+        questions=result.questions,
     )
 
 

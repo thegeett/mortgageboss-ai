@@ -293,7 +293,7 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-945 Wording for the expert's two questions | REVIEWED | `058d0e7a` + `9392f19f` | | S3-11 checkbox | batch 3, the owner's list of 2026-09-30 | REVIEWED by the reviewer: no defect. Outward text traced surface by surface (emails, the package, the upload link which names nothing, the underwriter question); the sweep's result is right but its gate — type-level text only "when any item is asked" — misses `render_question`, which renders the type's short-or-name for any condition, and 19 of 56 types have no asked item. No VOE member today. IE-08: the owner's third route (regulator listing) has no document type so it cannot arrive, and the 120-day note states a checkable rule the item does not check. IE-08 unmapped is normal — 10 of 56 are |
 | LP-946 Items with more than one performer | AWAITING_REVIEW (follow-up) | `1233372a`, review `9041cb3e` | | reading box: parts under their item | batch 3; an item is split into parts, one per destination (`part_of_item_id`, migration `c4a8e2f1b637`); the LO relays to the borrower (STOP AND ASK 3) | REVIEWED by the reviewer: 1 finding. The split invariants hold for EVERY 1-, 2- and 3-performer combination (zero violations: no stranded ask, her task iff the processor is a performer, one item per destination), and split-before-route at all three call sites is load-bearing. FINDING: `update_item`'s re-split soft-deletes any non-DONE part, so a part whose ask was already SENT is deleted and the file stops showing a request that went out — reproduced, and against LP-940's own doctrine that a sent draft keeps its items. No test covers a re-edit after sending **Follow-up `247ddd14` reviewed: no findings** — only OPEN parts are deleted now, the test asserts its premise first, four mutations kill one test each, and both consequences verified independently (`move_prep_status` has no item gate, so a manual Ready works; the item DELETE endpoint has no frontend caller). Note recorded: re-adding a performer whose ask went out does NOT re-ask them |
 | LP-947 One source for "waiting on" | AWAITING_REVIEW (follow-up) | `8a9def53`, review `c53e299b` | | detail sheet's "Becomes …" line | batch 3; the server sends `waiting_on_when_sent` with each condition, computed by the rule its send applies; the client's `WAITING_ON` and its drift check are deleted | REVIEWED: no defect. The reviewer's first reading — that the prediction and the move disagree (0132: prediction broker, sending the title email gives title) — was checked before reporting and is NOT a bug: `becomes()` names a specific email, and for that email the two agree (measured). FINDING: the ticket claims "the ONE statement of the rule" but there are two predicates (`status in _OPEN_ASK` vs `option in _ASKS` + a sent draft) that coincide only on the named email, and `test_the_prediction_is_the_move` marks EVERY draft sent — the one configuration where they always agree — so it cannot see the difference it exists to prove. Deleting the client's WAITING_ON map closes the LP-942 cross-language open item **Follow-up `679d598a` reviewed: no findings** — `first_asked_owner` is ONE function run by both the move and the prediction (one send ahead), so the equivalence is structural rather than coincidental. The named-email coupling measured across all 11 fixture conditions: 0 disagreements. Three mutations kill, including the NOT_NEEDED survivor. Note: the skip is dead for the move and load-bearing for the prediction, because their item sources differ |
-| LP-948 Four small defects | PENDING | | | | |
+| LP-948 Four small defects | AWAITING_REVIEW | | | draft dialog labels; S1-09 tie questions | batch 3; (a) labels not keys (STOP AND ASK 5); (b) code, then wording, a tie asked; (c) withdrawn parents filtered; (d) the assertion rewritten, a mutation shown failing |
 | LP-939 Real-model trial (script only) | PENDING | | | none | un-skipped in batch 3 |
 
 ## Stage 3A — acceptance (build prompt §6)
@@ -502,6 +502,7 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
 | 2 | plan §2.3 and §5 LP-924 (B3-2-10) against LP-924's own **Done when** | Is DU resubmission required when the DTI *is* above 45%, or only when it *crosses* 45% from at or under it? | **Answered by the product owner, 2026-09-29: the crossing reading is correct.** B3-2-10 reads "the DTI ratio recalculated by the lender to now exceed 45%, or increase by 3 percentage points or more (if the recalculated DTI ratio is 50% or less)", with the table 35→40 yes, 44→46 yes, 46→48 no, 46→50 yes. She added a limb: a recalculated DTI over 50% always flags, and the 3-point limb applies only at 50% or less. Built in [LP-936](../tickets/LP-936.md), all four rows and 50→51 pinned. The first reading (LP-924's) stands. |
 | 3 | the owner's LP-946 ("every outside performer gets the ask in their own draft") against plan §6 and the reviewed Stage 3A acceptance (0132's `[borrower, lo]` disclosure goes in the LO email only) | Does the borrower on a borrower + LO item get their own email too? | **Reading taken: no.** The LO relays to the borrower (plan §6, the acceptance test), so `[borrower, lo]` stays one ask in the LO's email; every other combination is split, each outside performer in their own draft and her task if she is one. Built in [LP-946](../tickets/LP-946.md). If the borrower should also be emailed directly, it is the one line `relayed` in `destinations`. |
 | 4 | the LP-946 review: a part whose ask went out is now kept when she removes its performer | Does a kept part still block the condition from reaching Ready to send? | **Reading taken: yes, it blocks the automatic move.** Someone was asked and has not answered, and the record says so; `_settle` counts it like any live item. She is never stranded: a manual move to Ready is allowed from To do or Waiting with no item gate. The alternatives are dimming it like a withdrawal or marking it not needed when its performer is removed. There is no UI today to remove a part by hand (the item DELETE endpoint has no frontend caller). |
+| 5 | the owner's LP-948 (a) "labels, never internal item keys" against the S3-04 mock's "Earnest money: source and clearance", whose words are library item keys | Should a library item's key stand as its short word in the partial label? | **Reading taken: no, the owner's words are literal.** An item is named by its library label, else its own name, so the line reads "Earnest money: source of the earnest money and clearance". The mock's shorter words are one line in `item_words`, a library key for a library item and a name only for generated keys. Built in [LP-948](../tickets/LP-948.md). |
 
 ## Stage 3 — open items (not blocking)
 
@@ -510,7 +511,9 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   and the history line ("Withdrawn as entered in error") never carried the reason; it stays in the event's
   detail. If "stays in the history" meant she can see later why, the history line should carry it. The
   owner's call.
-- **Child-table queries that do not filter the parent condition** (LP-940 review): `_items_by_condition`
+- **Child-table queries that do not filter the parent condition** (LP-940 review). **The named member is
+  fixed in LP-948 (c)**: `_items_by_condition` joins the parent. The CLASS stays open: other queries on
+  child tables were not censused in LP-948, whose scope was the one query. Originally: `_items_by_condition`
   returns a withdrawn condition's items. Safe today because every caller keys in by a condition that is on
   no list; a caller that iterates the map would show them.
 
@@ -710,6 +713,15 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   `WAITING_ON` pair: a mirror freezes the duplication rather than removing it, and a drift here is visible
   (the sentence would name one email while the status named another). The durable fix is the server sending
   WHICH email is named, so the client renders both halves instead of deriving one.
+
+- **A query with no ORDER BY that feeds a single-row pick is a CLASS, now four times** — raised by the
+  LP-948 review, open, for a convention rather than a fix. The instances, each found after something looked
+  wrong and each fixed in isolation: `email_send.py`'s mailbox; `condition_import._existing_conditions`
+  (`possible_match` changed from run to run); `condition_drafts._drafts` (LP-944's flaky test);
+  `condition_enrich`'s fingerprint dict (LP-948 b, where a tie is now asked). The LP-944 review counted 28
+  unordered order-sensitive sites in `app/` (`.first()`, `[0]`, `[-1]`, `{key: row for row in …}`),
+  nearly all benign today and none guarded. Proposed: write the rule where conventions live
+  (`docs/project-structure.md`): any query whose result feeds one of those shapes needs an ORDER BY.
 
 - **The product owner's sign-off on the library's top 20 types** (decision 6), once LP-918 has written
   `phase4.5-library-review.md`.
@@ -977,12 +989,9 @@ check's swap blindness; three intermittent tests that probably share one cause.
   borrower was not emailed~~ (answered by the owner, built in LP-946: the borrower is emailed AND she has
   her task); ~~the server could send the "waiting on" hint so the client stops keeping its own copy~~
   (built in LP-947).
-- **Recorded defects, not built:**
-  - `condition_enrich` matches sheet rows by a non-unique text fingerprint from an unordered query
-    (order it, as `email_send.py` did);
-  - a vacuous assertion in `test_insurance_wiring.py`;
-  - the draft dialog renders item keys ("6132 reask 3f2a9b1c");
-  - child-table queries that do not filter a withdrawn parent.
+- ~~**Recorded defects, not built**~~ — **all four built in [LP-948](../tickets/LP-948.md)**: round
+  matching by code, then wording, with a tie asked; the vacuous insurance assertion; item keys in the
+  draft dialog; child-table queries that did not filter a withdrawn parent.
 - The library's top-20 sign-off.
 
 **Last full runs on the finished tree** (three, sequential): backend 8929 passed, 1 failed (the named sonnet

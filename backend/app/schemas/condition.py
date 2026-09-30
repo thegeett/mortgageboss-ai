@@ -1852,6 +1852,10 @@ class ConditionEnrichResult(BaseModel):
     #: Rows the paste had and the PDF does not. KEPT, never removed (ADR-404).
     unmatched_existing: int = 0
     warnings: list[str] = Field(default_factory=list)
+    #: LP-948b — a PDF row that read the same as more than one pasted condition, as the question she
+    #: answers ("Which pasted condition is the PDF's 5868? Conditions 3 and 5 read the same…"). Codes
+    #: and row numbers only, never the lender's wording. Nothing was filled or added for it.
+    questions: list[str] = Field(default_factory=list)
 
 
 class ConditionImportResult(BaseModel):

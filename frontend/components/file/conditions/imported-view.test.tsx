@@ -540,6 +540,7 @@ describe("the round-details sheet (S1-09)", () => {
       added: 0,
       unmatched_existing: 0,
       warnings: [],
+      questions: [],
     });
 
     // The invalidation lands: the same round, now carrying the PDF and what it filled.
@@ -581,11 +582,40 @@ describe("the round-details sheet (S1-09)", () => {
       added: 0,
       unmatched_existing: 0,
       warnings: [],
+      questions: [],
     });
 
     expect(await screen.findByText(/Nothing new was found in it/)).toBeDefined();
     expect(screen.getByText(/It matched 6 pasted conditions/)).toBeDefined();
     expect(screen.queryByText(/Filled the codes/)).toBeNull();
+  });
+
+  it("asks her about a tie instead of picking one (LP-948b)", async () => {
+    show([round({ id: "r2", round_number: 2 }, ["paste"])]);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(input, "files", {
+      value: [new File(["x"], "approval.pdf", { type: "application/pdf" })],
+    });
+    fireEvent.change(input);
+    // The server's own sentence (`condition_enrich._question`), not an invented one.
+    const question =
+      "Which pasted condition is the PDF's 5868? Conditions 3 and 5 read the same. " +
+      "Nothing was filled for it; set the code on the right one.";
+    attachMutate.mock.calls[0]?.[1]?.onSuccess?.({
+      round_id: "r2",
+      round_number: 2,
+      status: "imported",
+      sheet_format: "uwm_approval_letter",
+      filled_header: false,
+      filled_expiry: false,
+      filled_date_printed: false,
+      matched: 4,
+      added: 0,
+      unmatched_existing: 0,
+      warnings: [],
+      questions: [question],
+    });
+    expect(await screen.findByText(question)).toBeDefined();
   });
 
   it("shows the History, and this test asserted the opposite one commit ago", () => {

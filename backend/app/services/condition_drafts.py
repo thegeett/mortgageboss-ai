@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.communications.sanitise import sanitise_html
 from app.conditions.library import ConditionType, LibraryItem, load_library
+from app.documents.display_names import in_sentence
 from app.models.borrower import Borrower
 from app.models.communication import (
     BodyFormat,
@@ -1409,6 +1410,28 @@ async def draft_needs_title(db: AsyncSession, need_id: UUID) -> str | None:
     return need.title if need is not None else None
 
 
+def item_words(condition: Condition, item: ConditionItem) -> str:
+    """An item as a sentence names it (LP-948a): a library item by its library label, else its library
+    name; any other item (a re-ask, a part, one she added) by its own name. NEVER its key.
+
+    A key is an internal handle (`reask_3f2a9b1c`, and since LP-946 a part's `source.employer`), and
+    the draft dialog is read by her and quoted to the people she emails.
+    """
+    library_type = load_library().get(condition.canonical_type_id)
+    # A part (LP-946) is `<library key>.<performer>`; no library key has a dot (checked: 0 of 52).
+    base = item.key.split(".", 1)[0]
+    library_item = (
+        next((each for each in library_type.items if each.key == base), None)
+        if library_type
+        else None
+    )
+    if library_item is not None:
+        # The LIBRARY's wording, not the item's: an item's name can carry its figure ("Source of the
+        # $2,850.00"), which a side-column label does not repeat.
+        return in_sentence(library_item.label or library_item.name)
+    return in_sentence(item.name)
+
+
 def condition_label(condition: Condition, items: list[ConditionItem]) -> str:
     """How an email's side column names a condition (S3-04, S3-05).
 
@@ -1428,7 +1451,7 @@ def condition_label(condition: Condition, items: list[ConditionItem]) -> str:
         elif set(carried) >= live_keys or short is None:
             label = short or items[0].name
         else:
-            parts = [key.replace("_", " ") for key in carried]
+            parts = [item_words(condition, item) for item in items]
             label = f"{short}: {_join(parts)}"
     else:
         label = short or (items[0].name if items else (condition.lender_code or ""))
@@ -1564,7 +1587,7 @@ async def draft_view(
             ids = list(dict.fromkeys(item.condition_id for item in other_items))
             if len(ids) == 1:
                 condition = await db.get(Condition, ids[0])
-                first = other_items[0].key.replace("_", " ")
+                first = item_words(condition, other_items[0]) if condition else ""
                 summary = f"{condition.lender_code if condition else ''} {first}".strip()
             else:
                 summary = f"{len(ids)} conditions"
