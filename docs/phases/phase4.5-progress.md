@@ -285,7 +285,7 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-937 Superseded failures | REVIEWED | `770d2513` | the review section in [LP-937](../tickets/LP-937.md) (written, not yet committed) | S3-08, S3-12 re-shot: unchanged (no drawn state shows it) | review found 1: a superseded row that is still evidence can hold the condition while the sheet hides the finding doing it — the Stage 3B dead end through the other door; plus the "together with" wording is false when both rows are the same account. Counts verified (8702/1, 2125/2125); a second intermittent test recorded. **Follow-up `da6fbd19` reviewed: no findings** — `replaced` and `_settle`'s filter are now the same predicate negated, so a row that can hold the condition can no longer be hidden; the third member (Next step) verified reachable; predicate pinned in both directions |
 | LP-938 Library fixes (AS-04, the review table) | REVIEWED | `37f5aa9f` | the review section in [LP-938](../tickets/LP-938.md) (written, not yet committed) | none (no screen) | review found 1 (pre-existing, not a regression): AS-04's receipt item's only check, `amount_matches`, reads bank-statement transactions and so returns not_run for an earnest money receipt — the item can never pass without a manual accept. Table verified independently of its generator: 20 rows x 5 columns re-derived from the raw YAML and seed files, 0 mismatches. The owner's top-20 sign-off still open, on the regenerated table. **Follow-up `8239ea91` reviewed: 1 finding** — the receipt is fixed and the purchase-agreement census is clean (only AS-11 lists it, with no amount check), but the same dead end is open on AS-06's `gift_letter` item, whose only document type carries `gift_amount` that `amount_matches` never reads; latent, since AS-05/AS-06 are on no mapped sheet. **Second follow-up `c9425f67` reviewed: 1 finding** — the typed `OWN_AMOUNT` allow-list is the right guard (better than the tripwire the reviewer suggested: it makes the unsafe pairing unrepresentable and takes `_takes` off the correctness path), but `reask_name` now names a receipt, gift letter or deposit slip "A corrected the statement", which is both false and ungrammatical, on a re-ask path this commit opens. **Third follow-up `71ca84a8` reviewed: 1 finding + 2 recorded** — copying the failed item's performer is right (a wrong receipt is title's, and it used to re-ask the borrower), but `reask_to` falls back to "borrower" both when the item is not an ask and when its performer has no `_RECIPIENT` entry, and in the second case the ask is created for someone else and reaches no draft; the grammar fix is universal, the document name is fixed for 3 types of 32. **Fourth follow-up `341f9c54` reviewed: 1 finding** — the gate is now correct by construction (`recipient_for` decides both) and the naming class closes for 29 of 32, but `document_label` renders five types as non-English where a re-ask now prints them, four on mapped sheets. **Reviewer agrees LP-938 can close**, the open items carrying the remainder |
 | LP-939 Real-model trial | SKIPPED | | | none | skipped for now by the owner, 2026-09-29 |
-| LP-940 Withdraw a hand-added condition | AWAITING_REVIEW | | | detail sheet | amends ADR-404 |
+| LP-940 Withdraw a hand-added condition | REVIEWED | `faea58ad` | the review section in [LP-940](../tickets/LP-940.md) (written, not yet committed) | detail sheet | amends ADR-404. Review found 1: `submit` never rewrites `package.rows`, so a condition withdrawn while the package was BUILT stays in the submitted record — the refusal then tells her it went to the lender (false) and the Undo becomes one-way. Census verified complete for the 40 Condition-row readers, plus one class it did not name (child-table queries that do not filter the parent). Counts verified (8723/1, 2135/2135) |
 
 ## Stage 3A — acceptance (build prompt §6)
 
@@ -466,6 +466,16 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   **intermittent, seen once in three full runs** by the LP-937 review. It passes alone, passes with its
   module (22/22), and passes right after the sonnet test; a third identical fixed-order run was clean.
   Not caused by LP-937 and not the inbox-token flake below. Recorded so the next ticket is not blamed.
+- `backend/tests/services/test_timeline_lp812.py::test_the_timeline_never_carries_a_body` —
+  **intermittent, seen once in two full runs** by the LP-940 review. It passes alone, passes with its
+  module (23/23), and passes when run straight after the withdrawal tests, which rules out the one
+  interaction that would have mattered (LP-940's new event carries her free-text reason, and this test is
+  the guard against a timeline row carrying a body). A second identical full run was clean.
+- **THREE tests now fail once each in a full run and pass in isolation** (the reask email, this timeline
+  one, and — separately — the randomised inbox token, which is understood). Two unexplained ones with the
+  same signature are more likely one shared cause in the suite's shared state than two independent flaky
+  tests. Worth someone reproducing under `-p no:randomly` with `--lf` rather than adding a fourth line
+  here next time.
 - `backend/tests/services/test_loan_file_ids.py::test_inbox_token_is_independent_of_display_id` —
   **randomised, and it fails about once in a thousand runs** (measured by the LP-922 review: 2 trips in
   2000 simulated runs, 0.100%). It draws 1000 display ids and asserts the 4-character code is not a
@@ -499,6 +509,16 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   LP-937's own reasoning — hide findings on the "Replaced by" branch only, since a row that is still
   evidence is a row whose findings still count. Reproduction and detail in
   [LP-937](../tickets/LP-937.md) "Review".
+
+- **A submitted package's stored rows can claim a condition it did not send** — found by the LP-940
+  review, open. `submit` sets `status` and `submitted_at` but never assigns `package.rows`, though its
+  docstring says "the rows frozen as the record". So a hand-added condition withdrawn while the package was
+  BUILT stays in the stored rows once it is submitted: `live_rows` correctly keeps it out of what is sent,
+  but afterwards `_submitted_on` reads the stale row, the withdrawal refusal tells her *"It went to the
+  lender in the package submitted on <date>"* (false), and the Undo becomes one-way — she can restore it
+  but never withdraw it again. Reproduced end to end. Fix: freeze `await live_rows(...)` into
+  `package.rows` at submission, which is what the docstring already claims. Detail in
+  [LP-940](../tickets/LP-940.md) "Review".
 
 - **The product owner's sign-off on the library's top 20 types** (decision 6), once LP-918 has written
   `phase4.5-library-review.md`.
