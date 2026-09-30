@@ -5,8 +5,8 @@ underscores, which is right for the rule engine's own reasons and wrong in an em
 `borrower_s_authorization_for_counseling` became "borrower s authorization for counseling", `verbal_voe`
 "verbal voe", and `letter_of_explanation_asset` leaked its internal discriminator ("… asset"). This is
 the display name: an explicit name where the rule reads badly, and a word-level rule (acronyms kept as
-acronyms) for the rest. `tests/documents/test_display_names.py` fails for any type the condition library
-uses without a clean one.
+acronyms) for the rest. `tests/documents/test_display_names.py` fails for any CATALOGUED type without a
+clean one: the attention panel names any document, not only the library's.
 
 `display_name` is for a list or a heading ("Borrower's authorization for counseling"); `in_sentence`
 for mid-sentence ("A corrected borrower's authorization for counseling").
@@ -31,6 +31,13 @@ DISPLAY_NAMES: dict[str, str] = {
     # file can ask for both (LP-943 review). The family is parenthesised; this matches it.
     "letter_of_explanation_misc": "Letter of explanation (other)",
     "letter_of_explanation_property": "Letter of explanation (property)",
+    # LP-943 follow-up review: catalogue types the attention panel can name, where a form number or an
+    # acronym-plus-number is the whole name.
+    "social_security_administration_ssa_89": "Form SSA-89",
+    "k_1_shareholder_profit_and_loss_transcripts": "K-1 shareholder profit and loss transcripts",
+    "k1_statement": "K-1 statement",
+    "form_4506c": "Form 4506-C",
+    "form_4506t_request_for_transcript": "Form 4506-T request for transcript",
     "verbal_voe": "Verbal VOE",
     "voe": "Verification of employment (VOE)",
     "w2": "W-2",
@@ -48,6 +55,7 @@ ACRONYMS: dict[str, str] = {
     "ira": "IRA",
     "irs": "IRS",
     "ssn": "SSN",
+    "ssa": "SSA",
     "llc": "LLC",
     "hud": "HUD",
     "poa": "POA",

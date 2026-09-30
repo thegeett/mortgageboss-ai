@@ -22,6 +22,7 @@ import re
 
 import pytest
 from app.conditions.library.loader import load_library
+from app.documents.catalog import CATALOG
 from app.documents.display_names import ACRONYMS, DISPLAY_NAMES, display_name, in_sentence
 
 _LOWER_ACRONYMS = {key for key, value in ACRONYMS.items() if value.upper() == value}
@@ -61,10 +62,24 @@ def test_the_five_named_by_the_owner() -> None:
     assert display_name("drivers_license") == "Driver's license"
 
 
-@pytest.mark.parametrize("document_type", _library_types())
-def test_every_library_document_type_reads_cleanly(document_type: str) -> None:
+@pytest.mark.parametrize("document_type", sorted(CATALOG))
+def test_every_catalogued_document_type_reads_cleanly(document_type: str) -> None:
+    """THE WHOLE CATALOGUE, not the library's 41 (LP-943 follow-up review): the attention panel names any
+    failed or stale document, so every type a document can have is a name she may read."""
     name = display_name(document_type)
     assert _problems(name) == [], f"{document_type} → {name!r}"
+
+
+def test_the_five_catalogue_names_the_rule_cannot_see() -> None:
+    """Four of these pass the cleanliness rule even without their entries ("K1 statement", "Form
+    4506c"): a form number is not a pattern the rule knows. So they are pinned by name."""
+    assert display_name("social_security_administration_ssa_89") == "Form SSA-89"
+    assert display_name("k_1_shareholder_profit_and_loss_transcripts") == (
+        "K-1 shareholder profit and loss transcripts"
+    )
+    assert display_name("k1_statement") == "K-1 statement"
+    assert display_name("form_4506c") == "Form 4506-C"
+    assert display_name("form_4506t_request_for_transcript") == "Form 4506-T request for transcript"
 
 
 def test_a_discriminated_type_has_an_explicit_name() -> None:
@@ -74,12 +89,12 @@ def test_a_discriminated_type_has_an_explicit_name() -> None:
     assert sorted(discriminated - set(DISPLAY_NAMES)) == []
 
 
-def test_no_two_library_types_share_a_name() -> None:
+def test_no_two_catalogued_types_share_a_name() -> None:
     """A name must also tell the documents apart: one file can ask for two types, and a note or an email
     naming both must say which answers which ask (the LP-943 review found two "Letter of explanation"s).
     A deliberate duplicate would go in `_SAME_ON_PURPOSE` with its reason; there is none today."""
     by_name: dict[str, list[str]] = {}
-    for document_type in _library_types():
+    for document_type in CATALOG:
         by_name.setdefault(display_name(document_type), []).append(document_type)
     _SAME_ON_PURPOSE: set[str] = set()
     shared = {name: types for name, types in by_name.items() if len(types) > 1}
@@ -93,6 +108,7 @@ def test_the_check_would_notice_a_bad_name() -> None:
     assert _problems("government issued id")
     assert _problems("Hoa statement")
     assert _problems("Bank  statement")
+    assert _problems("Social security administration ssa 89")
 
 
 def test_mid_sentence() -> None:

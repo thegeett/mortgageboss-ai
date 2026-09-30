@@ -588,7 +588,8 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   it is her screen, but a one-line substitution to `display_name`, and leaving it means the app spells one
   document two ways in two panels.
 
-- **The display-name guarantee covers 41 types; `attention.py` calls it on 166** — found by the LP-943
+- ~~**The display-name guarantee covers 41 types; `attention.py` calls it on 166**~~ — **fixed in LP-943's second
+  follow-up** (the tests run over the whole catalogue; the five named). Found by the LP-943
   follow-up review, open. `_document_label` names any FAILED or stalest document (`attention.py:160, 169`)
   with no library gating, while the cleanliness test is parametrised over the library's 41. Measured over
   all 166, five read badly: `social_security_administration_ssa_89` → "Social security administration ssa
