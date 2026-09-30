@@ -152,3 +152,41 @@ async def test_an_appraisal_request_goes_to_the_lenders_draft(db_session: AsyncS
     assert lender_drafts == ["lender"] and second.draft_id == draft.id
     (plain,) = (await items_public_for_file(db, loan_file_id=loan_file.id))[other.id]
     assert plain.route_note is None  # only the appraiser's ask carries the line
+
+
+def test_every_recipient_is_in_the_plan_panels_order() -> None:
+    """The plan panel renders `for key in _RECIPIENT_ORDER if key in drafts`, so a recipient added to
+    `_RECIPIENT` and forgotten there would vanish from the panel with no error (LP-942 review)."""
+    from app.services.condition_plan import _RECIPIENT, _RECIPIENT_ORDER
+
+    assert {key for key, _ in _RECIPIENT.values()} == set(_RECIPIENT_ORDER)
+
+
+async def test_a_reask_of_her_own_item_is_her_task(db_session: AsyncSession) -> None:
+    """A re-ask of HER OWN item used to go to the borrower, who cannot act on it (a verbal VOE made
+    outside the window). 6132's statement item is MARKED as her task here, the cheapest way to get a
+    processor item whose document fails a check; IE-03's call is the real case, not on round 1."""
+    from app.services import condition_evidence
+    from app.services.condition_evidence import check_document
+    from tests.conditions.statement_fixture import add_statement, august
+    from tests.conditions.test_condition_evidence import TODAY, _asked, _evidence
+
+    db = db_session
+    loan_file, conditions, actor = await _asked(db)
+    (item,) = (
+        await db.execute(
+            select(ConditionItem).where(ConditionItem.condition_id == conditions["6132"].id)
+        )
+    ).scalars()
+    item.performer = Performer.PROCESSOR
+    item.performers = [Performer.PROCESSOR.value]
+    item.option = PlanOption.I_WILL_DO_IT
+    short = await add_statement(db, loan_file, august(pages_present=5))
+    await check_document(db, document_id=short.id, today=TODAY)
+    (row,) = [e for e in await _evidence(db, conditions["6132"]) if e.document_id == short.id]
+    assert any(c["result"] == "failed" for c in row.checks)  # the positive control
+    reasked = await condition_evidence.reask(
+        db, condition=conditions["6132"], evidence_id=row.id, actor_user_id=actor
+    )
+    assert (reasked.performer, reasked.option) == (Performer.PROCESSOR, PlanOption.I_WILL_DO_IT)
+    assert recipient_for(reasked) is None  # hers: in no email at all

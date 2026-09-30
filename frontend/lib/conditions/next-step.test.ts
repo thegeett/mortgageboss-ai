@@ -6,7 +6,15 @@
  */
 import type { Condition, ConditionItem } from "@/lib/types/conditions";
 import { describe, expect, it } from "vitest";
-import { becomes, itemWhere, nextStepToken, stepOptions, tail, waitingLabel } from "./next-step";
+import {
+  askRecipients,
+  becomes,
+  itemWhere,
+  nextStepToken,
+  stepOptions,
+  tail,
+  waitingLabel,
+} from "./next-step";
 
 function item(overrides: Partial<ConditionItem> = {}): ConditionItem {
   return {
@@ -178,6 +186,31 @@ describe("words", () => {
     expect(waitingLabel("broker")).toBe("LO");
     expect(waitingLabel("borrower")).toBe("Borrower");
     expect(waitingLabel(null)).toBe("someone");
+  });
+
+  it("counts an appraiser's ask and a lender's as ONE lender email, waiting on the lender (LP-942)", () => {
+    const appraiser = item({
+      performer: "appraiser",
+      performers: ["appraiser"],
+      option: "ask_third_party",
+    });
+    const lender = item({
+      id: "i2",
+      performer: "lender",
+      performers: ["lender"],
+      option: "ask_third_party",
+    });
+    for (const items of [
+      [appraiser, lender],
+      [lender, appraiser],
+    ]) {
+      const both = condition({ items } as unknown as Partial<Condition>);
+      expect(askRecipients(both)).toHaveLength(1);
+      expect(nextStepToken(both)?.text).toBe("In lender email");
+    }
+    expect(
+      becomes(condition({ items: [appraiser] } as unknown as Partial<Condition>))?.status,
+    ).toBe("Waiting on Lender");
   });
 
   it("an ask says which email it is in; a task says nothing here", () => {

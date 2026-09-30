@@ -110,6 +110,16 @@ function condition(evidence: ConditionEvidence[], code = "6132"): Condition {
 }
 
 describe("EvidenceSection", () => {
+  it("re-asks her own item as her task (LP-942)", () => {
+    const hers: ConditionEvidence = { ...S3_07, reask: "a corrected verbal VOE", reask_to: "you" };
+    render(<EvidenceSection fileId="f1" condition={condition([hers], "1812")} />);
+    expect(
+      screen.getByRole("button", {
+        name: "Add “please send a corrected verbal VOE” to your tasks",
+      }),
+    ).toBeDefined();
+  });
+
   it("re-asks in the failed item's own email (LP-938 follow-up)", () => {
     const receipt: ConditionEvidence = {
       ...S3_07,

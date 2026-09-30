@@ -929,5 +929,8 @@ async def test_a_reask_goes_where_its_label_says_even_for_an_ask_with_no_email(
     reasked = await condition_evidence.reask(
         db_session, condition=conditions["6132"], evidence_id=row.id, actor_user_id=actor
     )
-    assert card.reask_to == "borrower"
-    assert recipient_for(reasked) == ("borrower", "Borrower")
+    # LP-942: since every performer has a destination, the only ask "with no email" is one addressed to
+    # HER, and her own item's re-ask is her task. The label and the destination still agree: both say so.
+    assert card.reask_to == "you"
+    assert (reasked.performer, reasked.option) == (Performer.PROCESSOR, PlanOption.I_WILL_DO_IT)
+    assert recipient_for(reasked) is None

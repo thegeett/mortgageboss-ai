@@ -535,13 +535,14 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   `package.rows` at submission, which is what the docstring already claims. Detail in
   [LP-940](../tickets/LP-940.md) "Review".
 
-- **`emailKey`'s appraiser→lender merge is unpinned** — found by the LP-942 review, open. The merge makes
+- ~~**`emailKey`'s appraiser→lender merge is unpinned**~~ — **pinned in LP-942's follow-up** (and the
+  client's `WAITING_ON` for the appraiser corrected to the lender). Found by the LP-942 review; originally open. The merge makes
   an appraiser ask and a lender ask count as ONE recipient, which is what stops the sentence reading
   "lender + lender emails". Measured: removing the branch from `emailKey` leaves the whole frontend suite
   green (2137/2137), because the only appraiser test asserts `EMAIL_WORD` and the item note and never
   reaches `askRecipients`' dedupe. One test on `askRecipients` with both items closes it.
 
-- **A re-ask sourced from her own task still asks the borrower** — found by the LP-942 review, open.
+- ~~**A re-ask sourced from her own task still asks the borrower**~~ — **fixed in LP-942's follow-up** (her own item's re-ask is her task). Originally found by the LP-942 review, open.
   `_takes` admits a document to an `i_will_do_it` item, so her task (IE-03's `call`, IE-06's `wvoe`, both
   processor performers with checks) can carry a failed document and offer a re-ask; `_add_ask` then sees
   `recipient_for(source) is None` and falls back to the borrower, who cannot act on a verbal VOE she made

@@ -97,7 +97,9 @@ PARTICIPANT_ROLE: dict[DraftRecipient, ParticipantRole] = {
     DraftRecipient.HOA: ParticipantRole.OTHER,
     DraftRecipient.OTHER_PARTY: ParticipantRole.OTHER,
     DraftRecipient.UNDERWRITER: ParticipantRole.UNDERWRITER,
-    # LP-942: an address she types for the lender is remembered on the lender side too; it is read
+    # LP-942: an address she types for the lender is remembered on the lender side too. SHARED with the
+    # underwriter question (as HOA and OTHER_PARTY share OTHER): an address typed on a question to the
+    # underwriter overwrites it, one way only, and matters only when the lender has no contacts. It is read
     # only after the lender's own contacts (`_lender_address`).
     DraftRecipient.LENDER: ParticipantRole.UNDERWRITER,
 }

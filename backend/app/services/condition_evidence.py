@@ -1120,6 +1120,27 @@ async def _answer_the_same_deposit_elsewhere(
     return touched
 
 
+def _hers(item: ConditionItem | None) -> bool:
+    """The failed item is her own (its first performer is the processor)."""
+    return item is not None and (item.performers or [item.performer.value])[0] == (
+        Performer.PROCESSOR.value
+    )
+
+
+def reask_destination(item: ConditionItem | None) -> str:
+    """Where a re-ask of this item goes, as the card names it: "you" (her own task), or the failed
+    item's email ("title/attorney", "LO"), or the borrower's. THE SAME DECISION `_add_ask` MAKES, in one
+    place, so the button can never name a different destination from the one the item lands in (LP-940's
+    divergence, and again at LP-942 for her own items)."""
+    from app.services.condition_plan import recipient_for
+
+    if _hers(item):
+        return "you"
+    email = recipient_for(item) if item is not None else None
+    label = email[1] if email is not None else "Borrower"
+    return label if label.isupper() else label.lower()
+
+
 async def _add_ask(
     db: AsyncSession,
     *,
@@ -1175,12 +1196,22 @@ async def _add_ask(
         specifics=dict(source.specifics or {}) if source is not None else {},
         sequence=(last or 0) + 1,
     )
+    # HER OWN ITEM'S RE-ASK IS HER TASK (LP-942 review); `reask_destination` says the same to the card. A verbal VOE she made outside the window, or any
+    # "I'll do it" item whose document failed, is hers to redo; asking the borrower for it asked someone
+    # who cannot act. `route_ask` then makes it her task, as it does wherever an item is made.
+    from app.services.condition_plan import route_ask
+
+    if _hers(source):
+        item.performer = Performer.PROCESSOR
+        item.performers = [Performer.PROCESSOR.value]
+        item.option = PlanOption.ASK_THIRD_PARTY
+    route_ask(item)
     db.add(item)
     db.add(
         _event(
             condition,
             ConditionEventKind.CONDITION_PLAN_CHANGED,
-            {"change": "item_added", "option": option.value, "why": "evidence"},
+            {"change": "item_added", "option": item.option.value, "why": "evidence"},
             actor_user_id=actor_user_id,
         )
     )
@@ -1231,7 +1262,6 @@ async def evidence_public_for_file(
             )
         ).scalars()
     }
-    from app.services.condition_plan import recipient_for
 
     out: dict[UUID, list[Any]] = {}
     for row in rows:
@@ -1255,10 +1285,8 @@ async def evidence_public_for_file(
                 if replaced
                 else f"Still evidence — enough for closing was met once {title} arrived"
             )
-        # Where "Add 'please send …'" puts the re-ask: the failed item's own email (`_add_ask`).
+        # Where "Add 'please send …'" puts the re-ask: the same decision `_add_ask` makes.
         item = items.get(row.item_id)
-        email = recipient_for(item) if item is not None else None
-        label = email[1] if email is not None else "Borrower"
         out.setdefault(row.condition_id, []).append(
             ConditionEvidencePublic.build(
                 row,
@@ -1266,7 +1294,7 @@ async def evidence_public_for_file(
                 statement=statement,
                 superseded=superseded,
                 replaced=replaced,
-                reask_to=label if label.isupper() else label.lower(),
+                reask_to=reask_destination(item),
             )
         )
     return out

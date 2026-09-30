@@ -160,6 +160,8 @@ function FailedCallout({
   const [note, setNote] = useState<string | null>(null);
   // The failed item's own email: a receipt title sent is asked of title again (LP-938 follow-up).
   const reaskTo = evidence.reask_to ?? "borrower";
+  // LP-942: her own item's re-ask is her task, and the button says so rather than naming an email.
+  const destination = reaskTo === "you" ? "your tasks" : `the ${reaskTo} email`;
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-col gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">
@@ -182,14 +184,19 @@ function FailedCallout({
                 reask.mutate(
                   { conditionId: condition.id, evidenceId: evidence.id },
                   {
-                    onSuccess: () => setNote(`Added to the ${reaskTo} email as a draft.`),
+                    onSuccess: () =>
+                      setNote(
+                        reaskTo === "you"
+                          ? "Added to your tasks."
+                          : `Added to the ${reaskTo} email as a draft.`,
+                      ),
                     onError: (error) => setNote(getErrorMessage(error)),
                   },
                 )
               }
             >
               <Mail className="h-3.5 w-3.5" aria-hidden />
-              Add “please send {evidence.reask}” to the {reaskTo} email
+              Add “please send {evidence.reask}” to {destination}
             </Button>
           ) : null}
           <Button type="button" size="sm" variant="ghost" onClick={() => setAccepting(true)}>

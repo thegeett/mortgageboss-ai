@@ -261,7 +261,8 @@ const WAITING_ON: Record<Performer, OwnerHint> = {
   insurance: "insurance",
   hoa: "unknown",
   employer: "unknown",
-  appraiser: "unknown",
+  // LP-942: the appraiser's ask is in the lender's email, so marking it sent waits on the lender.
+  appraiser: "lender",
   other_party: "unknown",
 };
 
