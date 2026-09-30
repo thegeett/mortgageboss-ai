@@ -894,3 +894,31 @@ check's swap blindness; three intermittent tests that probably share one cause.
 
 **Last full runs on the finished tree:** backend 8724 passed, 1 failed (the named sonnet test), 8 skipped,
 1 xfailed. Frontend 2135 / 2135. ruff, format, mypy, biome, tsc and the build are clean.
+
+## Stage 3 follow-ups, batch 2 (the owner's list of 2026-09-30)
+
+| Ticket | Result | Commits |
+|---|---|---|
+| [LP-941](../tickets/LP-941.md) Withdrawal history | **Done.** The withdrawal line shows her reason; Undo adds "Withdrawal undone" and the reason stays visible. The reason is the one free-text field in the history's projection, by the owner's decision, guarded by kind | `44d9fbfa`, `83bcf04b`, review `1eadb8fe` |
+| [LP-942](../tickets/LP-942.md) Asks with no email | **Done.** An ask to her is her task; the lender's asks and the appraiser's go into one lender draft per round, from the lender's contacts; appraiser asks say "Appraisal requests go through the lender" (appraiser independence). Two follow-ups: her own item's re-ask is her task, and one rule decides "hers" | `ac4f6d58`, `66f60857`, `b072d36b`, reviews `c659396f`, `6f78d3e4`, `b3d9978f` |
+| [LP-943](../tickets/LP-943.md) Document display names | **Done.** A display name for every catalogued type, clean by the rule and unique across all 166, with the owner's five exact; used in re-asks, package notes and the attention panel | `8af848c6` … `a82eb5ac`, reviews `0f480e2f` … `c52345e0` |
+| [LP-944](../tickets/LP-944.md) Flaky tests | **Done.** One cause, two mechanisms, each measured: random-substring absence assertions, and dict order from a query with no ORDER BY. Three sequential full runs clean | `adf963aa`, review (this commit's parent) |
+| Note swap check | **Left in the backlog**, as the owner asked | — |
+
+**Left for the owner** (each in the open items above):
+- **Domain wording, for the resident expert:** "Verbal VOE" next to "Verification of employment (VOE)";
+  and whether "Business existence verification" should name the CPA letter or the business licence.
+- **Product questions:** an item edited to [processor, borrower] routes as her task and nothing says the
+  borrower was not emailed; the server could send the "waiting on" hint so the client stops keeping its
+  own copy.
+- **Recorded defects, not built:**
+  - `condition_enrich` matches sheet rows by a non-unique text fingerprint from an unordered query
+    (order it, as `email_send.py` did);
+  - a vacuous assertion in `test_insurance_wiring.py`;
+  - the draft dialog renders item keys ("6132 reask 3f2a9b1c");
+  - child-table queries that do not filter a withdrawn parent.
+- The library's top-20 sign-off.
+
+**Last full runs on the finished tree** (three, sequential): backend 8929 passed, 1 failed (the named sonnet
+test, which fails every run from this machine's `.env`), 8 skipped, 1 xfailed. Frontend 2139 / 2139 at
+LP-942, unchanged since. ruff, format, mypy, biome, tsc and the build are clean.
