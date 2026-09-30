@@ -30,6 +30,10 @@ class DraftRecipient(StrEnum):
     EMPLOYER = "employer"
     OTHER_PARTY = "other_party"
     UNDERWRITER = "underwriter"
+    #: LP-942 — the lender's own contacts, one draft per round: asks whose performer is the lender, and
+    #: asks for the APPRAISER, which go through the lender (appraiser independence: loan production
+    #: staff do not contact the appraiser directly).
+    LENDER = "lender"
 
 
 class ConditionDraft(Base, UUIDMixin, TimestampMixin):

@@ -277,19 +277,32 @@ function ItemWhere({
 }) {
   const where = itemWhere(item);
   const draftId = item.draft?.id;
+  // LP-942: an appraiser's ask is in the lender's email, and says why.
+  const routeNote = item.route_note ? (
+    <p className="text-xs text-muted-foreground">{item.route_note}</p>
+  ) : null;
   if (where && draftId && onOpenDraft) {
     return (
-      <button
-        type="button"
-        onClick={() => onOpenDraft(draftId)}
-        className="inline-flex w-fit items-center gap-1 text-left text-xs text-primary hover:underline"
-      >
-        <Mail className="h-3 w-3" aria-hidden />
-        {where}
-      </button>
+      <>
+        <button
+          type="button"
+          onClick={() => onOpenDraft(draftId)}
+          className="inline-flex w-fit items-center gap-1 text-left text-xs text-primary hover:underline"
+        >
+          <Mail className="h-3 w-3" aria-hidden />
+          {where}
+        </button>
+        {routeNote}
+      </>
     );
   }
-  if (where) return <p className="text-xs text-primary">{where}</p>;
+  if (where)
+    return (
+      <>
+        <p className="text-xs text-primary">{where}</p>
+        {routeNote}
+      </>
+    );
   if (item.option !== "i_will_do_it" || !onMarkDone) return null;
   const done = item.status === "done";
   return (

@@ -325,11 +325,22 @@ async def test_the_task_wording_comes_from_the_library(db_session: AsyncSession)
         assert all(item["task"] is None for item in rows["7086"]["items"])
         assert rows["7086"]["waiting_on"] is None
 
-        # Re-pointed to an ask, the invoice is no longer her task, so it loses the task wording.
+        # LP-942: an ask addressed to HER is her task, so re-pointing the option alone keeps it one.
+        # (This test used to expect an ask with the processor as performer: an ask with no email.)
         (task,) = await _items(db_session, conditions["1582"])
         response = await client.patch(
             f"/api/v1/conditions/{conditions['1582'].id}/items/{task.id}",
             json={"option": "ask_third_party"},
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        (item,) = response.json()["items"]
+        assert (item["option"], item["task"]) == ("i_will_do_it", "upload the invoice")
+
+        # Re-pointed to an ask of someone ELSE, it is no longer her task and loses the wording.
+        response = await client.patch(
+            f"/api/v1/conditions/{conditions['1582'].id}/items/{task.id}",
+            json={"option": "ask_third_party", "performers": ["other_party"]},
             headers=headers,
         )
         assert response.status_code == 200, response.text

@@ -1,4 +1,4 @@
-import type { Condition, ConditionReading } from "@/lib/types/conditions";
+import type { Condition, ConditionItem, ConditionReading } from "@/lib/types/conditions";
 // @vitest-environment jsdom
 /**
  * "How we read it" (S3-01, LP-919): what is labelled as the AI's, what as code's, and when she is asked.
@@ -135,5 +135,26 @@ describe("ReadingItems", () => {
     ).toBeDefined();
     expect(screen.getByText("Title / escrow")).toBeDefined();
     expect(screen.getByText("Ask a third party")).toBeDefined();
+  });
+
+  it("puts an appraiser's ask in the lender's email, and says why (LP-942)", () => {
+    const appraisal = {
+      id: "i1",
+      key: "final_inspection",
+      name: "Final inspection",
+      acceptable: "Completion report (1004D)",
+      performer: "appraiser",
+      performers: ["appraiser"],
+      option: "ask_third_party",
+      status: "open",
+      documents: [],
+      checks: [],
+      specifics: { amounts: [], account_bank: null, account_last4: null, month: null, names: [] },
+      draft: null,
+      route_note: "Appraisal requests go through the lender",
+    } as unknown as ConditionItem;
+    render(<ReadingItems items={[appraisal]} />);
+    expect(screen.getByText("In lender email")).toBeDefined();
+    expect(screen.getByText("Appraisal requests go through the lender")).toBeDefined();
   });
 });

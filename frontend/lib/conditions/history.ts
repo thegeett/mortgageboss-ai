@@ -87,6 +87,7 @@ const EMAIL_NAME: Record<DraftRecipient, string> = {
   employer: "employer email",
   other_party: "email to the other party",
   underwriter: "question to the underwriter",
+  lender: "email to the lender",
 };
 
 function by(event: ConditionEvent): string {

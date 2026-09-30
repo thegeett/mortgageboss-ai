@@ -959,6 +959,9 @@ class ConditionItemPublic(BaseModel):
     specifics: ReadingSpecificsPublic = Field(default_factory=ReadingSpecificsPublic)
     #: LP-921 — what she does, from the library ("upload the invoice"); None on an ask or her own item.
     task: str | None = None
+    #: LP-942 — "Appraisal requests go through the lender" on an ask for the appraiser, which goes into
+    #: the lender's draft rather than to the appraiser (appraiser independence).
+    route_note: str | None = None
     #: LP-922 — the draft that asks for it: its id (to open it), "draft" or "sent", and the send date.
     draft: DraftTailPublic | None = None
 

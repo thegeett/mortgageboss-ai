@@ -81,6 +81,7 @@ WAITING_ON: dict[DraftRecipient, OwnerHint] = {
     DraftRecipient.LO: OwnerHint.BROKER,
     DraftRecipient.INSURANCE: OwnerHint.INSURANCE,
     DraftRecipient.UNDERWRITER: OwnerHint.LENDER,
+    DraftRecipient.LENDER: OwnerHint.LENDER,
     DraftRecipient.HOA: OwnerHint.UNKNOWN,
     DraftRecipient.EMPLOYER: OwnerHint.UNKNOWN,
     DraftRecipient.OTHER_PARTY: OwnerHint.UNKNOWN,
@@ -96,6 +97,9 @@ PARTICIPANT_ROLE: dict[DraftRecipient, ParticipantRole] = {
     DraftRecipient.HOA: ParticipantRole.OTHER,
     DraftRecipient.OTHER_PARTY: ParticipantRole.OTHER,
     DraftRecipient.UNDERWRITER: ParticipantRole.UNDERWRITER,
+    # LP-942: an address she types for the lender is remembered on the lender side too; it is read
+    # only after the lender's own contacts (`_lender_address`).
+    DraftRecipient.LENDER: ParticipantRole.UNDERWRITER,
 }
 
 #: The dialog's title (S3-04, S3-05), before " · round N".
@@ -108,6 +112,7 @@ TITLE: dict[DraftRecipient, str] = {
     DraftRecipient.EMPLOYER: "Email to the employer",
     DraftRecipient.OTHER_PARTY: "Email to the other party",
     DraftRecipient.UNDERWRITER: "Question to the underwriter",
+    DraftRecipient.LENDER: "Email to the lender",
 }
 
 #: How S3-05's "Other drafts this round" names a recipient.
@@ -120,6 +125,7 @@ SHORT_LABEL: dict[DraftRecipient, str] = {
     DraftRecipient.EMPLOYER: "Employer",
     DraftRecipient.OTHER_PARTY: "Other party",
     DraftRecipient.UNDERWRITER: "Underwriter",
+    DraftRecipient.LENDER: "Lender",
 }
 
 _MONTHS = [
@@ -586,7 +592,38 @@ async def _address(
         return email, name
     if recipient is DraftRecipient.UNDERWRITER:
         return await _underwriter_address(db, loan_file=loan_file, letter=letter)
+    if recipient is DraftRecipient.LENDER:
+        return await _lender_address(db, loan_file=loan_file)
     known = (await party_addresses(db, loan_file=loan_file)).get(PARTICIPANT_ROLE[recipient])
+    return (known[0], known[1]) if known else (None, None)
+
+
+async def _lender_address(
+    db: AsyncSession, *, loan_file: LoanFile
+) -> tuple[str | None, str | None]:
+    """LP-942 — the lender's own contacts: the account executive first, then any active contact, then
+    the lender's contact email, then an address she typed for it before. Code only."""
+    from app.services.party_requests import party_addresses
+
+    lender = await db.get(Lender, loan_file.lender_id) if loan_file.lender_id else None
+    if lender is not None:
+        contacts = list(
+            (
+                await db.execute(
+                    select(LenderContact).where(
+                        LenderContact.lender_id == lender.id,
+                        LenderContact.is_active.is_(True),
+                        LenderContact.email.is_not(None),
+                    )
+                )
+            ).scalars()
+        )
+        contacts.sort(key=lambda c: c.role is not LenderContactRole.ACCOUNT_EXECUTIVE)
+        if contacts:
+            return contacts[0].email, contacts[0].name
+        if lender.contact_email:
+            return lender.contact_email, lender.name
+    known = (await party_addresses(db, loan_file=loan_file)).get(ParticipantRole.UNDERWRITER)
     return (known[0], known[1]) if known else (None, None)
 
 

@@ -287,7 +287,7 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-939 Real-model trial | SKIPPED | | | none | skipped for now by the owner, 2026-09-29 |
 | LP-940 Withdraw a hand-added condition | REVIEWED | `faea58ad` | the review section in [LP-940](../tickets/LP-940.md) (written, not yet committed) | detail sheet | amends ADR-404. Review found 1: `submit` never rewrites `package.rows`, so a condition withdrawn while the package was BUILT stays in the submitted record — the refusal then tells her it went to the lender (false) and the Undo becomes one-way. Census verified complete for the 40 Condition-row readers, plus one class it did not name (child-table queries that do not filter the parent). Counts verified (8723/1, 2135/2135). **Follow-up `e8265768` reviewed: no findings** — the record now stores exactly what was sent (verified on the reviewer's own sequence: the row is gone, `_submitted_on` is None, the second withdrawal succeeds), and the restored Undo guard is unpinned only in the branch that cannot fire — `_was_withdrawn` always-False fails 4 tests |
 | LP-941 Withdrawal history | REVIEWED | `44d9fbfa` | the review section in [LP-941](../tickets/LP-941.md) (written, not yet committed) | detail sheet history | batch 2, the owner's list of 2026-09-29. No defect: the free-text exception is contained — traced to two company-scoped routes and ruled out of the log, the activity log, the timeline, the package, any export and `readonly.condition_events` (whose `detail` is dropped, verified against the live view). Two notes: the new allow-list justification is a *different* kind of exception from `actor_name`'s (that one is safe because it is never read from `detail`; this one is), and the 500 cap is written twice |
-| LP-942 Asks with no email | PENDING | | | | |
+| LP-942 Asks with no email | AWAITING_REVIEW | (this commit) | | an item line | |
 | LP-943 Document display names | PENDING | | | | |
 | LP-944 Flaky tests | PENDING | | | | |
 
@@ -603,7 +603,9 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   the label cannot disagree with the destination. Detail in [LP-938](../tickets/LP-938.md) "Review of the
   third follow-up".
 
-- **Three performers can be asked but have no email to be asked in** — same review, open, pre-existing and
+- ~~**Three performers can be asked but have no email to be asked in**~~ — **decided and built in
+  [LP-942](../tickets/LP-942.md)** (you: her task; the lender and the appraiser: the lender's draft).
+  Originally: — same review, open, pre-existing and
   the root of the item above. `_RECIPIENT` covers 8 of the 11 `Performer` members: `processor`, `lender`
   and `appraiser` are absent, while `_THIRD_PARTIES` *includes* `appraiser` (the lender-processing switch
   flips appraiser items between `ask_third_party` and `lender_doing_it`) and the frontend's `EMAIL_WORD`

@@ -66,13 +66,17 @@ const EMAIL_WORD: Record<Performer, string> = {
   insurance: "insurance",
   hoa: "HOA",
   employer: "employer",
-  appraiser: "appraiser",
+  // LP-942: never the appraiser's own email; appraisal requests go through the lender.
+  appraiser: "lender",
   other_party: "other party",
 };
 
 /** Title and attorney share one email (S3-05), so they count as one recipient. */
 function emailKey(performer: Performer): string {
-  return performer === "attorney" ? "title" : performer;
+  if (performer === "attorney") return "title";
+  // LP-942: the appraiser's asks go in the lender's email, so the two count as one recipient.
+  if (performer === "appraiser") return "lender";
+  return performer;
 }
 
 /**

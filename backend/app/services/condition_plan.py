@@ -485,12 +485,14 @@ async def build_plan(db: AsyncSession, *, round_id: UUID, today: date | None = N
                 sequence=index,
                 due_date=due if option in _ASKS and status is ConditionItemStatus.OPEN else None,
             )
+            route_ask(item)
             base = next(
                 (i for i in (condition_type.items if condition_type else ()) if i.key == item.key),
                 None,
             )
-            # Already in the file (existing coverage, by type and the library's words).
-            if option is PlanOption.I_WILL_DO_IT and status is ConditionItemStatus.OPEN:
+            # Already in the file (existing coverage, by type and the library's words). `item.option`,
+            # not `option`: an ask routed to her task by `route_ask` is looked for too.
+            if item.option is PlanOption.I_WILL_DO_IT and status is ConditionItemStatus.OPEN:
                 found = _find_document(raw, base.match_words if base else (), documents)
                 if found is not None:
                     item.option = PlanOption.ALREADY_IN_FILE
@@ -810,6 +812,10 @@ async def update_item(
     if due_date is not None:
         item.due_date = due_date
         changed["due_date"] = due_date.isoformat()
+    before = item.option
+    route_ask(item)
+    if item.option is not before:
+        changed["routed"] = {"from": before.value, "to": item.option.value}
     db.add(
         _event(
             condition,
@@ -866,6 +872,7 @@ async def add_item(
         if chosen in _ASKS
         else None,
     )
+    route_ask(item)
     db.add(item)
     if condition.next_step in (PlanOption.INFORMATION_ONLY, PlanOption.LENDER_DOING_IT):
         condition.next_step = None
@@ -1032,7 +1039,14 @@ _RECIPIENT: dict[Performer, tuple[str, str]] = {
     Performer.HOA: ("hoa", "HOA"),
     Performer.EMPLOYER: ("employer", "Employer"),
     Performer.OTHER_PARTY: ("other_party", "Other party"),
+    # LP-942 — the lender's own asks go to the lender, one draft per round. So do the APPRAISER's:
+    # appraiser independence means loan production staff do not contact the appraiser directly, so an
+    # appraisal request goes through the lender (`APPRAISAL_VIA_LENDER` is the line on the item).
+    Performer.LENDER: ("lender", "Lender"),
+    Performer.APPRAISER: ("lender", "Lender"),
 }
+#: LP-942 — shown on an appraiser's ask, which goes to the lender instead of the appraiser.
+APPRAISAL_VIA_LENDER = "Appraisal requests go through the lender"
 _RECIPIENT_ORDER = [
     "borrower",
     "title_attorney",
@@ -1041,6 +1055,7 @@ _RECIPIENT_ORDER = [
     "hoa",
     "employer",
     "other_party",
+    "lender",
 ]
 
 
@@ -1053,6 +1068,18 @@ def recipient_for(item: ConditionItem) -> tuple[str, str] | None:
     if Performer.LO in performers:
         return _RECIPIENT[Performer.LO]
     return _RECIPIENT.get(performers[0])
+
+
+def route_ask(item: ConditionItem) -> None:
+    """LP-942 — AN ASK NEVER ENDS UP WITH NO DESTINATION. The lender and the appraiser have an email now
+    (the lender's); the one performer with none is the processor herself, and an ask addressed to her
+    is her own task, so it becomes one ("I'll do it"). Called wherever an item is made or edited."""
+    if item.option not in _ASKS or recipient_for(item) is not None:
+        return
+    performers = [Performer(p) for p in item.performers] or [item.performer]
+    if performers[0] is Performer.PROCESSOR:
+        item.option = PlanOption.I_WILL_DO_IT
+        item.due_date = None
 
 
 async def items_public_for_file(db: AsyncSession, *, loan_file_id: UUID) -> dict[UUID, list[Any]]:
@@ -1148,6 +1175,10 @@ async def items_public_for_file(db: AsyncSession, *, loan_file_id: UUID) -> dict
                     # THE LIBRARY'S WORDS WHILE THE ITEM IS STILL ITS TASK: an item she re-pointed to an
                     # ask is no longer hers to do.
                     task=tasks.get(item.key) if item.option is PlanOption.I_WILL_DO_IT else None,
+                    route_note=APPRAISAL_VIA_LENDER
+                    if (item.performers or [item.performer.value])[0] == Performer.APPRAISER.value
+                    and recipient_for(item) is not None
+                    else None,
                     draft=tails.get(item.draft_id) if item.draft_id else None,
                 )
             )

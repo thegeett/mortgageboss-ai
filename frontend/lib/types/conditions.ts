@@ -1066,6 +1066,8 @@ export interface ConditionItem {
   task: string | null;
   /** LP-922 — the draft that asks for it, while one does. */
   draft: DraftTail | null;
+  /** LP-942 — "Appraisal requests go through the lender" on an ask for the appraiser. */
+  route_note?: string | null;
 }
 
 export interface RoundPlanDraft {
@@ -1102,7 +1104,8 @@ export type DraftRecipient =
   | "hoa"
   | "employer"
   | "other_party"
-  | "underwriter";
+  | "underwriter"
+  | "lender";
 
 /** A draft as a row's tail shows it: "In borrower email · draft", "· sent 08/28". */
 export interface DraftTail {
