@@ -283,7 +283,7 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-935 Stage 3 close | REVIEWED | `5b1582cf` | the commit titled `LP-935 review:` | every screen (24 shots: both sessions, all twelve) | review found 2, fixed: the mortgagee-clause term asserted unsourced domain claims; a decision she may want to overturn was missing from the table |
 | LP-936 DU tolerance (STOP AND ASK 2) | REVIEWED | `0c8090e6` | the commit titled `LP-936 review:` | S3-09 re-shot by the reviewer: the new callout is true as a rule, not only in this state | no findings; the owner's table and the 50% parenthetical both verified, including 47→51 |
 | LP-937 Superseded failures | REVIEWED | `770d2513` | the review section in [LP-937](../tickets/LP-937.md) (written, not yet committed) | S3-08, S3-12 re-shot: unchanged (no drawn state shows it) | review found 1: a superseded row that is still evidence can hold the condition while the sheet hides the finding doing it — the Stage 3B dead end through the other door; plus the "together with" wording is false when both rows are the same account. Counts verified (8702/1, 2125/2125); a second intermittent test recorded. **Follow-up `da6fbd19` reviewed: no findings** — `replaced` and `_settle`'s filter are now the same predicate negated, so a row that can hold the condition can no longer be hidden; the third member (Next step) verified reachable; predicate pinned in both directions |
-| LP-938 Library fixes (AS-04, the review table) | REVIEWED | `37f5aa9f` | the review section in [LP-938](../tickets/LP-938.md) (written, not yet committed) | none (no screen) | review found 1 (pre-existing, not a regression): AS-04's receipt item's only check, `amount_matches`, reads bank-statement transactions and so returns not_run for an earnest money receipt — the item can never pass without a manual accept. Table verified independently of its generator: 20 rows x 5 columns re-derived from the raw YAML and seed files, 0 mismatches. The owner's top-20 sign-off still open, on the regenerated table. **Follow-up `8239ea91` reviewed: 1 finding** — the receipt is fixed and the purchase-agreement census is clean (only AS-11 lists it, with no amount check), but the same dead end is open on AS-06's `gift_letter` item, whose only document type carries `gift_amount` that `amount_matches` never reads; latent, since AS-05/AS-06 are on no mapped sheet. **Second follow-up `c9425f67` reviewed: 1 finding** — the typed `OWN_AMOUNT` allow-list is the right guard (better than the tripwire the reviewer suggested: it makes the unsafe pairing unrepresentable and takes `_takes` off the correctness path), but `reask_name` now names a receipt, gift letter or deposit slip "A corrected the statement", which is both false and ungrammatical, on a re-ask path this commit opens |
+| LP-938 Library fixes (AS-04, the review table) | REVIEWED | `37f5aa9f` | the review section in [LP-938](../tickets/LP-938.md) (written, not yet committed) | none (no screen) | review found 1 (pre-existing, not a regression): AS-04's receipt item's only check, `amount_matches`, reads bank-statement transactions and so returns not_run for an earnest money receipt — the item can never pass without a manual accept. Table verified independently of its generator: 20 rows x 5 columns re-derived from the raw YAML and seed files, 0 mismatches. The owner's top-20 sign-off still open, on the regenerated table. **Follow-up `8239ea91` reviewed: 1 finding** — the receipt is fixed and the purchase-agreement census is clean (only AS-11 lists it, with no amount check), but the same dead end is open on AS-06's `gift_letter` item, whose only document type carries `gift_amount` that `amount_matches` never reads; latent, since AS-05/AS-06 are on no mapped sheet. **Second follow-up `c9425f67` reviewed: 1 finding** — the typed `OWN_AMOUNT` allow-list is the right guard (better than the tripwire the reviewer suggested: it makes the unsafe pairing unrepresentable and takes `_takes` off the correctness path), but `reask_name` now names a receipt, gift letter or deposit slip "A corrected the statement", which is both false and ungrammatical, on a re-ask path this commit opens. **Third follow-up `71ca84a8` reviewed: 1 finding + 2 recorded** — copying the failed item's performer is right (a wrong receipt is title's, and it used to re-ask the borrower), but `reask_to` falls back to "borrower" both when the item is not an ask and when its performer has no `_RECIPIENT` entry, and in the second case the ask is created for someone else and reaches no draft; the grammar fix is universal, the document name is fixed for 3 types of 32 |
 | LP-939 Real-model trial | SKIPPED | | | none | skipped for now by the owner, 2026-09-29 |
 | LP-940 Withdraw a hand-added condition | PENDING | | | detail sheet | amends ADR-404 |
 
@@ -554,6 +554,33 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   `purchase_agreement` is pinned, by name. Adding a future stated-amount type to `OWN_AMOUNT` passes every
   test. This is where a keyset tripwire now belongs, in the shape
   `test_deposit_findings_stay_on_one_item.py` uses for `_COVERS_ITEMS`.
+
+- **A re-ask can be created for someone with no email, while the button says "borrower"** — found by the
+  LP-938 third-follow-up review, open, introduced by that commit. `recipient_for` returns `None` for two
+  different reasons and `reask_to` treats them alike: when the item is not an ask, `_add_ask` also defaults
+  to the borrower and the label is true; but when the item IS an ask whose performer has no `_RECIPIENT`
+  entry, `_add_ask` copies that performer, so the ask is created for (say) the processor while the button
+  reads "to the borrower email" — and the new item's own `recipient_for` is `None` too, so it lands in no
+  draft at all. Reachable by an ordinary edit: `edit_item` changes option and performers independently, and
+  IE-03 `call` (UWM 1812) and IE-06 `wvoe` are `processor`-performer items that carry checks. Fix: gate
+  `_add_ask` on `recipient_for(source) is not None` rather than on the option, so one call decides both and
+  the label cannot disagree with the destination. Detail in [LP-938](../tickets/LP-938.md) "Review of the
+  third follow-up".
+
+- **Three performers can be asked but have no email to be asked in** — same review, open, pre-existing and
+  the root of the item above. `_RECIPIENT` covers 8 of the 11 `Performer` members: `processor`, `lender`
+  and `appraiser` are absent, while `_THIRD_PARTIES` *includes* `appraiser` (the lender-processing switch
+  flips appraiser items between `ask_third_party` and `lender_doing_it`) and the frontend's `EMAIL_WORD`
+  has words for all three. So an appraiser ask lands in no draft today, silently.
+
+- **The re-ask still calls 21 live items' documents "a statement"** — same review, open. `Statement.source`
+  is only populated for `OWN_AMOUNT`'s three types, so `reask_name` names every other non-statement
+  document a statement: censused at 29 items, 21 on mapped sheets, including IN-01 `declarations` (UWM
+  6178, homeowners insurance — the insurance agent is asked for "a corrected statement"), ID-01 `id`
+  (Champions 286, a driver's licence), DI-01 `disclosure` (UWM 0132) and TI-02 `report` (Champions 285).
+  Not a regression: before the third follow-up all 32 said "A corrected *the* statement". Fix: both call
+  sites hold the `Document`, so use `document.document_name` (what the card already prints) or
+  `app/documents/naming.py`'s per-type stem, which cover all ~80 types.
 - **Screen deviations for the product owner to redraw: D1 to D12**, gathered in one list below
   ("Stage 3 — screen deviations").
 - **S3-12 outside LP-921 (LP-921 visual check):** the list's status select is Stage 2's native select
