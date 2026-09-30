@@ -287,7 +287,7 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-939 Real-model trial | SKIPPED | | | none | skipped for now by the owner, 2026-09-29 |
 | LP-940 Withdraw a hand-added condition | REVIEWED | `faea58ad` | the review section in [LP-940](../tickets/LP-940.md) (written, not yet committed) | detail sheet | amends ADR-404. Review found 1: `submit` never rewrites `package.rows`, so a condition withdrawn while the package was BUILT stays in the submitted record — the refusal then tells her it went to the lender (false) and the Undo becomes one-way. Census verified complete for the 40 Condition-row readers, plus one class it did not name (child-table queries that do not filter the parent). Counts verified (8723/1, 2135/2135). **Follow-up `e8265768` reviewed: no findings** — the record now stores exactly what was sent (verified on the reviewer's own sequence: the row is gone, `_submitted_on` is None, the second withdrawal succeeds), and the restored Undo guard is unpinned only in the branch that cannot fire — `_was_withdrawn` always-False fails 4 tests |
 | LP-941 Withdrawal history | REVIEWED | `44d9fbfa` | the review section in [LP-941](../tickets/LP-941.md) (written, not yet committed) | detail sheet history | batch 2, the owner's list of 2026-09-29. No defect: the free-text exception is contained — traced to two company-scoped routes and ruled out of the log, the activity log, the timeline, the package, any export and `readonly.condition_events` (whose `detail` is dropped, verified against the live view). Two notes: the new allow-list justification is a *different* kind of exception from `actor_name`'s (that one is safe because it is never read from `detail`; this one is), and the 500 cap is written twice |
-| LP-942 Asks with no email | REVIEWED | `ac4f6d58` | the review section in [LP-942](../tickets/LP-942.md) (written, not yet committed) | an item line | No defect; the invariant verified for all 11 performers x both asks (0 stranded). Review found 1: `emailKey`'s appraiser→lender merge is UNPINNED — removing it leaves the frontend suite green at 2137/2137. Also: the processor-sourced re-ask should be her task (`route_ask` in `_add_ask`), and the round-1/page-break tests do not hold the processor rule (no library item is processor-first) |
+| LP-942 Asks with no email | REVIEWED | `ac4f6d58` | the review section in [LP-942](../tickets/LP-942.md) (written, not yet committed) | an item line | No defect; the invariant verified for all 11 performers x both asks (0 stranded). Review found 1: `emailKey`'s appraiser→lender merge is UNPINNED — removing it leaves the frontend suite green at 2137/2137. Also: the processor-sourced re-ask should be her task (`route_ask` in `_add_ask`), and the round-1/page-break tests do not hold the processor rule (no library item is processor-first). **Follow-up `66f60857` reviewed: 1 finding** — both items are fixed and the LP-938 test rewrite is sound (it keeps both halves of the invariant and adds the item's own performer/option), but `_hers` reads `performers[0]` while `recipient_for` prefers the LO anywhere, so a `[processor, lo]` ask goes in the LO's email while its re-ask becomes her task; fix by making `_hers` the predicate `route_ask` already uses |
 | LP-943 Document display names | PENDING | | | | |
 | LP-944 Flaky tests | PENDING | | | | |
 
@@ -549,6 +549,21 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   outside the window. Under the owner's LP-942 rule it should be her task: call `route_ask` on the item
   `_add_ask` creates, which also makes `route_ask`'s docstring true ("called wherever an item is made or
   edited" — `_add_ask` makes items and does not call it).
+
+- **`_hers` and `recipient_for` disagree about precedence** — found by the LP-942 follow-up review, open,
+  low stakes. `_hers` reads `performers[0]`; `recipient_for` prefers the LO wherever it appears. So a
+  `[processor, lo]` ask stays an ask in the LO's email (`route_ask` leaves it alone) while its re-ask
+  becomes her task — and `[lo, processor]`'s re-ask follows the LO, so the re-ask's destination flips on
+  performer order while the original ask's does not. The card and the item still agree, so this is NOT
+  LP-940's divergence returning. Fix: make `_hers` the predicate `route_ask` already uses —
+  `recipient_for(item) is None and performers[0] is PROCESSOR` — so three functions share one rule.
+  Reachable only via `update_item`. Detail in [LP-942](../tickets/LP-942.md) "Review of the follow-up".
+
+- **The server's `WAITING_ON` and the client's are two statements of one rule, unpinned** — same review,
+  open, low stakes. They agree on every entry now (verified entry by entry: `hoa`, `employer` and
+  `other_party` are `UNKNOWN` on both sides, so the appraiser was the only drift), but nothing holds them
+  together across the language boundary, and they have drifted once. Contrast `_RECIPIENT` /
+  `_RECIPIENT_ORDER`, pinned the same round because both live in Python.
 
 - **The product owner's sign-off on the library's top 20 types** (decision 6), once LP-918 has written
   `phase4.5-library-review.md`.
