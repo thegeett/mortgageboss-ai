@@ -23,8 +23,8 @@ _ASKS = (PlanOption.ASK_BORROWER, PlanOption.ASK_THIRD_PARTY)
 
 
 def _outward_text() -> list[tuple[str, str]]:
-    """Every library string a borrower or third party reads: an ASK item's own wording, and the type's
-    email wording when any of its items is asked of someone."""
+    """Every library string a borrower or third party reads: an ASK item's own wording, and every type's
+    name, short and why (emails, and the underwriter question)."""
     out: list[tuple[str, str]] = []
     for kind in load_library().types.values():
         asked = [item for item in kind.items if item.option in _ASKS]
@@ -33,11 +33,13 @@ def _outward_text() -> list[tuple[str, str]]:
                 value = getattr(item, field, None)
                 if value:
                     out.append((f"{kind.id}.{item.key}.{field}", value))
-        if asked:
-            for field in ("short", "why"):
-                value = getattr(kind, field, None)
-                if value:
-                    out.append((f"{kind.id}.{field}", value))
+        # EVERY type's name, short and why, not only those with an asked item (LP-945 review): the
+        # underwriter question renders a type's short-or-name for any condition, and an underwriter
+        # at the lender is outside her company.
+        for field in ("name", "short", "why"):
+            value = getattr(kind, field, None)
+            if value:
+                out.append((f"{kind.id}.{field}", value))
     return out
 
 
