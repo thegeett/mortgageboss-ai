@@ -826,19 +826,23 @@ async def update_item(
     if due_date is not None:
         item.due_date = due_date
         changed["due_date"] = due_date.isoformat()
-    # LP-946: a re-edit re-splits. The open parts from the last split go (soft), and the item is split
-    # again by its performers now; a part already done is kept, as the record of what arrived.
+    # LP-946: a re-edit re-splits. Only the parts NEVER ASKED go (soft): an OPEN part is still in an
+    # unsent draft or is her untouched task. A part whose ask went out (REQUESTED), whose document came
+    # (RECEIVED) or that is DONE is KEPT, as the record of what was requested or arrived — the LP-940
+    # doctrine that a SENT draft keeps its items (LP-946 review). A kept part is not split out again.
+    kept: set[str] = set()
     for old in (
         await db.execute(
             select(ConditionItem).where(
-                ConditionItem.part_of_item_id == item.id,
-                ConditionItem.deleted_at.is_(None),
-                ConditionItem.status != ConditionItemStatus.DONE,
+                ConditionItem.part_of_item_id == item.id, ConditionItem.deleted_at.is_(None)
             )
         )
     ).scalars():
-        old.deleted_at = datetime.now(UTC)
-    parts = split_item(item)
+        if old.status is ConditionItemStatus.OPEN:
+            old.deleted_at = datetime.now(UTC)
+        else:
+            kept.add(old.key)
+    parts = [part for part in split_item(item) if part.key not in kept]
     for part in parts:
         db.add(part)
     if parts:
