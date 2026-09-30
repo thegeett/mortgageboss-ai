@@ -167,7 +167,14 @@ export function ReadingItems({
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [who, setWho] = useState<Performer>("borrower");
-  const shown = items.filter((item) => !("status" in item) || item.status !== "not_needed");
+  const live = items.filter((item) => !("status" in item) || item.status !== "not_needed");
+  // LP-946: a part (one destination of an item several people act on) is shown on its parent's row,
+  // "Also: in the borrower email · draft", rather than as a row of its own.
+  const partsOf = (id: string) =>
+    live.filter(
+      (each): each is ConditionItem => "part_of_item_id" in each && each.part_of_item_id === id,
+    );
+  const shown = live.filter((item) => !("part_of_item_id" in item) || !item.part_of_item_id);
   if (shown.length === 0 && !onAdd) return null;
   return (
     <section className="flex flex-col gap-2">
@@ -222,6 +229,14 @@ export function ReadingItems({
               {"id" in item ? (
                 <ItemWhere item={item} onMarkDone={onMarkDone} onOpenDraft={onOpenDraft} />
               ) : null}
+              {"id" in item
+                ? partsOf(item.id).map((part) => (
+                    <p key={part.id} className="text-xs text-foreground-2">
+                      Also: {performersLabel(part.performers)} —{" "}
+                      {itemWhere(part) ?? (part.option === "i_will_do_it" ? "your task" : "")}
+                    </p>
+                  ))
+                : null}
             </div>
           </li>
         ))}

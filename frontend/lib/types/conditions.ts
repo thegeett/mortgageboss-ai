@@ -1068,6 +1068,8 @@ export interface ConditionItem {
   draft: DraftTail | null;
   /** LP-942 — "Appraisal requests go through the lender" on an ask for the appraiser. */
   route_note?: string | null;
+  /** LP-946 — the item this one was split from (each destination of a multi-performer item). */
+  part_of_item_id?: string | null;
 }
 
 export interface RoundPlanDraft {

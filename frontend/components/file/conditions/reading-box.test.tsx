@@ -137,6 +137,41 @@ describe("ReadingItems", () => {
     expect(screen.getByText("Ask a third party")).toBeDefined();
   });
 
+  it("shows where each part of a two-person item went, on the item's own row (LP-946)", () => {
+    const base = {
+      acceptable: "",
+      documents: [],
+      checks: [],
+      specifics: { amounts: [], account_bank: null, account_last4: null, month: null, names: [] },
+      draft: null,
+      status: "open",
+    };
+    const parent = {
+      ...base,
+      id: "p1",
+      key: "statement",
+      name: "Bank statement",
+      performer: "borrower",
+      performers: ["borrower"],
+      option: "ask_borrower",
+      part_of_item_id: null,
+    } as unknown as ConditionItem;
+    const part = {
+      ...base,
+      id: "p2",
+      key: "statement.processor",
+      name: "Bank statement",
+      performer: "processor",
+      performers: ["processor"],
+      option: "i_will_do_it",
+      part_of_item_id: "p1",
+    } as unknown as ConditionItem;
+    render(<ReadingItems items={[parent, part]} />);
+    expect(screen.getByText("Items · 1")).toBeDefined();
+    expect(screen.getByText("In borrower email")).toBeDefined();
+    expect(screen.getByText("Also: You — your task")).toBeDefined();
+  });
+
   it("puts an appraiser's ask in the lender's email, and says why (LP-942)", () => {
     const appraisal = {
       id: "i1",

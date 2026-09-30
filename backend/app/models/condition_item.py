@@ -86,5 +86,10 @@ class ConditionItem(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     draft_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("condition_drafts.id", ondelete="SET NULL"), nullable=True
     )
+    #: LP-946 — a PART of an item with several performers: each destination (an outside performer's
+    #: email, or her task) is its own item, linked to the item it was split from.
+    part_of_item_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("condition_items.id", ondelete="SET NULL"), nullable=True
+    )
 
     condition: Mapped["Condition"] = relationship(foreign_keys=[condition_id])

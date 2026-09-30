@@ -962,6 +962,9 @@ class ConditionItemPublic(BaseModel):
     #: LP-942 — "Appraisal requests go through the lender" on an ask for the appraiser, which goes into
     #: the lender's draft rather than to the appraiser (appraiser independence).
     route_note: str | None = None
+    #: LP-946 — the item this one was split from, when an item's performers are asked in different
+    #: places; the item row lists where each of its parts went.
+    part_of_item_id: UUID | None = None
     #: LP-922 — the draft that asks for it: its id (to open it), "draft" or "sent", and the send date.
     draft: DraftTailPublic | None = None
 

@@ -31,7 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 import structlog
@@ -495,6 +495,7 @@ async def build_plan(db: AsyncSession, *, round_id: UUID, today: date | None = N
                 sequence=index,
                 due_date=due if option in _ASKS and status is ConditionItemStatus.OPEN else None,
             )
+            parts = split_item(item)
             route_ask(item)
             base = next(
                 (i for i in (condition_type.items if condition_type else ()) if i.key == item.key),
@@ -514,6 +515,9 @@ async def build_plan(db: AsyncSession, *, round_id: UUID, today: date | None = N
                     )
             db.add(item)
             created.append(item)
+            for part in parts:
+                db.add(part)
+                created.append(part)
 
         # Waits on another condition (0007's invoice on 1228's inspection).
         if condition_type is not None and condition_type.waits_on_type:
@@ -822,6 +826,23 @@ async def update_item(
     if due_date is not None:
         item.due_date = due_date
         changed["due_date"] = due_date.isoformat()
+    # LP-946: a re-edit re-splits. The open parts from the last split go (soft), and the item is split
+    # again by its performers now; a part already done is kept, as the record of what arrived.
+    for old in (
+        await db.execute(
+            select(ConditionItem).where(
+                ConditionItem.part_of_item_id == item.id,
+                ConditionItem.deleted_at.is_(None),
+                ConditionItem.status != ConditionItemStatus.DONE,
+            )
+        )
+    ).scalars():
+        old.deleted_at = datetime.now(UTC)
+    parts = split_item(item)
+    for part in parts:
+        db.add(part)
+    if parts:
+        changed["split"] = [p.performers for p in parts]
     before = item.option
     route_ask(item)
     if item.option is not before:
@@ -882,8 +903,11 @@ async def add_item(
         if chosen in _ASKS
         else None,
     )
+    parts = split_item(item)
     route_ask(item)
     db.add(item)
+    for part in parts:
+        db.add(part)
     if condition.next_step in (PlanOption.INFORMATION_ONLY, PlanOption.LENDER_DOING_IT):
         condition.next_step = None
     db.add(
@@ -1080,6 +1104,73 @@ def recipient_for(item: ConditionItem) -> tuple[str, str] | None:
     return _RECIPIENT.get(performers[0])
 
 
+def destinations(item: ConditionItem) -> list[list[Performer]]:
+    """LP-946 — the performers of an ask, grouped by where each is asked: one group per email, and one
+    for HER (her task). THE LO RELAYS TO THE BORROWER (plan §6, the Stage 3A acceptance): a borrower on
+    an item the LO also acts on is asked through the LO's email, so `[borrower, lo]` is one group."""
+    performers = [Performer(p) for p in item.performers] or [item.performer]
+    if item.option not in _ASKS:
+        return [performers]
+    relayed = Performer.LO in performers
+    groups: dict[str, list[Performer]] = {}
+    for performer in performers:
+        if performer is Performer.PROCESSOR:
+            key = "you"
+        elif relayed and performer is Performer.BORROWER:
+            key = _RECIPIENT[Performer.LO][0]
+        else:
+            key = _RECIPIENT[performer][0] if performer in _RECIPIENT else performer.value
+        groups.setdefault(key, []).append(performer)
+    return list(groups.values())
+
+
+def split_item(item: ConditionItem) -> list[ConditionItem]:
+    """LP-946 — EVERY OUTSIDE PERFORMER GETS THE ASK IN THEIR OWN DRAFT, AND SHE GETS A TASK ONLY IF SHE IS
+    ONE OF THEM. An item with more than one destination keeps the first and returns one new PART per
+    other destination (not yet added to the session: the caller adds the item first, so the part's link
+    to it is inserted after it). Each part is a whole item: its own option, its own draft or her task,
+    its own evidence. Returns [] when there is one destination."""
+    groups = destinations(item)
+    if len(groups) <= 1:
+        return []
+    if item.id is None:
+        item.id = uuid4()
+    first, *rest = groups
+    item.performer = first[0]
+    item.performers = [p.value for p in first]
+    parts: list[ConditionItem] = []
+    for group in rest:
+        lead = group[0]
+        # An ask of the lead; `route_ask` below makes HER part her task (one rule, not two).
+        option = (
+            PlanOption.ASK_BORROWER if lead is Performer.BORROWER else PlanOption.ASK_THIRD_PARTY
+        )
+        part = ConditionItem(
+            id=uuid4(),
+            company_id=item.company_id,
+            loan_file_id=item.loan_file_id,
+            condition_id=item.condition_id,
+            round_id=item.round_id,
+            key=f"{item.key}.{lead.value}"[:40],
+            name=item.name,
+            acceptable=item.acceptable,
+            performer=lead,
+            performers=[p.value for p in group],
+            option=option,
+            status=ConditionItemStatus.OPEN,
+            origin=item.origin,
+            documents=list(item.documents or []),
+            checks=list(item.checks or []),
+            specifics=dict(item.specifics or {}),
+            sequence=item.sequence,
+            due_date=item.due_date if option in _ASKS else None,
+            part_of_item_id=item.part_of_item_id or item.id,
+        )
+        route_ask(part)
+        parts.append(part)
+    return parts
+
+
 def route_ask(item: ConditionItem) -> None:
     """LP-942 — AN ASK NEVER ENDS UP WITH NO DESTINATION. The lender and the appraiser have an email now
     (the lender's); the one performer with none is the processor herself, and an ask addressed to her
@@ -1190,6 +1281,7 @@ async def items_public_for_file(db: AsyncSession, *, loan_file_id: UUID) -> dict
                     and recipient_for(item) is not None
                     else None,
                     draft=tails.get(item.draft_id) if item.draft_id else None,
+                    part_of_item_id=item.part_of_item_id,
                 )
             )
         out[condition_id] = rows
