@@ -199,7 +199,9 @@ async def test_no_message_body_reaches_the_response(client: AsyncClient, db: Asy
 
     resp = await client.get(f"{API}/{loan_file.display_id}/timeline", headers=_auth(token))
 
-    assert "4821" not in resp.text
+    # "ENDING 4821", NOT "4821" (LP-944): the response carries UUIDs and timestamps, and a bare 4-digit
+    # string can occur in them by chance. The phrase is the body's, and nothing random can spell it.
+    assert "ending 4821" not in resp.text
     assert "Dear Jane" not in resp.text
     assert resp.json()["entries"][0]["subject"] == "Your documents"
 

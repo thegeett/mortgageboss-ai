@@ -105,11 +105,17 @@ async def _confirmed(
 async def _drafts(
     db: AsyncSession, loan_file: LoanFile
 ) -> dict[str, tuple[ConditionDraft, Communication]]:
+    # ORDERED, AND THE UNSENT ONE WINS (LP-944). Once a recipient has a sent draft AND a new one (a re-ask
+    # after the round's email was sent), this dict keeps whichever row comes LAST. Without an ORDER BY
+    # that was the planner's choice: a merge join returned the sent draft last, and
+    # `test_the_reask_goes_into_a_new_borrower_email` failed in about one full run in three, never
+    # alone, because the plan follows table statistics that a long run changes.
     rows = (
         await db.execute(
             select(ConditionDraft, Communication)
             .join(Communication, Communication.id == ConditionDraft.communication_id)
             .where(ConditionDraft.loan_file_id == loan_file.id, Communication.deleted_at.is_(None))
+            .order_by(Communication.status == CommunicationStatus.DRAFT, Communication.created_at)
         )
     ).tuples()
     out: dict[str, tuple[ConditionDraft, Communication]] = {}

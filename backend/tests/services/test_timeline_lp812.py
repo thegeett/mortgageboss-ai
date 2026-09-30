@@ -538,7 +538,10 @@ async def test_the_timeline_never_carries_a_body(db_session: AsyncSession) -> No
     timeline, _truncated = await build_timeline(db_session, loan_file=loan_file)
 
     rendered = repr(timeline[0])
-    assert "4821" not in rendered
+    # "ENDING 4821", NOT "4821" (LP-944): the repr carries a random UUID and microsecond timestamps,
+    # and a bare 4-digit string turned up in one of them about once in 1,500 runs. The phrase is the
+    # body's, and nothing random can spell it.
+    assert "ending 4821" not in rendered
     assert "Dear Jane" not in rendered
     # The SUBJECT does travel — it is what a processor recognises a message by.
     assert timeline[0].subject == "Your documents"

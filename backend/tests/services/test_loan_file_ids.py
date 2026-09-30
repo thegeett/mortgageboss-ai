@@ -17,6 +17,7 @@ logic is verified in isolation here, and end-to-end uniqueness is covered by
 the model tests.
 """
 
+import inspect
 import sys
 import types
 from collections.abc import Iterator
@@ -105,34 +106,20 @@ def test_display_ids_are_well_distributed() -> None:
 def test_inbox_token_is_independent_of_display_id() -> None:
     """The inbox token is NOT derived from the display ID (ADR-036).
 
-    Generate many (display_id, inbox_token) pairs and confirm there is no
-    relationship: the token never contains the display ID or its random code,
-    and identical display codes do not yield identical tokens. The tokens are
-    simply independent random values.
+    PROVED BY CONSTRUCTION, NOT BY SUBSTRING (LP-944). The first version drew 1000 pairs and asserted
+    the 4-character display code never appeared inside the random token. Both are random, so chance
+    alone put the code in the token about once in a thousand runs (`RAKSTDzq1DNBKVL5PyKWmQ` contains
+    `AKST`), and the test failed on nothing. Independence is the shape of the API: the token takes no
+    input, so there is nothing to derive it from, and one display id gets different tokens.
     """
-    seen_codes: dict[str, str] = {}
-    collision_found = False
-    for _ in range(1000):
-        display_id = generate_display_id()
-        token = generate_inbox_token()
-        code = display_id.removeprefix(DISPLAY_PREFIX)
-
-        # The token must not encode the display id in any obvious way.
-        assert display_id not in token
-        assert code not in token
-
-        # If the same 4-char display code recurs (birthday collisions happen),
-        # the token must still differ — proving the token is not a function of
-        # the display id.
-        if code in seen_codes:
-            collision_found = True
-            assert seen_codes[code] != token
-        seen_codes[code] = token
-
-    # Not required for correctness, but make the independence check meaningful:
-    # at 1000 draws over 31**4 codes, recurrence is plausible but not certain,
-    # so we don't assert it occurred — the per-iteration checks stand on their own.
-    _ = collision_found
+    # Nothing to derive from: the generator takes no arguments.
+    assert not inspect.signature(generate_inbox_token).parameters
+    # The same display id, many tokens, all different: the token is not a function of the id.
+    display_id = generate_display_id()
+    tokens = [generate_inbox_token() for _ in range(200)]
+    assert len(set(tokens)) == len(tokens)
+    # The WHOLE display id (7 characters with its prefix) is too long to occur by chance.
+    assert all(display_id not in token for token in tokens)
 
 
 async def test_generate_unique_display_id_returns_free_candidate(
