@@ -16249,7 +16249,13 @@ knows the lender cleared something cannot say so until Stage 2, and that is the 
 "Cleared" never appears anywhere in the Stage 1 UI, because a status control that cannot be trusted is
 worse than none.
 
-*Status.* Accepted (LP-903).
+*Status.* Accepted (LP-903). **Amended (LP-940, 2026-09-29, the product owner's decision).** A condition
+the processor ADDED BY HAND (`origin = manual`) is her own entry, not the lender's demand, so she may
+withdraw one entered in error, with a short reason. It is a soft delete (`deleted_at`) with a
+`condition_withdrawn` event: it leaves the list, the counts, the plan, the drafts and the package, stays
+in a collapsed "Withdrawn (n)" section, and Undo (`condition_restored`) puts it back. Nothing is removed.
+The rule for the lender's conditions is unchanged. It is refused for a sheet condition, for one with a
+recorded lender verdict (the lender's word), and for one that went to the lender in a submitted package.
 
 ---
 

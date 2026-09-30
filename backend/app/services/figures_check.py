@@ -154,7 +154,8 @@ async def _funds_evidence(
         ):
             continue
         condition = await db.get(Condition, item.condition_id)
-        if condition is None:
+        # A withdrawn condition (LP-940) is off the file: its evidence proposes nothing.
+        if condition is None or condition.deleted_at is not None:
             continue
         documents = list(
             (

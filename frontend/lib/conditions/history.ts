@@ -219,6 +219,12 @@ export function conditionHistoryLine(
       return `A failed check was accepted${by(event)}`;
     case "condition_finding_answered":
       return `A finding on the evidence was answered${by(event)}`;
+    // LP-940. NO REASON HERE, for the same reason as LP-923's: her words stay on the "Withdrawn"
+    // section's row rather than travelling in the history's allow-list.
+    case "condition_withdrawn":
+      return `Withdrawn as entered in error${by(event)}`;
+    case "condition_restored":
+      return `Put back${by(event)}`;
     case "condition_drafted":
       return event.draft_recipient
         ? `Added to the ${EMAIL_NAME[event.draft_recipient]}`

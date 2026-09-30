@@ -49,6 +49,7 @@ import { RoundDetailsSheet } from "./round-details-sheet";
 import { RoundDrafts } from "./round-drafts";
 import { RoundPlanPanel } from "./round-plan-panel";
 import { RoundStrip } from "./round-strip";
+import { WithdrawnSection } from "./withdraw-condition";
 
 /**
  * The conditions list screen (S2-01, S2-02, S2-09) — LP-913.
@@ -415,6 +416,8 @@ export function ConditionsListView({
           }}
         />
       )}
+
+      <WithdrawnSection fileId={fileId} />
 
       <ConditionsBulkBar
         selected={selected}

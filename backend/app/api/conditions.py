@@ -16,7 +16,7 @@ scoped, so a round can only ever be opened on a file the caller's company owns.
 
 from collections.abc import Callable
 from datetime import UTC, date, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 import structlog
@@ -103,6 +103,8 @@ from app.schemas.condition import (
     RoundPlanPublic,
     UnderwriterNotePublic,
     VerdictRequest,
+    WithdrawnConditionPublic,
+    WithdrawRequest,
 )
 from app.services import condition_drafts, condition_evidence
 from app.services.condition_compare import (
@@ -2111,3 +2113,76 @@ async def download_condition_package(loan_file: ScopedLoanFileById, db: DbSessio
     if missing:
         headers["X-Package-Missing"] = str(len(missing))
     return Response(content=content, media_type="application/zip", headers=headers)
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-940 — withdraw a hand-added condition entered in error (ADR-404 as amended)
+# --------------------------------------------------------------------------------------------- #
+
+
+def _withdraw_refused(exc: Any) -> HTTPException:
+    """409 with the sentence, the shape every refusal on this feature uses."""
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"message": exc.reason, "code": "withdraw_refused"},
+    )
+
+
+@conditions_by_id_router.post("/{condition_id}/withdraw", response_model=WithdrawnConditionPublic)
+async def withdraw_condition(
+    condition: ScopedCondition,
+    payload: WithdrawRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> WithdrawnConditionPublic:
+    """Withdraw a condition she added by hand. Refused for a sheet condition, one the lender answered
+    on, and one sent in a submitted package; the reason is required and kept in the history."""
+    from app.services import condition_withdraw
+
+    loan_file_id = condition.loan_file_id
+    try:
+        await condition_withdraw.withdraw(
+            db, condition=condition, reason=payload.reason, actor_user_id=current_user.id
+        )
+    except condition_withdraw.WithdrawRefused as exc:
+        raise _withdraw_refused(exc) from exc
+    await db.commit()
+    rows = await condition_withdraw.withdrawn_for_file(db, loan_file_id=loan_file_id)
+    (row,) = [r for r in rows if r.id == condition.id]
+    return WithdrawnConditionPublic.model_validate(row, from_attributes=True)
+
+
+@router.post("/{loan_file_id}/conditions/{condition_id}/restore", response_model=ConditionPublic)
+async def restore_condition(
+    loan_file: ScopedLoanFileById,
+    condition_id: UUID,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionPublic:
+    """Undo a withdrawal. Behind the FILE's gate: a withdrawn condition is not found by
+    `get_scoped_condition`, by design, so it is looked up on the scoped file, deleted rows included."""
+    from app.services import condition_withdraw
+
+    condition = await db.scalar(
+        select(Condition).where(
+            Condition.id == condition_id, Condition.loan_file_id == loan_file.id
+        )
+    )
+    if condition is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Condition not found")
+    try:
+        await condition_withdraw.restore(db, condition=condition, actor_user_id=current_user.id)
+    except condition_withdraw.WithdrawRefused as exc:
+        raise _withdraw_refused(exc) from exc
+    return await _condition_response(db, condition)
+
+
+@router.get("/{loan_file_id}/withdrawn-conditions", response_model=list[WithdrawnConditionPublic])
+async def list_withdrawn_conditions(
+    loan_file: ScopedLoanFileById, db: DbSession
+) -> list[WithdrawnConditionPublic]:
+    """The list's collapsed "Withdrawn (n)" section, the latest withdrawal first."""
+    from app.services import condition_withdraw
+
+    rows = await condition_withdraw.withdrawn_for_file(db, loan_file_id=loan_file.id)
+    return [WithdrawnConditionPublic.model_validate(r, from_attributes=True) for r in rows]

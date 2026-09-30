@@ -1605,6 +1605,23 @@ class VerdictRequest(_ConcurrentWrite):
     note: str | None = Field(default=None, max_length=500)
 
 
+class WithdrawRequest(BaseModel):
+    """LP-940 — withdraw a hand-added condition entered in error. The service refuses an empty reason with
+    its sentence (a 409 she reads), so the schema only bounds the length."""
+
+    reason: str = Field(default="", max_length=500)
+
+
+class WithdrawnConditionPublic(BaseModel):
+    """One row of the list's collapsed "Withdrawn (n)" section (LP-940)."""
+
+    id: UUID
+    lender_code: str | None
+    verbatim_text: str
+    reason: str
+    withdrawn_at: datetime
+
+
 class ReopenRequest(_ConcurrentWrite):
     """Put a cleared or waived condition back to open. The reason is required.
 

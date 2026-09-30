@@ -93,7 +93,8 @@ class ConditionEventKind(StrEnum):
     # WHAT IS STILL ABSENT IS AS DELIBERATE AS BEFORE. There is no `condition_cleared`: clearing is
     # `CONDITION_VERDICT_RECORDED` with a verdict naming who said so and where, because a bare
     # "cleared" event would be the app asserting the lender's answer without its provenance
-    # (ADR-404, ADR-408). And there is still no `condition_removed` — nothing disappears.
+    # (ADR-404, ADR-408). And there is still no `condition_removed` — nothing disappears. (LP-940's
+    # `condition_withdrawn` is a soft delete of a hand-added row, with Undo; the row and its history stay.)
 
     #: Our track moved. Carries `from`/`to`, plus the reason a BACKWARD move requires.
     CONDITION_PREP_MOVED = "condition_prep_moved"
@@ -138,6 +139,12 @@ class ConditionEventKind(StrEnum):
     #: LP-915. An imported round was switched between "full list" and "just some" (A7), which is what
     #: makes a comparison runnable — or withdraws its unconfirmed suggestions.
     ROUND_COMPLETENESS_CHANGED = "round_completeness_changed"
+    #: LP-940 — a condition SHE ADDED BY HAND was withdrawn as entered in error, with her reason. It is
+    #: soft-deleted, not removed: the row, its history and this event stay (ADR-404 as amended). Never
+    #: a sheet condition, never one the lender has answered on, never one sent in a package.
+    CONDITION_WITHDRAWN = "condition_withdrawn"
+    #: LP-940 — Undo of a withdrawal: the condition is back on the file as it was.
+    CONDITION_RESTORED = "condition_restored"
 
 
 class ConditionEvent(Base, UUIDMixin):

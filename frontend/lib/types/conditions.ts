@@ -320,7 +320,9 @@ export type ConditionEventKind =
   | "condition_draft_polished"
   | "condition_evidence_checked"
   | "condition_evidence_accepted"
-  | "condition_finding_answered";
+  | "condition_finding_answered"
+  | "condition_withdrawn"
+  | "condition_restored";
 
 /**
  * One line of a round's history (S1-09).
@@ -1271,4 +1273,14 @@ export interface ConditionPackage {
   upload_fields: string[];
   du_rerun_open: boolean;
   submitted_at: string | null;
+}
+
+/** LP-940 — one row of the list's collapsed "Withdrawn (n)" section. Only hand-added conditions. */
+export interface WithdrawnCondition {
+  id: string;
+  lender_code: string | null;
+  verbatim_text: string;
+  /** Her reason, kept for the record (the history line says only that it was withdrawn). */
+  reason: string;
+  withdrawn_at: string;
 }

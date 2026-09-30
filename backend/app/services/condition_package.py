@@ -528,7 +528,7 @@ async def submit(
         raise PackageRefused("This package was already submitted.")
     now = datetime.now(UTC)
     moved: list[str] = []
-    for row in package.rows:
+    for row in await live_rows(db, package):
         if not row.get("included", True):
             continue
         condition = await db.get(Condition, UUID(row["condition_id"]))
@@ -571,7 +571,7 @@ async def download(db: AsyncSession, *, package: ConditionPackage) -> tuple[byte
     missing: list[str] = []
     lines: list[str] = []
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        for row in package.rows:
+        for row in await live_rows(db, package):
             if not row.get("included", True):
                 continue
             extra = "".join(
@@ -624,6 +624,24 @@ class PackageView:
     submitted_at: datetime | None = None
 
 
+async def live_rows(db: AsyncSession, package: ConditionPackage) -> list[dict[str, Any]]:
+    """The package's rows WITHOUT a withdrawn condition (LP-940). A built package stores its rows; a
+    condition she withdraws afterwards leaves the view, the download and Mark submitted, and the stored
+    rows are not rewritten. A submitted package is the record of what was sent: its rows are all live,
+    because a condition in one cannot be withdrawn."""
+    ids = [UUID(r["condition_id"]) for r in package.rows or []]
+    if not ids:
+        return []
+    withdrawn = set(
+        (
+            await db.execute(
+                select(Condition.id).where(Condition.id.in_(ids), Condition.deleted_at.is_not(None))
+            )
+        ).scalars()
+    )
+    return [dict(r) for r in package.rows if UUID(r["condition_id"]) not in withdrawn]
+
+
 async def view(db: AsyncSession, *, loan_file: LoanFile) -> PackageView | None:
     """S3-10's panel: the package (or what would go in), its warnings, and the lender's cutoff."""
     from app.services import figures_check
@@ -643,7 +661,7 @@ async def view(db: AsyncSession, *, loan_file: LoanFile) -> PackageView | None:
         round_number=round_.round_number,
         status=package.status.value if package else None,
         package_id=package.id if package else None,
-        rows=list(package.rows) if package else [],
+        rows=await live_rows(db, package) if package else [],
         ready_count=len(ready),
         cutoff=settings.upload_cutoff,
         cutoff_tz=settings.upload_cutoff_tz,

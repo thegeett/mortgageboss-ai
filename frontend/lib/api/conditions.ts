@@ -44,6 +44,7 @@ import type {
   ReopenInput,
   RoundPlan,
   VerdictInput,
+  WithdrawnCondition,
 } from "@/lib/types/conditions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -1175,4 +1176,61 @@ export async function downloadConditionPackage(fileId: string, filename: string)
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+// --------------------------------------------------------------------------------------------- //
+// LP-940 — withdraw a hand-added condition entered in error, and put it back
+// --------------------------------------------------------------------------------------------- //
+
+export const withdrawnConditionsQueryKey = (fileId: string) =>
+  ["withdrawn-conditions", fileId] as const;
+
+/** The list's collapsed "Withdrawn (n)" section. */
+export function useWithdrawnConditions(fileId: string) {
+  return useQuery({
+    queryKey: withdrawnConditionsQueryKey(fileId),
+    queryFn: async () =>
+      (
+        await apiClient.get<WithdrawnCondition[]>(
+          `/api/v1/loan-files/${fileId}/withdrawn-conditions`,
+        )
+      ).data,
+  });
+}
+
+/** Everything a withdrawal or its Undo changes: the list, counts, plan, drafts, package, section. */
+function invalidateWithdrawal(queryClient: ReturnType<typeof useQueryClient>, fileId: string) {
+  invalidatePlan(queryClient, fileId);
+  void queryClient.invalidateQueries({ queryKey: withdrawnConditionsQueryKey(fileId) });
+  void queryClient.invalidateQueries({ queryKey: conditionPackageQueryKey(fileId) });
+  void queryClient.invalidateQueries({ queryKey: conditionDraftsQueryKey(fileId) });
+}
+
+/** "Withdraw": refused with a sentence (409) for a sheet condition, one the lender answered on, one
+ *  sent in a submitted package, and an empty reason. */
+export function useWithdrawCondition(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ conditionId, reason }: { conditionId: string; reason: string }) =>
+      (
+        await apiClient.post<WithdrawnCondition>(`/api/v1/conditions/${conditionId}/withdraw`, {
+          reason,
+        })
+      ).data,
+    onSuccess: () => invalidateWithdrawal(queryClient, fileId),
+  });
+}
+
+/** Undo. */
+export function useRestoreCondition(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ conditionId }: { conditionId: string }) =>
+      (
+        await apiClient.post<Condition>(
+          `/api/v1/loan-files/${fileId}/conditions/${conditionId}/restore`,
+        )
+      ).data,
+    onSuccess: () => invalidateWithdrawal(queryClient, fileId),
+  });
 }

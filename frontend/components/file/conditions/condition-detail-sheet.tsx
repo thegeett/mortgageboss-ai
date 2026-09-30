@@ -2,6 +2,7 @@
 
 import { EvidenceSection } from "@/components/file/conditions/evidence-section";
 import { ReadingBox, ReadingItems } from "@/components/file/conditions/reading-box";
+import { WithdrawControl } from "@/components/file/conditions/withdraw-condition";
 import { StatusToken } from "@/components/status-token";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
@@ -452,6 +453,8 @@ function SheetBody({
         </section>
 
         {fileId ? <EvidenceSection fileId={fileId} condition={condition} /> : null}
+
+        {fileId ? <WithdrawControl fileId={fileId} condition={condition} /> : null}
 
         <ReadingBox
           condition={condition}
