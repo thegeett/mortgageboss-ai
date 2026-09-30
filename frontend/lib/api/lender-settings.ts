@@ -18,6 +18,8 @@ export interface LenderConditionSettings {
   /** "note", "name_of_source", "date_verified". */
   upload_fields: string[];
   lender_orders_final_inspection: boolean;
+  /** LP-945 — the lender verifies a self-employed borrower's business exists (IE-08). */
+  lender_verifies_business_existence: boolean;
   lender_orders_title_insurance_payoffs: boolean;
   new_files_lender_processing: boolean;
 }

@@ -41,6 +41,7 @@ const UWM: LenderConditionSettings = {
   upload_cutoff_tz: "America/New_York",
   upload_fields: ["note"],
   lender_orders_final_inspection: true,
+  lender_verifies_business_existence: false,
   lender_orders_title_insurance_payoffs: false,
   new_files_lender_processing: false,
 };
@@ -63,6 +64,7 @@ describe("LenderConditionSettings", () => {
     screen.getByText("2 files");
     fireEvent.click(screen.getByLabelText("Date verified"));
     fireEvent.click(screen.getByLabelText(/Processor Assist/));
+    fireEvent.click(screen.getByLabelText(/Lender verifies business existence/));
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     const { clause_from_letter: _, ...rest } = UWM;
     expect(state.saved).toEqual([
@@ -70,6 +72,7 @@ describe("LenderConditionSettings", () => {
         ...rest,
         upload_fields: ["note", "date_verified"],
         lender_orders_title_insurance_payoffs: true,
+        lender_verifies_business_existence: true,
       },
     ]);
   });

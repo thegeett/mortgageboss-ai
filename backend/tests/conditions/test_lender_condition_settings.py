@@ -107,10 +107,15 @@ async def test_the_settings_are_s3_11_and_save_for_every_file(db_session: AsyncS
             "upload_cutoff_tz": "America/New_York",
             "upload_fields": ["note"],
             "lender_orders_final_inspection": True,
+            "lender_verifies_business_existence": False,
             "lender_orders_title_insurance_payoffs": False,
             "new_files_lender_processing": False,
         }
-        body = {**shown, "upload_fields": ["note", "name_of_source", "date_verified"]}
+        body = {
+            **shown,
+            "upload_fields": ["note", "name_of_source", "date_verified"],
+            "lender_verifies_business_existence": True,
+        }
         body.pop("clause_from_letter")
         # Only an admin may save.
         assert (await client.put(url, json=body, headers=processor)).status_code == 403
@@ -125,6 +130,7 @@ async def test_the_settings_are_s3_11_and_save_for_every_file(db_session: AsyncS
     await db_session.refresh(lender)
     settings = lender_condition_settings(lender)
     assert settings.upload_fields == ("note", "name_of_source", "date_verified")
+    assert settings.lender_verifies_business_existence is True  # LP-945
     assert lender.mortgagee_clause == CLAUSE
 
 

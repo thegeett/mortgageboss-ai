@@ -47,6 +47,7 @@ async def settings_for(db: AsyncSession, *, lender: Lender) -> dict[str, Any]:
         "upload_cutoff_tz": current["upload_cutoff_tz"],
         "upload_fields": list(current["upload_fields"]),
         "lender_orders_final_inspection": current["lender_orders_final_inspection"],
+        "lender_verifies_business_existence": current["lender_verifies_business_existence"],
         "lender_orders_title_insurance_payoffs": current["lender_orders_title_insurance_payoffs"],
         "new_files_lender_processing": current["new_files_lender_processing"],
     }
@@ -83,6 +84,7 @@ async def save_settings(db: AsyncSession, *, lender: Lender, data: dict[str, Any
         "upload_cutoff_tz": data.get("upload_cutoff_tz") or "America/New_York",
         "upload_fields": fields,
         "lender_orders_final_inspection": bool(data.get("lender_orders_final_inspection")),
+        "lender_verifies_business_existence": bool(data.get("lender_verifies_business_existence")),
         "lender_orders_title_insurance_payoffs": bool(
             data.get("lender_orders_title_insurance_payoffs")
         ),

@@ -141,6 +141,7 @@ class LenderConditionSettingsPublic(BaseModel):
     upload_cutoff_tz: str
     upload_fields: list[str]
     lender_orders_final_inspection: bool
+    lender_verifies_business_existence: bool
     lender_orders_title_insurance_payoffs: bool
     new_files_lender_processing: bool
 
@@ -151,6 +152,7 @@ class LenderConditionSettingsUpdate(BaseModel):
     upload_cutoff_tz: str = Field(default="America/New_York", max_length=64)
     upload_fields: list[str] = Field(default_factory=lambda: ["note"], max_length=3)
     lender_orders_final_inspection: bool = False
+    lender_verifies_business_existence: bool = False
     lender_orders_title_insurance_payoffs: bool = False
     new_files_lender_processing: bool = False
 

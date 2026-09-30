@@ -322,7 +322,8 @@ types:
     playbook: A W-2 or final pay stub from the previous job, or a written VOE the lender accepts instead.
     items:
       - key: prior_employment
-        name: W-2, final pay stub or written VOE from the prior employer
+        # LP-945: spelled out, because the borrower reads it; "VOE" stays in her own playbook and tasks.
+        name: W-2, final pay stub or written verification of employment from the prior employer
         acceptable: Any one of the three, for the employer the lender names
         performer: borrower
         option: ask_borrower
@@ -343,6 +344,23 @@ types:
         task: order the written VOE
         documents: [voe]
         checks: [right_borrower, inside_lender_dates]
+
+  - id: IE-08
+    name: Business existence verification
+    category: income
+    rule: {kind: agency, citation: Fannie Mae B3-3.1-04, note: "Within 120 calendar days before the note date."}
+    playbook: For a self-employed borrower. Any one of the three proves the business exists; check it is dated within 120 calendar days before the note date. At some lenders the lender verifies it, and the lender setting makes it "Lender is doing it".
+    short: "Business existence"
+    why: "that the borrower's business exists"
+    items:
+      - key: business_existence
+        # LP-945: the product owner's wording, answering the domain expert's question.
+        name: Business existence verification (CPA letter, business licence, or regulator listing)
+        acceptable: A CPA letter, a business licence, or a listing from the state or regulator, dated within 120 calendar days before the note date
+        performer: borrower
+        option: ask_borrower
+        documents: [business_existence_verification_cpa_ltr_bus_lic, cpa_letter, business_license]
+        checks: []
 
   - id: IE-07
     name: Tax returns or transcripts

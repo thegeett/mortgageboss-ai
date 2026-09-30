@@ -27,6 +27,10 @@ const ROLES: { key: keyof Settings; label: string }[] = [
     label: "Lender orders the final inspection / appraisal updates",
   },
   {
+    key: "lender_verifies_business_existence",
+    label: "Lender verifies business existence for self-employed borrowers",
+  },
+  {
     key: "lender_orders_title_insurance_payoffs",
     label: "Lender orders title updates, insurance, payoffs (Processor Assist)",
   },

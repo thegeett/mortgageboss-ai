@@ -92,6 +92,7 @@ _OPEN_NEED = frozenset(
 REASON_CONFIRM = "Please confirm how we read this"
 REASON_LENDER_ORDERS = "Ordered through the lender — confirm on your files"
 REASON_LENDER = "The lender is doing it"
+REASON_LENDER_VERIFIES = "The lender verifies it — its setting for this lender"
 REASON_PUSH_BACK = "Reason from the letter"
 REASON_SHORTFALL = "Shortfall computed by code"
 REASON_TITLE_INSTRUCTION = "Added to the title email"
@@ -112,6 +113,8 @@ class LenderConditionSettings:
 
     lender_orders_final_inspection: bool = False
     lender_orders_title_insurance_payoffs: bool = False
+    #: LP-945 — the lender verifies a self-employed borrower's business exists (IE-08).
+    lender_verifies_business_existence: bool = False
     new_files_lender_processing: bool = False
     upload_cutoff: str | None = None  # "20:00"
     upload_cutoff_tz: str = "America/New_York"
@@ -134,6 +137,8 @@ _CANONICAL_DEFAULTS: dict[str, dict[str, Any]] = {
 
 #: Types the "lender orders the final inspection / appraisal updates" setting covers.
 _FINAL_INSPECTION_TYPES = frozenset({"PA-03"})
+#: LP-945 — types the "lender verifies business existence" setting covers.
+_BUSINESS_EXISTENCE_TYPES = frozenset({"IE-08"})
 #: Types the Processor Assist setting ("lender orders title updates, insurance, payoffs") covers.
 _PROCESSOR_ASSIST_TYPES = frozenset({"TI-01", "TI-02", "TI-05", "IN-01", "IN-02", "IN-04"})
 
@@ -149,6 +154,9 @@ def lender_condition_settings(lender: Lender | None) -> LenderConditionSettings:
         lender_orders_final_inspection=bool(raw.get("lender_orders_final_inspection", False)),
         lender_orders_title_insurance_payoffs=bool(
             raw.get("lender_orders_title_insurance_payoffs", False)
+        ),
+        lender_verifies_business_existence=bool(
+            raw.get("lender_verifies_business_existence", False)
         ),
         new_files_lender_processing=bool(raw.get("new_files_lender_processing", False)),
         upload_cutoff=raw.get("upload_cutoff"),
@@ -358,6 +366,8 @@ def _step_and_reason(
     type_id = condition_type.id if condition_type else None
     if type_id in _FINAL_INSPECTION_TYPES and settings.lender_orders_final_inspection:
         return PlanOption.LENDER_DOING_IT, REASON_LENDER_ORDERS
+    if type_id in _BUSINESS_EXISTENCE_TYPES and settings.lender_verifies_business_existence:
+        return PlanOption.LENDER_DOING_IT, REASON_LENDER_VERIFIES
     if reading.get("lender_doing_it") or condition.bucket_kind is BucketKind.LENDER_TO_CLEAR:
         return PlanOption.LENDER_DOING_IT, REASON_LENDER
     if reading.get("information_only") or condition.info_only:

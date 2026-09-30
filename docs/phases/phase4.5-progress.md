@@ -290,6 +290,11 @@ the "Today" table's clock. Actual and review shots are committed under
 | LP-942 Asks with no email | REVIEWED | `ac4f6d58` | the review section in [LP-942](../tickets/LP-942.md) (written, not yet committed) | an item line | No defect; the invariant verified for all 11 performers x both asks (0 stranded). Review found 1: `emailKey`'s appraiser→lender merge is UNPINNED — removing it leaves the frontend suite green at 2137/2137. Also: the processor-sourced re-ask should be her task (`route_ask` in `_add_ask`), and the round-1/page-break tests do not hold the processor rule (no library item is processor-first). **Follow-up `66f60857` reviewed: 1 finding** — both items are fixed and the LP-938 test rewrite is sound (it keeps both halves of the invariant and adds the item's own performer/option), but `_hers` reads `performers[0]` while `recipient_for` prefers the LO anywhere, so a `[processor, lo]` ask goes in the LO's email while its re-ask becomes her task; fix by making `_hers` the predicate `route_ask` already uses. **Second follow-up `b072d36b` reviewed: no findings** — the seam is closed (re-verified on the reviewer's own probe: both orders now give "LO", matching where `route_ask` leaves the item, with her own task untouched) |
 | LP-943 Document display names | REVIEWED | `8af848c6` | the review section in [LP-943](../tickets/LP-943.md) (written, not yet committed) | none (emails and notes) | All 41 library types rendered and checked. Review found 2: `letter_of_explanation` and `letter_of_explanation_misc` share the display name "Letter of explanation" and the test does not check uniqueness ("(other)" fixes both); and `attention.py`'s `_document_label` still shows her "Borrower s authorization…", "Hoa statement", "Voe" from a helper whose docstring says "never the raw enum". (c) verified: no slug reaches a third party. **Follow-up `219ad4a6` reviewed: 1 finding** — both fixes verified on the reviewer's own probes, but the `attention.py` change gives `display_name` its first UNGATED caller (any of 166 catalogued types) while the cleanliness test covers the library's 41; five of the other 125 read badly, including `social_security_administration_ssa_89` -> "… ssa 89", the concrete member of the acronym gap. **Second follow-up `9212f734` reviewed: 1 finding** — all 166 now pass the rule with zero collisions (verified on the reviewer's own scan), but two more names are invisible to it: `business_existence_verification_cpa_ltr_bus_lic` → "… cpa ltr bus lic" and `prior_closing_disclosure_final_cd_from_purchase` → "… final cd …". The commit subject claims more than the test verifies, by exactly the amount the rule cannot see. **Third follow-up `ee28322b` reviewed: 1 finding, correcting the reviewer's own last claim** — "nothing else in the 166" was false because the reviewer's scan skipped capitalised words and `display_name` capitalises the first: `cpa_letter` renders "Cpa letter". Re-scanned with a positive control, exactly one remains, and one `ACRONYMS` entry (`cpa` → CPA) closes it. **Reviewer agrees LP-943 can close** |
 | LP-944 Flaky tests | REVIEWED | `adf963aa` | the review section in [LP-944](../tickets/LP-944.md) (written, not yet committed) | none | Sweep checked and complete for its class (widened to every spelling; the `"ssn" not in body` hits are dict-KEY checks, not substrings). Review found 1: the ordering mechanism has a live member in app code — `condition_enrich.py:185` keys a dict on `text_fingerprint` (a sha256, non-unique index) from an unordered query, so which of two identical-text conditions enrichment matches is the planner's choice. `email_send.py:482` already carries this repo's doctrine for it |
+| LP-945 Wording for the expert's two questions | AWAITING_REVIEW | (this commit) | | S3-11 checkbox | batch 3, the owner's list of 2026-09-30 |
+| LP-946 Items with more than one performer | PENDING | | | | |
+| LP-947 One source for "waiting on" | PENDING | | | | |
+| LP-948 Four small defects | PENDING | | | | |
+| LP-939 Real-model trial (script only) | PENDING | | | none | un-skipped in batch 3 |
 
 ## Stage 3A — acceptance (build prompt §6)
 
@@ -627,7 +632,8 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   `display_name` capitalises the first — an absence claim the reviewer made and has corrected. The re-scan,
   with a positive control this time, found exactly this one across all 166.
 
-- **"Verbal VOE" and "Verification of employment (VOE)" are inconsistent** — same review, open, for the
+- ~~**"Verbal VOE" and "Verification of employment (VOE)" are inconsistent**~~ — **answered by the owner
+  and built in [LP-945](../tickets/LP-945.md)**: spelled out wherever a borrower or third party reads it. Originally same review, for the
   DOMAIN EXPERT rather than either session. One of the pair expands the acronym and the other does not;
   "verbal verification of employment" is the agency's own phrasing (B3-3.1-04), so expanding both is
   probably right, but it is a mortgage-wording call and CLAUDE.md says to flag rather than guess.
@@ -906,7 +912,8 @@ check's swap blindness; three intermittent tests that probably share one cause.
 | Note swap check | **Left in the backlog**, as the owner asked | — |
 
 **Left for the owner** (each in the open items above):
-- **Domain wording, for the resident expert:** "Verbal VOE" next to "Verification of employment (VOE)";
+- ~~**Domain wording, for the resident expert**~~ — **both answered by the owner, built in LP-945** (VOE spelled out for
+  third parties; IE-08 with the owner's wording). Originally: "Verbal VOE" next to "Verification of employment (VOE)";
   and whether "Business existence verification" should name the CPA letter or the business licence.
 - **Product questions:** an item edited to [processor, borrower] routes as her task and nothing says the
   borrower was not emailed; the server could send the "waiting on" hint so the client stops keeping its

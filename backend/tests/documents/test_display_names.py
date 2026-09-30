@@ -59,7 +59,8 @@ def test_the_five_named_by_the_owner() -> None:
     assert display_name("borrower_s_authorization_for_counseling") == (
         "Borrower's authorization for counseling"
     )
-    assert display_name("verbal_voe") == "Verbal VOE"
+    # LP-945: spelled out, because a borrower or third party reads it.
+    assert display_name("verbal_voe") == "Verbal verification of employment"
     assert display_name("letter_of_explanation_asset") == "Letter of explanation (assets)"
     assert display_name("government_issued_id") == "Government-issued ID"
     assert display_name("drivers_license") == "Driver's license"
@@ -84,7 +85,7 @@ def test_the_catalogue_names_the_rule_cannot_see() -> None:
     assert display_name("form_4506c") == "Form 4506-C"
     assert display_name("form_4506t_request_for_transcript") == "Form 4506-T request for transcript"
     assert display_name("business_existence_verification_cpa_ltr_bus_lic") == (
-        "Business existence verification"
+        "Business existence verification (CPA letter, business licence, or regulator listing)"
     )
     assert display_name("cpa_letter") == "CPA letter"
     assert display_name("prior_closing_disclosure_final_cd_from_purchase") == (
