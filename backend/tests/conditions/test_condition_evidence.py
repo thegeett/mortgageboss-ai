@@ -17,7 +17,7 @@ from app.models.condition import Condition, ConditionPrepStatus
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_evidence import ConditionEvidence, EvidenceStatus
 from app.models.condition_item import ConditionItem
-from app.models.condition_vocabulary import ConditionItemStatus
+from app.models.condition_vocabulary import ConditionItemStatus, Performer
 from app.models.loan_file import LoanFile
 from app.services import condition_evidence, condition_reading
 from app.services.condition_drafts import mark_sent
@@ -849,12 +849,23 @@ def test_a_reask_names_the_document_and_is_a_sentence() -> None:
     assert reask_name("right_period", statement_from(august())) == (
         "A corrected Capital One ··9912 August 2026 statement"
     )
+    # Any other typed document is named by its type (LP-938 fourth follow-up), never "statement": a
+    # declarations page went to the insurance agent as "a corrected statement".
     assert reask_name("amount_matches", statement_from({}, "purchase_agreement")) == (
-        "A corrected statement"
+        "A corrected purchase agreement"
     )
-    # The source follows a READ amount: a gift letter whose amount could not be read is not one.
+    assert reask_name("effective_by_closing", statement_from({}, "homeowners_insurance")) == (
+        "A corrected homeowners insurance"
+    )
+    # Typed as a bank statement, as the check and the re-ask build it, it is still "statement".
+    assert reask_name("right_period", statement_from(august(), "bank_statement")) == (
+        "A corrected Capital One ··9912 August 2026 statement"
+    )
+    # Untyped, with nothing to go on, it is still a statement: every caller but the checks.
+    assert reask_name("right_period", statement_from({})) == "A corrected statement"
+    # An unread amount reads no movement; the gift letter is still named a gift letter.
     unread = statement_from({}, "gift_letter")
-    assert (unread.source, unread.movements) == ("statement", ())
+    assert (unread.source, unread.movements) == ("gift letter", ())
 
 
 async def test_a_wrong_receipt_is_reasked_as_a_receipt_of_title(db_session: AsyncSession) -> None:
@@ -882,3 +893,41 @@ async def test_a_wrong_receipt_is_reasked_as_a_receipt_of_title(db_session: Asyn
     from app.services.condition_plan import recipient_for
 
     assert recipient_for(item) == ("title_attorney", "Title/attorney")
+
+
+async def test_a_reask_goes_where_its_label_says_even_for_an_ask_with_no_email(
+    db_session: AsyncSession,
+) -> None:
+    """THE THIRD FOLLOW-UP'S DIVERGENCE (LP-938 fourth follow-up). An item edited to an ask whose performer
+    has no email (the processor) used to be copied into the re-ask, which then reached no draft while
+    the button said "borrower". One `recipient_for` now decides both: it goes to the borrower, and the
+    card says so."""
+    from app.models.condition_vocabulary import PlanOption
+
+    loan_file, conditions, actor = await _asked(db_session)
+    item = (
+        await db_session.execute(
+            select(ConditionItem).where(ConditionItem.condition_id == conditions["6132"].id)
+        )
+    ).scalar_one()
+    item.performer = Performer.PROCESSOR
+    item.performers = [Performer.PROCESSOR.value]
+    item.option = PlanOption.ASK_THIRD_PARTY
+    await db_session.flush()
+    from app.services.condition_plan import recipient_for
+
+    assert recipient_for(item) is None  # the premise: an ask with no email
+    short = await add_statement(db_session, loan_file, august(pages_present=5))
+    await check_document(db_session, document_id=short.id, today=TODAY)
+    public = await condition_evidence.evidence_public_for_file(
+        db_session, loan_file_id=loan_file.id
+    )
+    (card,) = [c for c in public[conditions["6132"].id] if c.document_id == short.id]
+    (row,) = [
+        e for e in await _evidence(db_session, conditions["6132"]) if e.document_id == short.id
+    ]
+    reasked = await condition_evidence.reask(
+        db_session, condition=conditions["6132"], evidence_id=row.id, actor_user_id=actor
+    )
+    assert card.reask_to == "borrower"
+    assert recipient_for(reasked) == ("borrower", "Borrower")

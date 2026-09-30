@@ -555,7 +555,8 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   test. This is where a keyset tripwire now belongs, in the shape
   `test_deposit_findings_stay_on_one_item.py` uses for `_COVERS_ITEMS`.
 
-- **A re-ask can be created for someone with no email, while the button says "borrower"** — found by the
+- ~~**A re-ask can be created for someone with no email, while the button says "borrower"**~~ — **fixed in
+  LP-938's fourth follow-up** (one `recipient_for` call decides the destination and the label). Originally — found by the
   LP-938 third-follow-up review, open, introduced by that commit. `recipient_for` returns `None` for two
   different reasons and `reask_to` treats them alike: when the item is not an ask, `_add_ask` also defaults
   to the borrower and the label is true; but when the item IS an ask whose performer has no `_RECIPIENT`
@@ -573,7 +574,8 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   flips appraiser items between `ask_third_party` and `lender_doing_it`) and the frontend's `EMAIL_WORD`
   has words for all three. So an appraiser ask lands in no draft today, silently.
 
-- **The re-ask still calls 21 live items' documents "a statement"** — same review, open. `Statement.source`
+- ~~**The re-ask still calls 21 live items' documents "a statement"**~~ — **fixed in LP-938's fourth
+  follow-up** (a typed document with no statement facts is named by its type label). Originally — same review, open. `Statement.source`
   is only populated for `OWN_AMOUNT`'s three types, so `reask_name` names every other non-statement
   document a statement: censused at 29 items, 21 on mapped sheets, including IN-01 `declarations` (UWM
   6178, homeowners insurance — the insurance agent is asked for "a corrected statement"), ID-01 `id`

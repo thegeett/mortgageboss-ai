@@ -238,6 +238,14 @@ def statement_from(data: dict[str, Any] | None, document_type: str | None = None
             on = next((d for f in date_fields if (d := _date(_value(data, f))) is not None), None)
             movements.append((abs(stated), on))
             source = word
+    # ANY OTHER TYPED DOCUMENT IS NAMED BY ITS TYPE, NOT CALLED A STATEMENT (LP-938 fourth follow-up): a
+    # re-ask asked an insurance agent for "a corrected statement" for a declarations page. A document
+    # with no statement facts at all (no transactions, account, period) is not a statement.
+    looks_like_statement = bool(movements) or bool(digits) or "statement_period_end" in data
+    if source == "statement" and document_type and not looks_like_statement:
+        from app.verification.rule_engine.reasons import document_label
+
+        source = document_label(document_type)
     return Statement(
         bank=_value(data, "bank_name"),
         last4=digits[-4:] if len(digits) >= 4 else None,
@@ -1127,10 +1135,13 @@ async def _add_ask(
     IT GOES TO WHOEVER THE FAILED ITEM ASKED (LP-938 follow-up). It went to the borrower always, which was
     right while only statements could fail; a receipt fails now, and title sent it. A deposit explanation
     has no source item and is the borrower's."""
-    asked = source is not None and source.option in (
-        PlanOption.ASK_BORROWER,
-        PlanOption.ASK_THIRD_PARTY,
-    )
+    # ONE CALL DECIDES BOTH WHERE THE ASK GOES AND WHAT THE BUTTON SAYS (LP-938 fourth follow-up). Gated on
+    # the option alone, an ask whose performer has no email (the processor, after an edit) was created
+    # for that performer, reached no draft, while the button said "borrower". `recipient_for` is also
+    # what the card's `reask_to` reads, so the two cannot disagree.
+    from app.services.condition_plan import recipient_for
+
+    asked = source is not None and recipient_for(source) is not None
     performer = source.performer if asked and source is not None else Performer.BORROWER
     performers = (
         list(source.performers or [source.performer.value])
