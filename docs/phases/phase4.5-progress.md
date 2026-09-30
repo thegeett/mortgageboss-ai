@@ -550,7 +550,8 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   `_add_ask` creates, which also makes `route_ask`'s docstring true ("called wherever an item is made or
   edited" — `_add_ask` makes items and does not call it).
 
-- **`_hers` and `recipient_for` disagree about precedence** — found by the LP-942 follow-up review, open,
+- ~~**`_hers` and `recipient_for` disagree about precedence**~~ — **fixed in LP-942's second follow-up**
+  (`_hers` is processor-led AND in no email, `route_ask`'s rule). Found by the LP-942 follow-up review; originally open,
   low stakes. `_hers` reads `performers[0]`; `recipient_for` prefers the LO wherever it appears. So a
   `[processor, lo]` ask stays an ask in the LO's email (`route_ask` leaves it alone) while its re-ask
   becomes her task — and `[lo, processor]`'s re-ask follows the LO, so the re-ask's destination flips on

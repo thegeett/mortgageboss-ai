@@ -1121,10 +1121,14 @@ async def _answer_the_same_deposit_elsewhere(
 
 
 def _hers(item: ConditionItem | None) -> bool:
-    """The failed item is her own (its first performer is the processor)."""
-    return item is not None and (item.performers or [item.performer.value])[0] == (
-        Performer.PROCESSOR.value
-    )
+    """The failed item is her own: processor-led AND in no email. `route_ask`'s own rule, so an item the
+    LO sends (`[processor, lo]`, which `recipient_for` gives the LO) is re-asked where it was asked, not
+    turned into her task (LP-942 follow-up review)."""
+    from app.services.condition_plan import recipient_for
+
+    if item is None or recipient_for(item) is not None:
+        return False
+    return (item.performers or [item.performer.value])[0] == Performer.PROCESSOR.value
 
 
 def reask_destination(item: ConditionItem | None) -> str:

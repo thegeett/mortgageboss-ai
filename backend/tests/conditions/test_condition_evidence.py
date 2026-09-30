@@ -895,7 +895,7 @@ async def test_a_wrong_receipt_is_reasked_as_a_receipt_of_title(db_session: Asyn
     assert recipient_for(item) == ("title_attorney", "Title/attorney")
 
 
-async def test_a_reask_goes_where_its_label_says_even_for_an_ask_with_no_email(
+async def test_a_reask_of_her_own_item_is_labelled_as_hers(
     db_session: AsyncSession,
 ) -> None:
     """THE THIRD FOLLOW-UP'S DIVERGENCE (LP-938 fourth follow-up). An item edited to an ask whose performer

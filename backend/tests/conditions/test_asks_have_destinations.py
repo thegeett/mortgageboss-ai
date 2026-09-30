@@ -190,3 +190,20 @@ async def test_a_reask_of_her_own_item_is_her_task(db_session: AsyncSession) -> 
     )
     assert (reasked.performer, reasked.option) == (Performer.PROCESSOR, PlanOption.I_WILL_DO_IT)
     assert recipient_for(reasked) is None  # hers: in no email at all
+
+
+def test_a_reask_follows_where_the_ask_went() -> None:
+    """ONE RULE FOR "HERS" (LP-942 follow-up review): processor-led AND in no email. `[processor, lo]` is
+    the LO's to send, so its re-ask goes to the LO like the ask did, in either order."""
+    from app.services.condition_evidence import reask_destination
+
+    def item(performers: list[str], option: PlanOption) -> ConditionItem:
+        return ConditionItem(
+            performer=Performer(performers[0]), performers=performers, option=option
+        )
+
+    assert reask_destination(item(["processor"], PlanOption.I_WILL_DO_IT)) == "you"
+    for performers in (["processor", "lo"], ["lo", "processor"]):
+        asked = item(performers, PlanOption.ASK_THIRD_PARTY)
+        assert recipient_for(asked) == ("lo", "LO")
+        assert reask_destination(asked) == "LO"
