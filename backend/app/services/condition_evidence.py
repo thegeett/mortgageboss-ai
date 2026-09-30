@@ -243,9 +243,11 @@ def statement_from(data: dict[str, Any] | None, document_type: str | None = None
     # with no statement facts at all (no transactions, account, period) is not a statement.
     looks_like_statement = bool(movements) or bool(digits) or "statement_period_end" in data
     if source == "statement" and document_type and not looks_like_statement:
-        from app.verification.rule_engine.reasons import document_label
+        # LP-943: the display name, mid-sentence ("a corrected borrower's authorization for counseling"),
+        # not the rule engine's underscore label ("borrower s authorization for counseling").
+        from app.documents.display_names import display_name, in_sentence
 
-        source = document_label(document_type)
+        source = in_sentence(display_name(document_type))
     return Statement(
         bank=_value(data, "bank_name"),
         last4=digits[-4:] if len(digits) >= 4 else None,

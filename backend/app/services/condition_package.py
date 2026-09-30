@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.conditions.library import load_library
+from app.documents.display_names import display_name
 from app.models.activity_log import ActivityType
 from app.models.condition import (
     BucketKind,
@@ -243,7 +244,10 @@ async def _row_facts(
         )
     others = [d for d in documents if d.document_type != "bank_statement"]
     for document in others:
-        facts["documents"].append({"kind": document.document_type, "name": document.document_name})
+        # LP-943: the display name, which is what the note may repeat to the underwriter.
+        facts["documents"].append(
+            {"kind": display_name(document.document_type or ""), "name": document.document_name}
+        )
 
     shortfall = ((condition.reading or {}).get("figures") or {}).get("shortfall") or {}
     evidence = list(
@@ -310,7 +314,7 @@ def _code_note(condition: Condition, facts: dict[str, Any], statements: list[Any
                 f"{doc['bank']} ··{doc['ending']} {months} {noun}{pages}".replace("  ", " ")
             )
         else:
-            parts.append(f"{doc.get('name') or doc['kind'].replace('_', ' ')} attached")
+            parts.append(f"{doc.get('name') or doc['kind']} attached")
     if "verified" in facts:
         parts.append(f"{facts['verified']} verified against {facts['required']} required")
     for deposit in facts.get("deposits_sourced", []):

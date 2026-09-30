@@ -857,6 +857,10 @@ def test_a_reask_names_the_document_and_is_a_sentence() -> None:
     assert reask_name("effective_by_closing", statement_from({}, "homeowners_insurance")) == (
         "A corrected homeowners insurance"
     )
+    # LP-943: the display name, mid-sentence, not the underscore label.
+    assert reask_name(
+        "signed_and_dated", statement_from({}, "borrower_s_authorization_for_counseling")
+    ) == ("A corrected borrower's authorization for counseling")
     # Typed as a bank statement, as the check and the re-ask build it, it is still "statement".
     assert reask_name("right_period", statement_from(august(), "bank_statement")) == (
         "A corrected Capital One ··9912 August 2026 statement"

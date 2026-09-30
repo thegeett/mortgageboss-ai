@@ -443,3 +443,23 @@ async def test_a_deposit_explained_only_on_a_rejected_statement_is_not_in_the_no
     note = next(r for r in package.rows if r["code"] == "7086")["note"]
     assert "08/19" not in note
     assert note.count("deposit sourced") == 1
+
+
+async def test_a_note_names_a_document_by_its_display_name(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LP-943: with no name of its own, a document is named in the note by its display name
+    ("Service invoice attached"), never by its classifier slug."""
+    _model_writes(monkeypatch, {})
+    loan_file, _, actor = await _ready(db_session)
+    invoice = (
+        await db_session.execute(
+            select(Document).where(
+                Document.loan_file_id == loan_file.id, Document.original_filename == "invoice.pdf"
+            )
+        )
+    ).scalar_one()
+    invoice.document_name = None
+    package = await condition_package.build(db_session, loan_file=loan_file, actor_user_id=actor)
+    note = next(r for r in package.rows if r["code"] == "0006")["note"]
+    assert note == "Service invoice attached."
