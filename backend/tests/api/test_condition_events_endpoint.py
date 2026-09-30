@@ -278,6 +278,12 @@ async def test_only_the_named_scalars_are_exposed(
         # LP-922: a `DraftRecipient` member, on `CONDITION_DRAFTED` and on a move a send made —
         # "Added to the borrower email". A closed set.
         "draft_recipient",
+        # LP-941 — THE ONE FREE-TEXT STRING, BY THE PRODUCT OWNER'S DECISION, AND IT BREAKS THE RULE ABOVE
+        # ON PURPOSE. Her reason for withdrawing a condition she added by hand: her own words about her
+        # own entry, not the lender's text. Projected on `CONDITION_WITHDRAWN` only (guarded by KIND:
+        # a reopen's or a backward move's `reason` does not travel), so the history can say why, and
+        # keeps saying it after an Undo. `test_condition_withdraw.py` pins both halves.
+        "withdrawal_reason",
     }
     # THREE FIELDS CAME OFF THIS LIST AND THAT IS THE POINT. `reader_version`,
     # `duplicates_dropped` and `filled_from` were projected and read by no sentence — three open

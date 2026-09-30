@@ -368,6 +368,8 @@ export interface ConditionEvent {
   plan_option: PlanOption | null;
   /** LP-922 — which email: on `condition_drafted`, and on a move that email's send made. */
   draft_recipient: DraftRecipient | null;
+  /** LP-941 — her reason, on `condition_withdrawn` only (the one free-text field, by the owner's decision). */
+  withdrawal_reason?: string | null;
   /** The lender's track's move. */
   lender_status_from: ConditionLenderStatus | null;
   lender_status_to: ConditionLenderStatus | null;

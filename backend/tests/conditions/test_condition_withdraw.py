@@ -315,3 +315,52 @@ async def test_a_withdrawn_conditions_evidence_proposes_no_figures(
     await condition_withdraw.withdraw(db, condition=seven, reason=REASON, actor_user_id=actor)
     keys = {c.key for c in (await figures_check.figures_check(db, loan_file=loan_file)).changes}
     assert "verified_assets" not in keys
+
+
+async def test_the_history_shows_the_reason_and_keeps_it_after_undo(
+    db_session: AsyncSession,
+) -> None:
+    """LP-941: the withdrawal's line carries her reason; Undo adds its own line and the reason stays.
+    Read through the sheet's own route, as the History section does."""
+    from tests.conditions.test_lender_condition_settings import _clients
+
+    db = db_session
+    loan_file, _, _, actor = await _confirmed(db)
+    added = await _hand_added(db, loan_file, actor)
+    await condition_withdraw.withdraw(db, condition=added, reason=REASON, actor_user_id=actor)
+    await condition_withdraw.restore(db, condition=added, actor_user_id=actor)
+    client, _, headers = await _clients(db, loan_file)
+    async with client:
+        events = (await client.get(f"/api/v1/conditions/{added.id}/events", headers=headers)).json()
+    lines = [(e["kind"], e["withdrawal_reason"]) for e in events]
+    assert ("condition_withdrawn", REASON) in lines
+    assert ("condition_restored", None) in lines
+
+
+def test_a_reason_on_any_other_event_does_not_travel() -> None:
+    """The reason is projected BY KIND. A reopen's reason (or any other `reason` in `detail`) stays
+    server-side, as the allow-list's rule requires for everything but this one field."""
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from app.schemas.condition import ConditionEventPublic
+
+    def projected(kind: ConditionEventKind) -> str | None:
+        event = ConditionEvent(
+            id=uuid4(),
+            company_id=uuid4(),
+            loan_file_id=uuid4(),
+            condition_id=uuid4(),
+            kind=kind,
+            detail={"reason": "borrower asked us to wait"},
+            occurred_at=datetime.now(UTC),
+        )
+        return ConditionEventPublic.from_model(event).withdrawal_reason
+
+    assert projected(ConditionEventKind.CONDITION_WITHDRAWN) == "borrower asked us to wait"
+    for kind in (
+        ConditionEventKind.CONDITION_REOPENED,
+        ConditionEventKind.CONDITION_PREP_MOVED,
+        ConditionEventKind.CONDITION_RESTORED,
+    ):
+        assert projected(kind) is None, kind

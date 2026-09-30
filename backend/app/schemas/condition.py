@@ -468,6 +468,12 @@ class ConditionEventPublic(BaseModel):
     #: event, deliberately (see the class docstring). Follows `timeline.py`'s existing `actor_name`
     #: rather than inventing a second attribution shape.
     actor_name: str | None = None
+    #: LP-941 — HER REASON FOR WITHDRAWING A CONDITION SHE ADDED BY HAND, and ONLY for
+    #: `condition_withdrawn`. The one free-text string in this projection, by the product owner's
+    #: decision (the history line shows why, and keeps showing it after an Undo). It is her own words
+    #: about her own entry, not the lender's text, and it is guarded by KIND: a `reason` stored on any
+    #: other event (a reopen, a backward move) does not travel.
+    withdrawal_reason: str | None = None
 
     @classmethod
     def from_model(
@@ -543,6 +549,10 @@ class ConditionEventPublic(BaseModel):
             if kind in _VERDICT_SOURCE_KINDS
             else None,
             notes_added=_as_int(detail.get("notes_added"), kind=kind, key="notes_added"),
+            withdrawal_reason=str(detail["reason"])[:500]
+            if kind is ConditionEventKind.CONDITION_WITHDRAWN
+            and isinstance(detail.get("reason"), str)
+            else None,
             # GUARDED BY KIND, NOT JUST BY KEY — see `_ROUND_SOURCE_KINDS`. Both source vocabularies
             # contain `email` and share this key, so without the guard a lender's emailed verdict
             # would also read as a condition sheet arriving by email.

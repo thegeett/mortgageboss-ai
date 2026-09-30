@@ -282,4 +282,19 @@ describe("LP-922's lines", () => {
       ),
     ).toBe("Moved to Waiting on LO (LO email marked sent) — Priya Raman");
   });
+
+  it("shows why a condition was withdrawn, and says when it was undone (LP-941)", () => {
+    expect(
+      conditionHistoryLine(
+        makeEvent({
+          kind: "condition_withdrawn",
+          withdrawal_reason: "Added twice by mistake",
+          actor_name: "Priya Raman",
+        }),
+      ),
+    ).toBe("Withdrawn as entered in error — “Added twice by mistake” — Priya Raman");
+    expect(
+      conditionHistoryLine(makeEvent({ kind: "condition_restored", actor_name: "Priya Raman" })),
+    ).toBe("Withdrawal undone — Priya Raman");
+  });
 });
