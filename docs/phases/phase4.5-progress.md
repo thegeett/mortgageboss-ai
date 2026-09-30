@@ -621,7 +621,7 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   question below. A human pass over the 166 is the only mechanism that finds these; the reviewer did one and
   found nothing else.
 
-- **`cpa_letter` renders "Cpa letter"** — found by the LP-943 third-follow-up review, open, one line.
+- ~~**`cpa_letter` renders "Cpa letter"**~~ — **fixed at LP-943's close** (`cpa` in `ACRONYMS`: "CPA letter", pinned by name). Originally found by the LP-943 third-follow-up review, open, one line.
   `cpa` is not in `ACRONYMS`, so the rule cannot see it; adding `cpa` → `"CPA"` gives "CPA letter" (verified).
   It survived the previous review because THAT review's scan only looked at lowercase words, and
   `display_name` capitalises the first — an absence claim the reviewer made and has corrected. The re-scan,

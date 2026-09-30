@@ -86,6 +86,7 @@ def test_the_catalogue_names_the_rule_cannot_see() -> None:
     assert display_name("business_existence_verification_cpa_ltr_bus_lic") == (
         "Business existence verification"
     )
+    assert display_name("cpa_letter") == "CPA letter"
     assert display_name("prior_closing_disclosure_final_cd_from_purchase") == (
         "Prior Closing Disclosure (final CD from the purchase)"
     )

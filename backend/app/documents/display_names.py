@@ -61,6 +61,7 @@ ACRONYMS: dict[str, str] = {
     "irs": "IRS",
     "ssn": "SSN",
     "ssa": "SSA",
+    "cpa": "CPA",
     "llc": "LLC",
     "hud": "HUD",
     "poa": "POA",
