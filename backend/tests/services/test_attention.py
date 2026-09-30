@@ -258,6 +258,19 @@ class TestTheLadder:
         assert result.tone is AttentionTone.ATTENTION
         assert result.label == "Pay stub failed extraction"
 
+    async def test_a_failed_document_is_named_by_its_display_name(
+        self, db_session: AsyncSession
+    ) -> None:
+        """LP-943: the panel spells a document as every other panel does ("HOA statement"), not as the
+        underscore rule did ("Hoa statement")."""
+        company, user = await _company_and_user(db_session)
+        loan_file = await _file(db_session, company)
+        await _document(
+            db_session, loan_file, status=DocumentStatus.FAILED, document_type="hoa_statement"
+        )
+        result = await _attention(db_session, loan_file, user)
+        assert result.label == "HOA statement failed extraction"
+
     async def test_a_new_file_with_needs_is_not_calm(self, db_session: AsyncSession) -> None:
         # No documents AND eight needs. "No documents yet" is neutral, and this
         # is the most actionable row on the page — the ordering used to put the

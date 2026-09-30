@@ -571,7 +571,8 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   ever worth one, is the server sending the `waiting_on` it will set, so the client renders a value
   instead of recomputing the rule.
 
-- **Two document types share one display name, unchecked** — found by the LP-943 review, open.
+- ~~**Two document types share one display name, unchecked**~~ — **fixed in LP-943's follow-up** ("Letter of
+  explanation (other)", and a uniqueness test). Found by the LP-943 review; originally open.
   `letter_of_explanation` and `letter_of_explanation_misc` both render "Letter of explanation"; both are on
   mapped sheets (CR-02 UWM 5868/7383 and CR-05; CR-12 Champions 245), so one file can carry two conditions
   asking for the same-named document and a package note cannot tell them apart. Cleanliness says nothing
@@ -579,7 +580,8 @@ Named so a later ticket is not blamed for them (baseline at `840df131`):
   explanation (other)" — matching its parenthesised siblings — and add a uniqueness guard with an
   allow-list of deliberate duplicates.
 
-- **`attention.py` shows the processor the strings LP-943 removes** — same review, open.
+- ~~**`attention.py` shows the processor the strings LP-943 removes**~~ — **fixed in LP-943's follow-up**
+  (it reads `display_name`). Same review; originally open.
   `_document_label` is `document_type.replace("_", " ").capitalize()` under a docstring reading "A
   processor's name for the document, never the raw enum": her attention list says "Borrower s authorization
   for counseling", "Hoa statement", "Voe", "Ira 401k". Outside the owner's words ("emails and notes") since

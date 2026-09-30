@@ -198,9 +198,12 @@ def _decide(
 
 
 def _document_label(document: Document) -> str:
-    """A processor's name for the document, never the raw enum."""
+    """A processor's name for the document, never the raw enum: the display name (LP-943), so the app
+    spells a document one way in every panel ("HOA statement", not "Hoa statement")."""
+    from app.documents.display_names import display_name
+
     if document.document_type:
-        return document.document_type.replace("_", " ").capitalize()
+        return display_name(document.document_type)
     return "A document"
 
 

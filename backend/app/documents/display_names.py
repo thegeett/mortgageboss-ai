@@ -27,7 +27,9 @@ DISPLAY_NAMES: dict[str, str] = {
     "homeowner_s_insurance_quote": "Homeowner's insurance quote",
     "ira_401k": "IRA or 401(k) statement",
     "letter_of_explanation_asset": "Letter of explanation (assets)",
-    "letter_of_explanation_misc": "Letter of explanation",
+    # "(other)", not bare: the plain `letter_of_explanation` renders "Letter of explanation", and one
+    # file can ask for both (LP-943 review). The family is parenthesised; this matches it.
+    "letter_of_explanation_misc": "Letter of explanation (other)",
     "letter_of_explanation_property": "Letter of explanation (property)",
     "verbal_voe": "Verbal VOE",
     "voe": "Verification of employment (VOE)",
