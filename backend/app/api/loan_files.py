@@ -278,6 +278,24 @@ async def update(
     loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
+    lender_named = "lender_id" in payload.model_fields_set
+    if lender_named and payload.lender_id is not None:
+        # LP-949 review — ANOTHER COMPANY'S LENDER IS REFUSED. This door setattr'd any id it was
+        # given; since LP-949 a lender change also writes review rows onto the lender and types the
+        # file's conditions from its code map, so a foreign id reached into another tenant's data.
+        from app.services.lenders import get_scoped_lender
+
+        if (
+            await get_scoped_lender(
+                db, lender_id=payload.lender_id, company_id=current_user.company_id
+            )
+            is None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="That lender is not one of your company's lenders.",
+            )
+    previous_lender_id = loan_file.lender_id
     try:
         await update_loan_file_with_activity(
             db,
@@ -290,8 +308,10 @@ async def update(
         # Open in-scope findings block the ready-to-submit transition (LP-75).
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await db.commit()
-    if "lender_id" in payload.model_fields_set:
-        # LP-949 — a lender change can type conditions nobody has read yet; read them now.
+    if lender_named and loan_file.lender_id != previous_lender_id:
+        # LP-949 — a lender change can type conditions nobody has read yet; read them now. Only on a
+        # real change (review): a PATCH naming the same lender changed nothing, and a reading queued
+        # beside one already running reads the same conditions twice.
         from app.api.conditions import queue_unread_reading
 
         await queue_unread_reading(db, loan_file_id=loan_file.id)

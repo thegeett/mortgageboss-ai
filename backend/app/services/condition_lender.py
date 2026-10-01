@@ -149,6 +149,24 @@ async def lender_suggestion(db: AsyncSession, *, loan_file: LoanFile) -> Suggest
     return None
 
 
+async def _has_code_map(db: AsyncSession, lender_id: UUID) -> bool:
+    """Whether ANY of this lender's codes has a library type, which is what typing needs.
+
+    MEASURED ON THE ROWS, NOT THE KEY (review). The build said `canonical_lender_key in shipped`, so a
+    keyless lender whose codes an admin had mapped was still "has no condition codes in the app" on the
+    banner, and a keyed lender whose seed had not run claimed a map it did not have.
+    """
+    found = await db.scalar(
+        select(LenderConditionCode.id)
+        .where(
+            LenderConditionCode.lender_id == lender_id,
+            LenderConditionCode.canonical_type_id.is_not(None),
+        )
+        .limit(1)
+    )
+    return found is not None
+
+
 async def file_lender_payload(db: AsyncSession, *, loan_file: LoanFile) -> dict[str, Any]:
     """`FileLenderPublic`'s data: the file's lender, or what the sheet suggests."""
     lender = await db.get(Lender, loan_file.lender_id) if loan_file.lender_id else None
@@ -158,7 +176,7 @@ async def file_lender_payload(db: AsyncSession, *, loan_file: LoanFile) -> dict[
             {
                 "id": lender.id,
                 "name": lender.name,
-                "has_code_map": lender.canonical_lender_key in seeded_lender_keys(),
+                "has_code_map": await _has_code_map(db, lender.id),
             }
             if lender is not None
             else None
@@ -170,6 +188,11 @@ async def file_lender_payload(db: AsyncSession, *, loan_file: LoanFile) -> dict[
                 "name": suggestion.detected.name,
                 "source": suggestion.detected.source,
                 "lender_exists": suggestion.lender_id is not None,
+                # Whether confirming types anything (review): a lender she adds here is created
+                # with its key and seeded, so it does; a same-named lender without the key does not,
+                # and the banner must not promise that it will.
+                "has_code_map": suggestion.lender_id is None
+                or await _has_code_map(db, suggestion.lender_id),
             }
             if suggestion is not None
             else None
@@ -371,10 +394,10 @@ async def on_file_lender_changed(
 ) -> int:
     """Apply the file's new lender to its rounds and its UNTYPED conditions. Returns how many got a type.
 
-    - A round with no lender, or the previous one, takes the new lender: the sheet is now known to be
-      this lender's. A round already attributed to a different lender keeps it.
-    - An untyped condition with no lender, or the previous one, takes the new lender, then its type
-      from that lender's code map. A code the map does not know is recorded for review
+    - Every round on the file takes the new lender: the sheet is now known to be this lender's.
+    - Every untyped condition on the file takes the new lender, then its type from that lender's code
+      map (whatever lender it carried before: an earlier lender of this file, through any number of
+      changes, including one to no lender). A code the map does not know is recorded for review
       (`OBSERVED_UNMAPPED`, as import does), with the reading's proposal copied on.
     - Nothing typed is touched, and nothing is read here: the caller queues the reading after commit,
       and the reading takes only unread conditions.
@@ -382,18 +405,25 @@ async def on_file_lender_changed(
     new_id = loan_file.lender_id
     if new_id is None or new_id == previous_lender_id:
         return 0
+    new_lender = await db.get(Lender, new_id)
+    if new_lender is None or new_lender.company_id != loan_file.company_id:
+        # TENANCY (review): never write review rows onto, or type from, another company's lender.
+        # The PATCH route refuses such an id; this is the second lock on the same door.
+        logger.warning(
+            "file_lender_not_applied_foreign", loan_file_id=str(loan_file.id), lender_id=str(new_id)
+        )
+        return 0
+    # EVERY ROUND AND EVERY UNTYPED CONDITION ON THE FILE FOLLOWS THE FILE'S LENDER (review). The
+    # build moved only those with no lender or the PREVIOUS one, so A -> none -> B left A's untyped
+    # conditions at A for ever, while A -> B moved them. Nothing else puts a lender on a round or a
+    # condition but the file's lender at the time, so "the previous one" was only ever a proxy for
+    # "an earlier lender of this file", and the none hop broke the proxy.
     for round_ in await db.scalars(
         select(ConditionRound).where(ConditionRound.loan_file_id == loan_file.id)
     ):
-        if round_.lender_id is None or round_.lender_id == previous_lender_id:
-            round_.lender_id = new_id
+        round_.lender_id = new_id
 
-    attributable = (
-        Condition.lender_id.is_(None)
-        if previous_lender_id is None
-        else (Condition.lender_id.is_(None) | (Condition.lender_id == previous_lender_id))
-    )
-    conditions = await _untyped(db, where=[Condition.loan_file_id == loan_file.id, attributable])
+    conditions = await _untyped(db, where=[Condition.loan_file_id == loan_file.id])
     if not conditions:
         await db.flush()
         return 0

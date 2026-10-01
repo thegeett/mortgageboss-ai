@@ -358,7 +358,7 @@ async def map_lender_code(
     current_user: CurrentUser,
     _: None = _ADMIN,
 ) -> list[LenderCodeToReviewPublic]:
-    """Give a code its library type (admin); new imports use it from then on."""
+    """Give a code its library type (admin): new imports use it, and untyped conditions with it take it."""
     from app.api.conditions import queue_unread_reading
     from app.services.condition_lender import type_conditions_for_code
     from app.services.lender_settings import SettingsRefused, codes_to_review, map_code

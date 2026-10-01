@@ -50,9 +50,12 @@ export function FileLenderBanner({ fileId }: { fileId: string }) {
         <p>
           <span className="font-medium text-foreground">This file has no lender.</span> The sheet
           looks like <span className="font-medium text-foreground">{suggestion.name}</span> (from{" "}
-          {WHERE[suggestion.source]}). Set it as this file’s lender? Its conditions are then matched
-          to the library
-          {suggestion.lender_exists ? "" : `, and ${suggestion.name} is added to your lenders`}.
+          {WHERE[suggestion.source]}). Set it as this file’s lender?{" "}
+          {suggestion.has_code_map
+            ? `Its conditions are then matched to the library${
+                suggestion.lender_exists ? "" : `, and ${suggestion.name} is added to your lenders`
+              }.`
+            : `${suggestion.name} has no condition codes in the app yet, so its conditions are not matched to the library until an admin gives its codes a meaning.`}
         </p>
         <div className="flex flex-wrap gap-2">
           <Button

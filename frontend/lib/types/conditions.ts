@@ -1310,7 +1310,7 @@ export interface WithdrawnCondition {
 export interface FileLenderName {
   id: string;
   name: string;
-  /** False for a lender the app ships no code map for: its conditions arrive untyped. */
+  /** Whether any of the lender's codes has a library type (measured on its codes, not its key). */
   has_code_map: boolean;
 }
 
@@ -1322,6 +1322,8 @@ export interface LenderSuggestion {
   source: "reader" | "mortgagee_clause" | "header";
   /** Whether her company already has this lender; confirming adds it when not. */
   lender_exists: boolean;
+  /** Whether confirming types anything: false for a same-named lender without the app's key. */
+  has_code_map: boolean;
 }
 
 export interface FileLender {

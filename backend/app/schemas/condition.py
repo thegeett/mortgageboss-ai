@@ -2111,6 +2111,9 @@ class LenderSuggestionPublic(BaseModel):
     source: str
     #: Whether her company already has this lender. When it does not, confirming adds it.
     lender_exists: bool
+    #: Whether confirming types anything: the lender (existing, or added with its key) has a code map.
+    #: False for a same-named lender without the key (LP-949 review), so the banner promises nothing.
+    has_code_map: bool
 
 
 class FileLenderPublic(BaseModel):

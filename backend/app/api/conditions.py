@@ -1272,6 +1272,7 @@ async def set_file_lender_route(
     read. A key her company has no lender for adds that lender, with its shipped code map."""
     from app.services.condition_lender import LenderRefused, set_file_lender
 
+    previous_lender_id = loan_file.lender_id
     try:
         await set_file_lender(
             db,
@@ -1283,7 +1284,10 @@ async def set_file_lender_route(
     except LenderRefused as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
     await db.commit()
-    await queue_unread_reading(db, loan_file_id=loan_file.id)
+    if loan_file.lender_id != previous_lender_id:
+        # Only on a real change (LP-949 review): confirming the lender the file already has typed
+        # nothing, and a second reading beside a running one reads the same conditions twice.
+        await queue_unread_reading(db, loan_file_id=loan_file.id)
     return await _file_lender(db, loan_file)
 
 

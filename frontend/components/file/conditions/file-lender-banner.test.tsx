@@ -3,7 +3,7 @@
  * LP-949 — the file's lender above the conditions: offered from the sheet, set only on her click,
  * declined on her click, and gone once the file has a lender with a code map.
  */
-import type { FileLender } from "@/lib/types/conditions";
+import type { FileLender, LenderSuggestion } from "@/lib/types/conditions";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -42,6 +42,7 @@ const SUGGESTED: FileLender = {
     name: "United Wholesale Mortgage",
     source: "reader",
     lender_exists: false,
+    has_code_map: true,
   },
 };
 
@@ -57,6 +58,25 @@ describe("FileLenderBanner", () => {
     );
     expect(state.set).toEqual([{ lender_key: "uwm" }]);
     expect(state.declined).toEqual([]);
+  });
+
+  it("promises no match to the library when the lender it would set has no codes (review)", () => {
+    state.data = {
+      lender: null,
+      suggestion: {
+        ...(SUGGESTED.suggestion as LenderSuggestion),
+        lender_exists: true,
+        has_code_map: false,
+      },
+    };
+    render(<FileLenderBanner fileId="f1" />);
+    expect(screen.queryByText(/matched to the library\./)).toBeNull();
+    expect(screen.getByText(/has no condition codes in the app yet/)).toBeTruthy();
+    // THE POSITIVE CONTROL: with a code map, the same banner does promise the match.
+    cleanup();
+    state.data = SUGGESTED;
+    render(<FileLenderBanner fileId="f1" />);
+    expect(screen.getByText(/Its conditions are then matched to the library/)).toBeTruthy();
   });
 
   it("declines for the round the suggestion came from", () => {

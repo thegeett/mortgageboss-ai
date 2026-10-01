@@ -156,7 +156,11 @@ async def codes_to_review(db: AsyncSession, *, lender: Lender) -> list[dict[str,
 async def map_code(
     db: AsyncSession, *, lender: Lender, code: str, canonical_type_id: str | None
 ) -> None:
-    """She gives a code its meaning: new imports use it from then on (existing conditions keep theirs)."""
+    """She gives a code its meaning: new imports use it from then on.
+
+    Conditions already on files that carry the code and NO type take it too (LP-949,
+    `condition_lender.type_conditions_for_code`, called by the route); a typed one keeps its own.
+    """
     if canonical_type_id is not None and load_library().get(canonical_type_id) is None:
         raise SettingsRefused(f"{canonical_type_id} is not a type in the library.")
     row = (

@@ -32,7 +32,23 @@ export function useUpdateLoanFile(fileId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: Body) => apiClient.patch(`${API_V1}/loan-files/${fileId}`, body),
-    onSuccess: () => invalidateBaseline(queryClient),
+    onSuccess: (_data, body) => {
+      invalidateBaseline(queryClient);
+      if ("lender_id" in body) {
+        // LP-949 review — THE CONDITIONS TAB SENDS HER HERE TO SET THE LENDER, and the lender types
+        // the file's conditions. Without this, the banner kept saying "This file has no lender" for
+        // up to a minute (the default staleTime) after she set it. By prefix, as above.
+        for (const key of [
+          "condition-file-lender",
+          "conditions",
+          "conditions-summary",
+          "condition-rounds",
+          "condition-round-plan",
+        ]) {
+          void queryClient.invalidateQueries({ queryKey: [key] });
+        }
+      }
+    },
   });
 }
 

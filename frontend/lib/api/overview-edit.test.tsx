@@ -46,5 +46,19 @@ describe("overview-edit invalidation (LP-80.5)", () => {
     expect(spy).toHaveBeenCalledWith({ queryKey: ["ltv"] });
     expect(spy).toHaveBeenCalledWith({ queryKey: ["verification"] });
     expect(spy).toHaveBeenCalledWith({ queryKey: ["loan-file"] });
+    // LP-949 review: a lender edit reaches the Conditions tab's banner and lists.
+    expect(spy).toHaveBeenCalledWith({ queryKey: ["condition-file-lender"] });
+    expect(spy).toHaveBeenCalledWith({ queryKey: ["conditions"] });
+  });
+
+  it("an edit that does not name the lender leaves the conditions alone (LP-949 review)", async () => {
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    const { result } = renderHook(() => useUpdateLoanFile("LF-1"), { wrapper: wrapper(qc) });
+
+    result.current.mutate({ loan_amount: "1" });
+
+    await waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: ["loan-file"] }));
+    expect(spy).not.toHaveBeenCalledWith({ queryKey: ["condition-file-lender"] });
   });
 });

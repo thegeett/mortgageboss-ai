@@ -152,6 +152,7 @@ async def test_a_file_with_no_lender_imports_untyped_and_is_offered_the_sheets_l
         "name": "United Wholesale Mortgage",
         "source": "reader",
         "lender_exists": False,
+        "has_code_map": True,
     }
 
 
