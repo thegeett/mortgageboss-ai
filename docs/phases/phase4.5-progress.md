@@ -1044,3 +1044,21 @@ spoiled two runs):
   8 skipped, 1 xfailed, at `32bce190`, matched by the reviewer's own run;
 - frontend: 2142 / 2142, and the build passed;
 - ruff, format, mypy, biome and tsc are clean.
+
+## Stage 3 follow-ups, batch 4 (the staging trial of 2026-09-30)
+
+**Source:** [`phase4.5-staging-trial-2026-09-30.md`](phase4.5-staging-trial-2026-09-30.md) and the owner's
+batch-4 list. Builder `mortgageboss-ai-a1`; reviewer `mortgageboss-ai-cf` (asking its own user to sanction
+the role for this batch, 2026-09-30). One ticket at a time; pushed only after its review. Item 9 (the
+drawer) waits for mockups and is not built.
+
+| Ticket | Status | Build SHA | Review SHA | Notes |
+|---|---|---|---|---|
+| [LP-949](../tickets/LP-949.md) Lender on the file (items 1, 10b) | AWAITING_REVIEW | the commit titled `LP-949: …` | | ADR-417; full run 8972 passed, 2 failed (named sonnet; allow-list, fixed) |
+| LP-950 Outbound wording (items 2, 3) | TODO | | | |
+| LP-951 Wrong-file warning (item 11, raised to High) | TODO | | | |
+| LP-952 Reading state and Read again (items 4, 5) | TODO | | | |
+| LP-953 Linking (items 6, 7) | TODO | | | |
+| LP-954 Reading keeps every clause (item 13) | TODO | | | |
+| LP-955 "I'll do it" actions (item 8) | TODO | | | |
+| LP-956 Small items (items 10a, 12) | TODO | | | |

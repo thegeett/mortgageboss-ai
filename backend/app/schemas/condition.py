@@ -344,6 +344,14 @@ def _as_vocab[T](value: object, allowed: frozenset[str], build: Callable[[str], 
         return None
 
 
+def _typed_as(type_id: object) -> str | None:
+    """A library type id as the library's label; None for anything the library does not know."""
+    from app.conditions.library import load_library
+
+    found = load_library().get(type_id) if isinstance(type_id, str) else None
+    return found.label if found is not None else None
+
+
 class ConditionEventPublic(BaseModel):
     """One thing that happened to a round — the history on screen S1-09.
 
@@ -483,6 +491,9 @@ class ConditionEventPublic(BaseModel):
     #: about her own entry, not the lender's text, and it is guarded by KIND: a `reason` stored on any
     #: other event (a reopen, a backward move) does not travel.
     withdrawal_reason: str | None = None
+    #: LP-949 — the library type an untyped condition was given (`CONDITION_TYPED`), as the LIBRARY'S
+    #: label: drawn from a closed vocabulary (a type id the library knows), never stored text.
+    typed_as: str | None = None
 
     @classmethod
     def from_model(
@@ -558,6 +569,9 @@ class ConditionEventPublic(BaseModel):
             if kind in _VERDICT_SOURCE_KINDS
             else None,
             notes_added=_as_int(detail.get("notes_added"), kind=kind, key="notes_added"),
+            typed_as=_typed_as(detail.get("type_id"))
+            if kind is ConditionEventKind.CONDITION_TYPED
+            else None,
             withdrawal_reason=str(detail["reason"])[:WITHDRAWAL_REASON_MAX]
             if kind is ConditionEventKind.CONDITION_WITHDRAWN
             and isinstance(detail.get("reason"), str)
@@ -2072,3 +2086,44 @@ class PackageRowUpdate(BaseModel):
     note: str | None = Field(default=None, max_length=600)
     included: bool | None = None
     fields: dict[str, str | None] | None = None
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-949 — the file's lender, as the Conditions tab needs it
+# --------------------------------------------------------------------------------------------- #
+
+
+class FileLenderNamePublic(BaseModel):
+    id: UUID
+    name: str
+    #: Whether the app ships a code map for this lender. False for a lender with no canonical key: its
+    #: conditions arrive untyped until an admin sets the key or maps the codes.
+    has_code_map: bool
+
+
+class LenderSuggestionPublic(BaseModel):
+    """The lender the newest sheet names, offered while the file has none (never set by itself)."""
+
+    round_id: UUID
+    key: str
+    name: str
+    #: `reader`, `mortgagee_clause` or `header`: where the sheet named it.
+    source: str
+    #: Whether her company already has this lender. When it does not, confirming adds it.
+    lender_exists: bool
+
+
+class FileLenderPublic(BaseModel):
+    lender: FileLenderNamePublic | None
+    suggestion: LenderSuggestionPublic | None
+
+
+class FileLenderRequest(BaseModel):
+    """Exactly one of the two: the suggestion's key, or one of her company's lenders."""
+
+    lender_key: str | None = Field(default=None, max_length=64)
+    lender_id: UUID | None = None
+
+
+class LenderDeclineRequest(BaseModel):
+    round_id: UUID

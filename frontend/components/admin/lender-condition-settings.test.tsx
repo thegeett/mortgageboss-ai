@@ -89,3 +89,42 @@ describe("LenderConditionSettings", () => {
     expect(state.mapped).toEqual([{ code: "7812", canonical_type_id: "CR-05" }]);
   });
 });
+
+describe("LP-949 — the AI's proposed type", () => {
+  it("is shown beside the select, is not selected, and maps the code only when she uses it", () => {
+    state.settings = UWM;
+    state.codes = [
+      {
+        code: "7812",
+        example_wording: "Provide signed and dated letter of explanation for the credit inquiry",
+        files: 1,
+        canonical_type_id: null,
+        proposed_type_id: "CR-05",
+        proposed_type_label: "CR-05 Credit inquiry letter",
+      },
+    ];
+    render(<Settings lenderId="l1" name="United Wholesale Mortgage" />);
+    expect(screen.getByText("CR-05 Credit inquiry letter", { selector: "span" })).toBeTruthy();
+    const select = screen.getByLabelText("Library type for 7812") as HTMLSelectElement;
+    expect(select.value).toBe("");
+    expect(state.mapped).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Use it" }));
+    expect(state.mapped).toEqual([{ code: "7812", canonical_type_id: "CR-05" }]);
+  });
+
+  it("is not offered once the code has a type", () => {
+    state.settings = UWM;
+    state.codes = [
+      {
+        code: "7812",
+        example_wording: "Letter of explanation",
+        files: 1,
+        canonical_type_id: "CR-05",
+        proposed_type_id: "CR-05",
+        proposed_type_label: "CR-05 Credit inquiry letter",
+      },
+    ];
+    render(<Settings lenderId="l1" name="United Wholesale Mortgage" />);
+    expect(screen.queryByRole("button", { name: "Use it" })).toBeNull();
+  });
+});

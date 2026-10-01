@@ -35,6 +35,7 @@ import type {
   DraftPolish,
   DraftUpdateInput,
   FiguresCheck,
+  FileLender,
   OwnerHint,
   OwnerInput,
   PasteConditionsInput,
@@ -1232,5 +1233,62 @@ export function useRestoreCondition(fileId: string) {
         )
       ).data,
     onSuccess: () => invalidateWithdrawal(queryClient, fileId),
+  });
+}
+
+// --------------------------------------------------------------------------------------------- //
+// LP-949 — the file's lender
+// --------------------------------------------------------------------------------------------- //
+
+export const fileLenderQueryKey = (fileId: string) => ["condition-file-lender", fileId] as const;
+
+/** The file's lender, or the lender the newest sheet names. Read-only: it never sets anything. */
+export function useFileLender(fileId: string) {
+  return useQuery({
+    queryKey: fileLenderQueryKey(fileId),
+    queryFn: async () =>
+      (await apiClient.get<FileLender>(`/loan-files/${fileId}/conditions/lender`)).data,
+    enabled: Boolean(fileId),
+  });
+}
+
+function afterLenderChange(queryClient: ReturnType<typeof useQueryClient>, fileId: string) {
+  // THE LENDER REACHES THE CONDITIONS: untyped ones are typed and unread ones read, so every view of
+  // them, the plan and the file's own header are stale.
+  void queryClient.invalidateQueries({ queryKey: fileLenderQueryKey(fileId) });
+  void queryClient.invalidateQueries({ queryKey: conditionsQueryPrefix(fileId) });
+  void queryClient.invalidateQueries({ queryKey: conditionsSummaryQueryKey(fileId) });
+  void queryClient.invalidateQueries({ queryKey: conditionRoundsQueryKey(fileId) });
+  void queryClient.invalidateQueries({ queryKey: ["condition-round-plan"] });
+  void queryClient.invalidateQueries({ queryKey: ["loan-file"] });
+}
+
+/**
+ * She confirms the file's lender: the suggestion's key, or one of her lenders. Can 409 with a
+ * sentence (a lender that is not hers, or two at once); the caller shows it.
+ */
+export function useSetFileLender(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { lender_key: string } | { lender_id: string }) =>
+      (await apiClient.put<FileLender>(`/loan-files/${fileId}/conditions/lender`, body)).data,
+    onSuccess: (data) => {
+      queryClient.setQueryData(fileLenderQueryKey(fileId), data);
+      afterLenderChange(queryClient, fileId);
+    },
+  });
+}
+
+/** She says the lender the sheet names is not this file's. Recorded; nothing is set. */
+export function useDeclineFileLender(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (roundId: string) =>
+      (
+        await apiClient.post<FileLender>(`/loan-files/${fileId}/conditions/lender/decline`, {
+          round_id: roundId,
+        })
+      ).data,
+    onSuccess: (data) => queryClient.setQueryData(fileLenderQueryKey(fileId), data),
   });
 }

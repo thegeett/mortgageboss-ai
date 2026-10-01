@@ -89,7 +89,10 @@ from app.schemas.condition import (
     EvidenceAcceptRequest,
     FiguresApplyRequest,
     FiguresCheckPublic,
+    FileLenderPublic,
+    FileLenderRequest,
     FindingAnswerRequest,
+    LenderDeclineRequest,
     LenderProcessingRequest,
     NextStepRequest,
     OwnerRequest,
@@ -1235,6 +1238,73 @@ async def switch_round_completeness(
     await db.commit()
     await db.refresh(round_)
     return await _round_card(db, round_)
+
+
+async def queue_unread_reading(db: DbSession, *, loan_file_id: UUID) -> None:
+    """Queue the reading when the file has conditions nobody has read (LP-949). After a commit only."""
+    from app.services.condition_lender import unread_round_to_read
+
+    round_id = await unread_round_to_read(db, loan_file_id=loan_file_id)
+    if round_id is not None:
+        _enqueue_reading(round_id)
+
+
+async def _file_lender(db: DbSession, loan_file: LoanFile) -> FileLenderPublic:
+    from app.services.condition_lender import file_lender_payload
+
+    return FileLenderPublic.model_validate(await file_lender_payload(db, loan_file=loan_file))
+
+
+@router.get("/{loan_file_id}/conditions/lender", response_model=FileLenderPublic)
+async def get_file_lender(loan_file: ScopedLoanFileById, db: DbSession) -> FileLenderPublic:
+    """The file's lender, or the lender the newest sheet names (LP-949). Read-only; sets nothing."""
+    return await _file_lender(db, loan_file)
+
+
+@router.put("/{loan_file_id}/conditions/lender", response_model=FileLenderPublic)
+async def set_file_lender_route(
+    loan_file: ScopedLoanFileById,
+    payload: FileLenderRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> FileLenderPublic:
+    """She confirms the file's lender (LP-949). Untyped conditions take its code map; unread ones are
+    read. A key her company has no lender for adds that lender, with its shipped code map."""
+    from app.services.condition_lender import LenderRefused, set_file_lender
+
+    try:
+        await set_file_lender(
+            db,
+            loan_file=loan_file,
+            lender_key=payload.lender_key,
+            lender_id=payload.lender_id,
+            actor_user_id=current_user.id,
+        )
+    except LenderRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    await db.commit()
+    await queue_unread_reading(db, loan_file_id=loan_file.id)
+    return await _file_lender(db, loan_file)
+
+
+@router.post("/{loan_file_id}/conditions/lender/decline", response_model=FileLenderPublic)
+async def decline_file_lender(
+    loan_file: ScopedLoanFileById,
+    payload: LenderDeclineRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> FileLenderPublic:
+    """She says the lender the sheet names is not this file's (LP-949). Recorded; nothing is set."""
+    from app.services.condition_lender import LenderRefused, decline_suggestion
+
+    try:
+        await decline_suggestion(
+            db, loan_file=loan_file, round_id=payload.round_id, actor_user_id=current_user.id
+        )
+    except LenderRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    await db.commit()
+    return await _file_lender(db, loan_file)
 
 
 @router.post(

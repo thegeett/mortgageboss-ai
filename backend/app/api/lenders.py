@@ -359,6 +359,8 @@ async def map_lender_code(
     _: None = _ADMIN,
 ) -> list[LenderCodeToReviewPublic]:
     """Give a code its library type (admin); new imports use it from then on."""
+    from app.api.conditions import queue_unread_reading
+    from app.services.condition_lender import type_conditions_for_code
     from app.services.lender_settings import SettingsRefused, codes_to_review, map_code
 
     lender = await _lender_or_404(db, lender_id, current_user.company_id)
@@ -366,7 +368,14 @@ async def map_lender_code(
         await map_code(db, lender=lender, code=code, canonical_type_id=payload.canonical_type_id)
     except SettingsRefused as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.reason) from exc
+    # LP-949 — HER ANSWER REACHES THE CONDITIONS ALREADY ON FILES, untyped ones only; unread ones are
+    # then read. A typed or read condition keeps what it has.
+    files = await type_conditions_for_code(
+        db, lender=lender, code=code, actor_user_id=current_user.id
+    )
     await db.commit()
+    for loan_file_id in sorted(files):
+        await queue_unread_reading(db, loan_file_id=loan_file_id)
     return [
         LenderCodeToReviewPublic.model_validate(r) for r in await codes_to_review(db, lender=lender)
     ]

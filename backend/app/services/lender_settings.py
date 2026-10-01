@@ -134,12 +134,20 @@ async def codes_to_review(db: AsyncSession, *, lender: Lender) -> list[dict[str,
                 Condition.lender_id == lender.id, Condition.lender_code == row.code
             )
         )
+        proposed = (
+            load_library().get(row.proposed_type_id)
+            if row.proposed_type_id and row.canonical_type_id is None
+            else None
+        )
         out.append(
             {
                 "code": row.code,
                 "example_wording": (example or row.label or "")[:300],
                 "files": int(files or 0),
                 "canonical_type_id": row.canonical_type_id,
+                # LP-949 — shown only while nobody has given the code a meaning.
+                "proposed_type_id": proposed.id if proposed else None,
+                "proposed_type_label": proposed.label if proposed else None,
             }
         )
     return out

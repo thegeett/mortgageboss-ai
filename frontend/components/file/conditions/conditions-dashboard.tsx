@@ -13,6 +13,7 @@ import { ConditionsEmpty } from "./conditions-empty";
 // rewrite of the tab. `ImportedView` itself is left in place with its tests: deleting a tested
 // component in the commit that supersedes it would mix two changes into one review.
 import { ConditionsListView } from "./conditions-list-view";
+import { FileLenderBanner } from "./file-lender-banner";
 import { RoundFailed } from "./round-failed";
 import { RoundReading } from "./round-reading";
 import { RoundReview } from "./round-review";
@@ -170,15 +171,21 @@ export function ConditionsDashboard({
   // THE STRIP GETS EVERY ROUND, NOT `live`. Discarded rounds are filtered out of "what am I
   // working on" and belong in "what has happened to this file"; a round vanishing from the history
   // reads as data loss.
+  // LP-949 — THE FILE'S LENDER ABOVE BOTH SCREENS THAT HOLD CONDITIONS: the review (so she can set it
+  // before importing, and the import types every condition) and the list (so a file imported without
+  // one can still get it). It renders nothing once the file has a lender with a code map.
   if (current.status === "imported") {
     return (
-      <ConditionsListView
-        fileId={fileId}
-        rounds={rounds.data ?? []}
-        onPaste={onPaste}
-        onAddByHand={onAddByHand}
-        onUploadAnother={onUploadAnother}
-      />
+      <>
+        <FileLenderBanner fileId={fileId} />
+        <ConditionsListView
+          fileId={fileId}
+          rounds={rounds.data ?? []}
+          onPaste={onPaste}
+          onAddByHand={onAddByHand}
+          onUploadAnother={onUploadAnother}
+        />
+      </>
     );
   }
 
@@ -213,5 +220,10 @@ export function ConditionsDashboard({
 
   // The draft a processor reviews and imports (S1-04/07/10/11). This branch used to be an interim
   // card saying the review screen was not built yet; it is now the screen.
-  return <RoundReview round={current} fileId={fileId} onDiscard={() => onDiscard(current.id)} />;
+  return (
+    <>
+      <FileLenderBanner fileId={fileId} />
+      <RoundReview round={current} fileId={fileId} onDiscard={() => onDiscard(current.id)} />
+    </>
+  );
 }

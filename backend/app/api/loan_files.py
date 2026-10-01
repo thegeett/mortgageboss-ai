@@ -290,6 +290,11 @@ async def update(
         # Open in-scope findings block the ready-to-submit transition (LP-75).
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await db.commit()
+    if "lender_id" in payload.model_fields_set:
+        # LP-949 — a lender change can type conditions nobody has read yet; read them now.
+        from app.api.conditions import queue_unread_reading
+
+        await queue_unread_reading(db, loan_file_id=loan_file.id)
     return LoanFileDetail.from_model(loan_file)
 
 

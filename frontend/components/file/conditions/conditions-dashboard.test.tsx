@@ -44,6 +44,10 @@ vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   // Stage 3 hooks (LP-919, LP-920) — stubbed so these Stage 1/2 screens need no QueryClient for them.
   useAddItem: () => ({ mutate: vi.fn(), isPending: false }),
   useRoundPlan: () => ({ data: undefined }),
+  // LP-949 — no lender banner in these screens' assertions.
+  useFileLender: () => ({ data: undefined }),
+  useSetFileLender: () => ({ mutate: vi.fn(), isPending: false }),
+  useDeclineFileLender: () => ({ mutate: vi.fn(), isPending: false }),
   useConfirmPlan: () => ({ mutate: vi.fn(), isPending: false }),
   // LP-922's draft hooks: no drafts in these screens.
   useConditionDrafts: () => ({ data: [] }),

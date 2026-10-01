@@ -322,7 +322,9 @@ export type ConditionEventKind =
   | "condition_evidence_accepted"
   | "condition_finding_answered"
   | "condition_withdrawn"
-  | "condition_restored";
+  | "condition_restored"
+  | "condition_typed"
+  | "round_lender_declined";
 
 /**
  * One line of a round's history (S1-09).
@@ -370,6 +372,8 @@ export interface ConditionEvent {
   draft_recipient: DraftRecipient | null;
   /** LP-941 — her reason, on `condition_withdrawn` only (the one free-text field, by the owner's decision). */
   withdrawal_reason?: string | null;
+  /** LP-949 — on `condition_typed` only: the library type's label the condition was given. */
+  typed_as?: string | null;
   /** The lender's track's move. */
   lender_status_from: ConditionLenderStatus | null;
   lender_status_to: ConditionLenderStatus | null;
@@ -1300,4 +1304,27 @@ export interface WithdrawnCondition {
   /** Her reason, kept for the record (the history line says only that it was withdrawn). */
   reason: string;
   withdrawn_at: string;
+}
+
+/** LP-949 — the file's lender as the Conditions tab needs it. */
+export interface FileLenderName {
+  id: string;
+  name: string;
+  /** False for a lender the app ships no code map for: its conditions arrive untyped. */
+  has_code_map: boolean;
+}
+
+/** The lender the newest sheet names, offered while the file has none. Never set by itself. */
+export interface LenderSuggestion {
+  round_id: string;
+  key: string;
+  name: string;
+  source: "reader" | "mortgagee_clause" | "header";
+  /** Whether her company already has this lender; confirming adds it when not. */
+  lender_exists: boolean;
+}
+
+export interface FileLender {
+  lender: FileLenderName | null;
+  suggestion: LenderSuggestion | null;
 }

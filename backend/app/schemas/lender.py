@@ -162,6 +162,9 @@ class LenderCodeToReviewPublic(BaseModel):
     example_wording: str
     files: int
     canonical_type_id: str | None
+    #: LP-949 — the reading's proposed type while the code is unmapped. Never used until she picks it.
+    proposed_type_id: str | None = None
+    proposed_type_label: str | None = None
 
 
 class LenderCodeMapRequest(BaseModel):

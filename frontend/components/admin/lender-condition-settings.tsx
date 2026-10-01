@@ -253,6 +253,31 @@ function CodesToReview({ lenderId }: { lenderId: string }) {
                     </option>
                   ))}
                 </select>
+                {/* LP-949 — THE AI'S PROPOSAL, AS A PROPOSAL (ADR-417). It is not pre-selected: the code
+                    stays unmapped, and nothing uses the type, until she presses the button. */}
+                {!c.canonical_type_id && c.proposed_type_id ? (
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-foreground-2">
+                    <span>
+                      AI suggests{" "}
+                      <span className="font-medium text-foreground">
+                        {c.proposed_type_label ?? c.proposed_type_id}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      className="font-medium text-primary underline-offset-2 hover:underline"
+                      disabled={map.isPending}
+                      onClick={() =>
+                        map.mutate(
+                          { code: c.code, canonical_type_id: c.proposed_type_id ?? null },
+                          { onError: (err) => setError(getErrorMessage(err)) },
+                        )
+                      }
+                    >
+                      Use it
+                    </button>
+                  </div>
+                ) : null}
               </td>
             </tr>
           ))}

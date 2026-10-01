@@ -29,6 +29,9 @@ export interface LenderCodeToReview {
   example_wording: string;
   files: number;
   canonical_type_id: string | null;
+  /** LP-949 — the reading's proposed type while the code is unmapped. Used only once she picks it. */
+  proposed_type_id?: string | null;
+  proposed_type_label?: string | null;
 }
 
 export interface LibraryTypeOption {

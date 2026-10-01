@@ -284,6 +284,10 @@ async def test_only_the_named_scalars_are_exposed(
         # a reopen's or a backward move's `reason` does not travel), so the history can say why, and
         # keeps saying it after an Undo. `test_condition_withdraw.py` pins both halves.
         "withdrawal_reason",
+        # LP-949: the library type an untyped condition was given, on `CONDITION_TYPED` only, as the
+        # LIBRARY'S label looked up from the stored id. A closed set: an id the library does not know
+        # projects as None (`test_typed_as_is_the_librarys_label_or_nothing` in the LP-949 tests).
+        "typed_as",
     }
     # THREE FIELDS CAME OFF THIS LIST AND THAT IS THE POINT. `reader_version`,
     # `duplicates_dropped` and `filled_from` were projected and read by no sentence — three open

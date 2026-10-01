@@ -229,6 +229,12 @@ export function conditionHistoryLine(
         : `Withdrawn as entered in error${by(event)}`;
     case "condition_restored":
       return `Withdrawal undone${by(event)}`;
+    // LP-949 — the file's lender was set, or a code was confirmed, and this untyped condition took its
+    // type from the lender's code map. The label is the library's, from a closed vocabulary.
+    case "condition_typed":
+      return event.typed_as
+        ? `Matched to the library: ${event.typed_as}${by(event)}`
+        : `Matched to the library${by(event)}`;
     case "condition_drafted":
       return event.draft_recipient
         ? `Added to the ${EMAIL_NAME[event.draft_recipient]}`
@@ -240,6 +246,8 @@ export function conditionHistoryLine(
     // id, and round-level events carry `condition_id = NULL` — a round's history is the other
     // screen's question. They are answered anyway because the union includes them and this switch is
     // exhaustive by design: a sentence that cannot render beats a build that cannot compile.
+    case "round_lender_declined":
+      return `The lender the sheet named was marked not this file’s${by(event)}`;
     case "round_received":
       return "The lender’s sheet arrived";
     case "round_parsed":

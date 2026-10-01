@@ -163,6 +163,25 @@ async def seed_lender_codes(db: AsyncSession) -> SeedResult:
     return result
 
 
+async def seed_lender(db: AsyncSession, *, lender: Lender) -> SeedResult:
+    """Apply the shipped map to ONE lender, by its own `canonical_lender_key` (LP-949).
+
+    For a lender created when she confirms the lender a sheet names: it gets its code map at once, not
+    on the next deploy's seed. Same upsert as `seed_lender_codes`, so the two cannot disagree. A lender
+    with no key, or a key with no shipped map, gets nothing and is reported as unclaimed.
+    """
+    result = SeedResult()
+    key = lender.canonical_lender_key
+    if not key or key not in seeded_lender_keys():
+        result.unclaimed_keys = (key,) if key else ()
+        return result
+    result.matched_lenders = 1
+    for row in load_seed(key):
+        outcome = await _upsert(db, lender_id=lender.id, row=row)
+        setattr(result, outcome, getattr(result, outcome) + 1)
+    return result
+
+
 async def _run() -> SeedResult:
     async with async_session_maker() as db:
         result = await seed_lender_codes(db)

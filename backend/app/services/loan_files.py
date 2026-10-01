@@ -240,6 +240,7 @@ async def update_loan_file(
     *,
     loan_file: LoanFile,
     data: LoanFileUpdate,
+    actor_user_id: UUID | None = None,
 ) -> LoanFile:
     """Apply a partial update to a loan file.
 
@@ -261,6 +262,17 @@ async def update_loan_file(
 
     await clear_underwriter_if_lender_changed(
         db, loan_file=loan_file, previous_lender_id=previous_lender_id
+    )
+    # LP-949 — THE CONDITIONS FOLLOW THE LENDER, here for the same reason the underwriter does: every
+    # caller changes the lender through this function. Untyped conditions get the new lender's code map;
+    # the caller queues the reading for any still unread, after its commit.
+    from app.services.condition_lender import on_file_lender_changed
+
+    await on_file_lender_changed(
+        db,
+        loan_file=loan_file,
+        previous_lender_id=previous_lender_id,
+        actor_user_id=actor_user_id,
     )
     await db.flush()
     return loan_file
@@ -399,7 +411,7 @@ async def update_loan_file_with_activity(
             "Open in-scope findings must be resolved before the file can submit."
         )
 
-    await update_loan_file(db, loan_file=loan_file, data=data)
+    await update_loan_file(db, loan_file=loan_file, data=data, actor_user_id=actor_user_id)
 
     # Record the thoroughness the file cleared at (auditability) once it passes the gate.
     if becoming_ready:

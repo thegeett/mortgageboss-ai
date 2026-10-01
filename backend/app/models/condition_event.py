@@ -145,6 +145,13 @@ class ConditionEventKind(StrEnum):
     CONDITION_WITHDRAWN = "condition_withdrawn"
     #: LP-940 — Undo of a withdrawal: the condition is back on the file as it was.
     CONDITION_RESTORED = "condition_restored"
+    #: LP-949 — an UNTYPED condition got its library type from the lender's code map: the file's lender
+    #: was set (or changed), or a person confirmed the code in "Codes to review". Detail says which
+    #: (`by`), the type and the lender. A typed condition is never re-typed.
+    CONDITION_TYPED = "condition_typed"
+    #: LP-949 — she said the lender the app detected on this round's sheet is not the file's lender.
+    #: The suggestion stops showing for that round; nothing else changes.
+    ROUND_LENDER_DECLINED = "round_lender_declined"
 
 
 class ConditionEvent(Base, UUIDMixin):

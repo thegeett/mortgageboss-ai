@@ -68,6 +68,10 @@ class LenderConditionCode(Base, UUIDMixin, TimestampMixin):
     #: All four defaults are NULLABLE on purpose. An observed code has none of them until a person
     #: decides, and a default that guessed would be indistinguishable from one that was chosen.
     canonical_type_id: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
+    #: LP-949 — a library type the reading PROPOSED for this code while it is unmapped. Shown in the
+    #: lender's "Codes to review" table and used ONLY once a person confirms it there, which writes
+    #: `canonical_type_id` (ADR-417). Import, the reading and the plan never read this column.
+    proposed_type_id: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
     default_bucket_kind: Mapped[BucketKind | None] = mapped_column(
         str_enum(BucketKind, name="lender_condition_code_bucket_kind"), nullable=True
     )

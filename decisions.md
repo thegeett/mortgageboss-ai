@@ -16769,3 +16769,43 @@ one.
   newest approval letter's until it is saved. Mapping a lender code sets it `mapped` for new imports.
 
 *Status.* Accepted (LP-925).
+
+## ADR-417
+
+**A file's lender is detected from its condition sheet but set only when she confirms it. Setting it
+types the file's untyped conditions from that lender's code map. For a code the map does not know, the
+AI may propose a library type; the proposal waits in the lender's "Lender codes to review" table and is
+used only once a person maps the code there.**
+
+*Context.* The staging trial of 2026-09-30 (`docs/phases/phase4.5-staging-trial-2026-09-30.md`, items 1
+and 10b). A condition's library type comes only from its lender's code map, at import. LF-DH8V had no
+lender, so all six conditions were untyped: the reading split each one itself, emails carried a
+placeholder, no document could be found already in the file, and 0007 did not wait on 1228. Staging had
+no lenders at all, so even a correct manual pick had nothing to choose.
+
+*Decision (LP-949).*
+- **Detection is code, from the sheet:** the reader that recognised the layout, then the mortgagee
+  clause, then the rest of the header, matched against the shipped lenders' printed labels. Nothing is
+  set by it. The Conditions tab offers the newest live sheet's lender; *Not this lender* records
+  `round_lender_declined` and stops offering it.
+- **Confirming** uses her company's lender with that canonical key, else one with the same printed name,
+  else creates the lender with the key and seeds its shipped code map at once. A same-named lender with
+  no key is used **without** attaching the key: the seed's "never guessed at" rule stands, and the tab
+  says that lender has no codes.
+- **Every lender change** goes through `update_loan_file`, which now types the file's untyped conditions
+  (and the rounds with no lender) from the new lender's map, writing `condition_typed`. A typed condition
+  is never re-typed. Unknown codes are recorded `observed_unmapped`, as import records them.
+- **Reading after typing** takes only unread conditions. A condition already read keeps its reading
+  (generic, if it was read untyped); the owner's rule is "read the ones still unplanned".
+- **The AI's proposal** (`library_type` in reading prompt v2) is kept on the reading only when it names a
+  real library type and the condition has none, then copied to the code's review row
+  (`lender_condition_codes.proposed_type_id`) while that row is `observed_unmapped`. Import, the reading
+  and the plan never read the column. Mapping the code (admin) types that lender's untyped conditions
+  with the code, and the unread ones are read.
+
+*Consequences.* This changes the order of authority in `condition_reading` only by adding a suggestion
+outside it: the library still beats the AI, and an AI type reaches a condition only through a person's
+mapping. A file read while untyped keeps its generic items after its lender is set; re-reading such a
+file is LP-952's question (its rule: never re-read a read or confirmed condition).
+
+*Status.* Accepted (LP-949).

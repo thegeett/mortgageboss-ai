@@ -36,7 +36,8 @@ THE READING'S SHAPE (`conditions.reading`, JSONB):
                 "names"}}],
      "figures": {"shortfall": {"required", "verified", "amount"}} | {},
      "push_back": {"must_not_close_before", "policy_starts"} | null,
-     "confidence": float | null, "prompt_version": "read_v1" | null}
+     "confidence": float | null, "prompt_version": "read_v2" | null,
+     "proposed_type_id": str | null}
 """
 
 from __future__ import annotations
@@ -76,8 +77,8 @@ from app.models.loan_file import LoanFile
 
 logger = structlog.get_logger(__name__)
 
-PROMPT_PATH = "conditions/read_v1.txt"
-READING_VERSION = "read_v1"
+PROMPT_PATH = "conditions/read_v2.txt"
+READING_VERSION = "read_v2"
 _MAX_TOKENS = 8192
 
 _OWNER_TO_PERFORMER: dict[OwnerHint, Performer] = {
@@ -408,8 +409,25 @@ def compose_reading(
         ),
         "confidence": float(confidence) if confidence is not None else None,
         "prompt_version": READING_VERSION if source is ConditionReadingSource.AI else None,
+        # LP-949 — THE AI'S PROPOSED LIBRARY TYPE for an untyped condition, kept only when it names a
+        # real type. A proposal: nothing here uses it. It reaches the lender's "Codes to review", and a
+        # type is applied only when a person maps the code there (ADR-417).
+        "proposed_type_id": _proposed_type(condition_type, confirmed, ai),
     }
     return reading, source, status, confidence
+
+
+def _proposed_type(
+    condition_type: ConditionType | None,
+    confirmed: dict[str, Any] | None,
+    ai: dict[str, Any] | None,
+) -> str | None:
+    if condition_type is not None or confirmed or ai is None:
+        return None
+    proposed = ai.get("library_type")
+    if isinstance(proposed, str) and load_library().get(proposed) is not None:
+        return proposed
+    return None
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -453,7 +471,14 @@ def _ai_input(
                 ],
             }
         conditions.append(entry)
-    return json.dumps({"file": summary, "conditions": conditions})
+    request: dict[str, Any] = {"file": summary, "conditions": conditions}
+    if any(condition_type is None for _, _, condition_type in pending):
+        # LP-949 — only when a condition has no type, so the model has something to propose from.
+        request["library"] = [
+            {"id": each.id, "name": each.name}
+            for each in sorted(load_library().types.values(), key=lambda t: t.id)
+        ]
+    return json.dumps(request)
 
 
 async def _ask_model(prompt_input: str, outcome: RoundReading) -> dict[str, dict[str, Any]] | None:
@@ -596,6 +621,15 @@ async def read_round(db: AsyncSession, *, round_id: UUID, use_ai: bool = True) -
         if status is ConditionReadingStatus.NEEDS_CONFIRMATION:
             outcome.needs_confirmation += 1
 
+    if loan_file.lender_id is not None:
+        # LP-949 — an unmapped code's proposal goes to that lender's review queue, for a person.
+        from app.services.condition_lender import record_proposals
+
+        await record_proposals(
+            db,
+            lender_id=loan_file.lender_id,
+            conditions=[c for c in unread if c.lender_id == loan_file.lender_id],
+        )
     round_.reading_run = outcome.as_run()
     await db.flush()
     logger.info(

@@ -49,6 +49,8 @@ const ALL_KINDS = [
   "condition_finding_answered",
   "condition_withdrawn",
   "condition_restored",
+  "condition_typed",
+  "round_lender_declined",
 ] as const satisfies readonly ConditionEventKind[];
 
 /**
@@ -102,7 +104,7 @@ describe("every event kind has a sentence", () => {
 
   it("is exhaustive over the union, checked by the compiler", () => {
     expect(_everyKindIsListed).toBe(true);
-    expect(ALL_KINDS).toHaveLength(31);
+    expect(ALL_KINDS).toHaveLength(33);
   });
 });
 
@@ -296,5 +298,22 @@ describe("LP-922's lines", () => {
     expect(
       conditionHistoryLine(makeEvent({ kind: "condition_restored", actor_name: "Priya Raman" })),
     ).toBe("Withdrawal undone — Priya Raman");
+  });
+});
+
+describe("LP-949's lines", () => {
+  it("names the library type a condition was matched to, and says so without one", () => {
+    expect(
+      conditionHistoryLine(
+        makeEvent({
+          kind: "condition_typed",
+          typed_as: "Final inspection",
+          actor_name: "Priya Raman",
+        }),
+      ),
+    ).toBe("Matched to the library: Final inspection — Priya Raman");
+    expect(conditionHistoryLine(makeEvent({ kind: "condition_typed", typed_as: null }))).toBe(
+      "Matched to the library",
+    );
   });
 });

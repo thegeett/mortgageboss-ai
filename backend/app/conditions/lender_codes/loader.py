@@ -185,3 +185,21 @@ def seeded_lender_keys() -> tuple[str, ...]:
     renamed key cannot leave a map that matches no lender.
     """
     return tuple(sorted(_FILES))
+
+
+@cache
+def lender_label(lender_key: str) -> str:
+    """The lender's printed name from its shipped map (`lender_label`), e.g. "United Wholesale Mortgage".
+
+    LP-949: what the app offers her when it recognises a sheet, and the name a lender is created with
+    when her company has none for that key. Raises :class:`LenderCodeSeedError` for an unknown key or a
+    file with no label, because a lender named by its key ("uwm") is a name nobody would type.
+    """
+    path = _FILES.get(lender_key)
+    if path is None:
+        raise LenderCodeSeedError(f"no shipped code map for {lender_key!r}")
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    label = document.get("lender_label") if isinstance(document, dict) else None
+    if not isinstance(label, str) or not label.strip():
+        raise LenderCodeSeedError(f"{path.name}: no `lender_label`")
+    return label.strip()
