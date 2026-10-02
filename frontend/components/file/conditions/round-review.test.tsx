@@ -17,6 +17,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const saveMutate = vi.fn();
 const importMutate = vi.fn();
+const wrong = vi.hoisted(() => ({
+  file: null as import("@/lib/types/conditions").WrongFile | null,
+}));
 
 vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/conditions")>()),
@@ -30,6 +33,8 @@ vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   useLibraryDefaultReading: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdateDraft: () => ({ mutate: saveMutate, isPending: false }),
   useImportRound: () => ({ mutate: importMutate, isPending: false }),
+  // LP-951 — no warning unless a test sets one.
+  useWrongFile: () => ({ data: wrong.file }),
   // MOCKED BECAUSE THE SCREEN NOW READS THE FILE'S CONDITIONS. S1-07's "just some" callout names
   // how many are already on the file, and the real hook is a `useQuery` with no `QueryClientProvider`
   // in this file's `render` — so omitting this throws inside `RoundReview` before a single assertion
@@ -52,6 +57,7 @@ import { RoundReview } from "./round-review";
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  wrong.file = null;
 });
 
 function draftRow(overrides: Partial<DraftRow> = {}): DraftRow {
@@ -530,5 +536,43 @@ describe("how the rows are grouped and ordered", () => {
     expect(row).not.toBeNull();
     expect(within(row as HTMLElement).getByText("Title")).toBeDefined();
     expect(within(row as HTMLElement).getByText(/from .TC:. prefix/)).toBeDefined();
+  });
+});
+
+describe("LP-951 — a sheet that may be another file's", () => {
+  const MISMATCH = {
+    sheet_surname: "GURUNG",
+    file_surnames: ["Patel"],
+    sheet_loan_number: "1226474352",
+    file_loan_numbers: [],
+    borrower_differs: true,
+    loan_number_differs: false,
+  };
+
+  it("says what differs and keeps Import off until she says it is this file's", () => {
+    wrong.file = MISMATCH;
+    show();
+    expect(screen.getByText(/the sheet names GURUNG; this file’s borrower is Patel/)).toBeTruthy();
+    const importButton = screen.getByRole("button", {
+      name: /Import 1 condition/,
+    }) as HTMLButtonElement;
+    expect(importButton.disabled).toBe(true);
+
+    fireEvent.click(screen.getByLabelText("I checked: this sheet is this file’s"));
+    expect(importButton.disabled).toBe(false);
+    fireEvent.click(importButton);
+    saveMutate.mock.calls[0]?.[1].onSuccess();
+    expect(importMutate).toHaveBeenCalledWith(
+      { roundId: "r1", confirmWrongFile: true },
+      expect.anything(),
+    );
+  });
+
+  it("without a mismatch shows nothing and imports as before", () => {
+    show();
+    expect(screen.queryByText(/This sheet may be for another file/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Import 1 condition/ }));
+    saveMutate.mock.calls[0]?.[1].onSuccess();
+    expect(importMutate).toHaveBeenCalledWith("r1", expect.anything());
   });
 });

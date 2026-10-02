@@ -46,6 +46,7 @@ import type {
   RoundPlan,
   VerdictInput,
   WithdrawnCondition,
+  WrongFile,
 } from "@/lib/types/conditions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -512,8 +513,14 @@ export function useReparseRound(fileId: string) {
 export function useImportRound(fileId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (roundId: string) =>
-      (await apiClient.post<ConditionImportResult>(`${roundPath(roundId)}/import`, {})).data,
+    // LP-951 — `confirmWrongFile` is her answer to the wrong-file warning. A plain round id imports as
+    // before; the server refuses a mismatched sheet (409, code `wrong_file`) without the confirmation.
+    mutationFn: async (arg: string | { roundId: string; confirmWrongFile: boolean }) => {
+      const roundId = typeof arg === "string" ? arg : arg.roundId;
+      const body = typeof arg === "string" ? {} : { confirm_wrong_file: arg.confirmWrongFile };
+      return (await apiClient.post<ConditionImportResult>(`${roundPath(roundId)}/import`, body))
+        .data;
+    },
     onSuccess: (result) => invalidateRound(queryClient, fileId, result.round_id),
   });
 }
@@ -1290,5 +1297,15 @@ export function useDeclineFileLender(fileId: string) {
         })
       ).data,
     onSuccess: (data) => queryClient.setQueryData(fileLenderQueryKey(fileId), data),
+  });
+}
+
+/** LP-951 — what on a draft round's sheet does not match its file (borrower, loan number), or null. */
+export function useWrongFile(roundId: string | null) {
+  return useQuery({
+    queryKey: ["condition-round-wrong-file", roundId ?? "none"],
+    queryFn: async () =>
+      (await apiClient.get<WrongFile | null>(`${roundPath(roundId as string)}/wrong-file`)).data,
+    enabled: roundId !== null,
   });
 }

@@ -2130,3 +2130,30 @@ class FileLenderRequest(BaseModel):
 
 class LenderDeclineRequest(BaseModel):
     round_id: UUID
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-951 — is this sheet for this file?
+# --------------------------------------------------------------------------------------------- #
+
+
+class WrongFilePublic(BaseModel):
+    """What differs between a draft round's sheet and its file, for the review screen's warning.
+
+    NPI ON THE SCREEN ONLY: a company-scoped route returns the names and numbers so she can judge; the
+    override's event stores only which facts differed.
+    """
+
+    sheet_surname: str | None
+    file_surnames: list[str]
+    sheet_loan_number: str | None
+    file_loan_numbers: list[str]
+    borrower_differs: bool
+    loan_number_differs: bool
+
+
+class ImportRequest(BaseModel):
+    """LP-951 — `confirm_wrong_file` is her answer to the warning: import although the sheet's borrower
+    or loan number does not match the file. Without it, a mismatched sheet is refused (409)."""
+
+    confirm_wrong_file: bool = False

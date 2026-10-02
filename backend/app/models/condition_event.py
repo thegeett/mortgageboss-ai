@@ -152,6 +152,9 @@ class ConditionEventKind(StrEnum):
     #: LP-949 — she said the lender the app detected on this round's sheet is not the file's lender.
     #: The suggestion stops showing for that round; nothing else changes.
     ROUND_LENDER_DECLINED = "round_lender_declined"
+    #: LP-951 — she imported a sheet whose borrower or loan number did not match the file, after the
+    #: warning. Detail says WHICH differed (`borrower_differs`, `loan_number_differs`), never the values.
+    ROUND_WRONG_FILE_CONFIRMED = "round_wrong_file_confirmed"
 
 
 class ConditionEvent(Base, UUIDMixin):

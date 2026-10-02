@@ -324,7 +324,8 @@ export type ConditionEventKind =
   | "condition_withdrawn"
   | "condition_restored"
   | "condition_typed"
-  | "round_lender_declined";
+  | "round_lender_declined"
+  | "round_wrong_file_confirmed";
 
 /**
  * One line of a round's history (S1-09).
@@ -1329,4 +1330,14 @@ export interface LenderSuggestion {
 export interface FileLender {
   lender: FileLenderName | null;
   suggestion: LenderSuggestion | null;
+}
+
+/** LP-951 — what differs between a draft round's sheet and its file. Shown to her; never stored. */
+export interface WrongFile {
+  sheet_surname: string | null;
+  file_surnames: string[];
+  sheet_loan_number: string | null;
+  file_loan_numbers: string[];
+  borrower_differs: boolean;
+  loan_number_differs: boolean;
 }

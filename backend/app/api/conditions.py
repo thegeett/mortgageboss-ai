@@ -46,6 +46,7 @@ from app.models.condition import (
     OwnerHint,
 )
 from app.models.condition_draft import ConditionDraft
+from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_item import ConditionItem
 from app.models.condition_package import ConditionPackage
 from app.models.condition_round import (
@@ -92,6 +93,7 @@ from app.schemas.condition import (
     FileLenderPublic,
     FileLenderRequest,
     FindingAnswerRequest,
+    ImportRequest,
     LenderDeclineRequest,
     LenderProcessingRequest,
     NextStepRequest,
@@ -108,6 +110,7 @@ from app.schemas.condition import (
     VerdictRequest,
     WithdrawnConditionPublic,
     WithdrawRequest,
+    WrongFilePublic,
 )
 from app.services import condition_drafts, condition_evidence
 from app.services.condition_compare import (
@@ -943,13 +946,29 @@ async def _round_card(db: DbSession, round_: ConditionRound) -> ConditionRoundPu
     return _round_public(round_, per_round=per_round, imports=imports)
 
 
+@rounds_router.get("/{round_id}/wrong-file", response_model=WrongFilePublic | None)
+async def get_wrong_file(round_: ScopedRound, db: DbSession) -> WrongFilePublic | None:
+    """LP-951 — what on a DRAFT round's sheet does not match its file, or null. Read-only."""
+    from dataclasses import asdict
+
+    from app.services.condition_wrong_file import wrong_file_check
+
+    if round_.status is not ConditionRoundStatus.DRAFT:
+        return None
+    found = await wrong_file_check(db, round_=round_)
+    return WrongFilePublic(**asdict(found)) if found is not None else None
+
+
 @rounds_router.post(
     "/{round_id}/import",
     response_model=ConditionImportResult,
     status_code=status.HTTP_200_OK,
 )
 async def import_condition_round(
-    round_: ScopedRound, db: DbSession, current_user: CurrentUser
+    round_: ScopedRound,
+    db: DbSession,
+    current_user: CurrentUser,
+    payload: ImportRequest | None = None,
 ) -> ConditionImportResult:
     """Turn a reviewed draft into the file's conditions (spec §LP-909 steps 1-5).
 
@@ -969,6 +988,29 @@ async def import_condition_round(
     `uq_condition_rounds_file_number`; the service catches that violation and recomputes. The lock
     narrows the window, it does not close it, and nothing here may assume otherwise.
     """
+    from app.services.condition_wrong_file import confirmed_event_detail, wrong_file_check
+
+    # LP-951 — A SHEET FOR ANOTHER FILE IS REFUSED UNTIL SHE SAYS IT IS THIS ONE. The review screen
+    # shows the warning first; this is the server's half, so no client can import past it silently.
+    mismatch = (
+        await wrong_file_check(db, round_=round_)
+        if round_.status is ConditionRoundStatus.DRAFT
+        else None
+    )
+    confirmed = payload is not None and payload.confirm_wrong_file
+    if mismatch is not None and not confirmed:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            # A CODE AND THE SENTENCE (as `_refused` sends them), so a client can tell this 409 from a
+            # round that is not importable and offer the confirmation rather than a dead end.
+            detail={
+                "message": (
+                    "This sheet does not look like this file's: its borrower or loan number does not "
+                    "match. Check it, and import only if it is this file's sheet."
+                ),
+                "code": "wrong_file",
+            },
+        )
     async with loan_file_needs_lock(round_.loan_file_id):
         try:
             outcome = await import_round(db, round_=round_, actor_user_id=current_user.id)
@@ -976,6 +1018,18 @@ async def import_condition_round(
             # 409, like the enrich door: the round exists and the caller may see it — it is the
             # round's STATE that refuses, and the reason says which state it is in.
             raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+        if mismatch is not None:
+            db.add(
+                ConditionEvent(
+                    company_id=round_.company_id,
+                    loan_file_id=round_.loan_file_id,
+                    round_id=round_.id,
+                    condition_id=None,
+                    kind=ConditionEventKind.ROUND_WRONG_FILE_CONFIRMED,
+                    actor_user_id=current_user.id,
+                    detail=confirmed_event_detail(mismatch),
+                )
+            )
         await db.commit()
 
     # LP-919 — read the new conditions into items, after the commit so the worker sees them. A broker

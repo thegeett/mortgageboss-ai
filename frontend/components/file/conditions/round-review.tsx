@@ -3,11 +3,22 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
-import { hasPdf, useConditions, useImportRound, useUpdateDraft } from "@/lib/api/conditions";
+import {
+  hasPdf,
+  useConditions,
+  useImportRound,
+  useUpdateDraft,
+  useWrongFile,
+} from "@/lib/api/conditions";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import { COMPLETENESS_CHIP, FORMAT_LABEL, LAYOUT_NAME } from "@/lib/types/conditions";
-import type { ConditionRound, ConditionSourceKind, DraftRow } from "@/lib/types/conditions";
+import type {
+  ConditionRound,
+  ConditionSourceKind,
+  DraftRow,
+  WrongFile,
+} from "@/lib/types/conditions";
 import { CircleCheck, Info, Sparkles, TriangleAlert } from "lucide-react";
 import { useId, useState } from "react";
 import { FLAGGED_BELOW, ReviewRows } from "./review-rows";
@@ -146,6 +157,9 @@ export function RoundReview({
   const [checked, setChecked] = useState(false);
   const save = useUpdateDraft(fileId);
   const importRound = useImportRound(fileId);
+  // LP-951 — whether this sheet looks like another file's. Import waits on her answer when it does.
+  const wrongFile = useWrongFile(round.id).data ?? null;
+  const [rightFile, setRightFile] = useState(false);
   /**
    * The file's existing conditions, for the "just some" callout's own numbers (S1-07).
    *
@@ -180,18 +194,21 @@ export function RoundReview({
       },
       {
         onSuccess: () =>
-          importRound.mutate(round.id, {
-            onSuccess: (result) =>
-              notifySuccess({
-                title: `Conditions imported · Round ${result.round_number}`,
-                consequence: `${result.created} new, ${result.seen_again} seen again. Import never removes or clears a condition.`,
-              }),
-            onError: (error) =>
-              notifyError({
-                title: "Those conditions could not be imported",
-                whatToDo: getErrorMessage(error),
-              }),
-          }),
+          importRound.mutate(
+            wrongFile ? { roundId: round.id, confirmWrongFile: rightFile } : round.id,
+            {
+              onSuccess: (result) =>
+                notifySuccess({
+                  title: `Conditions imported · Round ${result.round_number}`,
+                  consequence: `${result.created} new, ${result.seen_again} seen again. Import never removes or clears a condition.`,
+                }),
+              onError: (error) =>
+                notifyError({
+                  title: "Those conditions could not be imported",
+                  whatToDo: getErrorMessage(error),
+                }),
+            },
+          ),
         onError: (error) =>
           notifyError({
             title: "Your edits could not be saved, so nothing was imported",
@@ -393,6 +410,10 @@ export function RoundReview({
         </Card>
       ) : null}
 
+      {wrongFile ? (
+        <WrongFileWarning wrongFile={wrongFile} confirmed={rightFile} onConfirm={setRightFile} />
+      ) : null}
+
       <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-[1fr_330px]">
         <ReviewRows rows={rows} onChange={setRows} />
         <ReviewSidePanel round={round} />
@@ -421,12 +442,65 @@ export function RoundReview({
           <Button variant="ghost" size="sm" className="text-destructive" onClick={onDiscard}>
             Discard
           </Button>
-          <Button size="sm" onClick={importNow} disabled={busy || (needsCheck && !checked)}>
+          <Button
+            size="sm"
+            onClick={importNow}
+            disabled={busy || (needsCheck && !checked) || (wrongFile !== null && !rightFile)}
+          >
             {busy && <Spinner className="mr-2 h-4 w-4" />}
             Import {rows.length} conditions
           </Button>
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * LP-951 — the sheet's borrower or loan number does not match the file. The staging trial imported a
+ * sheet for one borrower onto another's file without a word; every draft after it mixed two loans.
+ * Import stays off until she says the sheet is this file's, and that answer is recorded (no names).
+ */
+function WrongFileWarning({
+  wrongFile,
+  confirmed,
+  onConfirm,
+}: {
+  wrongFile: WrongFile;
+  confirmed: boolean;
+  onConfirm: (value: boolean) => void;
+}) {
+  const facts: string[] = [];
+  if (wrongFile.borrower_differs) {
+    facts.push(
+      `the sheet names ${wrongFile.sheet_surname ?? "another borrower"}; this file’s borrower${
+        wrongFile.file_surnames.length === 1 ? " is" : "s are"
+      } ${wrongFile.file_surnames.join(", ")}`,
+    );
+  }
+  if (wrongFile.loan_number_differs) {
+    facts.push(
+      `the sheet’s loan number is ${wrongFile.sheet_loan_number ?? "different"}; this file’s earlier sheets show ${wrongFile.file_loan_numbers.join(", ")}`,
+    );
+  }
+  return (
+    <section
+      aria-label="This sheet may be another file’s"
+      className="mb-3 rounded-lg border border-warning/50 bg-warning/5 px-3 py-2 text-sm text-foreground-2"
+    >
+      <p>
+        <span className="font-medium text-foreground">This sheet may be for another file:</span>{" "}
+        {facts.join("; and ")}.
+      </p>
+      <label className="mt-1.5 flex cursor-pointer items-center gap-1.5 text-xs">
+        <input
+          type="checkbox"
+          checked={confirmed}
+          onChange={(event) => onConfirm(event.target.checked)}
+          className="accent-primary"
+        />
+        I checked: this sheet is this file’s
+      </label>
+    </section>
   );
 }
