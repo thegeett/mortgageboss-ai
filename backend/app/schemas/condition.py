@@ -2157,3 +2157,17 @@ class ImportRequest(BaseModel):
     or loan number does not match the file. Without it, a mismatched sheet is refused (409)."""
 
     confirm_wrong_file: bool = False
+
+
+class ReadingStatePublic(BaseModel):
+    """LP-952 — where the reading of the round's file stands, for the plan panel.
+
+    `state`: `queued`, `reading`, `done`, `failed` (a queued or running reading too old to be alive is
+    failed, error `stalled`), or `not_queued` (conditions unread and nothing queued: offer to read them).
+    `unread` counts the FILE's unread conditions, since a reading reads them all.
+    """
+
+    state: Literal["queued", "reading", "done", "failed", "not_queued"]
+    unread: int
+    #: A closed-ish reason: `stalled`, `not_queued`, or an exception's TYPE name. Never message text.
+    error: str | None = None

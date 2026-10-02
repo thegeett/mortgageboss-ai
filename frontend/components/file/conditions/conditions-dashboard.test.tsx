@@ -88,6 +88,9 @@ vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   useUpdateDraft: () => ({ mutate: vi.fn(), isPending: false }),
   useImportRound: () => ({ mutate: vi.fn(), isPending: false }),
   useWrongFile: () => ({ data: null }),
+  // LP-952 — every condition read, so the reading panel renders nothing here.
+  useReadingState: () => ({ data: { state: "done", unread: 0, error: null } }),
+  useReadAgain: () => ({ mutate: vi.fn(), isPending: false }),
   // The imported branch mounts `ImportedView`, which reads the file's conditions and owns the
   // attach-PDF mutation. Third time an explicit mock has needed a new export one at a time.
   // `{ rows, capped }`, matching the hook since LP-913 — see the note in round-review.test.tsx.

@@ -119,6 +119,8 @@ class RoundReading:
 
     def as_run(self) -> dict[str, Any]:
         return {
+            # LP-952 — the end-of-run record says it is the end: `condition_reading_state` reads it.
+            "state": "done",
             "version": READING_VERSION,
             "read": self.read,
             "needs_confirmation": self.needs_confirmation,

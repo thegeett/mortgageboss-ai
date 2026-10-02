@@ -560,6 +560,17 @@ async def _run_read(round_id: str) -> None:
         round_pk = UUID(round_id)
     except ValueError:
         return
+    from app.models.condition_round import ConditionRound
+    from app.services.condition_reading_state import READING, mark
+
+    # LP-952 — SAY IT HAS STARTED, in its own commit, so the screen can show "Reading …" while the one
+    # model call runs, rather than nothing.
+    async with task_session() as db:
+        started = await db.get(ConditionRound, round_pk)
+        if started is None:
+            return
+        mark(started, READING)
+        await db.commit()
     async with task_session() as db:
         await read_round(db, round_id=round_pk)
         # LP-920 — the plan is built straight from the reading, so importing produces it with nobody
@@ -567,6 +578,33 @@ async def _run_read(round_id: str) -> None:
         # conditions read and nothing proposed.
         await build_plan(db, round_id=round_pk)
         await db.commit()
+
+
+async def _mark_read_failed(round_id: str, error: str) -> None:
+    from app.models.condition_round import ConditionRound
+    from app.services.condition_reading_state import FAILED, mark
+
+    try:
+        round_pk = UUID(round_id)
+    except ValueError:
+        return
+    async with task_session() as db:
+        round_ = await db.get(ConditionRound, round_pk)
+        if round_ is not None:
+            mark(round_, FAILED, error=error)
+            await db.commit()
+
+
+def _read_exhausted(round_id: str, exc: BaseException) -> None:
+    """LP-952 — the reading gave up: the round says FAILED (with the error's type, never its text, which
+    can carry the lender's words), so the screen offers Read again instead of waiting."""
+    logger.error("condition_read_exhausted", round_id=round_id, error_type=type(exc).__name__)
+    try:
+        run_async(_mark_read_failed(round_id, type(exc).__name__))
+    except Exception as marker_exc:  # the marker must never hide the original failure
+        logger.error(
+            "condition_read_failed_marker", round_id=round_id, error_type=type(marker_exc).__name__
+        )
 
 
 @celery_app.task(  # type: ignore[untyped-decorator]
@@ -587,9 +625,7 @@ def read_condition_round(self: Task, round_id: str) -> None:
     retry_or_terminal(
         self,
         lambda: run_async(_run_read(round_id)),
-        on_exhausted=lambda exc: logger.error(
-            "condition_read_exhausted", round_id=round_id, error_type=type(exc).__name__
-        ),
+        on_exhausted=lambda exc: _read_exhausted(round_id, exc),
         event="condition_read_exhausted",
     )
 

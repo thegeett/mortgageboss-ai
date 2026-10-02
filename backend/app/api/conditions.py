@@ -101,6 +101,7 @@ from app.schemas.condition import (
     PackageRowUpdate,
     PrepStatusRequest,
     ReadingConfirmRequest,
+    ReadingStatePublic,
     ReopenRequest,
     RewordedDecisionRequest,
     RoundCompletenessUpdate,
@@ -220,7 +221,8 @@ log = structlog.get_logger(__name__)
 _CHUNK = 1024 * 1024
 
 
-def _enqueue_reading(round_id: UUID) -> None:
+def _enqueue_reading(round_id: UUID) -> bool | None:
+    """Send the reading task. False when the broker refused it (LP-952 marks the round failed)."""
     from app.tasks.conditions import read_condition_round
 
     try:
@@ -229,6 +231,8 @@ def _enqueue_reading(round_id: UUID) -> None:
         log.warning(
             "condition_read_not_queued", round_id=str(round_id), error_type=type(exc).__name__
         )
+        return False
+    return True
 
 
 async def _enqueue_or_fail(
@@ -953,6 +957,53 @@ async def _round_card(db: DbSession, round_: ConditionRound) -> ConditionRoundPu
     return _round_public(round_, per_round=per_round, imports=imports)
 
 
+@rounds_router.get("/{round_id}/reading", response_model=ReadingStatePublic)
+async def get_reading_state(round_: ScopedRound, db: DbSession) -> ReadingStatePublic:
+    """LP-952 — whether this round's file is being read, was read, failed, or has unread conditions."""
+    from app.services.condition_reading_state import reading_state
+
+    return ReadingStatePublic.model_validate(await reading_state(db, round_=round_))
+
+
+@rounds_router.post("/{round_id}/read", response_model=ReadingStatePublic)
+async def read_round_again(round_: ScopedRound, db: DbSession) -> ReadingStatePublic:
+    """LP-952 — "Read conditions" / "Read again": read the file's UNREAD conditions now.
+
+    Refused (409) while a reading is queued or running, and when nothing is unread. It never re-reads a
+    read or confirmed condition: the task reads only `unread` ones (`read_round`). The reading runs on the
+    file's newest imported round, which is the one `read_round` and the plan are built around.
+    """
+    from app.services.condition_reading_state import (
+        is_running,
+        newest_imported_round,
+        reading_state,
+        unread_count,
+    )
+
+    target = await newest_imported_round(db, loan_file_id=round_.loan_file_id)
+    if target is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"message": "Import the sheet first.", "code": "not_imported"},
+        )
+    if is_running(target):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"message": "These conditions are being read now.", "code": "reading_running"},
+        )
+    if not await unread_count(db, loan_file_id=round_.loan_file_id):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "message": "Every condition on this file has been read.",
+                "code": "nothing_unread",
+            },
+        )
+    await queue_round_reading(db, target)
+    await db.refresh(target)
+    return ReadingStatePublic.model_validate(await reading_state(db, round_=target))
+
+
 @rounds_router.get("/{round_id}/wrong-file", response_model=WrongFilePublic | None)
 async def get_wrong_file(round_: ScopedRound, db: DbSession) -> WrongFilePublic | None:
     """LP-951 — what on a DRAFT round's sheet does not match its file, or null. Read-only."""
@@ -1029,7 +1080,7 @@ async def import_condition_round(
 
     # LP-919 — read the new conditions into items, after the commit so the worker sees them. A broker
     # that will not take it leaves them `unread`; the import itself has already succeeded and stays so.
-    _enqueue_reading(round_.id)
+    await queue_round_reading(db, round_)
 
     return ConditionImportResult(
         round_id=round_.id,
@@ -1289,13 +1340,30 @@ async def switch_round_completeness(
     return await _round_card(db, round_)
 
 
+async def queue_round_reading(db: DbSession, round_: ConditionRound) -> None:
+    """Mark the round QUEUED, commit, then queue the reading (LP-952). Every door that reads goes here.
+
+    THE MARK IS COMMITTED BEFORE THE TASK IS SENT, so the worker can never mark READING before the queue
+    mark lands and be overwritten by it. A broker that refuses the task leaves the round FAILED
+    ("not_queued"), which the screen offers to read again.
+    """
+    from app.services.condition_reading_state import FAILED, QUEUED, mark
+
+    mark(round_, QUEUED)
+    await db.commit()
+    if _enqueue_reading(round_.id) is False:
+        mark(round_, FAILED, error="not_queued")
+        await db.commit()
+
+
 async def queue_unread_reading(db: DbSession, *, loan_file_id: UUID) -> None:
     """Queue the reading when the file has conditions nobody has read (LP-949). After a commit only."""
     from app.services.condition_lender import unread_round_to_read
 
     round_id = await unread_round_to_read(db, loan_file_id=loan_file_id)
-    if round_id is not None:
-        _enqueue_reading(round_id)
+    round_ = await db.get(ConditionRound, round_id) if round_id is not None else None
+    if round_ is not None:
+        await queue_round_reading(db, round_)
 
 
 async def _file_lender(db: DbSession, loan_file: LoanFile) -> FileLenderPublic:

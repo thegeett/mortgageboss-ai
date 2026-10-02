@@ -1341,3 +1341,11 @@ export interface WrongFile {
   borrower_differs: boolean;
   loan_number_differs: boolean;
 }
+
+/** LP-952 — where the reading of a round's file stands. `unread` counts the FILE's unread conditions. */
+export interface ReadingState {
+  state: "queued" | "reading" | "done" | "failed" | "not_queued";
+  unread: number;
+  /** `stalled`, `not_queued`, or an error type name. Never message text. */
+  error: string | null;
+}

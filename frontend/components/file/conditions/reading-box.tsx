@@ -44,7 +44,8 @@ export function ReadingBox({
   if (!reading) {
     return condition.reading_status === "unread" ? (
       <section className="rounded-lg border border-input bg-card p-3 text-xs text-muted-foreground">
-        Not read yet. The app reads each condition shortly after the sheet is imported.
+        Not read yet. The panel above the list shows whether the reading is running, and offers to
+        read the conditions if it is not.
       </section>
     ) : null;
   }

@@ -43,6 +43,7 @@ import type {
   Performer,
   PlanOption,
   PrepStatusInput,
+  ReadingState,
   ReopenInput,
   RoundPlan,
   VerdictInput,
@@ -50,6 +51,7 @@ import type {
   WrongFile,
 } from "@/lib/types/conditions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 
 const API_V1 = "/api/v1";
 
@@ -1328,5 +1330,55 @@ export function useWrongFile(roundId: string | null) {
       (await apiClient.get<WrongFile | null>(`${roundPath(roundId as string)}/wrong-file`)).data,
     enabled: roundId !== null,
     staleTime: 0,
+  });
+}
+
+export const readingStateQueryKey = (roundId: string) =>
+  ["condition-reading-state", roundId] as const;
+
+/**
+ * LP-952 — the reading's state, POLLED while it is queued or being read, so "Reading 6 conditions…"
+ * turns into the plan by itself. Stops once it is done, failed or never queued.
+ */
+export function useReadingState(roundId: string | null, fileId: string) {
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    queryKey: readingStateQueryKey(roundId ?? "none"),
+    queryFn: async () =>
+      (await apiClient.get<ReadingState>(`${roundPath(roundId as string)}/reading`)).data,
+    enabled: roundId !== null,
+    refetchInterval: (query) =>
+      query.state.data?.state === "queued" || query.state.data?.state === "reading"
+        ? READING_POLL_MS
+        : false,
+  });
+  // WHEN A RUNNING READING ENDS, the plan and the conditions it wrote are stale: refetch them, so the
+  // plan replaces the reading panel without a refresh.
+  const state = query.data?.state;
+  const previous = useRef(state);
+  useEffect(() => {
+    const was = previous.current;
+    previous.current = state;
+    if ((was === "queued" || was === "reading") && state !== "queued" && state !== "reading") {
+      void queryClient.invalidateQueries({ queryKey: ["condition-round-plan"] });
+      void queryClient.invalidateQueries({ queryKey: conditionsQueryPrefix(fileId) });
+    }
+  }, [state, fileId, queryClient]);
+  return query;
+}
+
+/** How often a running reading is checked. One model call per round; it takes seconds, not minutes. */
+export const READING_POLL_MS = 3000;
+
+/** LP-952 — "Read conditions" / "Read again". Can 409 with a sentence (running, nothing unread). */
+export function useReadAgain(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (roundId: string) =>
+      (await apiClient.post<ReadingState>(`${roundPath(roundId)}/read`)).data,
+    onSuccess: (data, roundId) => {
+      queryClient.setQueryData(readingStateQueryKey(roundId), data);
+      void queryClient.invalidateQueries({ queryKey: conditionsQueryPrefix(fileId) });
+    },
   });
 }

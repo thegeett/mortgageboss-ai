@@ -44,6 +44,7 @@ import { ConditionsFilterRow } from "./conditions-filter-row";
 import { ConditionsList } from "./conditions-list";
 import { ConditionsSummaryBar } from "./conditions-summary-bar";
 import { FiguresCheckPanel } from "./figures-check-panel";
+import { ReadingStatus } from "./reading-status";
 import { RoundComparisonPanel } from "./round-comparison-panel";
 import { RoundDetailsSheet } from "./round-details-sheet";
 import { RoundDrafts } from "./round-drafts";
@@ -337,6 +338,8 @@ export function ConditionsListView({
       ) : null}
 
       {/* S3-02 (LP-920): the newest imported round's plan, until she confirms it. */}
+      {/* LP-952: the reading's state above its plan — running, failed, or never started. */}
+      {newestImported ? <ReadingStatus fileId={fileId} roundId={newestImported.id} /> : null}
       {newestImported ? (
         <RoundPlanPanel
           fileId={fileId}
