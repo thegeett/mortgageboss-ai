@@ -1070,3 +1070,8 @@ drawer) waits for mockups and is not built.
   not be meant for the borrower. Owner to decide.
 - **The draft dialog still labels a generic condition "What the lender asks for"** in its side column and
   "Other drafts" summary (LP-950 review). LP-950's rule covers emails; this is a screen. Not built.
+- **Is a MISMO `LenderLoan` identifier ever the wholesale lender's loan number?** (LP-951 review, for the
+  domain expert.) If so, a file's FIRST sheet could be checked against it. The one real MISMO file's number
+  is 8 digits where the UWM sheets print 10, so it is not wired in.
+- **Older bug, not built:** after attaching a PDF to a round, the success toast says "No new conditions"
+  even when the PDF added some (found in the LP-951 review).
