@@ -275,33 +275,68 @@ def fill(template: str, values: dict[str, str | None]) -> str | None:
     needed = set(_PLACEHOLDER.findall(template))
     if any(not values.get(name) for name in needed):
         return None
-    escaped = html.escape(template, quote=False)
+    # THE TEMPLATE'S BOLD FIRST, THEN THE VALUES (LP-950 review). Bolding after the values went in read
+    # the values' own asterisks as markup: a masked "****7788" inside `{instruction}` printed "7788", and
+    # the lender's own "**8/28 Not in Upload" split the bold. A value is text, never markup.
+    escaped = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", html.escape(template, quote=False))
     for name in needed:
         escaped = escaped.replace("{" + name + "}", html.escape(values[name] or "", quote=False))
-    return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
+    return escaped
 
 
-#: LP-950 — a run of digits (hyphen-joined groups count as one run) that is not a dollar figure, a
-#: decimal or part of a word. Five or more digits is an account-shaped number: the same line the
-#: privacy test draws ("no long digit run" outside the loan number).
-_DIGIT_RUN = re.compile(r"(?<![\w$.,])\d+(?:-\d+)*(?![\w,])")
+#: LP-950 — every number in a piece of the lender's words, so `mask_accounts` can decide what each is.
+#: A number may follow a letter or a mark ("Acct123456789", "x123456789", "No.123456789") and may be
+#: followed by anything, a comma included ("account 123456789, and"): the review found all four printed
+#: whole by the first pattern, which required a word boundary on both sides. Three shapes, tried in order:
+#: - `figure`: a thousands-grouped number or a decimal ("2,850.00", "38,210.40") — a figure, kept;
+#: - `spaced`: groups of 2 to 5 digits joined by single spaces ("1234 5678 9012", "123 45 6789");
+#: - `run`: digits, hyphen-joined groups counting as one ("123-45-6789", "4455667788").
+#: Never mid-number, and never after "$" (a dollar figure written without commas, "$125000").
+_NUMBER = re.compile(
+    r"(?<![\d$])"
+    r"(?:(?P<figure>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+)"
+    r"|(?P<spaced>\d{2,5}(?:[ \u00a0]\d{2,5}(?!\d))+)"
+    r"|(?P<run>\d+(?:-\d+)*))"
+)
+
+#: A space-joined number is an account (a card or an SSN typed with spaces) at eight digits or more;
+#: below that, and with no group of five, it is most likely two numbers side by side ("December 15
+#: 2025") and is kept.
+_SPACED_ACCOUNT = 8
 
 
 def mask_accounts(text: str, *, keep: str | None = None) -> str:
     """Every account-shaped number in the lender's words, masked to its last four (LP-950).
 
     Code, never the model. `keep` is the lender's loan number, which the emails already print in full
-    and which a reader needs whole. Dollar figures (`$2,850.00`) and dates (`09/30/2026`) are not runs
-    of five digits and pass unchanged.
+    and which a reader needs whole. Dollar figures (`$2,850.00`, `$125000`), decimals and dates
+    (`09/30/2026`) pass unchanged. A run of five or more digits is account-shaped, the line the privacy
+    test draws. NOT COVERED: an account written in dot-separated groups ("123.456.789"), which reads as
+    a decimal.
     """
+    kept = re.sub(r"\D", "", keep) if keep else None
 
-    def masked(match: re.Match[str]) -> str:
-        digits = re.sub(r"\D", "", match.group(0))
-        if len(digits) < 5 or (keep is not None and digits == re.sub(r"\D", "", keep)):
-            return match.group(0)
+    def run(value: str) -> str:
+        digits = re.sub(r"\D", "", value)
+        if len(digits) < 5 or digits == kept:
+            return value
         return f"****{digits[-4:]}"
 
-    return _DIGIT_RUN.sub(masked, text)
+    def masked(match: re.Match[str]) -> str:
+        if match.group("figure"):
+            return match.group(0)
+        spaced = match.group("spaced")
+        if spaced:
+            digits = re.sub(r"\D", "", spaced)
+            groups = spaced.split()
+            # Whole when it is account-length, or when one group alone is account-shaped: masking that
+            # group alone would print its neighbours beside its last four ("****2345 67").
+            if len(digits) >= _SPACED_ACCOUNT or any(len(group) >= 5 for group in groups):
+                return run(spaced)
+            return spaced
+        return run(match.group(0))
+
+    return _NUMBER.sub(masked, text)
 
 
 def lender_words(condition: Condition, letter: LetterFacts) -> str:
@@ -322,8 +357,15 @@ def _plain_line(condition: Condition, item: ConditionItem, letter: LetterFacts) 
     from app.services.condition_reading import GENERIC_ACCEPTABLE, GENERIC_NAME
 
     words = html.escape(lender_words(condition, letter), quote=False)
-    name = html.escape(item.name, quote=False) if item.name and item.name != GENERIC_NAME else ""
-    acceptable = (item.acceptable or "").strip().rstrip(".")
+    # THE ITEM'S NAME AND ACCEPTABLE FORM ARE MASKED TOO (LP-950 review): a generic item's name is the
+    # reading's or hers, and either can copy an account number out of the lender's words.
+    keep = letter.loan_number
+    name = (
+        html.escape(mask_accounts(item.name, keep=keep), quote=False)
+        if item.name and item.name != GENERIC_NAME
+        else ""
+    )
+    acceptable = mask_accounts((item.acceptable or "").strip().rstrip("."), keep=keep)
     if acceptable and acceptable != GENERIC_ACCEPTABLE.rstrip("."):
         detail = html.escape(acceptable, quote=False)
         detail = f"{detail[0].lower()}{detail[1:]}"
@@ -502,13 +544,18 @@ def lender_lines(pairs: list[tuple[Condition, ConditionItem]], letter: LetterFac
         acceptable = (library_item.acceptable if library_item else item.acceptable) or ""
         if acceptable.rstrip(".") == GENERIC_ACCEPTABLE.rstrip("."):
             acceptable = ""
+        # Masked like the lender's words (LP-950 review): a non-library name or acceptable form is the
+        # reading's or hers, and can carry an account number.
+        name = mask_accounts(name, keep=letter.loan_number)
+        acceptable = mask_accounts(acceptable, keep=letter.loan_number)
         performers = [Performer(p) for p in item.performers] or [item.performer]
         verb = "Please order" if Performer.APPRAISER in performers else "Please provide"
-        what = name[:1].lower() + name[1:] if name else ""
+        # `in_sentence`, not a bare lower(): "CDA desk review" must not become "cDA desk review".
+        what = in_sentence(name) if name else ""
         words = lender_words(condition, letter)
         detail = acceptable.rstrip(".") if acceptable else (f"“{words}”" if words else "")
         if detail and acceptable:
-            detail = detail[:1].lower() + detail[1:]
+            detail = in_sentence(detail)
         head = f"{verb} the {what}" if what else verb
         body = f"<strong>{html.escape(head, quote=False)}</strong>"
         if detail:
@@ -522,13 +569,17 @@ def _one_line_per_wording(lines: list[Line]) -> list[Line]:
 
     A condition read without a type can split into several generic items, and each quotes the lender's
     whole condition; the staging trial's 7086 printed the same paragraph twice in one email. The first
-    line keeps its place and its Why; a later identical body only adds its codes.
+    line keeps its place; a later identical one only adds its codes (the lender's subject names
+    them, `render_lender`).
+
+    SAME WORDS AND SAME WHY (LP-950 review). Keyed on the body alone, a second line with the same
+    words but its own Why (a different condition's reason) was dropped with its reason.
     """
-    kept: dict[str, Line] = {}
+    kept: dict[tuple[str, str | None], Line] = {}
     for line in lines:
-        same = kept.get(line.body)
+        same = kept.get((line.body, line.why))
         if same is None:
-            kept[line.body] = Line(body=line.body, why=line.why, codes=list(line.codes))
+            kept[(line.body, line.why)] = Line(body=line.body, why=line.why, codes=list(line.codes))
             continue
         same.codes.extend(code for code in line.codes if code not in same.codes)
     return list(kept.values())
@@ -621,14 +672,22 @@ def render_lender(
 
     `request` names the one thing asked for when there is one ("final inspection"); the subject says
     it, so the lender's inbox shows what is wanted. Several requests read "N requests".
+
+    ONE UNNAMED REQUEST NAMES ITS CONDITION (LP-950 review). A generic item has no name to put in the
+    subject, and "— 1 request" named nothing: the trial's own case (a file with no lender). The
+    lender's code is the name the lender itself gave it ("— request on condition 1228").
     """
     head = " ".join(p for p in (letter.surname, letter.loan_number) if p) or "Our loan"
     count = len(lines)
-    what = (
-        f"{request} request"
-        if request and count == 1
-        else f"{count} request" + ("" if count == 1 else "s")
-    )
+    codes = [code for code in (lines[0].codes if count == 1 else []) if code != "—"]
+    if request and count == 1:
+        # Masked here, in the template (LP-950 review): the subject is outbound text, and the guard
+        # renders this function, not its caller.
+        what = f"{mask_accounts(request, keep=letter.loan_number)} request"
+    elif codes:
+        what = f"request on condition{'s' if len(codes) > 1 else ''} {_join(codes)}"
+    else:
+        what = f"{count} request" + ("" if count == 1 else "s")
     subject = f"{head} — {what}"
     greeting = f"Hi {html.escape(greeting_name, quote=False)}," if greeting_name else "Hello,"
     where = f" ({html.escape(letter.property_line, quote=False)})" if letter.property_line else ""
@@ -1213,7 +1272,7 @@ async def render(
             from app.services.condition_reading import GENERIC_NAME
 
             if named and named != GENERIC_NAME:
-                request = named[:1].lower() + named[1:]
+                request = in_sentence(named)
         message.subject, message.body = render_lender(
             greeting_name=_first_word(name) if name else None,
             lines=lines,

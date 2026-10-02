@@ -1055,7 +1055,7 @@ drawer) waits for mockups and is not built.
 | Ticket | Status | Build SHA | Review SHA | Notes |
 |---|---|---|---|---|
 | [LP-949](../tickets/LP-949.md) Lender on the file (items 1, 10b) | REVIEWED | `86089cf7` | the commit titled `LP-949 review: …` | ADR-417; reviewer: fresh subagent (peer session not sanctioned); 6 findings fixed (tenancy on PATCH, A→none→B, code map by rows, banner promise, no-op PATCH, stale tab) |
-| [LP-950](../tickets/LP-950.md) Outbound wording (items 2, 3) | AWAITING_REVIEW | the commit titled `LP-950: …` | | full run 8998 passed, 1 failed (named sonnet) |
+| [LP-950](../tickets/LP-950.md) Outbound wording (items 2, 3) | REVIEWED | `de7df33c` | the commit titled `LP-950 review: …` | reviewer: fresh subagent (peer session not sanctioned); 7 findings fixed (mask missed `123456789,` / `No.123…` / `Acct123…` / spaced card+SSN; item names and acceptable forms unmasked; `fill` ate the mask's `****`; acronym lowercased; dedupe dropped a Why; unnamed subject named nothing; three claims untested) |
 | LP-951 Wrong-file warning (item 11, raised to High) | TODO | | | |
 | LP-952 Reading state and Read again (items 4, 5) | TODO | | | |
 | LP-953 Linking (items 6, 7) | TODO | | | |
