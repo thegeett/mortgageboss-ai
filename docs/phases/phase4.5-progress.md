@@ -1062,3 +1062,11 @@ drawer) waits for mockups and is not built.
 | LP-954 Reading keeps every clause (item 13) | TODO | | | |
 | LP-955 "I'll do it" actions (item 8) | TODO | | | |
 | LP-956 Small items (items 10a, 12) | TODO | | | |
+
+**Batch 4 open items (for the owner):**
+- **The lender's internal notes reach the borrower word for word** (LP-950 review). A generic item quotes
+  the lender's whole condition, so 7086's "**8/28 Not in Upload. Provide the follo…" goes into the borrower
+  email as written. That is what "the lender's own words" asks, but an underwriter's note to the broker may
+  not be meant for the borrower. Owner to decide.
+- **The draft dialog still labels a generic condition "What the lender asks for"** in its side column and
+  "Other drafts" summary (LP-950 review). LP-950's rule covers emails; this is a screen. Not built.
