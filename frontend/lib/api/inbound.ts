@@ -8,6 +8,7 @@
  * load, and `unclaimed()` below is what tells them apart.
  */
 import { apiClient } from "@/lib/api/client";
+import { withWrongFileConfirmation } from "@/lib/api/wrong-file";
 import type { AcceptResult, InboundMessage } from "@/lib/types/inbound";
 import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
@@ -185,15 +186,25 @@ export interface UseAsConditionSheetInput {
 export function useForwardAttachmentAsSheet(fileId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ attachmentId, attachToRoundId }: UseAsConditionSheetInput) =>
-      (
-        await apiClient.post<UseAsConditionSheetResult>(
-          `${inboundPath(fileId)}/attachments/${attachmentId}/condition-round`,
-          // Still an object rather than nothing, for the 422 reason above; the key is sent only
-          // when there is a round to merge into, so the create path posts exactly what it did.
-          attachToRoundId ? { attach_to_round_id: attachToRoundId } : {},
-        )
-      ).data,
+    // LP-951 review — merging into a round is a door from a sheet to conditions, so a PDF whose
+    // borrower or loan number is not this file's is refused (409, `wrong_file`) until she confirms.
+    mutationFn: async ({ attachmentId, attachToRoundId }: UseAsConditionSheetInput) => {
+      const send = async (confirmWrongFile: boolean) =>
+        (
+          await apiClient.post<UseAsConditionSheetResult>(
+            `${inboundPath(fileId)}/attachments/${attachmentId}/condition-round`,
+            // Still an object rather than nothing, for the 422 reason above; the key is sent only
+            // when there is a round to merge into, so the create path posts exactly what it did.
+            attachToRoundId
+              ? {
+                  attach_to_round_id: attachToRoundId,
+                  ...(confirmWrongFile ? { confirm_wrong_file: true } : {}),
+                }
+              : {},
+          )
+        ).data;
+      return attachToRoundId ? withWrongFileConfirmation(send) : send(false);
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: fileMessagesQueryKey(fileId) });
       void queryClient.invalidateQueries({ queryKey: triageQueueQueryKey() });

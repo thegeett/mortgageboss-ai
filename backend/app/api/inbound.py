@@ -28,6 +28,7 @@ from app.schemas.inbound import (
 )
 from app.services.condition_enrich import RoundNotEnrichable
 from app.services.condition_rounds import ConditionSheetRejected
+from app.services.condition_wrong_file import WrongFileRefused
 from app.services.inbound_triage import (
     AcceptAs,
     CannotAcceptError,
@@ -301,7 +302,13 @@ async def use_as_condition_sheet(
                 attachment=attachment,
                 round_id=payload.attach_to_round_id,
                 actor_user_id=current_user.id,
+                confirm_wrong_file=payload.confirm_wrong_file,
             )
+        except WrongFileRefused as exc:
+            # LP-951 — the attach door's shape: a code, so the client offers the confirmation.
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, detail={"message": exc.message, "code": "wrong_file"}
+            ) from exc
         except ConditionSheetRejected as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.reason) from exc
         except RoundNotEnrichable as exc:

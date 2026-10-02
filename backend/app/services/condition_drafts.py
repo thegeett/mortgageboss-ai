@@ -170,8 +170,10 @@ _MONTHS = [
     "December",
 ]
 _PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
+#: The surname may itself hold a hyphen (`RIVERA-LOPEZ`); it ends at the LAST dash before the number.
+#: `[^-\n]` here made a hyphenated borrower's title unreadable whole, number included (LP-951 review).
 _TITLE_LINE = re.compile(
-    r"LOAN APPROVAL CONDITIONS\s*-\s*(?P<surname>[^-\n]+?)\s*-\s*(?P<number>\d{6,})", re.I
+    r"LOAN APPROVAL CONDITIONS\s*-\s*(?P<surname>[^\n]+?)\s*-\s*(?P<number>\d{6,})\b", re.I
 )
 
 

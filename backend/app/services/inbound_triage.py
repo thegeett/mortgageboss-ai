@@ -407,6 +407,7 @@ async def merge_attachment_into_round(
     attachment: InboundAttachment,
     round_id: UUID,
     actor_user_id: UUID,
+    confirm_wrong_file: bool = False,
 ) -> ConditionRound:
     """Merge an emailed PDF into an EXISTING round instead of opening a new one (LP-907).
 
@@ -491,6 +492,7 @@ async def merge_attachment_into_round(
         # records how each arrival reached us. The enrich hard-coded `PDF_UPLOAD` until now, so every
         # round merged from a forward has been claiming someone uploaded it.
         source_kind=ConditionSourceKind.EMAIL,
+        confirm_wrong_file=confirm_wrong_file,
     )
 
     # The attachment's id goes onto the ROUND's sources by the merge itself, so S1-13's link still

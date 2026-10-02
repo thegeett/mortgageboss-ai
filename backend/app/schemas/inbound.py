@@ -79,6 +79,10 @@ class UseAsConditionSheetRequest(BaseModel):
         default=None,
         description="Attach to an existing pasted round instead of starting a new one (LP-907).",
     )
+    #: LP-951 — her answer to the wrong-file warning when merging into `attach_to_round_id`: attach
+    #: although the PDF's borrower or loan number does not match the file. Without it such a PDF is
+    #: refused (409, code `wrong_file`).
+    confirm_wrong_file: bool = False
 
 
 class UseAsConditionSheetResponse(BaseModel):

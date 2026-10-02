@@ -325,8 +325,15 @@ async def enrich_round_with_pdf(
     declared_content_type: str | None = None,
     actor_user_id: UUID | None = None,
     source_kind: ConditionSourceKind = ConditionSourceKind.PDF_UPLOAD,
+    confirm_wrong_file: bool = False,
 ) -> EnrichResult:
     """Merge a lender's PDF into an existing round. Never creates a second round.
+
+    LP-951 — THIS IS A DOOR FROM A SHEET TO CONDITIONS, SO IT ASKS WHETHER THE SHEET IS THIS FILE'S.
+    On an imported round the merge creates conditions directly; on a draft it adds rows whose title the
+    import check never sees, because the PDF's text is discarded below. A PDF whose borrower or loan
+    number does not match the file raises `WrongFileRefused` unless `confirm_wrong_file`; confirmed, the
+    override is a `round_wrong_file_confirmed` event (which facts differed, no values).
 
     The caller owns the transaction, as every service here does.
 
@@ -352,7 +359,7 @@ async def enrich_round_with_pdf(
         )
 
     reject_unless_pdf(content, declared_content_type=declared_content_type)
-    # THE SOURCE TEXT IS DELIBERATELY DISCARDED HERE, and that is not the same decision the parse
+    # THE SOURCE TEXT IS DELIBERATELY NOT STORED HERE, and that is not the same decision the parse
     # task makes. `sheet_from_bytes` now returns the lender's page so a PDF round can be AI-split
     # (LP-908 review), and the parse task persists it to `raw_text`. This is an ENRICH: it merges a
     # SECOND PDF into a round that already exists, and for a pasted round `raw_text` is the page the
@@ -360,8 +367,25 @@ async def enrich_round_with_pdf(
     # against. Overwriting it with a later PDF's text would quietly change what "AI only splits" is
     # checked against, on a round whose rows a processor may already be reviewing.
     #
-    # Named with `_` rather than ignored, so the next reader sees a choice instead of an oversight.
-    reader, sheet, _source_text = sheet_from_bytes(content)
+    # Read only for LP-951's wrong-file check below; it is never stored or logged.
+    reader, sheet, source_text = sheet_from_bytes(content)
+
+    from app.services.condition_wrong_file import (
+        ATTACH_REFUSAL,
+        WrongFileRefused,
+        compare_sheet,
+        record_confirmation,
+    )
+
+    # The round's own text counts as the file's: a pasted round's title names its loan number.
+    mismatch = await compare_sheet(
+        db,
+        loan_file_id=round_.loan_file_id,
+        text=source_text,
+        also_numbers_from=(round_.raw_text,),
+    )
+    if mismatch is not None and not confirm_wrong_file:
+        raise WrongFileRefused(ATTACH_REFUSAL)
 
     storage_path = f"condition-sheets/{round_.company_id}/{round_.loan_file_id}/{uuid4().hex}.pdf"
     await get_storage_backend().save_at(storage_path=storage_path, content=content)
@@ -410,6 +434,8 @@ async def enrich_round_with_pdf(
     report["warnings"] = [*report.get("warnings", []), *result.warnings]
     round_.parse_report = report
 
+    if mismatch is not None:
+        record_confirmation(db, round_=round_, check=mismatch, actor_user_id=actor_user_id)
     db.add(
         ConditionEvent(
             company_id=round_.company_id,

@@ -248,9 +248,10 @@ export function conditionHistoryLine(
     // exhaustive by design: a sentence that cannot render beats a build that cannot compile.
     case "round_lender_declined":
       return `The lender the sheet named was marked not this file’s${by(event)}`;
-    // LP-951 — no names or numbers: the event records only that she was warned and imported anyway.
+    // LP-951 — no names or numbers: the event records only that she was warned and went ahead. Not
+    // "Imported": attaching or forwarding a PDF onto a round writes it too (LP-951 review).
     case "round_wrong_file_confirmed":
-      return `Imported after a warning that the sheet may be another file’s${by(event)}`;
+      return `Kept as this file’s sheet after a warning that it may be another file’s${by(event)}`;
     case "round_received":
       return "The lender’s sheet arrived";
     case "round_parsed":

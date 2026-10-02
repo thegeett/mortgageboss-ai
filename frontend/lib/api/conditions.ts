@@ -12,6 +12,7 @@
  * requirement is literally "poll until `DRAFT` or `PARSE_FAILED`".
  */
 import { apiClient } from "@/lib/api/client";
+import { withWrongFileConfirmation } from "@/lib/api/wrong-file";
 import type {
   AddConditionInput,
   BucketKind,
@@ -522,6 +523,12 @@ export function useImportRound(fileId: string) {
         .data;
     },
     onSuccess: (result) => invalidateRound(queryClient, fileId, result.round_id),
+    // LP-951 review — a refusal may be a wrong-file 409 the screen has not shown yet; refetch it so
+    // the warning and its checkbox appear.
+    onError: (_error, arg) =>
+      void queryClient.invalidateQueries({
+        queryKey: wrongFileQueryKey(typeof arg === "string" ? arg : arg.roundId),
+      }),
   });
 }
 
@@ -886,15 +893,19 @@ export interface AttachPdfInput {
 export function useAttachPdf(fileId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ roundId, file }: AttachPdfInput) => {
-      const form = new FormData();
-      form.append("file", file);
-      return (
-        await apiClient.post<ConditionEnrichResult>(`${roundPath(roundId)}/attach-pdf`, form, {
-          headers: { "Content-Type": "multipart/form-data" },
-        })
-      ).data;
-    },
+    // LP-951 review — a PDF whose borrower or loan number is not this file's is refused (409,
+    // `wrong_file`) until she confirms; `withWrongFileConfirmation` asks her and resends.
+    mutationFn: async ({ roundId, file }: AttachPdfInput) =>
+      withWrongFileConfirmation(async (confirmWrongFile) => {
+        const form = new FormData();
+        form.append("file", file);
+        if (confirmWrongFile) form.append("confirm_wrong_file", "true");
+        return (
+          await apiClient.post<ConditionEnrichResult>(`${roundPath(roundId)}/attach-pdf`, form, {
+            headers: { "Content-Type": "multipart/form-data" },
+          })
+        ).data;
+      }),
     onSuccess: (result) => invalidateRound(queryClient, fileId, result.round_id),
   });
 }
@@ -1300,12 +1311,22 @@ export function useDeclineFileLender(fileId: string) {
   });
 }
 
-/** LP-951 — what on a draft round's sheet does not match its file (borrower, loan number), or null. */
+export const wrongFileQueryKey = (roundId: string | null) =>
+  ["condition-round-wrong-file", roundId ?? "none"] as const;
+
+/**
+ * LP-951 — what on a draft round's sheet does not match its file (borrower, loan number), or null.
+ *
+ * `staleTime: 0` (LP-951 review): the answer moves with the file's borrowers and its other rounds,
+ * which other screens change, and a cached "no mismatch" left Import enabled into a 409 she had no
+ * checkbox to answer. A failed import refetches it for the same reason (`useImportRound`).
+ */
 export function useWrongFile(roundId: string | null) {
   return useQuery({
-    queryKey: ["condition-round-wrong-file", roundId ?? "none"],
+    queryKey: wrongFileQueryKey(roundId),
     queryFn: async () =>
       (await apiClient.get<WrongFile | null>(`${roundPath(roundId as string)}/wrong-file`)).data,
     enabled: roundId !== null,
+    staleTime: 0,
   });
 }

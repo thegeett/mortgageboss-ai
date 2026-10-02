@@ -46,7 +46,6 @@ from app.models.condition import (
     OwnerHint,
 )
 from app.models.condition_draft import ConditionDraft
-from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_item import ConditionItem
 from app.models.condition_package import ConditionPackage
 from app.models.condition_round import (
@@ -171,6 +170,7 @@ from app.services.condition_status import (
     reopen,
     set_owner,
 )
+from app.services.condition_wrong_file import WrongFileRefused
 from app.services.conditions import (
     MAX_CONDITIONS,
     ConditionFilters,
@@ -868,6 +868,7 @@ async def attach_pdf(
     db: DbSession,
     current_user: CurrentUser,
     file: Annotated[UploadFile, File(description="The lender's condition sheet, as a PDF")],
+    confirm_wrong_file: Annotated[bool, Form()] = False,
 ) -> ConditionEnrichResult:
     """Attach the lender's PDF to a round that was pasted → merge into THE SAME round (S1-09).
 
@@ -893,10 +894,16 @@ async def attach_pdf(
             content=content,
             declared_content_type=file.content_type,
             actor_user_id=current_user.id,
+            confirm_wrong_file=confirm_wrong_file,
         )
     except RoundNotEnrichable as exc:
         # 409: the round exists and the caller may see it — it is the round's STATE that refuses.
         raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    except WrongFileRefused as exc:
+        # LP-951 — the import door's shape: a code, so the client offers the confirmation.
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, detail={"message": exc.message, "code": "wrong_file"}
+        ) from exc
     except ConditionSheetRejected as exc:
         raise HTTPException(status_code=422, detail=exc.reason) from exc
 
@@ -988,7 +995,11 @@ async def import_condition_round(
     `uq_condition_rounds_file_number`; the service catches that violation and recomputes. The lock
     narrows the window, it does not close it, and nothing here may assume otherwise.
     """
-    from app.services.condition_wrong_file import confirmed_event_detail, wrong_file_check
+    from app.services.condition_wrong_file import (
+        IMPORT_REFUSAL,
+        record_confirmation,
+        wrong_file_check,
+    )
 
     # LP-951 — A SHEET FOR ANOTHER FILE IS REFUSED UNTIL SHE SAYS IT IS THIS ONE. The review screen
     # shows the warning first; this is the server's half, so no client can import past it silently.
@@ -1003,13 +1014,7 @@ async def import_condition_round(
             status.HTTP_409_CONFLICT,
             # A CODE AND THE SENTENCE (as `_refused` sends them), so a client can tell this 409 from a
             # round that is not importable and offer the confirmation rather than a dead end.
-            detail={
-                "message": (
-                    "This sheet does not look like this file's: its borrower or loan number does not "
-                    "match. Check it, and import only if it is this file's sheet."
-                ),
-                "code": "wrong_file",
-            },
+            detail={"message": IMPORT_REFUSAL, "code": "wrong_file"},
         )
     async with loan_file_needs_lock(round_.loan_file_id):
         try:
@@ -1019,17 +1024,7 @@ async def import_condition_round(
             # round's STATE that refuses, and the reason says which state it is in.
             raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
         if mismatch is not None:
-            db.add(
-                ConditionEvent(
-                    company_id=round_.company_id,
-                    loan_file_id=round_.loan_file_id,
-                    round_id=round_.id,
-                    condition_id=None,
-                    kind=ConditionEventKind.ROUND_WRONG_FILE_CONFIRMED,
-                    actor_user_id=current_user.id,
-                    detail=confirmed_event_detail(mismatch),
-                )
-            )
+            record_confirmation(db, round_=round_, check=mismatch, actor_user_id=current_user.id)
         await db.commit()
 
     # LP-919 — read the new conditions into items, after the commit so the worker sees them. A broker
