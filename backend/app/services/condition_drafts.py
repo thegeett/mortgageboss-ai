@@ -281,12 +281,57 @@ def fill(template: str, values: dict[str, str | None]) -> str | None:
     return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
 
 
-def _plain_line(item: ConditionItem) -> str:
-    name = html.escape(item.name, quote=False)
-    acceptable = html.escape(item.acceptable.rstrip("."), quote=False)
-    if not acceptable:
-        return f"<strong>{name}</strong>."
-    return f"<strong>{name}</strong> — {acceptable[0].lower()}{acceptable[1:]}."
+#: LP-950 — a run of digits (hyphen-joined groups count as one run) that is not a dollar figure, a
+#: decimal or part of a word. Five or more digits is an account-shaped number: the same line the
+#: privacy test draws ("no long digit run" outside the loan number).
+_DIGIT_RUN = re.compile(r"(?<![\w$.,])\d+(?:-\d+)*(?![\w,])")
+
+
+def mask_accounts(text: str, *, keep: str | None = None) -> str:
+    """Every account-shaped number in the lender's words, masked to its last four (LP-950).
+
+    Code, never the model. `keep` is the lender's loan number, which the emails already print in full
+    and which a reader needs whole. Dollar figures (`$2,850.00`) and dates (`09/30/2026`) are not runs
+    of five digits and pass unchanged.
+    """
+
+    def masked(match: re.Match[str]) -> str:
+        digits = re.sub(r"\D", "", match.group(0))
+        if len(digits) < 5 or (keep is not None and digits == re.sub(r"\D", "", keep)):
+            return match.group(0)
+        return f"****{digits[-4:]}"
+
+    return _DIGIT_RUN.sub(masked, text)
+
+
+def lender_words(condition: Condition, letter: LetterFacts) -> str:
+    """The lender's own words for a condition, as an email may quote them: the "TC:" marker dropped,
+    the closing full stop dropped, and every account number masked to its last four."""
+    words = re.sub(r"^\s*TC:\s*", "", condition.verbatim_text or "").strip().rstrip(".")
+    return mask_accounts(words, keep=letter.loan_number)
+
+
+def _plain_line(condition: Condition, item: ConditionItem, letter: LetterFacts) -> str:
+    """A line with no library wording: the item's own acceptable form, or THE LENDER'S WORDS.
+
+    LP-950 — a generic item (no library type) carries placeholders, `GENERIC_NAME` and
+    `GENERIC_ACCEPTABLE`. Neither may reach a reader outside the app: the title company was told
+    "Final inspection — what the lender's words describe" and nothing else (staging trial, item 2). So a
+    placeholder, or an empty acceptable form, is replaced by what the lender actually wrote.
+    """
+    from app.services.condition_reading import GENERIC_ACCEPTABLE, GENERIC_NAME
+
+    words = html.escape(lender_words(condition, letter), quote=False)
+    name = html.escape(item.name, quote=False) if item.name and item.name != GENERIC_NAME else ""
+    acceptable = (item.acceptable or "").strip().rstrip(".")
+    if acceptable and acceptable != GENERIC_ACCEPTABLE.rstrip("."):
+        detail = html.escape(acceptable, quote=False)
+        detail = f"{detail[0].lower()}{detail[1:]}"
+    else:
+        detail = f"as the lender wrote it: “{words}”" if words else ""
+    if not name:
+        return f"<strong>{words}</strong>." if words else "The lender's condition."
+    return f"<strong>{name}</strong> — {detail}." if detail else f"<strong>{name}</strong>."
 
 
 def _amount(condition: Condition, item: ConditionItem | None) -> Decimal | None:
@@ -315,7 +360,7 @@ def _values(
     shortfall = ((condition.reading or {}).get("figures") or {}).get("shortfall") or {}
     required = _decimal(shortfall.get("required"))
     verified = _decimal(shortfall.get("verified"))
-    instruction = re.sub(r"^\s*TC:\s*", "", condition.verbatim_text or "").strip().rstrip(".")
+    instruction = lender_words(condition, letter)
     return {
         "amount": money(amount) if amount is not None else None,
         "amount_short": money_short(amount) if amount is not None else None,
@@ -349,7 +394,7 @@ def _item_line(condition: Condition, item: ConditionItem, letter: LetterFacts) -
     line = None
     if library_item is not None and library_item.email:
         line = fill(library_item.email, _values(condition, item, letter))
-    line = line or _plain_line(item)
+    line = line or _plain_line(condition, item, letter)
     # "(needed before funding)" (S3-05's 1947): a prior-to-funding item asked early says so.
     if _before_funding(condition, [item]) and line.endswith("."):
         line = f"{line[:-1]} (needed before funding)."
@@ -428,7 +473,7 @@ def borrower_lines(pairs: list[tuple[Condition, ConditionItem]], letter: LetterF
         )
         codes = list(dict.fromkeys(condition.lender_code or "—" for condition, _ in members))
         lines.append(Line(body=body, why=_why(members, letter), codes=codes))
-    return lines
+    return _one_line_per_wording(lines)
 
 
 def party_lines(pairs: list[tuple[Condition, ConditionItem]], letter: LetterFacts) -> list[Line]:
@@ -439,7 +484,54 @@ def party_lines(pairs: list[tuple[Condition, ConditionItem]], letter: LetterFact
         if item.performer is Performer.INSURANCE and letter.mortgagee_clause:
             body += f"<br>Mortgagee clause: {html.escape(letter.mortgagee_clause, quote=False)}"
         lines.append(Line(body=body, codes=[condition.lender_code or "—"]))
-    return lines
+    return _one_line_per_wording(lines)
+
+
+def lender_lines(pairs: list[tuple[Condition, ConditionItem]], letter: LetterFacts) -> list[Line]:
+    """LP-950 — the lender email's lines are REQUESTS: the lender is asked to act, never told what
+    it needs. An appraiser's item (routed to the lender, LP-942) is an order; anything else the lender
+    holds is asked for. The detail is the library's acceptable form, else the lender's own words."""
+    from app.services.condition_reading import GENERIC_ACCEPTABLE, GENERIC_NAME
+
+    lines: list[Line] = []
+    for condition, item in pairs:
+        _, library_item = _library_item(condition, item)
+        name = (library_item.name if library_item else item.name) or ""
+        if name == GENERIC_NAME:
+            name = ""
+        acceptable = (library_item.acceptable if library_item else item.acceptable) or ""
+        if acceptable.rstrip(".") == GENERIC_ACCEPTABLE.rstrip("."):
+            acceptable = ""
+        performers = [Performer(p) for p in item.performers] or [item.performer]
+        verb = "Please order" if Performer.APPRAISER in performers else "Please provide"
+        what = name[:1].lower() + name[1:] if name else ""
+        words = lender_words(condition, letter)
+        detail = acceptable.rstrip(".") if acceptable else (f"“{words}”" if words else "")
+        if detail and acceptable:
+            detail = detail[:1].lower() + detail[1:]
+        head = f"{verb} the {what}" if what else verb
+        body = f"<strong>{html.escape(head, quote=False)}</strong>"
+        if detail:
+            body += f" — {html.escape(detail, quote=False)}"
+        lines.append(Line(body=f"{body}.", codes=[condition.lender_code or "—"]))
+    return _one_line_per_wording(lines)
+
+
+def _one_line_per_wording(lines: list[Line]) -> list[Line]:
+    """LP-950 — two lines with the same words become one, carrying both codes.
+
+    A condition read without a type can split into several generic items, and each quotes the lender's
+    whole condition; the staging trial's 7086 printed the same paragraph twice in one email. The first
+    line keeps its place and its Why; a later identical body only adds its codes.
+    """
+    kept: dict[str, Line] = {}
+    for line in lines:
+        same = kept.get(line.body)
+        if same is None:
+            kept[line.body] = Line(body=line.body, why=line.why, codes=list(line.codes))
+            continue
+        same.codes.extend(code for code in line.codes if code not in same.codes)
+    return list(kept.values())
 
 
 def _ol(lines: list[Line]) -> str:
@@ -516,6 +608,40 @@ def render_party(
     return subject, body
 
 
+def render_lender(
+    *,
+    greeting_name: str | None,
+    lines: list[Line],
+    letter: LetterFacts,
+    signer: str,
+    company: str,
+    request: str | None,
+) -> tuple[str, str]:
+    """LP-950 — the email TO the lender (LP-942's draft): requests, never "the lender needs".
+
+    `request` names the one thing asked for when there is one ("final inspection"); the subject says
+    it, so the lender's inbox shows what is wanted. Several requests read "N requests".
+    """
+    head = " ".join(p for p in (letter.surname, letter.loan_number) if p) or "Our loan"
+    count = len(lines)
+    what = (
+        f"{request} request"
+        if request and count == 1
+        else f"{count} request" + ("" if count == 1 else "s")
+    )
+    subject = f"{head} — {what}"
+    greeting = f"Hi {html.escape(greeting_name, quote=False)}," if greeting_name else "Hello,"
+    where = f" ({html.escape(letter.property_line, quote=False)})" if letter.property_line else ""
+    loan = html.escape(_file_name(letter, with_lender=False), quote=False)
+    asking = "Could you help with this" if len(lines) == 1 else "Could you help with these"
+    body = (
+        f"<p>{greeting}</p>"
+        f"<p>For <strong>{loan}</strong>{where}. {asking}?</p>"
+        f"{_ol(lines)}{_signature(signer, company)}"
+    )
+    return subject, body
+
+
 def render_question(
     *,
     condition: Condition,
@@ -547,7 +673,12 @@ def render_question(
             f"<p>Could you clear {code}, or let me know what else you need?</p>"
         )
     else:
-        summary = html.escape((condition.reading or {}).get("summary") or "", quote=False)
+        summary = html.escape(
+            mask_accounts(
+                str((condition.reading or {}).get("summary") or ""), keep=letter.loan_number
+            ),
+            quote=False,
+        )
         middle = (f"<p>{summary}</p>" if summary else "") + (
             f"<p>Could you let me know what you need to clear {code}?</p>"
         )
@@ -1071,6 +1202,25 @@ async def render(
             upload_url=message.upload_link_url,
             signer=signer,
             company=company,
+        )
+    elif draft.recipient is DraftRecipient.LENDER:
+        lines = lender_lines(pairs, letter)
+        request = None
+        if len(pairs) == 1:
+            condition, item = pairs[0]
+            _, library_item = _library_item(condition, item)
+            named = library_item.name if library_item else item.name
+            from app.services.condition_reading import GENERIC_NAME
+
+            if named and named != GENERIC_NAME:
+                request = named[:1].lower() + named[1:]
+        message.subject, message.body = render_lender(
+            greeting_name=_first_word(name) if name else None,
+            lines=lines,
+            letter=letter,
+            signer=signer,
+            company=company,
+            request=request,
         )
     else:
         greeting = _first_word(name) if name and draft.recipient is DraftRecipient.LO else None

@@ -64,6 +64,7 @@ from app.models.lender import Lender
 from app.models.loan_file import LoanFile
 from app.models.needs_item import NeedsItem, NeedsItemDisposition, NeedsItemOrigin, NeedsItemStatus
 from app.services.activity_log import log_activity
+from app.services.condition_reading import GENERIC_NAME
 from app.services.needs_items import create_needs_item
 
 logger = structlog.get_logger(__name__)
@@ -491,7 +492,7 @@ async def build_plan(db: AsyncSession, *, round_id: UUID, today: date | None = N
                 condition_id=condition.id,
                 round_id=round_.id,
                 key=str(raw.get("key") or f"item_{index + 1}")[:40],
-                name=str(raw.get("name") or "What the lender asks for")[:200],
+                name=str(raw.get("name") or GENERIC_NAME)[:200],
                 acceptable=str(raw.get("acceptable") or ""),
                 performer=Performer(performers[0]),
                 performers=performers,

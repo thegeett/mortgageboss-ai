@@ -188,11 +188,19 @@ def _name_the_amount(item: dict[str, Any], condition_type: ConditionType | None)
         item["name"] = base.name_with_amount.replace("{amount}", amounts[0])
 
 
+#: LP-950 — what a generic item (no library type) carries in place of a name and an acceptable form.
+#: INTERNAL WORDS: they describe a gap, not a request, and may never reach an email. The email builders
+#: use the lender's own words instead (`condition_drafts._plain_line`), and a guard test renders every
+#: template and asserts neither string is in it.
+GENERIC_NAME = "What the lender asks for"
+GENERIC_ACCEPTABLE = "What the lender's words describe"
+
+
 def _generic_item(performer: Performer, name: str = "") -> dict[str, Any]:
     return {
         "key": "request",
-        "name": name or "What the lender asks for",
-        "acceptable": "What the lender's words describe",
+        "name": name or GENERIC_NAME,
+        "acceptable": GENERIC_ACCEPTABLE,
         "performers": [performer.value],
         "option": option_for(performer).value,
         "documents": [],
