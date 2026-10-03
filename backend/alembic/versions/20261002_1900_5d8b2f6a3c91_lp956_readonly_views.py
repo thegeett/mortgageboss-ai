@@ -5,8 +5,12 @@ not be answered with `./scripts/deploy staging query`: the reading, plan and ite
 excluded "only to avoid rebuilding the view". This rebuilds two views and adds one:
 
 - `readonly.conditions` gains `reading_status`, `reading_source`, `reading_confidence` (closed vocabularies
-  and a number), `next_step` (a category) and `plan_reason` (a fixed sentence built by code, naming no
-  borrower). `reading` itself (the model's summary of the lender's text) stays out.
+  and a number) and `next_step` (a category). `reading` itself (the model's summary of the lender's text)
+  stays out, and so does `plan_reason`: LP-920's exclusion note called it "built by code and names no
+  borrower", but the same commit added `plan_reason = f"Found: {found.document_name …}"`
+  (`condition_plan.py:605`), so it can hold a DOCUMENT'S FILE NAME. `documents.document_name` is in
+  `NEVER_EXPOSED` because the scrub matches identifier shapes and a person's name is not digit-shaped;
+  carrying it here under another name would walk around that guard (LP-956 review).
 - `readonly.condition_rounds` gains `plan_ready_at`, `plan_confirmed_at`, `plan_confirmed_by_user_id`, and
   the reading's STATE and counts from `reading_run` (state, conditions read, AI used, fell back, model).
   `reading_run` itself stays out: its `error` is the one free-text field.
@@ -51,7 +55,7 @@ def upgrade() -> None:
                (verdict ->> 'source_date') AS verdict_source_date,
                jsonb_array_length(underwriter_notes) AS underwriter_note_count,
                reading_status, reading_source, reading_confidence,
-               next_step, plan_reason,
+               next_step,
                created_at, updated_at, deleted_at
         FROM public.conditions
         """

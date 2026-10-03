@@ -465,8 +465,17 @@ EXCLUDED: dict[str, frozenset[str]] = {
             "prep_note",
             "verdict",
             # The model's summary of the lender's text. LP-956 exposed the reading's STATUS, source and
-            # confidence, and the plan's `next_step` and `plan_reason`; the reading itself stays out.
+            # confidence and the plan's `next_step`; the reading itself stays out.
             "reading",
+            # LP-956 REVIEW — `plan_reason` IS NOT ALWAYS CODE'S OWN WORDS. LP-920's note here said it was
+            # "built by code and names no borrower", and the SAME commit (106de9af) added
+            # `reason or f"Found: {found.document_name or found.document_type}, page 1"`
+            # (`condition_plan.py:605`), so it can carry a document's FILE NAME —
+            # `test_round_one_plan_is_plan_section_6` pins exactly that string. A file name can hold a
+            # borrower's name, which is why `documents.document_name` is in `NEVER_EXPOSED`; this column
+            # would have carried it across under another name. It stays out of the view, and it is in
+            # `NEVER_EXPOSED` below so re-adding it cannot be quiet.
+            "plan_reason",
         }
     ),
     # LP-919 — the items she confirmed for a code: names and performers, no specifics. Excluded rather
@@ -571,6 +580,10 @@ NEVER_EXPOSED: tuple[tuple[str, str], ...] = (
     ("borrowers", "ssn"),
     # LP-919 — the reading restates the lender's words (amounts, banks, last fours).
     ("conditions", "reading"),
+    # LP-956 review — it can hold a found document's FILE NAME (`condition_plan.py:605`), and a file name
+    # can hold a person's name, which the scrub cannot match. Same strong-form argument as
+    # `documents.document_name` above: being wrong here is not recoverable by redaction.
+    ("conditions", "plan_reason"),
     # LP-956 — the items view is new; these restate the lender's words, amounts and account endings.
     # EXCLUDED only records that; this asserts absence. `name` cannot be pinned here (other views have a
     # `name` column legitimately), so `test_the_items_view_never_selects_name` pins it for that view.

@@ -93,7 +93,7 @@ linked to what":
 
 | View | Carries | Leaves out |
 |---|---|---|
-| `readonly.conditions` | statuses, owner, step (`next_step`), `plan_reason`, `reading_status` / `reading_source` / `reading_confidence` | the lender's text (`verbatim_text`), the reading itself, notes, the verdict's note |
+| `readonly.conditions` | statuses, owner, step (`next_step`), `reading_status` / `reading_source` / `reading_confidence` | the lender's text (`verbatim_text`), the reading itself, notes, the verdict's note, and `plan_reason` — it can quote a found document's FILE NAME (LP-956 review) |
 | `readonly.condition_rounds` | status, reader, counts, `plan_ready_at` / `plan_confirmed_at`, and the reading's `reading_state` / `reading_read` / `reading_used_ai` / `reading_fell_back` / `reading_model` | the sheet's text and header, draft rows, the raw `reading_run` (its error is free text) |
 | `readonly.condition_items` | key, who acts, step, status, document types and checks, the linked document and page, waits-on, draft, part | `name`, `acceptable`, `specifics` (the lender's wording, amounts, account endings) |
 | `readonly.condition_item_unlinks` | her unlinks: item, document, who, when | nothing (ids only) |
