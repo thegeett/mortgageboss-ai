@@ -1089,3 +1089,33 @@ drawer) waits for mockups and is not built.
 - **Should attaching or forwarding a PDF onto an imported round read the conditions it adds?** (LP-952
   review.) Import reads automatically; attach does not. The reading panel now shows them as unread, with
   Read conditions. Owner to decide.
+
+**Batch 4 closed (2026-10-02).** All eight tickets REVIEWED and pushed. Reviewers: a fresh subagent for LP-949
+to LP-952 (the peer session's user had not sanctioned the role yet), `mortgageboss-ai-cf` for LP-953 to LP-956
+once its user did. Findings fixed in review: LP-949 6, LP-950 7, LP-951 8, LP-952 6, LP-953 1, LP-954 1, LP-955 3,
+LP-956 1.
+
+What the trial's items became: the file's lender detected from the sheet and confirmed by her, with untyped
+conditions typed and AI-proposed types reviewed per lender (LP-949, ADR-417); outbound emails in the lender's
+own words with account numbers masked, and a lender email that asks (LP-950); a wrong-file warning at every door
+that turns a sheet into conditions (LP-951); the reading's state on screen with Read conditions / Read again
+(LP-952); one matching rule, and her own links, changes, unlinks and upload-here, with her choices stored
+(LP-953, ADR-418); every clause of the lender's text covered or flagged, 1228's re-disclosure for the LO
+(LP-954); "Ask someone for it" and the UWM credit-invoice routes (LP-955); no "Waiting on Processor", and
+readonly views that answer the trial's questions (LP-956).
+
+**Not built:** item 9, the condition drawer, waits for mockups (the owner's instruction).
+
+**Carry into the next batch** (the reviewer's two class-level notes):
+- a list hand-written as a subset of an enum drifts (LP-955's recipients, 4 of 7); derive it from the enum, as
+  LP-956's waiting-on choices do;
+- a comment asserting a safety property with nothing enforcing it (LP-955's placeholders, LP-956's
+  `plan_reason` "names no borrower") is the cheapest defect to prevent and the hardest to see in review: pin
+  the property with a test, or delete the claim.
+
+**Last full runs** (the reviewer's, at `054ec089`): backend 9118 passed, 1 failed (the named sonnet test), 8
+skipped, 1 xfailed; frontend 2190 / 2190 (183 files) at `3d862cca`, unchanged since; ruff, format, mypy, biome,
+tsc and the build clean.
+
+**The shared dev database is behind HEAD** (the reviewer saw the old event-kind CHECK on `mortgageboss_dev`):
+run `alembic upgrade head` there before clicking these features through on dev; staging needs a deploy.
