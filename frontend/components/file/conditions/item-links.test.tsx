@@ -115,6 +115,31 @@ describe("ItemLinkActions", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  it("keeps the keyboard the native select had: arrows move, Escape returns focus (LP-958 review)", () => {
+    // This menu REPLACED a `<select>`, which had arrow keys, Home/End and focus management for free,
+    // and it declares `role="menu"` — a promise to a screen reader that those keys work. Without the
+    // focus return, a keyboard user is dropped at the top of the drawer after every choice.
+    render(<ItemLinkActions fileId="f1" condition={CONDITION} item={ITEM} />);
+    const trigger = screen.getByRole("button", { name: "Ask someone" });
+    const menu = openMenu("Ask someone");
+    const choices = within(menu).getAllByRole("menuitem");
+    expect(choices.length).toBeGreaterThan(2);
+    expect(document.activeElement).toBe(choices[0]);
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(choices[1]);
+    fireEvent.keyDown(menu, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(choices[0]);
+    fireEvent.keyDown(menu, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(choices[choices.length - 1]);
+    fireEvent.keyDown(menu, { key: "Home" });
+    expect(document.activeElement).toBe(choices[0]);
+    fireEvent.keyDown(menu, { key: "End" });
+    expect(document.activeElement).toBe(choices[choices.length - 1]);
+    fireEvent.keyDown(menu, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it("offers every recipient an ask reaches, and routes the insurance agent to their own email", () => {
     // LP-955 REVIEW: four of the seven were offered, so the insurance, HOA and employer emails were
     // unreachable from the only door that delegates her task — and an insurance ask sent as "Someone

@@ -33,6 +33,12 @@ const ASK_WHO: [Performer, string][] = [
  * A small disclosure menu: a button, and under it the choices as buttons. Not Radix's dropdown — two
  * or seven plain choices need no portal, and the drawer is itself a dialog that a portalled menu has
  * to fight for focus. Escape and a click outside close it.
+ *
+ * IT KEEPS THE KEYBOARD THE NATIVE `<select>` HAD (LP-958 review). This replaced a `<select>`, which
+ * came with arrow keys, Home/End and focus management; a div that says `role="menu"` has made the same
+ * promise to a screen reader and has to keep it by hand. So: the trigger opens on ArrowDown, opening
+ * focuses the first choice, Up/Down wrap, Home/End jump, and closing returns focus to the trigger —
+ * without which a keyboard user is dropped at the top of the drawer after every choice.
  */
 function ActionMenu({
   label,
@@ -47,6 +53,17 @@ function ActionMenu({
 }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const items = useRef<(HTMLButtonElement | null)[]>([]);
+  const focusItem = (index: number) => {
+    const count = choices.length;
+    if (count === 0) return;
+    items.current[((index % count) + count) % count]?.focus();
+  };
+  useEffect(() => {
+    // The ref needs no dependency, and opening is the only time focus is moved for her.
+    if (open) items.current[0]?.focus();
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     const away = (event: MouseEvent) => {
@@ -56,6 +73,7 @@ function ActionMenu({
       if (event.key === "Escape") {
         event.stopPropagation();
         setOpen(false);
+        trigger.current?.focus();
       }
     };
     document.addEventListener("mousedown", away);
@@ -68,6 +86,7 @@ function ActionMenu({
   return (
     <div ref={box} className="relative">
       <Button
+        ref={trigger}
         type="button"
         variant="outline"
         size="sm"
@@ -75,6 +94,12 @@ function ActionMenu({
         aria-expanded={open}
         disabled={disabled}
         onClick={() => setOpen((was) => !was)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setOpen(true);
+          }
+        }}
       >
         {icon}
         {label}
@@ -85,15 +110,35 @@ function ActionMenu({
           role="menu"
           aria-label={label}
           className="absolute left-0 top-full z-20 mt-1 flex min-w-[15rem] flex-col rounded-md border border-input bg-popover py-1 shadow-md"
+          onKeyDown={(event) => {
+            const here = items.current.findIndex((el) => el === document.activeElement);
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              focusItem(here + 1);
+            } else if (event.key === "ArrowUp") {
+              event.preventDefault();
+              focusItem(here <= 0 ? choices.length - 1 : here - 1);
+            } else if (event.key === "Home") {
+              event.preventDefault();
+              focusItem(0);
+            } else if (event.key === "End") {
+              event.preventDefault();
+              focusItem(choices.length - 1);
+            }
+          }}
         >
-          {choices.map(([key, text, act]) => (
+          {choices.map(([key, text, act], index) => (
             <button
               key={key}
               type="button"
               role="menuitem"
+              ref={(el) => {
+                items.current[index] = el;
+              }}
               className="px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
               onClick={() => {
                 setOpen(false);
+                trigger.current?.focus();
                 act();
               }}
             >

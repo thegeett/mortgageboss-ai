@@ -144,6 +144,42 @@ def _unions() -> dict[str, list[str]]:
     return found
 
 
+#: LP-958 review — the frontend's copy of "still awaiting the lender's word" lives here, not in the
+#: types file: `openWithLender` in `lib/conditions/next-step.ts`.
+_NEXT_STEP_FILE = _TYPES_FILE.parent.parent / "conditions" / "next-step.ts"
+_OPEN_WITH_LENDER = re.compile(
+    r"export function openWithLender\(condition: Condition\): boolean \{(.+?)\}", re.S
+)
+
+
+def test_the_frontend_still_open_rule_matches_the_backend_set() -> None:
+    """LP-958 review — `_OPEN` is written out twice, and the copies had already drifted.
+
+    `condition_package._OPEN` decides what goes in the lender package; the frontend repeats it in
+    `openWithLender`, which the Ready token, the "Sent to lender" token and the drawer's Next box all
+    read. Before this ticket's review the two disagreed: the package rule counted `not_cleared` and
+    the "Sent to lender" token did not, so a condition she had fixed and re-sent read as sent in one
+    place and as never-sent in another. Nothing tied them, so nothing failed.
+
+    A set comparison rather than a text match, in both directions: a member here and not there means
+    the client hides a condition the server will package, and the reverse means it offers one the
+    server will refuse.
+    """
+    from app.services.condition_package import _OPEN
+
+    source = _NEXT_STEP_FILE.read_text(encoding="utf-8")
+    body = _OPEN_WITH_LENDER.search(source)
+    # THE VACUITY GUARDS, in the spirit of the one below: a renamed function or a reshaped body would
+    # otherwise make this pass over nothing.
+    assert body is not None, (
+        f"`openWithLender` not found in {_NEXT_STEP_FILE.name} — if it was renamed or inlined, this "
+        "guard is comparing nothing and the two copies of `_OPEN` are unpinned again"
+    )
+    frontend = set(_MEMBER.findall(body.group(1)))
+    assert frontend, "`openWithLender`'s body names no lender status; the regex or the rule changed"
+    assert frontend == {member.value for member in _OPEN}
+
+
 def test_the_types_file_is_where_this_test_thinks_it_is() -> None:
     """WITHOUT THIS, A MOVED OR RENAMED FILE MAKES EVERY TEST BELOW VACUOUS. `_unions()` would
     raise, or — worse, if the read were ever made forgiving — return nothing and turn every

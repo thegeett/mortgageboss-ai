@@ -91,16 +91,38 @@ describe("nextAction", () => {
     }
   });
 
-  it("Sent: record the lender's answer; came back: fix it and send it again", () => {
-    expect(nextAction(condition({ prep_status: "with_underwriter" }), UWM)).toEqual({
+  it("sent: record their answer — including one fixed and sent again (LP-958 review)", () => {
+    const sent = {
       text: "Sent to UWM. When they answer, record it here.",
       do: { kind: "record" },
       tone: "waiting",
-    });
+    };
+    expect(nextAction(condition({ prep_status: "with_underwriter" }), UWM)).toEqual(sent);
+    // THE RE-SEND. `lender_status` still holds the previous round's `not_cleared` until a new verdict
+    // is recorded, and this used to answer "did not clear it … send it again" for a condition she had
+    // just sent — and withhold the Record control, which is the part that cost her something.
     expect(
-      nextAction(condition({ prep_status: "with_underwriter", lender_status: "not_cleared" }), UWM)
-        ?.text,
-    ).toBe("UWM did not clear it. Read their note, fix what it asks, then send it again.");
+      nextAction(condition({ prep_status: "with_underwriter", lender_status: "not_cleared" }), UWM),
+    ).toEqual(sent);
+  });
+
+  it("came back: the refusal is on a To do condition, which is where the server puts it", () => {
+    // `condition_status.py:488` moves our track to To do on a `not_cleared` verdict from Ready or
+    // Sent to lender, so this is the only state a came-back condition is ever in. The sentence used
+    // to require `with_underwriter`, so it never appeared here at all.
+    expect(
+      nextAction(condition({ prep_status: "to_do", lender_status: "not_cleared" }), UWM),
+    ).toEqual({
+      text: "UWM did not clear it. Read their note, fix what it asks, then send it again.",
+      tone: "blocking",
+    });
+    // THE CONTROL: an ordinary To do condition with work on it is not told the lender refused it.
+    const ordinary = nextAction(
+      condition({ prep_status: "to_do", items: [item({ id: "t1" })] }),
+      UWM,
+    );
+    expect(ordinary?.text).toBeTruthy();
+    expect(ordinary?.text).not.toContain("did not clear");
   });
 
   it("her open task: get it, by linking or asking, on that item", () => {

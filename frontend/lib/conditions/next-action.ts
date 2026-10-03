@@ -81,17 +81,29 @@ export function nextAction(condition: Condition, context: NextContext = {}): Nex
     };
   }
 
+  // SENT IS SENT, WHATEVER THE LAST ROUND SAID (LP-958 review). `not_cleared` used to be read here as
+  // "it came back", but the server moves our track to To do on that verdict
+  // (`condition_status.py:488`), so `with_underwriter` + `not_cleared` is not a condition that came
+  // back — it is one she fixed and SENT AGAIN, its `lender_status` still holding the previous round's
+  // answer until a new one is recorded. The old ternary therefore fired only in the state where its
+  // sentence was false, and told her to send again what she had just sent, while withholding the
+  // Record control she needed.
   if (condition.prep_status === "with_underwriter") {
-    return condition.lender_status === "not_cleared"
-      ? {
-          text: `${lender} did not clear it. Read their note, fix what it asks, then send it again.`,
-          tone: "blocking",
-        }
-      : {
-          text: `Sent to ${lender}. When they answer, record it here.`,
-          do: { kind: "record" },
-          tone: "waiting",
-        };
+    return {
+      text: `Sent to ${lender}. When they answer, record it here.`,
+      do: { kind: "record" },
+      tone: "waiting",
+    };
+  }
+
+  // AND HERE IS WHERE A CAME-BACK CONDITION ACTUALLY IS: To do, with the refusal still on it. Scoped
+  // to `to_do` because that is the state the server writes; `waiting` keeps its own sentence (she is
+  // waiting on someone for the fix), and `ready` keeps the package steps (she has fixed it).
+  if (condition.prep_status === "to_do" && condition.lender_status === "not_cleared") {
+    return {
+      text: `${lender} did not clear it. Read their note, fix what it asks, then send it again.`,
+      tone: "blocking",
+    };
   }
 
   if (condition.prep_status === "ready") {

@@ -129,11 +129,20 @@ export function unsentAskDrafts(condition: Condition): DraftTail[] {
 
 /** LP-958 — whether the server's package takes it now: `condition_package._goes_in`, mirrored. */
 export function goesInPackage(condition: Condition): boolean {
-  return (
-    condition.prep_status === "ready" &&
-    (condition.lender_status === "open" || condition.lender_status === "not_cleared") &&
-    !condition.info_only
-  );
+  return condition.prep_status === "ready" && openWithLender(condition) && !condition.info_only;
+}
+
+/**
+ * Still awaiting the lender's word: `open`, or came back `not_cleared` and not answered since. The
+ * backend's `_OPEN` (`condition_package.py:58`), as ONE predicate (LP-958 review).
+ *
+ * It was written out twice with different members: the package rule counted `not_cleared` and the
+ * "Sent to lender" token did not, so a condition she had fixed and re-sent read as sent in the
+ * package rule and as un-sent in the Next step column, and the drawer's Next box said a third thing.
+ * Anything asking "is the lender still to answer?" asks here.
+ */
+export function openWithLender(condition: Condition): boolean {
+  return condition.lender_status === "open" || condition.lender_status === "not_cleared";
 }
 
 /** The recipients of the condition's open asks, in item order, one per email. */
@@ -230,7 +239,10 @@ export function nextStepToken(condition: Condition): NextStepToken | null {
       };
     }
   }
-  if (condition.prep_status === "with_underwriter" && condition.lender_status === "open") {
+  // A RE-SENT CONDITION IS STILL SENT (LP-958 review). This read `lender_status === "open"`, so a
+  // condition that came back `not_cleared`, was fixed and submitted again fell past here and showed the
+  // plan's steps — as if nothing had been sent — while the drawer told her to send it again.
+  if (condition.prep_status === "with_underwriter" && openWithLender(condition)) {
     return { icon: "lender", text: "Sent to lender · waiting for their answer", tone: "quiet" };
   }
   if (step === "lender_doing_it")

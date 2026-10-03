@@ -360,15 +360,23 @@ describe("LP-958 — Ready and Sent say what comes next", () => {
     ).not.toMatch(/package/);
   });
 
-  it("Sent and still open waits for the lender; a came-back one does not say waiting", () => {
-    expect(nextStepToken(condition({ prep_status: "with_underwriter" }))).toEqual({
+  it("sent waits for the lender, re-sent included; a came-back one is To do (LP-958 review)", () => {
+    const waiting = {
       icon: "lender",
       text: "Sent to lender · waiting for their answer",
       tone: "quiet",
-    });
+    };
+    expect(nextStepToken(condition({ prep_status: "with_underwriter" }))).toEqual(waiting);
+    // THIS STATE IS A RE-SEND, NOT A CAME-BACK, which is what this case asserted before. A
+    // `not_cleared` verdict moves our track to To do (`condition_status.py:488`), so the only way to
+    // be Sent to lender with `not_cleared` still on the row is that she fixed it and sent it again —
+    // and it was reading as though nothing had been sent.
     expect(
-      nextStepToken(condition({ prep_status: "with_underwriter", lender_status: "not_cleared" }))
-        ?.text,
-    ).not.toBe("Sent to lender · waiting for their answer");
+      nextStepToken(condition({ prep_status: "with_underwriter", lender_status: "not_cleared" })),
+    ).toEqual(waiting);
+    // The real came-back: To do, so it shows the plan's work rather than "waiting for their answer".
+    expect(
+      nextStepToken(condition({ prep_status: "to_do", lender_status: "not_cleared" }))?.text,
+    ).not.toBe(waiting.text);
   });
 });
