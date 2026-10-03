@@ -89,6 +89,16 @@ export function ReadingBox({
             : ""}
         </p>
       ) : null}
+      {reading.uncovered && reading.uncovered.length > 0 ? (
+        <div className="rounded-md border border-warning/40 bg-warning/5 p-2 text-xs text-foreground-2">
+          <p className="font-medium text-foreground">Not covered by an item yet:</p>
+          <ul className="mt-0.5 list-disc pl-4">
+            {reading.uncovered.map((words) => (
+              <li key={words}>“{words}”</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {needsHer && onConfirm ? (
         <div className="flex items-center gap-2 border-t border-ai/20 pt-2">
           <TriangleAlert className="h-3.5 w-3.5 text-warning" aria-hidden />

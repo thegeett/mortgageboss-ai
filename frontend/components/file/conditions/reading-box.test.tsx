@@ -193,3 +193,23 @@ describe("ReadingItems", () => {
     expect(screen.getByText("Appraisal requests go through the lender")).toBeDefined();
   });
 });
+
+describe("LP-954 — a clause nothing covers", () => {
+  it("is shown in the lender's words", () => {
+    render(
+      <ReadingBox
+        condition={condition({
+          reading_status: "needs_confirmation",
+          reading: reading({ uncovered: ["required (and possibly a Change of Circumstance) to"] }),
+        })}
+      />,
+    );
+    expect(screen.getByText("Not covered by an item yet:")).toBeTruthy();
+    expect(screen.getByText("“required (and possibly a Change of Circumstance) to”")).toBeTruthy();
+  });
+
+  it("shows nothing when every clause is covered", () => {
+    render(<ReadingBox condition={condition({ reading: reading({ uncovered: [] }) })} />);
+    expect(screen.queryByText("Not covered by an item yet:")).toBeNull();
+  });
+});

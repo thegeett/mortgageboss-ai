@@ -1786,7 +1786,16 @@ async def draft_view(
             .order_by(ConditionDraft.created_at)
         )
     ).scalars()
-    for other in siblings:
+    # IN RECIPIENT ORDER (borrower, title/attorney, LO, …), as S3-05 lists them, not creation order:
+    # which draft a plan creates first depends on the sheet's order (LP-954 put 1228's LO ask ahead of
+    # the borrower's), and the side column should not reshuffle when the sheet does.
+    from app.services.condition_plan import _RECIPIENT_ORDER
+
+    def _place(each: ConditionDraft) -> int:
+        value = each.recipient.value
+        return _RECIPIENT_ORDER.index(value) if value in _RECIPIENT_ORDER else len(_RECIPIENT_ORDER)
+
+    for other in sorted(siblings, key=_place):
         label = SHORT_LABEL[other.recipient]
         if other.recipient is DraftRecipient.LO and signer_first:
             label = f"LO ({signer_first} → loan officer)"

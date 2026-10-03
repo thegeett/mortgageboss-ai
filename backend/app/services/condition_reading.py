@@ -36,13 +36,14 @@ THE READING'S SHAPE (`conditions.reading`, JSONB):
                 "names"}}],
      "figures": {"shortfall": {"required", "verified", "amount"}} | {},
      "push_back": {"must_not_close_before", "policy_starts"} | null,
-     "confidence": float | null, "prompt_version": "read_v2" | null,
+     "confidence": float | null, "prompt_version": "read_v3" | null,
      "proposed_type_id": str | null}
 """
 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -77,8 +78,8 @@ from app.models.loan_file import LoanFile
 
 logger = structlog.get_logger(__name__)
 
-PROMPT_PATH = "conditions/read_v2.txt"
-READING_VERSION = "read_v2"
+PROMPT_PATH = "conditions/read_v3.txt"
+READING_VERSION = "read_v3"
 _MAX_TOKENS = 8192
 
 _OWNER_TO_PERFORMER: dict[OwnerHint, Performer] = {
@@ -355,6 +356,21 @@ def compose_reading(
                     widened = _performers(raw.get("performers"))
                     if widened and Performer(item["performers"][0]) in widened:
                         item["performers"] = [p.value for p in widened]
+                # LP-954 — A CLAUSE THE TYPE DOES NOT COVER becomes an item of its own, after the
+                # library's (1228's "possibly a Change of Circumstance" is the LO's re-disclosure). The
+                # library still decides its own items; these are additions, never replacements.
+                library_keys = {item["key"] for item in items}
+                for raw in ai_items[:6]:
+                    key = re.sub(r"[^a-z0-9_]", "", str(raw.get("key") or "").lower())[:40]
+                    performers = _performers(raw.get("performers"))
+                    if not key or key in library_keys or not performers:
+                        continue
+                    extra = _generic_item(performers[0], str(raw.get("name") or "")[:200])
+                    extra["key"] = key
+                    extra["performers"] = [p.value for p in performers]
+                    extra["specifics"] = _checked_specifics(raw.get("specifics"), text)
+                    items.append(extra)
+                    library_keys.add(key)
             else:
                 for index, raw in enumerate(ai_items[:6]):
                     performers = _performers(raw.get("performers"))
@@ -382,7 +398,19 @@ def compose_reading(
                 items = [_generic_item(performer)]
 
         bar = Decimal(str(settings.condition_reading_confidence_bar))
-        ready = source is ConditionReadingSource.AI and confidence is not None and confidence >= bar
+        # LP-954 — A CONDITIONAL CLAUSE NOTHING COVERS puts the reading below the bar, so she confirms
+        # it before anything is drafted: the clauses a processor misses are the ones the AI drops.
+        uncovered = (
+            uncovered_conditionals(text, ai, items) if source is ConditionReadingSource.AI else []
+        )
+        if uncovered and confidence is not None and confidence >= bar:
+            confidence = (bar - Decimal("0.01")).quantize(Decimal("0.01"))
+        ready = (
+            source is ConditionReadingSource.AI
+            and confidence is not None
+            and confidence >= bar
+            and not uncovered
+        )
         status = (
             ConditionReadingStatus.READY if ready else ConditionReadingStatus.NEEDS_CONFIRMATION
         )
@@ -423,8 +451,49 @@ def compose_reading(
         # real type. A proposal: nothing here uses it. It reaches the lender's "Codes to review", and a
         # type is applied only when a person maps the code there (ADR-417).
         "proposed_type_id": _proposed_type(condition_type, confirmed, ai),
+        # LP-954 — the conditional clauses ("possibly", "if applicable", "and/or") nothing covers, in
+        # the lender's words, for the confirm screen. Empty when every one has an item or a note.
+        "uncovered": uncovered if not confirmed else [],
     }
     return reading, source, status, confidence
+
+
+#: LP-954 — the owner's conditional words. A clause carrying one asks for something only sometimes, which
+#: is exactly when it gets dropped. Whole words, case-insensitive.
+CONDITIONAL = re.compile(r"\b(possibly|if applicable|and/or)\b", re.IGNORECASE)
+
+
+def _plain(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip().casefold()
+
+
+def uncovered_conditionals(
+    text: str, ai: dict[str, Any] | None, items: list[dict[str, Any]]
+) -> list[str]:
+    """Each conditional clause in the lender's text that no item and no note covers. Code only.
+
+    The AI says which item covers each clause it found (`clauses`). A conditional word is covered when a
+    clause the AI quoted contains it, is really in the lender's text, and names an item the reading has or
+    a note saying why it asks for nothing. Anything else is reported in the lender's own words.
+    """
+    plain_text = _plain(text)
+    keys = {str(item.get("key")) for item in items}
+    clauses = [c for c in (ai or {}).get("clauses") or [] if isinstance(c, dict)]
+    out: list[str] = []
+    for match in CONDITIONAL.finditer(text):
+        word = match.group(0).casefold()
+        covered = False
+        for clause in clauses:
+            quoted = _plain(str(clause.get("text") or ""))
+            if not quoted or word not in quoted or quoted not in plain_text:
+                continue
+            if str(clause.get("item_key") or "") in keys or str(clause.get("note") or "").strip():
+                covered = True
+                break
+        if not covered:
+            start = max(0, match.start() - 40)
+            out.append(re.sub(r"\s+", " ", text[start : match.end() + 40]).strip())
+    return out
 
 
 def _proposed_type(

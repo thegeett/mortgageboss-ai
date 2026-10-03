@@ -689,7 +689,7 @@ async def view(db: AsyncSession, *, loan_file: LoanFile) -> PackageView | None:
                 {
                     "kind": "open_prior_to_docs",
                     "code": condition.lender_code or "—",
-                    "text": _why_open(condition),
+                    "text": _why_open(condition, await _lender_does_an_item(db, condition)),
                 }
             )
     out.warnings.extend(await _expiry_warnings(db, round_, out.rows))
@@ -702,8 +702,27 @@ async def view(db: AsyncSession, *, loan_file: LoanFile) -> PackageView | None:
     return out
 
 
-def _why_open(condition: Condition) -> str:
-    if condition.next_step is PlanOption.LENDER_DOING_IT:
+async def _lender_does_an_item(db: AsyncSession, condition: Condition) -> bool:
+    """LP-954 — whether the lender is doing a live item of this condition. Since a clause the type does
+    not cover keeps its own step (1228's re-disclosure), the condition's step can be empty while the
+    lender still orders the inspection; the sentence must say so either way."""
+    from app.models.condition_item import ConditionItem
+
+    found = await db.scalar(
+        select(ConditionItem.id)
+        .where(
+            ConditionItem.condition_id == condition.id,
+            ConditionItem.deleted_at.is_(None),
+            ConditionItem.option == PlanOption.LENDER_DOING_IT,
+            ConditionItem.status != ConditionItemStatus.NOT_NEEDED,
+        )
+        .limit(1)
+    )
+    return found is not None
+
+
+def _why_open(condition: Condition, lender_does_an_item: bool = False) -> str:
+    if condition.next_step is PlanOption.LENDER_DOING_IT or lender_does_an_item:
         library_type = load_library().get(condition.canonical_type_id)
         what = (library_type.name if library_type else "it").lower()
         return f"the {what} is ordered through the lender and not back yet"

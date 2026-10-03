@@ -54,10 +54,15 @@ ASK_3P = PlanOption.ASK_THIRD_PARTY
 #: Plan §6, by code: the condition's own step, and each item as (key, who acts, option).
 #: "who acts" is the performers list; `lender_doing_it` for 1228's inspection is the item's step.
 SECTION_6: dict[str, tuple[PlanOption | None, list[tuple[str, list[str], PlanOption]]]] = {
-    # Final inspection → the appraiser, through the lender's AMC. Lender is doing it.
+    # Final inspection → the appraiser, through the lender's AMC: the lender is doing it. LP-954 (the
+    # owner, superseding §6 for this row): "possibly a Change of Circumstance" is an item for the LO
+    # (re-disclosure), asked in the LO email, so the condition's items carry their own steps.
     "1228": (
-        PlanOption.LENDER_DOING_IT,
-        [("inspection", ["appraiser"], PlanOption.LENDER_DOING_IT)],
+        None,
+        [
+            ("inspection", ["appraiser"], PlanOption.LENDER_DOING_IT),
+            ("change_of_circumstance", ["lo"], ASK_3P),
+        ],
     ),
     # $27,148.22 more in assets, 2 months of statements → borrower. Ask the borrower.
     "7086": (None, [("statements", ["borrower"], ASK_B), ("other_accounts", ["borrower"], ASK_B)]),
@@ -192,7 +197,7 @@ async def test_confirming_makes_the_three_drafts_and_the_question(db_session: As
 
     assert await codes("borrower") == {"7086", "6132", "6637"}
     assert await codes("title_attorney") == {"6637", "0132", "1947", "6378"}
-    assert await codes("lo") == {"0132"}
+    assert await codes("lo") == {"0132", "1228"}  # LP-954: 1228's re-disclosure
 
     # Two of her own tasks, one already in the file (now Ready), 1228 the lender's.
     tasks = {
@@ -202,7 +207,9 @@ async def test_confirming_makes_the_three_drafts_and_the_question(db_session: As
     }
     assert tasks == {"1582", "0007"}
     assert conditions["0006"].prep_status is ConditionPrepStatus.READY
-    assert conditions["1228"].next_step is PlanOption.LENDER_DOING_IT
+    # LP-954: the inspection is still the lender's; the re-disclosure is the LO's.
+    assert conditions["1228"].next_step is None
+    assert (await _items(db_session, conditions["1228"]))[0].option is PlanOption.LENDER_DOING_IT
 
     # Marking the THREE drafts sent moves exactly those conditions, to the right owner.
     for key in ("borrower", "title_attorney", "lo"):
@@ -219,6 +226,7 @@ async def test_confirming_makes_the_three_drafts_and_the_question(db_session: As
         "0132": OwnerHint.BROKER,  # "Waiting on LO"
         "1947": OwnerHint.TITLE,
         "6378": OwnerHint.TITLE,
+        "1228": OwnerHint.BROKER,  # LP-954: the LO's re-disclosure
     }
     # 6178 waits for its own question; the lender's track has not moved anywhere.
     assert conditions["6178"].prep_status is ConditionPrepStatus.TO_DO
@@ -227,7 +235,16 @@ async def test_confirming_makes_the_three_drafts_and_the_question(db_session: As
 
 async def test_the_same_plan_with_the_ai_switched_off(db_session: AsyncSession) -> None:
     loan_file, round_ = await _round_one(db_session, use_ai=False)
-    assert await _plan(db_session, loan_file) == SECTION_6
+    # WITHOUT THE AI NOBODY READS 1228'S CLAUSES: the library's PA-03 alone, the lender's, as §6 had it.
+    # The reading is marked for her to confirm (below), which is where the re-disclosure is added.
+    library_only = {
+        **SECTION_6,
+        "1228": (
+            PlanOption.LENDER_DOING_IT,
+            [("inspection", ["appraiser"], PlanOption.LENDER_DOING_IT)],
+        ),
+    }
+    assert await _plan(db_session, loan_file) == library_only
     conditions = await _conditions(db_session, loan_file)
     # Library fallback: every reading is marked for her to confirm, and nothing is drafted past them.
     assert {c.reading_status for c in conditions.values()} == {

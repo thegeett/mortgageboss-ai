@@ -119,8 +119,11 @@ async def test_round_one_plan_is_plan_section_6(db_session: AsyncSession) -> Non
     async def options(code: str) -> list[str]:
         return [item.option.value for item in await _items(db_session, by_code[code])]
 
-    # 1228 — lender is doing it: UWM orders the final inspection (decision 1).
-    assert by_code["1228"].next_step is PlanOption.LENDER_DOING_IT
+    # 1228 — UWM orders the final inspection (decision 1), so its inspection is the lender's; LP-954
+    # adds the LO's re-disclosure for "possibly a Change of Circumstance", so the items carry their
+    # own steps and the reason still says what the lender does.
+    assert by_code["1228"].next_step is None
+    assert await options("1228") == ["lender_doing_it", "ask_third_party"]
     assert by_code["1228"].plan_reason == "Ordered through the lender — confirm on your files"
     # 7086, 6132 — ask the borrower; 7086's reason is code's arithmetic.
     assert set(await options("7086")) == {"ask_borrower"}
@@ -164,7 +167,7 @@ async def test_round_one_plan_is_plan_section_6(db_session: AsyncSession) -> Non
     assert [d.codes for d in summary.drafts] == [
         ["6132", "6637", "7086"],
         ["0132", "1947", "6378", "6637"],
-        ["0132"],
+        ["0132", "1228"],  # LP-954: 1228's re-disclosure, in the LO email
     ]
     assert (summary.your_tasks, summary.already_in_file, summary.push_back) == (2, 1, 1)
     assert (summary.lender_doing_it, summary.needs_confirmation) == (1, 1)

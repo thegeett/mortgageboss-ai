@@ -27,7 +27,30 @@ CANNED: dict[str, dict[str, Any]] = {
         "summary": "Final inspection must confirm construction is complete",
         "explanation": "The lender needs a final inspection confirming the new construction was "
         "completed to the plans and specs.",
-        "items": [{"key": "inspection", "performers": ["appraiser"], "specifics": {}}],
+        "items": [
+            {"key": "inspection", "performers": ["appraiser"], "specifics": {}},
+            # LP-954 — the conditional clause the library's PA-03 does not cover.
+            {
+                "key": "change_of_circumstance",
+                "name": "Change of Circumstance re-disclosure",
+                "performers": ["lo"],
+                "specifics": {},
+            },
+        ],
+        "clauses": [
+            {"text": "Final inspection is required", "item_key": "inspection", "note": None},
+            {
+                "text": "possibly a Change of Circumstance",
+                "item_key": "change_of_circumstance",
+                "note": None,
+            },
+            {
+                "text": "On new construction transactions this condition can be moved to closing at "
+                "the request of the client.",
+                "item_key": None,
+                "note": "A timing rule; asks for nothing.",
+            },
+        ],
         "confidence": 0.88,
     },
     "7086": {
@@ -41,6 +64,13 @@ CANNED: dict[str, dict[str, Any]] = {
                 "specifics": {"amounts": ["$38,210.40", "$11,062.18", "$27,148.22"]},
             },
             {"key": "other_accounts", "performers": ["borrower"], "specifics": {}},
+        ],
+        "clauses": [
+            {
+                "text": "Short funds to close and/or reserves.",
+                "item_key": "statements",
+                "note": None,
+            },
         ],
         "confidence": 0.95,
     },

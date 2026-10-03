@@ -479,13 +479,19 @@ async def build_plan(db: AsyncSession, *, round_id: UUID, today: date | None = N
         step, reason = _step_and_reason(condition, condition_type, reading, settings, loan_file)
 
         created: list[ConditionItem] = []
+        # LP-954 — THE LENDER DOES THE TYPE'S WORK, NOT EVERY CLAUSE'S. An item the reading added for a
+        # clause the library type does not cover (1228's "possibly a Change of Circumstance", the LO's
+        # re-disclosure) keeps its own step when the lender orders the inspection.
+        library_keys = {each.key for each in condition_type.items} if condition_type else None
         for index, raw in enumerate(reading.get("items") or []):
             performers = [str(p) for p in raw.get("performers") or ["borrower"]]
             option = _item_option(raw, condition_type, settings, loan_file)
             status = ConditionItemStatus.OPEN
             if step in (PlanOption.PUSH_BACK, PlanOption.INFORMATION_ONLY):
                 status = ConditionItemStatus.NOT_NEEDED
-            elif step is PlanOption.LENDER_DOING_IT:
+            elif step is PlanOption.LENDER_DOING_IT and (
+                library_keys is None or str(raw.get("key")) in library_keys
+            ):
                 option = PlanOption.LENDER_DOING_IT
             item = ConditionItem(
                 company_id=condition.company_id,
@@ -556,6 +562,14 @@ async def build_plan(db: AsyncSession, *, round_id: UUID, today: date | None = N
             and all(i.option is PlanOption.LENDER_DOING_IT for i in created)
         ):
             step = PlanOption.LENDER_DOING_IT
+        elif step is PlanOption.LENDER_DOING_IT and any(
+            i.option is not PlanOption.LENDER_DOING_IT
+            for i in created
+            if i.status is not ConditionItemStatus.NOT_NEEDED
+        ):
+            # LP-954 — the lender is not doing ALL of it: the items carry their own steps, and the
+            # reason still says what the lender does.
+            step = None
 
         condition.next_step = step
         condition.plan_reason = reason
@@ -1405,6 +1419,14 @@ async def round_plan_summary(db: AsyncSession, *, round_: ConditionRound) -> Any
             continue
         if condition.next_step is PlanOption.INFORMATION_ONLY:
             continue
+        # LP-954 — the lender doing PART of a condition (1228's inspection, beside the LO's
+        # re-disclosure) still counts: the pill says what the lender is doing, not the whole step.
+        if any(
+            i.option is PlanOption.LENDER_DOING_IT
+            and i.status is not ConditionItemStatus.NOT_NEEDED
+            for i in items
+        ):
+            lender += 1
         if any(i.option is PlanOption.I_WILL_DO_IT for i in items):
             your_tasks += 1
         if items and all(i.option is PlanOption.ALREADY_IN_FILE for i in items):

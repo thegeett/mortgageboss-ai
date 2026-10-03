@@ -262,7 +262,8 @@ async def test_a_display_only_step_never_moves(
         status=ConditionItemStatus.DONE,
     )
     assert condition.prep_status is ConditionPrepStatus.TO_DO
-    assert conditions["1228"].next_step is PlanOption.LENDER_DOING_IT
+    # 1228's inspection is the lender's (a display-only step on the item, LP-954) and it never moves.
+    assert (await _items(db_session, conditions["1228"]))[0].option is PlanOption.LENDER_DOING_IT
     assert conditions["1228"].prep_status is ConditionPrepStatus.TO_DO
 
 

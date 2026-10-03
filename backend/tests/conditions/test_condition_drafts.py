@@ -154,7 +154,8 @@ async def test_round_one_makes_three_drafts_and_the_question(db_session: AsyncSe
         "6378",
         "6637",
     ]
-    assert await _codes(db_session, drafts["lo"][0]) == ["0132"]
+    # LP-954: 1228's "possibly a Change of Circumstance" is the LO's re-disclosure, in the LO email.
+    assert await _codes(db_session, drafts["lo"][0]) == ["0132", "1228"]
     for _, message in drafts.values():
         assert message.status is CommunicationStatus.DRAFT
         assert message.party is None  # kept out of Phase 4's party drafts
@@ -248,11 +249,13 @@ async def test_marking_sent_moves_the_right_conditions(db_session: AsyncSession)
         "0132": OwnerHint.BROKER,
         "1947": OwnerHint.TITLE,
         "6378": OwnerHint.TITLE,
+        # LP-954: 1228's re-disclosure went in the LO email, so it waits on the LO.
+        "1228": OwnerHint.BROKER,
     }
     for code, owner in expected.items():
         assert conditions[code].prep_status is ConditionPrepStatus.WAITING, code
         assert conditions[code].waiting_on is owner, code
-    for code in ("1582", "0007", "1228"):
+    for code in ("1582", "0007"):
         assert conditions[code].prep_status is ConditionPrepStatus.TO_DO, code
     assert conditions["0006"].prep_status is ConditionPrepStatus.READY
     # The lender's track never moves.
@@ -274,8 +277,9 @@ async def test_marking_sent_moves_the_right_conditions(db_session: AsyncSession)
         )
     ).scalars()
     by_email = [e for e in moves if e.detail.get("by") == "email"]
-    # Seven moves to Waiting, and 0132's owner following from Title to the LO when the LO's went.
-    assert len(by_email) == 8
+    # Eight moves to Waiting (LP-954 adds 1228's, by the LO email), and 0132's owner following from
+    # Title to the LO when the LO's went.
+    assert len(by_email) == 9
 
 
 async def test_each_drafted_condition_has_an_event(db_session: AsyncSession) -> None:
@@ -291,7 +295,8 @@ async def test_each_drafted_condition_has_an_event(db_session: AsyncSession) -> 
         ).scalars()
     )
     drafted = {c.lender_code for c in conditions.values() if c.id in rows}
-    assert drafted == {"7086", "6132", "6637", "6178", "0132", "1947", "6378"}
+    # LP-954: 1228's re-disclosure is drafted into the LO email.
+    assert drafted == {"7086", "6132", "6637", "6178", "0132", "1947", "6378", "1228"}
 
 
 async def test_a_changed_step_follows_into_the_drafts(db_session: AsyncSession) -> None:
@@ -423,7 +428,8 @@ async def test_the_dialog_reads_what_the_screens_show(db_session: AsyncSession) 
             "LO (Priya → loan officer)",
         ]
         assert title["other_drafts"][0]["summary"] == "3 conditions"
-        assert title["other_drafts"][1]["summary"] == "0132 re-signed disclosure"
+        # LP-954: the LO email now carries 0132's disclosure and 1228's re-disclosure.
+        assert title["other_drafts"][1]["summary"] == "2 conditions"
 
         question = (
             await client.get(f"{base}/{by_label['Question 6178']['id']}", headers=headers)

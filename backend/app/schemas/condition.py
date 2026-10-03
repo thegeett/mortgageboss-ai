@@ -776,6 +776,9 @@ class ConditionReadingPublic(BaseModel):
     figures: ReadingFiguresPublic = Field(default_factory=ReadingFiguresPublic)
     push_back: ReadingPushBackPublic | None = None
     confidence: float | None = None
+    #: LP-954 — conditional clauses ("possibly", "if applicable", "and/or") no item or note covers, in the
+    #: lender's own words. The reading box shows them; they are why such a reading needs her.
+    uncovered: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_stored(cls, stored: dict[str, Any] | None) -> "ConditionReadingPublic | None":

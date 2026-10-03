@@ -1040,6 +1040,8 @@ export interface ConditionReading {
   figures: { shortfall: { required: string; verified: string; amount: string } | null };
   /** Two dates code read from the letter: the condition cannot apply (6178). ISO dates. */
   push_back: { must_not_close_before: string; policy_starts: string } | null;
+  /** LP-954 — conditional clauses no item or note covers, in the lender's words. */
+  uncovered?: string[];
   confidence: number | null;
 }
 
