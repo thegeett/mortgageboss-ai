@@ -544,3 +544,127 @@ async def test_upload_here_links_the_upload_and_refuses_another_files_item(
     [row] = await _rows(db_session, item)
     assert row.origin is EvidenceOrigin.MANUAL
     assert [c["check"] for c in row.checks] == ["document_read"]
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-953 REVIEW: her refusal is keyed `(item_id, document_id)`, and two flows replace the item id
+# --------------------------------------------------------------------------------------------- #
+
+
+async def _refusal(db: AsyncSession, *, item: ConditionItem, document: Document) -> None:
+    """Record her "no" for this pair, the way door 5 records it."""
+    db.add(
+        ConditionItemUnlink(
+            company_id=item.company_id,
+            loan_file_id=item.loan_file_id,
+            item_id=item.id,
+            document_id=document.id,
+            unlinked_by_user_id=None,
+        )
+    )
+    await db.flush()
+
+
+async def _answers(
+    db: AsyncSession, *, item: ConditionItem, document: Document
+) -> tuple[bool, bool]:
+    """`(with her refusals, ignoring them)` — the second is the positive control, so a False below
+    cannot come from a type or word mismatch instead of the refusal."""
+    from app.services.condition_matching import unlinked_pairs
+
+    pairs = await unlinked_pairs(db, loan_file_id=item.loan_file_id)
+    args: dict[str, Any] = {
+        "wanted": list(item.documents or []),
+        "match_words": (),
+        "document": document,
+        "item_id": item.id,
+    }
+    return (
+        document_answers(**args, unlinked=pairs),
+        document_answers(**args, unlinked=set()),
+    )
+
+
+async def test_her_unlink_follows_a_rewording_carry(db_session: AsyncSession) -> None:
+    """A reworded condition hands its plan to a SUCCESSOR, with new item ids. Her refusal must follow,
+    or the next arrival re-links the document she removed (LP-953 review)."""
+    from app.services.condition_plan import carry_plan
+    from tests.conditions.test_condition_plan import (
+        _conditions,
+        _items,
+        _planned_round_one,
+    )
+
+    loan_file, _round = await _planned_round_one(db_session)
+    by_code = await _conditions(db_session, loan_file)
+    old, new = by_code["1947"], by_code["6378"]
+    for stale in await _items(db_session, new):
+        stale.deleted_at = stale.created_at
+    new.next_step = None
+    await db_session.flush()
+
+    source = (await _items(db_session, old))[0]
+    document = await _doc(
+        db_session, loan_file, document_type="closing_disclosure", name="Final seller CD"
+    )
+    await _refusal(db_session, item=source, document=document)
+    assert await _answers(db_session, item=source, document=document) == (False, True)
+
+    assert (
+        await carry_plan(db_session, from_condition=old, to_condition=new, actor_user_id=None) == 1
+    )
+    carried = (await _items(db_session, new))[0]
+    assert carried.id != source.id  # the premise: the carry replaces the id her refusal is keyed on
+
+    assert await _answers(db_session, item=carried, document=document) == (False, True)
+
+
+async def test_her_unlink_follows_a_part_that_is_remade(db_session: AsyncSession) -> None:
+    """A re-edit deletes an open part and makes it again with a new id (LP-946). Her refusal on that
+    part must follow it (LP-953 review)."""
+    from app.models.condition_vocabulary import Performer
+    from tests.conditions.test_condition_plan import _conditions, _items, _planned_round_one
+
+    loan_file, _round = await _planned_round_one(db_session)
+    by_code = await _conditions(db_session, loan_file)
+    condition = by_code["6637"]
+    item = next(i for i in await _items(db_session, condition) if i.part_of_item_id is None)
+
+    async def edit(performers: list[Performer]) -> None:
+        await update_item(
+            db_session,
+            condition=condition,
+            item=item,
+            option=PlanOption.ASK_BORROWER,
+            name=None,
+            performers=performers,
+            due_date=None,
+            actor_user_id=None,
+        )
+        await db_session.flush()
+
+    await edit([Performer.BORROWER, Performer.EMPLOYER])
+    part = next(
+        i
+        for i in await _items(db_session, condition)
+        if i.part_of_item_id is not None and Performer.EMPLOYER.value in (i.performers or [])
+    )
+    document = await _doc(
+        db_session,
+        loan_file,
+        document_type=(part.documents or ["bank_statement"])[0],
+        name="A statement",
+    )
+    await _refusal(db_session, item=part, document=document)
+    assert await _answers(db_session, item=part, document=document) == (False, True)
+
+    # The same performer stays, so the part is deleted and remade under the same key with a new id.
+    await edit([Performer.BORROWER, Performer.EMPLOYER, Performer.INSURANCE])
+    remade = next(
+        i
+        for i in await _items(db_session, condition)
+        if i.part_of_item_id is not None and Performer.EMPLOYER.value in (i.performers or [])
+    )
+    assert remade.id != part.id  # the premise
+
+    assert await _answers(db_session, item=remade, document=document) == (False, True)

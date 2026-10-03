@@ -619,10 +619,17 @@ async def carry_plan(
     existing = await _items_by_condition(db, from_condition.loan_file_id)
     if existing.get(to_condition.id):
         return 0
+    from app.services.condition_matching import copy_unlinks
+
     carried = 0
     for item in existing.get(from_condition.id, []):
+        # AN EXPLICIT ID SO HER REFUSALS CAN FOLLOW (LP-953 review). `condition_item_unlinks` is keyed
+        # `(item_id, document_id)`, and a carry replaces the item id, so without the copy below the
+        # successor's item is unprotected and the next arrival re-links a document she removed.
+        new_id = uuid4()
         db.add(
             ConditionItem(
+                id=new_id,
                 company_id=to_condition.company_id,
                 loan_file_id=to_condition.loan_file_id,
                 condition_id=to_condition.id,
@@ -645,6 +652,13 @@ async def carry_plan(
                 due_date=item.due_date,
                 sequence=item.sequence,
             )
+        )
+        await copy_unlinks(
+            db,
+            from_item_id=item.id,
+            to_item_id=new_id,
+            company_id=to_condition.company_id,
+            loan_file_id=to_condition.loan_file_id,
         )
         carried += 1
     to_condition.next_step = from_condition.next_step
@@ -869,7 +883,13 @@ async def update_item(
     # unsent draft or is her untouched task. A part whose ask went out (REQUESTED), whose document came
     # (RECEIVED) or that is DONE is KEPT, as the record of what was requested or arrived — the LP-940
     # doctrine that a SENT draft keeps its items (LP-946 review). A kept part is not split out again.
+    from app.services.condition_matching import copy_unlinks
+
     kept: set[str] = set()
+    # HER REFUSALS FOLLOW A PART THAT IS REMADE (LP-953 review): a deleted part's id is replaced, and
+    # `condition_item_unlinks` is keyed on it, so without carrying them the next arrival re-links a
+    # document she removed from that part. Keyed by key, which `split_item` derives deterministically.
+    replaced: dict[str, UUID] = {}
     for old in (
         await db.execute(
             select(ConditionItem).where(
@@ -879,11 +899,21 @@ async def update_item(
     ).scalars():
         if old.status is ConditionItemStatus.OPEN:
             old.deleted_at = datetime.now(UTC)
+            replaced[old.key] = old.id
         else:
             kept.add(old.key)
     parts = [part for part in split_item(item) if part.key not in kept]
     for part in parts:
         db.add(part)
+        was = replaced.get(part.key)
+        if was is not None:
+            await copy_unlinks(
+                db,
+                from_item_id=was,
+                to_item_id=part.id,
+                company_id=item.company_id,
+                loan_file_id=item.loan_file_id,
+            )
     if parts:
         changed["split"] = [p.performers for p in parts]
     before = item.option

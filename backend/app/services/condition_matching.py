@@ -66,6 +66,45 @@ def document_answers(
     return not (item_id is not None and unlinked and (item_id, document.id) in unlinked)
 
 
+async def copy_unlinks(
+    db: AsyncSession, *, from_item_id: UUID, to_item_id: UUID, company_id: UUID, loan_file_id: UUID
+) -> int:
+    """Carry her refusals onto an item that REPLACES another (LP-953 review). Returns how many.
+
+    HER "NO" IS KEYED `(item_id, document_id)`, AND TWO FLOWS REPLACE THE ITEM ID while keeping the
+    plan: `carry_plan`, when a reworded condition hands its items to its successor, and `update_item`'s
+    re-split, which deletes an open part and makes it again. Without this the fact is stranded on an id
+    nothing reads, and the next arrival re-links the document she removed — "her choice wins" held
+    within a round and failed across a carry.
+
+    The key stays narrow on purpose. A file-wide key (`loan_file_id, item.key, document_id`) would
+    survive both flows without this copy, but item keys are unique only within a CONDITION — AS-01 and
+    AS-10 both have a `statements` item — so one refusal would suppress the automatic match on an
+    unrelated condition. A missed refusal shows itself when the document reappears; a wrong suppression
+    never does.
+    """
+    rows = (
+        await db.execute(
+            select(ConditionItemUnlink.document_id, ConditionItemUnlink.unlinked_by_user_id).where(
+                ConditionItemUnlink.item_id == from_item_id
+            )
+        )
+    ).tuples()
+    carried = 0
+    for document_id, unlinked_by in rows:
+        db.add(
+            ConditionItemUnlink(
+                company_id=company_id,
+                loan_file_id=loan_file_id,
+                item_id=to_item_id,
+                document_id=document_id,
+                unlinked_by_user_id=unlinked_by,
+            )
+        )
+        carried += 1
+    return carried
+
+
 async def unlinked_pairs(db: AsyncSession, *, loan_file_id: UUID) -> set[tuple[UUID, UUID]]:
     """Every `(item, document)` she has unlinked on the file."""
     rows = await db.execute(
