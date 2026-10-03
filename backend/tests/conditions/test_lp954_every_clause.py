@@ -166,3 +166,37 @@ async def test_1228_on_a_uwm_file_asks_the_lo_and_leaves_the_inspection_to_the_l
     ]
     assert condition.next_step is None
     assert condition.plan_reason == "Ordered through the lender — confirm on your files"
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-954 REVIEW: the guard's floor — a real quote, saying more than the word
+# --------------------------------------------------------------------------------------------- #
+
+
+def test_an_echo_of_the_conditional_word_does_not_cover_it() -> None:
+    """The guard's BOUNDARY, not its happy path (LP-954 review).
+
+    It must catch the two failures that matter — a dropped clause and a quote the lender never wrote —
+    and must not be satisfied by quoting the conditional word back with any item key attached, which
+    would make a READY reading out of a clause nobody covered. The last two rows are the positive
+    control: a real clause, covered by an item or by a note, still reads as covered.
+    """
+    from app.services.condition_reading import uncovered_conditionals
+
+    text = "Final inspection is required (and possibly a Change of Circumstance) to confirm completion."
+    items = [{"key": "inspection"}]
+    clause = "and possibly a Change of Circumstance"
+
+    def uncovered(clauses: list[dict[str, str]]) -> bool:
+        return uncovered_conditionals(text, {"clauses": clauses}, items) != []
+
+    assert uncovered([]) is True  # the drop this guard exists to catch
+    assert (
+        uncovered([{"text": "possibly a Letter of Explanation", "item_key": "inspection"}]) is True
+    )
+    assert (
+        uncovered([{"text": "possibly", "item_key": "inspection"}]) is True
+    )  # an echo, not a clause
+    assert uncovered([{"text": "possibly", "note": "x"}]) is True
+    assert uncovered([{"text": clause, "item_key": "inspection"}]) is False
+    assert uncovered([{"text": clause, "note": "the LO re-discloses"}]) is False

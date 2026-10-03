@@ -473,8 +473,17 @@ def uncovered_conditionals(
     """Each conditional clause in the lender's text that no item and no note covers. Code only.
 
     The AI says which item covers each clause it found (`clauses`). A conditional word is covered when a
-    clause the AI quoted contains it, is really in the lender's text, and names an item the reading has or
-    a note saying why it asks for nothing. Anything else is reported in the lender's own words.
+    clause the AI quoted contains it, is really in the lender's text, SAYS MORE THAN THE WORD ITSELF, and
+    names an item the reading has or a note saying why it asks for nothing. Anything else is reported in
+    the lender's own words.
+
+    WHAT THIS ESTABLISHES, AND WHAT IT CANNOT (LP-954 review). It catches the two failures that matter: a
+    clause the model dropped, and a quote the lender never wrote. It cannot judge whether the named item
+    really covers the clause — that is a reading, not a fact — so the floor is a real quote plus a real
+    item key. The length test is what stops that floor falling to an echo of the word: quoting bare
+    "possibly" and naming any existing item used to satisfy this. A clause that is nothing but the
+    conditional phrase ("Provide X. If applicable.") now reads as uncovered, which asks her to look at a
+    sentence no lender writes — the safe direction for a guard whose only cost is a confirmation.
     """
     plain_text = _plain(text)
     keys = {str(item.get("key")) for item in items}
@@ -486,6 +495,8 @@ def uncovered_conditionals(
         for clause in clauses:
             quoted = _plain(str(clause.get("text") or ""))
             if not quoted or word not in quoted or quoted not in plain_text:
+                continue
+            if len(quoted) <= len(word):  # an echo of the word is not a clause (LP-954 review)
                 continue
             if str(clause.get("item_key") or "") in keys or str(clause.get("note") or "").strip():
                 covered = True
