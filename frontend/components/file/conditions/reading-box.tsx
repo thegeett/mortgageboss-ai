@@ -156,8 +156,11 @@ export function ReadingItems({
   onAdd,
   onMarkDone,
   onOpenDraft,
+  itemActions,
 }: {
   items: ShownItem[];
+  /** LP-953 — her link actions on a stored item (Link a document, Upload here). */
+  itemActions?: (item: ConditionItem) => React.ReactNode;
   /** S3-01's "Add an item" (LP-920). Offered only once the plan exists. */
   onAdd?: (name: string, performer: Performer) => void;
   /** LP-921 — her own task done (or not). Offered on an "I'll do it" item only. */
@@ -230,6 +233,7 @@ export function ReadingItems({
               {"id" in item ? (
                 <ItemWhere item={item} onMarkDone={onMarkDone} onOpenDraft={onOpenDraft} />
               ) : null}
+              {"id" in item && itemActions ? itemActions(item) : null}
               {"id" in item
                 ? partsOf(item.id).map((part) => (
                     <p key={part.id} className="text-xs text-foreground-2">

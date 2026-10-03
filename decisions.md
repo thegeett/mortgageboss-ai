@@ -16809,3 +16809,36 @@ mapping. A file read while untyped keeps its generic items after its lender is s
 file is LP-952's question (its rule: never re-read a read or confirmed condition).
 
 *Status.* Accepted (LP-949).
+
+## ADR-418
+
+**A condition item's link to a document is an evidence row, whoever made it. Her links are rows with
+`origin = manual`; her unlinks delete the row and are kept as their own fact (`condition_item_unlinks`),
+which the matching reads. A document of the wrong type can be linked, but it fails a check and the item is
+not done until she accepts it anyway.**
+
+*Context.* The staging trial (items 6 and 7) and the owner's LP-953 list: one matching rule for plan and
+arrival; manual link, change, unlink and upload-here; "her choice always beats automatic matching"; "a
+mismatched manual link shows its warning"; "Already in the file chosen by hand must link a document". Two
+link stores existed: `condition_items.document_id` (plan-time "Already in the file") and `condition_evidence`
+(arrival, carrying the checks and findings `_settle` reads).
+
+*Decision (LP-953).*
+- **The evidence row is the link.** A manual link creates one, so its checks run and show. The item's
+  `document_id` is a pointer that follows it (set on link, cleared on unlink).
+- **Her "no" is a stored fact, not an absent link** (the `owner_override` pattern, ADR-404's owner field):
+  unlinking deletes the evidence row, so no query over evidence needs to remember to skip it and nothing
+  hidden can hold a condition, and writes `condition_item_unlinks`, which arrival and plan-time matching
+  read. Linking the same document again by hand deletes that row.
+- **One matching rule**: `condition_matching.document_answers(wanted, match_words, document, unlinked)`,
+  called by both matchers; what differs between them is passed in.
+- **A mismatched manual link** fails "Right document type" (both types named). The item stays not done, so
+  the condition cannot reach Ready to send and the package by itself; "Accept anyway" with her reason makes
+  it done.
+- **"Already in the file" by hand** is refused unless the item has a linked document.
+- **Unlinking** recomputes the item (open, or requested if its ask went out) and moves a Ready condition
+  back to To do.
+- **One document per evidence row; several per item and per condition** (the evidence table is keyed by
+  item and document). No new link table.
+
+*Status.* Accepted (LP-953).

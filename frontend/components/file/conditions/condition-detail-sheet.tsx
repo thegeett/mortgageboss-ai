@@ -1,6 +1,7 @@
 "use client";
 
 import { EvidenceSection } from "@/components/file/conditions/evidence-section";
+import { ItemLinkActions } from "@/components/file/conditions/item-links";
 import { ReadingBox, ReadingItems } from "@/components/file/conditions/reading-box";
 import { WithdrawControl } from "@/components/file/conditions/withdraw-condition";
 import { StatusToken } from "@/components/status-token";
@@ -470,6 +471,11 @@ function SheetBody({
               onMarkItemDone ? (item, done) => onMarkItemDone(condition, item, done) : undefined
             }
             onOpenDraft={onOpenDraft}
+            itemActions={
+              fileId && replacedById === null
+                ? (item) => <ItemLinkActions fileId={fileId} condition={condition} item={item} />
+                : undefined
+            }
           />
         ) : condition.reading ? (
           <ReadingItems items={condition.reading.items} />

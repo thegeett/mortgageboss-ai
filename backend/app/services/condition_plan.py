@@ -99,6 +99,9 @@ REASON_PUSH_BACK = "Reason from the letter"
 REASON_SHORTFALL = "Shortfall computed by code"
 REASON_TITLE_INSTRUCTION = "Added to the title email"
 REASON_LENDER_PROCESSING = "Lender is processing this file"
+#: LP-953 — "Already in the file" names a document, so choosing it by hand means one is linked.
+LINK_FIRST = "Link the document that is already in the file first: choose it, then this step."
+
 ITEM_DONE_ONLY_FOR_TASKS = (
     "Only your own tasks are marked done here — an item you asked for is done when it arrives."
 )
@@ -216,18 +219,16 @@ async def _items_by_condition(
 def _find_document(
     item: dict[str, Any], match_words: tuple[str, ...], documents: list[Document]
 ) -> Document | None:
-    """A document the file already holds for this item: same type and, if the library gives words,
-    one of them in the document's name. The newest wins."""
-    wanted = set(item.get("documents") or [])
-    if not wanted:
-        return None
+    """A document the file already holds for this item: the ONE matching rule arrival uses too
+    (`condition_matching.document_answers`, LP-953). The newest wins. A new item has nothing she has
+    unlinked yet, so no `unlinked` set is passed."""
+    from app.services.condition_matching import document_answers
+
     for document in documents:
-        if document.document_type not in wanted:
-            continue
-        name = (document.document_name or "").lower()
-        if match_words and not any(word in name for word in match_words):
-            continue
-        return document
+        if document_answers(
+            wanted=item.get("documents"), match_words=match_words, document=document
+        ):
+            return document
     return None
 
 
@@ -777,9 +778,35 @@ async def apply_step_status(
     return True
 
 
+async def _has_link(db: AsyncSession, item: ConditionItem) -> bool:
+    """LP-953 — whether a document answers this item: the pointer, or an evidence row."""
+    from app.models.condition_evidence import ConditionEvidence
+
+    if item.document_id is not None:
+        return True
+    found = await db.scalar(
+        select(ConditionEvidence.id).where(ConditionEvidence.item_id == item.id).limit(1)
+    )
+    return found is not None
+
+
 async def set_next_step(
     db: AsyncSession, *, condition: Condition, next_step: PlanOption | None, actor_user_id: UUID
 ) -> None:
+    if next_step is PlanOption.ALREADY_IN_FILE:
+        # LP-953 — THE WHOLE CONDITION "already in the file" means every live item has its document.
+        live = [
+            item
+            for item in await db.scalars(
+                select(ConditionItem).where(
+                    ConditionItem.condition_id == condition.id,
+                    ConditionItem.deleted_at.is_(None),
+                )
+            )
+            if item.status is not ConditionItemStatus.NOT_NEEDED
+        ]
+        if not live or not all([await _has_link(db, item) for item in live]):
+            raise PlanRefused(LINK_FIRST)
     before = condition.next_step
     condition.next_step = next_step
     db.add(
@@ -824,6 +851,8 @@ async def update_item(
         changed["status"] = {"from": item.status.value, "to": status.value}
         item.status = status
     if option is not None and option is not item.option:
+        if option is PlanOption.ALREADY_IN_FILE and not await _has_link(db, item):
+            raise PlanRefused(LINK_FIRST)
         changed["option"] = {"from": item.option.value, "to": option.value}
         item.option = option
     if name is not None and name.strip() and name.strip() != item.name:

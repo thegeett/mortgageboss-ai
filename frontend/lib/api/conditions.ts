@@ -12,6 +12,7 @@
  * requirement is literally "poll until `DRAFT` or `PARSE_FAILED`".
  */
 import { apiClient } from "@/lib/api/client";
+import { documentsQueryKey, uploadDocuments } from "@/lib/api/documents";
 import { withWrongFileConfirmation } from "@/lib/api/wrong-file";
 import type {
   AddConditionInput,
@@ -1390,6 +1391,66 @@ export function useReadAgain(fileId: string) {
     // left unread): refetch, so the panel shows the reading rather than the button that was refused.
     onError: (_error, roundId) => {
       void queryClient.invalidateQueries({ queryKey: readingStateQueryKey(roundId) });
+    },
+  });
+}
+
+// --------------------------------------------------------------------------------------------- //
+// LP-953 — her links between an item and a document
+// --------------------------------------------------------------------------------------------- //
+
+/** Link (or, with `replace_document_id`, Change). 404 for another file's document; 409 already linked. */
+export function useLinkItemDocument(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      conditionId,
+      itemId,
+      ...body
+    }: {
+      conditionId: string;
+      itemId: string;
+      document_id: string;
+      page?: number | null;
+      replace_document_id?: string | null;
+    }) =>
+      (await apiClient.post<Condition>(`${conditionPath(conditionId)}/items/${itemId}/links`, body))
+        .data,
+    onSuccess: (condition) => invalidateCondition(queryClient, fileId, condition.id),
+  });
+}
+
+/** Unlink: recorded, so no automatic match puts it back. */
+export function useUnlinkItemDocument(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      conditionId,
+      itemId,
+      documentId,
+    }: {
+      conditionId: string;
+      itemId: string;
+      documentId: string;
+    }) =>
+      (
+        await apiClient.delete<Condition>(
+          `${conditionPath(conditionId)}/items/${itemId}/links/${documentId}`,
+        )
+      ).data,
+    onSuccess: (condition) => invalidateCondition(queryClient, fileId, condition.id),
+  });
+}
+
+/** "Upload here": upload to the file, linked to this item. The documents list and the condition refresh. */
+export function useUploadToItem(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ itemId, files }: { conditionId: string; itemId: string; files: File[] }) =>
+      uploadDocuments(fileId, files, itemId),
+    onSuccess: (_docs, { conditionId }) => {
+      void queryClient.invalidateQueries({ queryKey: documentsQueryKey(fileId) });
+      invalidateCondition(queryClient, fileId, conditionId);
     },
   });
 }

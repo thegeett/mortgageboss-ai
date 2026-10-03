@@ -68,6 +68,10 @@ class EvidenceCheck(StrEnum):
     EFFECTIVE_BY_CLOSING = "effective_by_closing"
     INSIDE_VOE_WINDOW = "inside_voe_window"
     NOT_EXPIRED = "not_expired"
+    #: LP-953 — not a library check: added to a document SHE linked whose type the item does not ask
+    #: for. It fails with both types named, so a credit report linked to an invoice item never passes
+    #: by itself; she can still "Accept anyway", with her reason, which is her deciding it.
+    RIGHT_DOCUMENT_TYPE = "right_document_type"
 
 
 class ConditionItemStatus(StrEnum):

@@ -93,6 +93,7 @@ from app.schemas.condition import (
     FileLenderRequest,
     FindingAnswerRequest,
     ImportRequest,
+    ItemLinkRequest,
     LenderDeclineRequest,
     LenderProcessingRequest,
     NextStepRequest,
@@ -1583,9 +1584,75 @@ async def set_condition_next_step(
     condition: ScopedCondition, payload: NextStepRequest, db: DbSession, current_user: CurrentUser
 ) -> ConditionPublic:
     """The whole condition's step (S3-02's select), or null to let its items carry their own."""
-    await set_next_step(
-        db, condition=condition, next_step=payload.next_step, actor_user_id=current_user.id
-    )
+    try:
+        await set_next_step(
+            db, condition=condition, next_step=payload.next_step, actor_user_id=current_user.id
+        )
+    except PlanRefused as exc:
+        # LP-953 — "Already in the file" without a linked document is refused with the sentence.
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    return await _condition_response(db, condition)
+
+
+@conditions_by_id_router.post(
+    "/{condition_id}/items/{item_id}/links", response_model=ConditionPublic
+)
+async def link_item_document(
+    condition: ScopedCondition,
+    item_id: UUID,
+    payload: ItemLinkRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionPublic:
+    """LP-953 — Link (and, with `replace_document_id`, Change): this file's document answers this item.
+
+    Another file's document is 404, like another file's item. The link is an evidence row of her own, so
+    its checks run now if the document has been read, and when it is read otherwise.
+    """
+    from app.services.condition_links import LinkRefused, link_document
+
+    item = await _scoped_item(db, condition, item_id)
+    try:
+        await link_document(
+            db,
+            condition=condition,
+            item=item,
+            document_id=payload.document_id,
+            page=payload.page,
+            actor_user_id=current_user.id,
+            replace_document_id=payload.replace_document_id,
+        )
+    except LinkRefused as exc:
+        code = status.HTTP_404_NOT_FOUND if exc.not_found else status.HTTP_409_CONFLICT
+        raise HTTPException(code, detail=exc.reason) from exc
+    return await _condition_response(db, condition)
+
+
+@conditions_by_id_router.delete(
+    "/{condition_id}/items/{item_id}/links/{document_id}", response_model=ConditionPublic
+)
+async def unlink_item_document(
+    condition: ScopedCondition,
+    item_id: UUID,
+    document_id: UUID,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionPublic:
+    """LP-953 — Unlink: this document does not answer this item. Recorded, so no match puts it back."""
+    from app.services.condition_links import LinkRefused, unlink_document
+
+    item = await _scoped_item(db, condition, item_id)
+    try:
+        await unlink_document(
+            db,
+            condition=condition,
+            item=item,
+            document_id=document_id,
+            actor_user_id=current_user.id,
+        )
+    except LinkRefused as exc:
+        code = status.HTTP_404_NOT_FOUND if exc.not_found else status.HTTP_409_CONFLICT
+        raise HTTPException(code, detail=exc.reason) from exc
     return await _condition_response(db, condition)
 
 

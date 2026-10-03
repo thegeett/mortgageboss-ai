@@ -12,7 +12,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Index, Text, UniqueConstraint
+from sqlalchemy import ForeignKey, Index, Integer, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,6 +25,13 @@ class EvidenceStatus(StrEnum):
 
     CHECKED = "checked"
     ACCEPTED = "accepted"
+
+
+class EvidenceOrigin(StrEnum):
+    """LP-953 — how the link was made: by the evidence step's matching, or by her."""
+
+    AUTO = "auto"
+    MANUAL = "manual"
 
 
 class ConditionEvidence(Base, UUIDMixin, TimestampMixin):
@@ -64,5 +71,49 @@ class ConditionEvidence(Base, UUIDMixin, TimestampMixin):
     #: Her reason for accepting a failed check (S3-07's "Accept anyway…"). Kept in the history too.
     accepted_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     accepted_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    #: LP-953 — `manual` when she linked it (Link, Change, Upload here). Her link is an evidence row like
+    #: any other, so its checks run and show; `origin` says it was hers, and the sheet shows that.
+    origin: Mapped[EvidenceOrigin] = mapped_column(
+        str_enum(EvidenceOrigin),
+        default=EvidenceOrigin.AUTO,
+        server_default=EvidenceOrigin.AUTO.value,
+        nullable=False,
+    )
+    linked_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    #: The page she pointed at, when she linked a page rather than the whole document.
+    page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class ConditionItemUnlink(Base, UUIDMixin, TimestampMixin):
+    """LP-953 — HER DECISION that a document does not answer an item.
+
+    Its own row, never inferred: unlinking DELETES the evidence row (so no query over evidence has to
+    remember to skip it), and this row is what stops arrival linking or a plan-time match from putting the
+    link back. Linking the same document again by hand deletes this row. Ids only; not NPI.
+    """
+
+    __tablename__ = "condition_item_unlinks"
+    __table_args__ = (
+        UniqueConstraint("item_id", "document_id"),
+        Index("ix_condition_item_unlinks_loan_file_id", "loan_file_id"),
+    )
+
+    company_id: Mapped[UUID] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
+    )
+    loan_file_id: Mapped[UUID] = mapped_column(
+        ForeignKey("loan_files.id", ondelete="CASCADE"), nullable=False
+    )
+    item_id: Mapped[UUID] = mapped_column(
+        ForeignKey("condition_items.id", ondelete="CASCADE"), nullable=False
+    )
+    document_id: Mapped[UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    unlinked_by_user_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

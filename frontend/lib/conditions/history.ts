@@ -229,6 +229,11 @@ export function conditionHistoryLine(
         : `Withdrawn as entered in error${by(event)}`;
     case "condition_restored":
       return `Withdrawal undone${by(event)}`;
+    // LP-953 — her links. The detail carries ids only, so the line names no document.
+    case "condition_evidence_linked":
+      return `A document was linked by hand${by(event)}`;
+    case "condition_evidence_unlinked":
+      return `A document was unlinked; it will not be matched to that item again${by(event)}`;
     // LP-949 — the file's lender was set, or a code was confirmed, and this untyped condition took its
     // type from the lender's code map. The label is the library's, from a closed vocabulary.
     case "condition_typed":

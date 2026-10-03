@@ -1,7 +1,12 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { useAcceptEvidence, useAnswerFinding, useReaskEvidence } from "@/lib/api/conditions";
+import {
+  useAcceptEvidence,
+  useAnswerFinding,
+  useReaskEvidence,
+  useUnlinkItemDocument,
+} from "@/lib/api/conditions";
 import { waitingLabel } from "@/lib/conditions/next-step";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import type {
@@ -22,6 +27,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { ItemLinkActions } from "./item-links";
 
 /**
  * Evidence that arrived for the condition's items, and what code found (S3-07, S3-08; LP-923).
@@ -65,15 +71,18 @@ function EvidenceCard({
           <p className="text-sm font-semibold text-foreground">{evidence.title}</p>
           <p className="text-xs text-muted-foreground">
             {evidence.via_upload_link ? "Arrived through the borrower upload link" : "Arrived"} ·{" "}
-            {arrived(evidence.arrived_at)} · linked to this condition automatically
+            {arrived(evidence.arrived_at)} · {linkedHow(evidence)}
           </p>
         </div>
-        <Button asChild variant="outline" size="sm">
-          <Link href={`/loan-files/${fileId}/documents?doc=${evidence.document_id}`}>
-            <Eye className="h-3.5 w-3.5" aria-hidden />
-            Open
-          </Link>
-        </Button>
+        <div className="flex flex-col items-end gap-1.5">
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/loan-files/${fileId}/documents?doc=${evidence.document_id}`}>
+              <Eye className="h-3.5 w-3.5" aria-hidden />
+              Open
+            </Link>
+          </Button>
+          <LinkControls fileId={fileId} condition={condition} evidence={evidence} />
+        </div>
       </div>
 
       <div>
@@ -404,4 +413,73 @@ function arrived(iso: string): string {
     minute: "2-digit",
     timeZone: "America/New_York",
   });
+}
+
+/** LP-953 — who made the link: the matching, or her (with her name and the page she pointed at). */
+function linkedHow(evidence: ConditionEvidence): string {
+  if (evidence.origin !== "manual") return "linked to this condition automatically";
+  const who = evidence.linked_by_name ? ` by ${evidence.linked_by_name}` : "";
+  const page = evidence.page ? `, page ${evidence.page}` : "";
+  return `linked by hand${who}${page}`;
+}
+
+/**
+ * LP-953 — Unlink and Change, on every link, hers or automatic. Unlink is recorded, so the matching
+ * never puts it back; Change removes this link and makes the new one in one step.
+ */
+function LinkControls({
+  fileId,
+  condition,
+  evidence,
+}: {
+  fileId: string;
+  condition: Condition;
+  evidence: ConditionEvidence;
+}) {
+  const unlink = useUnlinkItemDocument(fileId);
+  const [changing, setChanging] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const item = condition.items.find((each) => each.id === evidence.item_id);
+  if (!item) return null;
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <div className="flex gap-1.5">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={unlink.isPending}
+          onClick={() => setChanging((open) => !open)}
+        >
+          Change
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="text-destructive"
+          disabled={unlink.isPending}
+          onClick={() => {
+            setError(null);
+            unlink.mutate(
+              { conditionId: condition.id, itemId: item.id, documentId: evidence.document_id },
+              { onError: (err) => setError(getErrorMessage(err)) },
+            );
+          }}
+        >
+          Unlink
+        </Button>
+      </div>
+      {changing ? (
+        <ItemLinkActions
+          fileId={fileId}
+          condition={condition}
+          item={item}
+          replaceDocumentId={evidence.document_id}
+          onDone={() => setChanging(false)}
+        />
+      ) : null}
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+    </div>
+  );
 }

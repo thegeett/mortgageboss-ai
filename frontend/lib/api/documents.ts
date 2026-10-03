@@ -99,11 +99,17 @@ export function useDocumentDetail(documentId: string | null) {
 
 // --- Upload (multipart, multiple) ------------------------------------------- //
 
-export async function uploadDocuments(fileId: string, files: File[]): Promise<DocumentResponse[]> {
+export async function uploadDocuments(
+  fileId: string,
+  files: File[],
+  conditionItemId?: string,
+): Promise<DocumentResponse[]> {
   const form = new FormData();
   for (const file of files) {
     form.append("files", file);
   }
+  // LP-953 — "Upload here": the upload is linked to this condition item as it is created.
+  if (conditionItemId) form.append("condition_item_id", conditionItemId);
   const res = await apiClient.post<DocumentResponse[]>(
     `${API_V1}/loan-files/${fileId}/documents`,
     form,

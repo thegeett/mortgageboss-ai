@@ -18,12 +18,12 @@ bytes are returned only through the auth'd ``/download`` route.
 """
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
 import structlog
-from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.ai.extraction import EXTRACTORS
@@ -315,14 +315,44 @@ async def _read_capped(upload: UploadFile, *, max_bytes: int) -> bytes:
     return b"".join(chunks)
 
 
+async def _upload_target(db: DbSession, *, loan_file_id: UUID, item_id: UUID) -> tuple[Any, Any]:
+    """LP-953 — the item "Upload here" links to: on THIS file (404 otherwise) and on an open condition
+    (409 otherwise), checked BEFORE any file is stored."""
+    from sqlalchemy import select
+
+    from app.models.condition import Condition
+    from app.models.condition_item import ConditionItem
+    from app.services.condition_evidence import open_condition
+    from app.services.condition_links import CLOSED
+
+    item = await db.scalar(
+        select(ConditionItem).where(
+            ConditionItem.id == item_id,
+            ConditionItem.loan_file_id == loan_file_id,
+            ConditionItem.deleted_at.is_(None),
+        )
+    )
+    condition = await db.get(Condition, item.condition_id) if item is not None else None
+    if item is None or condition is None or condition.loan_file_id != loan_file_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found.")
+    if not open_condition(condition):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=CLOSED)
+    return condition, item
+
+
 @nested_router.post("", response_model=list[DocumentResponse], status_code=status.HTTP_201_CREATED)
 async def upload(
     loan_file: ScopedLoanFile,
     current_user: CurrentUser,
     db: DbSession,
     files: Annotated[list[UploadFile], File(description="One or more files to upload")],
+    condition_item_id: Annotated[UUID | None, Form()] = None,
 ) -> list[DocumentResponse]:
     """Upload one or more files to the loan file (validated, stored, ``PENDING``).
+
+    LP-953 — ``condition_item_id`` is the condition sheet's "Upload here": each file is linked to that
+    item as it is created (her link, checked once the document has been read). The item must be on THIS
+    file and its condition open; otherwise nothing is stored (404 / 409).
 
     All files are validated **before any are stored**, so an invalid file in the
     batch rejects the whole request and leaves nothing persisted. Each valid file
@@ -331,6 +361,9 @@ async def upload(
     """
     if not files:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files provided")
+    target = None
+    if condition_item_id is not None:
+        target = await _upload_target(db, loan_file_id=loan_file.id, item_id=condition_item_id)
 
     # Stage 1 — read + validate every file first (all-or-nothing).
     staged: list[tuple[UUID, UploadFile, bytes, str]] = []
@@ -367,6 +400,24 @@ async def upload(
             uploaded_by_user_id=current_user.id,
         )
         created.append(document)
+
+    if target is not None:
+        from app.services.condition_links import LinkRefused, link_document
+
+        condition, item = target
+        for document in created:
+            try:
+                await link_document(
+                    db,
+                    condition=condition,
+                    item=item,
+                    document_id=document.id,
+                    page=None,
+                    actor_user_id=current_user.id,
+                )
+            except LinkRefused as exc:
+                code = status.HTTP_404_NOT_FOUND if exc.not_found else status.HTTP_409_CONFLICT
+                raise HTTPException(status_code=code, detail=exc.reason) from exc
 
     await log_activity(
         db,

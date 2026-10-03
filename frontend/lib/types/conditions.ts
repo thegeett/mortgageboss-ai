@@ -325,7 +325,9 @@ export type ConditionEventKind =
   | "condition_restored"
   | "condition_typed"
   | "round_lender_declined"
-  | "round_wrong_file_confirmed";
+  | "round_wrong_file_confirmed"
+  | "condition_evidence_linked"
+  | "condition_evidence_unlinked";
 
 /**
  * One line of a round's history (S1-09).
@@ -994,7 +996,8 @@ export type EvidenceCheck =
   | "mortgagee_clause_matches"
   | "effective_by_closing"
   | "inside_voe_window"
-  | "not_expired";
+  | "not_expired"
+  | "right_document_type";
 
 /** Below the confidence bar, or read without the AI, the reading needs her before anything is drafted. */
 export type ConditionReadingStatus = "unread" | "ready" | "needs_confirmation" | "confirmed";
@@ -1227,6 +1230,10 @@ export interface ConditionEvidence {
   replaced: boolean;
   /** The email a re-ask goes into — the failed item's own asker ("borrower", "title/attorney"). */
   reask_to: string | null;
+  /** LP-953 — `manual` when she linked it. The card says "Linked by hand — <name>" and the page. */
+  origin: "auto" | "manual";
+  linked_by_name: string | null;
+  page: number | null;
 }
 
 // --- Stage 3: the figures check (LP-924) ------------------------------------------------------- //

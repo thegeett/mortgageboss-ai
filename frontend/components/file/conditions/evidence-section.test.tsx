@@ -11,6 +11,7 @@ const calls = vi.hoisted(() => ({
   reask: [] as unknown[],
   accept: [] as unknown[],
   answer: [] as unknown[],
+  unlink: [] as unknown[],
 }));
 vi.mock("@/lib/api/conditions", () => ({
   useReaskEvidence: () => ({ isPending: false, mutate: (body: unknown) => calls.reask.push(body) }),
@@ -22,6 +23,16 @@ vi.mock("@/lib/api/conditions", () => ({
     isPending: false,
     mutate: (body: unknown) => calls.answer.push(body),
   }),
+  // LP-953 — her link controls on each card.
+  useUnlinkItemDocument: () => ({
+    isPending: false,
+    mutate: (body: unknown) => calls.unlink.push(body),
+  }),
+  useLinkItemDocument: () => ({ isPending: false, mutate: vi.fn() }),
+  useUploadToItem: () => ({ isPending: false, mutate: vi.fn() }),
+}));
+vi.mock("@/lib/api/documents", () => ({
+  useLoanFileDocuments: () => ({ data: [] }),
 }));
 
 import { EvidenceSection } from "./evidence-section";
@@ -59,6 +70,9 @@ const S3_07: ConditionEvidence = {
   superseded: null,
   replaced: false,
   reask_to: "borrower",
+  origin: "auto",
+  linked_by_name: null,
+  page: null,
 };
 
 const S3_08: ConditionEvidence = {
@@ -99,13 +113,18 @@ const S3_08: ConditionEvidence = {
   reask: null,
 };
 
-function condition(evidence: ConditionEvidence[], code = "6132"): Condition {
+function condition(
+  evidence: ConditionEvidence[],
+  code = "6132",
+  items: Condition["items"] = [],
+): Condition {
   return {
     id: "c1",
     lender_code: code,
     prep_status: "waiting",
     waiting_on: "borrower",
     evidence,
+    items,
   } as Condition;
 }
 
@@ -228,5 +247,30 @@ describe("EvidenceSection", () => {
       { conditionId: "c1", evidenceId: "e2", index: 0, answer: "ask" },
     ]);
     expect(screen.getByText(/All figures above are computed by code/)).toBeDefined();
+  });
+
+  it("says who linked a document and offers Unlink and Change (LP-953)", () => {
+    const item = { id: S3_07.item_id, name: "Bank statement" } as Condition["items"][number];
+    const hers: ConditionEvidence = {
+      ...S3_07,
+      origin: "manual",
+      linked_by_name: "Priya Raman",
+      page: 3,
+    };
+    render(<EvidenceSection fileId="f1" condition={condition([hers], "6132", [item])} />);
+    expect(screen.getByText(/linked by hand by Priya Raman, page 3/)).toBeTruthy();
+    expect(screen.queryByText(/linked to this condition automatically/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Unlink" }));
+    expect(calls.unlink).toEqual([
+      { conditionId: "c1", itemId: S3_07.item_id, documentId: S3_07.document_id },
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Change" }));
+    expect(screen.getByText("Change to")).toBeTruthy();
+  });
+
+  it("says an automatic link is automatic", () => {
+    const item = { id: S3_07.item_id, name: "Bank statement" } as Condition["items"][number];
+    render(<EvidenceSection fileId="f1" condition={condition([S3_07], "6132", [item])} />);
+    expect(screen.getByText(/linked to this condition automatically/)).toBeTruthy();
   });
 });

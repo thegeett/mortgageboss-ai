@@ -262,6 +262,9 @@ async def test_her_polish_survives_an_unrelated_edit_but_not_a_change_to_its_ite
         actor_user_id=actor,
     )
     # An edit that does not touch the borrower email leaves her words and the mark.
+    from tests.conditions.test_next_steps import point_items_at_a_document
+
+    await point_items_at_a_document(db_session, conditions["1582"])
     await set_next_step(
         db_session,
         condition=conditions["1582"],

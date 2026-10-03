@@ -99,11 +99,39 @@ async def test_every_round_one_condition_has_a_step(db_session: AsyncSession) ->
         assert condition.next_step is not None or live, condition.lender_code
 
 
+async def point_items_at_a_document(db: AsyncSession, condition: Condition) -> None:
+    """LP-953 — "Already in the file" by hand needs a linked document. These tests are about what the
+    STEP does, so each live item gets the pointer a plan-time match would set, and nothing else (a full
+    manual link would also run checks and could move the condition, which is not what they test)."""
+    from uuid import uuid4
+
+    from app.models.document import Document, DocumentStatus, UploadSource
+
+    document = Document(
+        loan_file_id=condition.loan_file_id,
+        original_filename="processing-invoice.pdf",
+        mime_type="application/pdf",
+        file_size_bytes=10,
+        storage_path=f"{condition.loan_file_id}/{uuid4().hex}.pdf",
+        document_type="service_invoice",
+        document_name="Processing invoice",
+        status=DocumentStatus.COMPLETED,
+        upload_source=UploadSource.USER_UPLOAD,
+    )
+    db.add(document)
+    await db.flush()
+    for item in await _items(db, condition):
+        if item.status is not ConditionItemStatus.NOT_NEEDED:
+            item.document_id = document.id
+    await db.flush()
+
+
 async def test_nothing_moves_while_the_plan_is_a_proposal(db_session: AsyncSession) -> None:
     loan_file, _ = await _planned_round_one(db_session)
     conditions = await _conditions(db_session, loan_file)
     actor = await _actor(db_session, loan_file)
     # 0006's item is already in the file, and 1582 is re-pointed there too — neither moves yet.
+    await point_items_at_a_document(db_session, conditions["1582"])
     await set_next_step(
         db_session,
         condition=conditions["1582"],
@@ -138,6 +166,7 @@ async def test_choosing_a_step_after_confirming_moves_and_records(
 ) -> None:
     _, _, conditions, actor = await _confirmed_round_one(db_session)
     condition = conditions["1582"]
+    await point_items_at_a_document(db_session, condition)
     await set_next_step(
         db_session, condition=condition, next_step=PlanOption.ALREADY_IN_FILE, actor_user_id=actor
     )
@@ -205,6 +234,7 @@ async def test_the_plan_never_overrides_her_move(db_session: AsyncSession) -> No
         payload=PrepStatusRequest(to=ConditionPrepStatus.WAITING, waiting_on=OwnerHint.LENDER),
         actor_user_id=actor,
     )
+    await point_items_at_a_document(db_session, condition)
     await set_next_step(
         db_session, condition=condition, next_step=PlanOption.ALREADY_IN_FILE, actor_user_id=actor
     )

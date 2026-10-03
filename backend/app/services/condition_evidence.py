@@ -46,7 +46,7 @@ from app.models.condition import (
     ConditionPrepStatus,
 )
 from app.models.condition_event import ConditionEvent, ConditionEventKind
-from app.models.condition_evidence import ConditionEvidence, EvidenceStatus
+from app.models.condition_evidence import ConditionEvidence, EvidenceOrigin, EvidenceStatus
 from app.models.condition_item import ConditionItem
 from app.models.condition_round import ConditionRound
 from app.models.condition_vocabulary import (
@@ -118,6 +118,8 @@ LABEL: dict[str, str] = {
     EvidenceCheck.EFFECTIVE_BY_CLOSING.value: "In force by closing",
     EvidenceCheck.INSIDE_VOE_WINDOW.value: "Inside the VOE window",
     EvidenceCheck.NOT_EXPIRED.value: "Not expired",
+    EvidenceCheck.RIGHT_DOCUMENT_TYPE.value: "Right document type",
+    "document_read": "Document read",
     "no_large_deposit": "No unexplained large deposit",
 }
 
@@ -506,14 +508,32 @@ async def _document(db: AsyncSession, document_id: UUID) -> Document | None:
 
 
 def _takes(
-    item: ConditionItem, siblings: list[ConditionItem], document: Document, s: Statement
+    item: ConditionItem,
+    siblings: list[ConditionItem],
+    document: Document,
+    s: Statement,
+    *,
+    match_words: tuple[str, ...],
+    unlinked: set[tuple[UUID, UUID]],
 ) -> bool:
-    """Whether this document answers this item (step 1)."""
+    """Whether this document answers this item (step 1).
+
+    LP-953 — THE TYPE, THE LIBRARY'S WORDS AND HER UNLINKS go through the one rule the plan uses
+    (`condition_matching.document_answers`); the month and the account below are arrival's own.
+    """
+    from app.services.condition_matching import document_answers
+
     if item.deleted_at is not None or item.status not in _AWAITING:
         return False
     if item.option in (PlanOption.LENDER_DOING_IT, PlanOption.INFORMATION_ONLY):
         return False
-    if document.document_type not in (item.documents or []):
+    if not document_answers(
+        wanted=item.documents,
+        match_words=match_words,
+        document=document,
+        item_id=item.id,
+        unlinked=unlinked,
+    ):
         return False
     month = _month(item)
     covered = _months_covered(s)
@@ -644,11 +664,34 @@ async def check_document(
     touched: list[ConditionEvidence] = []
     conditions_touched: dict[UUID, Condition] = {}
 
+    from app.services.condition_matching import match_words_for, unlinked_pairs
+
+    unlinked = await unlinked_pairs(db, loan_file_id=document.loan_file_id)
+    # LP-953 — A LINK SHE MADE BEFORE THE DOCUMENT WAS READ (Upload here) waits for this moment: it is
+    # checked now whatever the matching would say, because she, not the matching, chose the item.
+    manual_items = set(
+        (
+            await db.execute(
+                select(ConditionEvidence.item_id).where(
+                    ConditionEvidence.document_id == document.id,
+                    ConditionEvidence.origin == EvidenceOrigin.MANUAL,
+                )
+            )
+        ).scalars()
+    )
+
     for item in items:
         condition = await db.get(Condition, item.condition_id)
         if condition is None or not _open_condition(condition):
             continue
-        if not _takes(item, by_condition[item.condition_id], document, statement):
+        if item.id not in manual_items and not _takes(
+            item,
+            by_condition[item.condition_id],
+            document,
+            statement,
+            match_words=match_words_for(condition.canonical_type_id, item.key),
+            unlinked=unlinked,
+        ):
             continue
         evidence = await _evidence_row(db, item=item, document=document, condition=condition)
         await _check(
@@ -749,6 +792,10 @@ async def _check(
         ),
     )
     results = [run_check(name, statement, ctx) for name in names]
+    if evidence.origin is EvidenceOrigin.MANUAL:
+        mismatch = _type_mismatch(item, document)
+        if mismatch is not None:
+            results.insert(0, mismatch)
     if EvidenceCheck.COVERS_REQUIRED_FUNDS.value in names:
         # THE FINDINGS KEEP HER ANSWERS: a re-check never reopens a deposit she explained or asked about.
         answered = {(f.get("date"), f.get("amount")): f for f in (evidence.findings or [])}
@@ -832,14 +879,58 @@ def _open_finding(evidence: ConditionEvidence) -> bool:
 
 
 def _item_passes(item: ConditionItem, evidence: list[ConditionEvidence]) -> bool:
-    """Done when some evidence for it is accepted, or every check on it passed and nothing is open."""
+    """Done when some evidence for it is accepted, or every check on it passed and nothing is open.
+
+    LP-953 — A DOCUMENT SHE LINKED to an item with no checks is done: she chose it and there is nothing
+    for code to run. A link arriving by matching to such an item is not: nothing has looked at it. A manual
+    link made before the document was read carries the not-run `document_read` check (`AWAITING_READ`),
+    so it is never done before the evidence step has checked it.
+    """
     for row in evidence:
         if row.status is EvidenceStatus.ACCEPTED:
             return True
         results = [c.get("result") for c in row.checks or []]
-        if results and all(r == PASSED for r in results) and not _open_finding(row):
+        if _open_finding(row):
+            continue
+        if results and all(r == PASSED for r in results):
+            return True
+        if not results and row.origin is EvidenceOrigin.MANUAL:
             return True
     return False
+
+
+#: LP-953 — the one check a manual link carries until its document has been read and checked (Upload
+#: here, or a link to a document still being processed). Not run, so it never passes and never fails.
+AWAITING_READ: dict[str, str] = {
+    "check": "document_read",
+    "result": NOT_RUN,
+    "reason": "Waiting for the document to be read.",
+}
+
+
+def _type_mismatch(item: ConditionItem, document: Document) -> dict[str, str] | None:
+    """LP-953 — a failed check when the document she linked is not a type the item asks for."""
+    from app.documents.display_names import display_name, in_sentence
+
+    wanted = list(item.documents or [])
+    if not wanted or not document.document_type or document.document_type in wanted:
+        return None
+    asks = " or ".join(in_sentence(display_name(t)) for t in wanted)
+    return {
+        "check": EvidenceCheck.RIGHT_DOCUMENT_TYPE.value,
+        "result": FAILED,
+        "reason": (
+            f"The linked document is {_article(display_name(document.document_type))}; "
+            f"this item asks for {asks}."
+        ),
+    }
+
+
+def _article(name: str) -> str:
+    from app.documents.display_names import in_sentence
+
+    words = in_sentence(name)
+    return f"an {words}" if words[:1].lower() in "aeiou" else f"a {words}"
 
 
 async def _settle(db: AsyncSession, *, condition: Condition, actor_user_id: UUID | None) -> bool:
@@ -1269,6 +1360,12 @@ async def evidence_public_for_file(
         ).scalars()
     }
 
+    from app.services.override_attribution import resolve_user_names
+
+    # LP-953 — WHO LINKED IT, for "Linked by hand — Priya Raman": names in one query.
+    names = await resolve_user_names(
+        db, {r.linked_by_user_id for r in rows if r.linked_by_user_id is not None}
+    )
     out: dict[UUID, list[Any]] = {}
     for row in rows:
         document = documents.get(row.document_id)
@@ -1301,6 +1398,9 @@ async def evidence_public_for_file(
                 superseded=superseded,
                 replaced=replaced,
                 reask_to=reask_destination(item),
+                linked_by_name=names.get(row.linked_by_user_id)
+                if row.linked_by_user_id is not None
+                else None,
             )
         )
     return out
@@ -1321,3 +1421,40 @@ def document_title(document: Document, statement: Statement) -> str:
             parts.append(f"{statement.pages_present} pages")
         return " · ".join(parts)
     return document.document_name or document.original_filename
+
+
+async def check_link(
+    db: AsyncSession,
+    *,
+    evidence: ConditionEvidence,
+    item: ConditionItem,
+    condition: Condition,
+    document: Document,
+    today: date | None = None,
+) -> None:
+    """LP-953 — check one link now: the same `_check` arrival runs. Flushes nothing; caller flushes."""
+    statement = statement_from(_extraction_data(document), document.document_type)
+    await _check(
+        db,
+        evidence=evidence,
+        item=item,
+        condition=condition,
+        document=document,
+        statement=statement,
+        borrowers=await _borrowers(db, document.loan_file_id),
+        today=today or datetime.now(UTC).date(),
+    )
+
+
+async def settle(db: AsyncSession, *, condition: Condition, actor_user_id: UUID | None) -> bool:
+    """`_settle`, for the manual-link door (LP-953)."""
+    return await _settle(db, condition=condition, actor_user_id=actor_user_id)
+
+
+def item_passes(item: ConditionItem, evidence: list[ConditionEvidence]) -> bool:
+    """`_item_passes`, for the manual-link door (LP-953)."""
+    return _item_passes(item, evidence)
+
+
+def open_condition(condition: Condition) -> bool:
+    return _open_condition(condition)

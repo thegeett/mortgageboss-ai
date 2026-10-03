@@ -155,6 +155,12 @@ class ConditionEventKind(StrEnum):
     #: LP-951 — she imported a sheet whose borrower or loan number did not match the file, after the
     #: warning. Detail says WHICH differed (`borrower_differs`, `loan_number_differs`), never the values.
     ROUND_WRONG_FILE_CONFIRMED = "round_wrong_file_confirmed"
+    #: LP-953 — she linked a document to an item by hand (Link, Change, Upload here, or choosing
+    #: "Already in the file"). Detail: the item key, the document id, the page. No document text.
+    CONDITION_EVIDENCE_LINKED = "condition_evidence_linked"
+    #: LP-953 — she removed a link; the evidence row is deleted and `condition_item_unlinks` keeps her
+    #: decision so no automatic match puts it back.
+    CONDITION_EVIDENCE_UNLINKED = "condition_evidence_unlinked"
 
 
 class ConditionEvent(Base, UUIDMixin):

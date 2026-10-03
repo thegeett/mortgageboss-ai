@@ -860,6 +860,11 @@ class ConditionEvidencePublic(BaseModel):
     #: LP-938 follow-up — the email the re-ask goes into ("borrower", "title/attorney", "LO"): the failed
     #: item's own asker. Null when there is nothing to re-ask.
     reask_to: str | None = None
+    #: LP-953 — `manual` when she linked it (Link, Change, Upload here). The sheet says so, with her name
+    #: and the page, and offers Unlink and Change on every link, hers or automatic.
+    origin: Literal["auto", "manual"] = "auto"
+    linked_by_name: str | None = None
+    page: int | None = None
 
     @classmethod
     def build(
@@ -871,6 +876,7 @@ class ConditionEvidencePublic(BaseModel):
         superseded: str | None = None,
         replaced: bool = False,
         reask_to: str | None = None,
+        linked_by_name: str | None = None,
     ) -> "ConditionEvidencePublic":
         from app.models.condition_vocabulary import EvidenceCheck
         from app.models.document import UploadSource
@@ -905,8 +911,11 @@ class ConditionEvidencePublic(BaseModel):
                 )
             )
         accepted = row.status.value == "accepted"
+        manual = getattr(row, "origin", None) is not None and row.origin.value == "manual"
         reask = None
-        if failed and not accepted and superseded is None:
+        # A DOCUMENT SHE LINKED IS NOT RE-ASKED FOR (LP-953): nobody sent it, so there is nobody to ask
+        # again; she unlinks or changes it instead.
+        if failed and not accepted and superseded is None and not manual:
             name = reask_name(failed[0].check, statement)
             reask = name[0].lower() + name[1:]
             if reask.startswith("page") and " of the " in reask:
@@ -927,6 +936,9 @@ class ConditionEvidencePublic(BaseModel):
             superseded=superseded,
             replaced=replaced,
             reask_to=reask_to if reask is not None else None,
+            origin="manual" if manual else "auto",
+            linked_by_name=linked_by_name if manual else None,
+            page=getattr(row, "page", None),
         )
 
 
@@ -2171,3 +2183,11 @@ class ReadingStatePublic(BaseModel):
     unread: int
     #: A closed-ish reason: `stalled`, `not_queued`, or an exception's TYPE name. Never message text.
     error: str | None = None
+
+
+class ItemLinkRequest(BaseModel):
+    """LP-953 — she links a document of this file to an item; with `replace_document_id`, it is Change."""
+
+    document_id: UUID
+    page: int | None = Field(default=None, ge=1, le=10000)
+    replace_document_id: UUID | None = None
