@@ -117,7 +117,10 @@ async def test_iv01_at_uwm_offers_two_routes(db_session: AsyncSession) -> None:
     by_code = {row["lender_code"]: row for row in rows}
     assert [r["key"] for r in by_code["0006"]["routes"]] == ["lender_system", "our_vendor"]
     assert by_code["0006"]["routes"][0]["label"] == "Pulled in UWM's system"
-    assert by_code["0006"]["chosen_route"] is None
+    # LP-955 REVIEW: the route it is ON, not only a stepped one it was moved to. With no step, 0006's
+    # item is hers to upload, which IS "Our vendor" — and it had to become derivable so that picking
+    # it presses something (it read as nothing chosen before, exactly like never having chosen).
+    assert by_code["0006"]["chosen_route"] == "our_vendor"
     # The positive control: a condition no route is defined for offers none.
     assert by_code["1582"]["routes"] == []
 
@@ -151,6 +154,50 @@ async def test_our_vendor_keeps_it_her_task_and_drops_the_question(
     assert condition.next_step is None
     assert [i.option for i in await _items(db_session, condition)] == [PlanOption.I_WILL_DO_IT]
     assert await _question(db_session, condition) is None
+
+
+async def test_our_vendor_reads_as_chosen_and_a_step_no_route_sets_reads_as_neither(
+    db_session: AsyncSession,
+) -> None:
+    """LP-955 review — every route the condition can be on reads back, and only those.
+
+    `chosen_route` returned the stepped routes only, so "Our vendor" could never be pressed: she
+    picked it, the panel refetched, and the two buttons looked untouched. The last row is the control
+    that keeps this honest — a step no route sets must still read as no route, or "pressed" would
+    just mean "has no other step".
+    """
+    from app.services.condition_plan import chosen_route, routes_for, set_next_step
+
+    _, conditions, actor = await _confirmed(db_session)
+    condition = conditions["0006"]
+    routes = routes_for("uwm", "IV-01")
+    assert [r.key for r in routes] == ["lender_system", "our_vendor"]
+
+    assert chosen_route(condition, routes) == "our_vendor"  # the default state IS her task
+    await choose_route(
+        db_session, condition=condition, route_key="lender_system", actor_user_id=actor
+    )
+    assert chosen_route(condition, routes) == "lender_system"
+    await choose_route(db_session, condition=condition, route_key="our_vendor", actor_user_id=actor)
+    assert chosen_route(condition, routes) == "our_vendor"
+    # THE CONTROL: a step neither route sets is neither route.
+    await set_next_step(
+        db_session, condition=condition, next_step=PlanOption.ASK_BORROWER, actor_user_id=actor
+    )
+    assert chosen_route(condition, routes) is None
+
+
+def test_no_two_routes_in_a_pair_share_a_step() -> None:
+    """The premise `chosen_route` rests on, over the whole table: it answers with the first route
+    whose step the condition carries, so two routes sharing one step (`None` counts) would make the
+    answer arbitrary. A new ROUTES row that breaks this fails here rather than in a drawer."""
+    from app.services.condition_plan import ROUTES
+
+    assert ROUTES, "the positive control: an empty table would pass this vacuously"
+    for pair, routes in ROUTES.items():
+        steps = [route.step for route in routes]
+        assert len(steps) == len(set(steps)), f"{pair} has two routes with one step"
+        assert len({route.key for route in routes}) == len(routes), f"{pair} repeats a route key"
 
 
 async def test_a_route_not_offered_is_refused(db_session: AsyncSession) -> None:

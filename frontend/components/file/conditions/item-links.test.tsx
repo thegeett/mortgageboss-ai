@@ -85,6 +85,35 @@ describe("ItemLinkActions", () => {
     ]);
   });
 
+  it("offers every recipient an ask reaches, and routes the insurance agent to their own email", () => {
+    // LP-955 REVIEW: four of the seven were offered, so the insurance, HOA and employer emails were
+    // unreachable from the only door that delegates her task — and an insurance ask sent as "Someone
+    // else" lands in the other-party draft without the mortgagee clause the insurance email carries.
+    render(<ItemLinkActions fileId="f1" condition={CONDITION} item={ITEM} />);
+    const select = screen.getByLabelText("Ask someone for Credit report invoice");
+    const offered = [...select.querySelectorAll("option")]
+      .map((o) => (o as HTMLOptionElement).value)
+      .filter((v) => v !== "");
+    expect(offered).toEqual([
+      "lo",
+      "borrower",
+      "title",
+      "insurance",
+      "hoa",
+      "employer",
+      "other_party",
+    ]);
+    // The absences, each deliberate: her own task, Title's shared email, and the lender's draft.
+    expect(offered).not.toContain("processor");
+    expect(offered).not.toContain("attorney");
+    expect(offered).not.toContain("lender");
+    expect(offered).not.toContain("appraiser");
+    fireEvent.change(select, { target: { value: "insurance" } });
+    expect(calls.update).toEqual([
+      { conditionId: "c1", itemId: "i1", option: "ask_third_party", performers: ["insurance"] },
+    ]);
+  });
+
   it("asks the borrower as the borrower's ask, and is not offered on an ask", () => {
     const { unmount } = render(<ItemLinkActions fileId="f1" condition={CONDITION} item={ITEM} />);
     fireEvent.change(screen.getByLabelText("Ask someone for Credit report invoice"), {

@@ -181,10 +181,21 @@ def routes_for(lender_key: str | None, type_id: str | None) -> tuple[Route, ...]
 
 
 def chosen_route(condition: Condition, routes: tuple[Route, ...]) -> str | None:
-    """The route her condition is on: the one whose step it has. None until she has chosen a stepped
-    one (the task route is the condition's default state, so it reads as chosen only after a change)."""
+    """The route this condition is on: the one whose step it carries, the task route (`step=None`)
+    included. None when its step is one no route sets.
+
+    THE TASK ROUTE HAS TO BE DERIVABLE TOO (LP-955 review). Returning only the stepped routes left
+    "Our vendor" unable to read as chosen at all: she picked it, the panel refetched, and nothing was
+    pressed — the same picture as never having chosen, so her click looked like it did nothing. The
+    panel asks "How this gets done", and with `next_step` null that IS the task route: the items carry
+    their own steps and 0006's is hers to upload. Her choice is still not a stored fact (the step is
+    the proxy), which is why a step no route sets reads as no route rather than as the task one.
+
+    AT MOST ONE ROUTE PER PAIR MAY CARRY A GIVEN STEP, `None` included, or this is ambiguous;
+    `test_no_two_routes_in_a_pair_share_a_step` pins it over the whole table.
+    """
     for route in routes:
-        if route.step is not None and condition.next_step is route.step:
+        if condition.next_step is route.step:
             return route.key
     return None
 

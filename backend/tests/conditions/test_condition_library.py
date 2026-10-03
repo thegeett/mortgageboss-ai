@@ -87,6 +87,13 @@ def test_the_minimal_library_loads() -> None:
             lambda d: d["types"][0]["items"][0].update(option="i_will_do_it"),
             "task must be non-empty",
         ),
+        # LP-955 REVIEW — EACH FIELD'S PLACEHOLDERS ARE ITS OWN FILLER'S. `_values` fills the email
+        # names, `_type_question` fills {lender_short}/{code}, and the two sets are disjoint; one
+        # shared list let either field name a value nothing passes it, which `fill` answers with None
+        # — a dropped request line, or a silent fall back to the generic question.
+        (lambda d: d["types"][0].update(question="Could you clear {amount}?"), "does not fill"),
+        (lambda d: d["types"][0]["items"][0].update(email="Please send {code}"), "does not fill"),
+        (lambda d: d["types"][0].update(question="Clear {nonsense}?"), "does not fill"),
         # Stage 3A acceptance: everyone who acts is listed, and it includes the item's performer.
         (lambda d: d["types"][0]["items"][0].update(performers=["lo"]), "must include"),
         (
@@ -100,6 +107,18 @@ def test_a_malformed_library_is_refused(mutate: Any, message: str) -> None:
     mutate(data)
     with pytest.raises(LibraryError, match=message):
         parse_library(data, documents_known=_DOCS)
+
+
+def test_a_types_question_may_name_the_lender_and_the_code() -> None:
+    """The positive control for the refusals above: the names `_type_question` DOES fill are
+    accepted, and the shipped IV-01 question uses both — so the narrowing cannot be green by
+    refusing every placeholder."""
+    question = load_library().types["IV-01"].question
+    assert question is not None
+    assert "{lender_short}" in question and "{code}" in question
+    data = _minimal()
+    data["types"][0]["question"] = "{lender_short} has it. Could you clear {code}?"
+    assert parse_library(data, documents_known=_DOCS).types[data["types"][0]["id"]].question
 
 
 def test_the_shipped_library_loads_and_is_about_forty_types() -> None:

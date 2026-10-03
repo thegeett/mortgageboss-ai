@@ -141,11 +141,15 @@ EMAIL_PLACEHOLDERS = frozenset(
         "required",
         "verified",
         "instruction",
-        # LP-955 — a type's `question` to the underwriter names the lender and the condition's code.
-        "lender_short",
-        "code",
     }
 )
+#: LP-955 review — the type `question`'s OWN names, because the two fillers are DISJOINT.
+#: `condition_drafts._values` supplies the six above and neither of these; `_type_question` supplies
+#: these two and none of those. One shared list let every field name a fact its own filler cannot
+#: supply, and `fill` answers None to a missing value: an item's `email` naming `{code}` would drop
+#: that request line from the email, and a `question` naming `{amount}` would fall back to the
+#: generic question — both silently, which is the opposite of what this guard is for.
+QUESTION_PLACEHOLDERS = frozenset({"lender_short", "code"})
 _PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
 
 
@@ -291,13 +295,16 @@ def _all_performers(raw: dict[str, Any], performer: Performer, where: str) -> tu
     return found
 
 
-def _wording(value: Any, where: str, field: str) -> str | None:
-    """Optional library wording: non-empty text using only the placeholders code fills (LP-922)."""
+def _wording(
+    value: Any, where: str, field: str, allowed: frozenset[str] = EMAIL_PLACEHOLDERS
+) -> str | None:
+    """Optional library wording: non-empty text using only the placeholders THIS FIELD's filler
+    supplies (LP-922, narrowed per field by the LP-955 review)."""
     if value is None:
         return None
     if not isinstance(value, str) or not value.strip():
         raise LibraryError(f"{where}: {field} must be non-empty text when present")
-    unknown = set(_PLACEHOLDER.findall(value)) - EMAIL_PLACEHOLDERS
+    unknown = set(_PLACEHOLDER.findall(value)) - allowed
     if unknown:
         raise LibraryError(f"{where}: {field} uses {sorted(unknown)}, which code does not fill")
     return value.strip()
@@ -352,7 +359,9 @@ def parse_library(data: Any, *, documents_known: frozenset[str] | None = None) -
             waits_on_type=raw.get("waits_on_type"),
             short=_wording(raw.get("short"), where, "short"),
             why=_wording(raw.get("why"), where, "why"),
-            question=_wording(raw.get("question"), where, "question"),
+            question=_wording(
+                raw.get("question"), where, "question", allowed=QUESTION_PLACEHOLDERS
+            ),
         )
 
     for condition_type in types.values():

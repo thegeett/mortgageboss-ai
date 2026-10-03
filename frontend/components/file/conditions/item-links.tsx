@@ -8,11 +8,24 @@ import type { Condition, ConditionItem, Performer } from "@/lib/types/conditions
 import { Link2, Upload } from "lucide-react";
 import { useId, useRef, useState } from "react";
 
-/** Who "Ask someone for it" can ask. The processor is not one: it is her own task already. */
+/**
+ * Who "Ask someone for it" can ask: EVERY recipient an ask reaches, and the backend's `_RECIPIENT`
+ * table is the list (LP-955 review — it offered four of seven, so the insurance, HOA and employer
+ * emails were unreachable from the only door that delegates her task, and an insurance ask sent as
+ * "Someone else" lost the mortgagee clause the insurance email carries).
+ *
+ * The four absences, each for a reason: the PROCESSOR is her own task already; the ATTORNEY shares
+ * Title's one email (`title_attorney`), so offering both would be two labels for one draft; the
+ * LENDER and the APPRAISER go to the lender's draft (LP-942 — appraiser independence), which is not
+ * a delegation she makes from here.
+ */
 const ASK_WHO: [Performer, string][] = [
   ["lo", "The LO"],
   ["borrower", "The borrower"],
   ["title", "Title"],
+  ["insurance", "The insurance agent"],
+  ["hoa", "The HOA"],
+  ["employer", "The employer"],
   ["other_party", "Someone else"],
 ];
 

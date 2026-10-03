@@ -1112,8 +1112,9 @@ class ConditionPublic(BaseModel):
     #: LP-947 — who we WILL be waiting on when the next email is marked sent (S3-01's "Becomes
     #: Waiting on Borrower when…"). The server's rule, sent so the client renders it, not recomputes it.
     waiting_on_when_sent: OwnerHint | None = None
-    #: LP-955 — the ways this condition can get done at its lender, and the one chosen (see
-    #: `condition_plan.ROUTES`). Empty for every condition no route is defined for.
+    #: LP-955 — the ways this condition can get done at its lender, and the one it is ON (see
+    #: `condition_plan.chosen_route`: the route whose step it carries, the task route included, so
+    #: the panel can press it). Empty for every condition no route is defined for.
     routes: list["RoutePublic"] = Field(default_factory=list)
     chosen_route: str | None = None
 
