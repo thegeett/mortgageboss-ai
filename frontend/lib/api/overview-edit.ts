@@ -44,6 +44,8 @@ export function useUpdateLoanFile(fileId: string) {
           "conditions-summary",
           "condition-rounds",
           "condition-round-plan",
+          // LP-952 review — the lender queues a reading of the unread conditions.
+          "condition-reading-state",
         ]) {
           void queryClient.invalidateQueries({ queryKey: [key] });
         }

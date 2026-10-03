@@ -432,6 +432,9 @@ function invalidateRound(
   // function's own docstring gives for invalidating both lists rather than one.
   void queryClient.invalidateQueries({ queryKey: conditionsSummaryQueryKey(fileId) });
   void queryClient.invalidateQueries({ queryKey: ["loan-file-activity", fileId] });
+  // LP-952 review — AN IMPORT QUEUES A READING, and an attached PDF can add unread conditions: the
+  // reading panel's cached "done" (not polled, a minute's staleTime) would hide both.
+  void queryClient.invalidateQueries({ queryKey: ["condition-reading-state"] });
   if (roundId) {
     void queryClient.invalidateQueries({ queryKey: conditionRoundQueryKey(roundId) });
   }
@@ -1281,6 +1284,9 @@ function afterLenderChange(queryClient: ReturnType<typeof useQueryClient>, fileI
   void queryClient.invalidateQueries({ queryKey: conditionRoundsQueryKey(fileId) });
   void queryClient.invalidateQueries({ queryKey: ["condition-round-plan"] });
   void queryClient.invalidateQueries({ queryKey: ["loan-file"] });
+  // LP-952 review — THE LENDER QUEUES A READING of the unread conditions: refetch its state, so the
+  // panel polls it and the plan arrives when it ends, instead of a cached "not read" and its button.
+  void queryClient.invalidateQueries({ queryKey: ["condition-reading-state"] });
 }
 
 /**
@@ -1379,6 +1385,11 @@ export function useReadAgain(fileId: string) {
     onSuccess: (data, roundId) => {
       queryClient.setQueryData(readingStateQueryKey(roundId), data);
       void queryClient.invalidateQueries({ queryKey: conditionsQueryPrefix(fileId) });
+    },
+    // LP-952 review — A REFUSAL MEANS THE SCREEN WAS STALE (a reading another door queued, or nothing
+    // left unread): refetch, so the panel shows the reading rather than the button that was refused.
+    onError: (_error, roundId) => {
+      void queryClient.invalidateQueries({ queryKey: readingStateQueryKey(roundId) });
     },
   });
 }

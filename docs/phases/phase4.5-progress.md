@@ -1057,7 +1057,7 @@ drawer) waits for mockups and is not built.
 | [LP-949](../tickets/LP-949.md) Lender on the file (items 1, 10b) | REVIEWED | `86089cf7` | the commit titled `LP-949 review: …` | ADR-417; reviewer: fresh subagent (peer session not sanctioned); 6 findings fixed (tenancy on PATCH, A→none→B, code map by rows, banner promise, no-op PATCH, stale tab) |
 | [LP-950](../tickets/LP-950.md) Outbound wording (items 2, 3) | REVIEWED | `de7df33c` | the commit titled `LP-950 review: …` | reviewer: fresh subagent (peer session not sanctioned); 7 findings fixed (mask missed `123456789,` / `No.123…` / `Acct123…` / spaced card+SSN; item names and acceptable forms unmasked; `fill` ate the mask's `****`; acronym lowercased; dedupe dropped a Why; unnamed subject named nothing; three claims untested) |
 | [LP-951](../tickets/LP-951.md) Wrong-file warning (item 11, raised to High) | REVIEWED | `5b2fc995` | the commit titled `LP-951 review: …` | reviewer: fresh subagent (peer session not sanctioned); 8 findings, 7 fixed + 1 recorded (attach-PDF and forward-merge doors skipped the check; accents/apostrophes false-warned; a shared particle hid a mismatch; a hyphenated surname switched the check off; Champions `Loan #` never read; duplicate surnames; "nothing from MISMO/extraction" too wide, flagged for the domain expert; stale cached answer left Import into an unanswerable 409). Builder full runs before review: backend 9024 passed, 1 failed (named sonnet); frontend 2156/2156. Full suites NOT re-run after review |
-| [LP-952](../tickets/LP-952.md) Reading state and Read again (items 4, 5) | AWAITING_REVIEW | the commit titled `LP-952: …` | | full runs: backend 9055 passed, 1 failed (named sonnet); frontend 2169/2169 |
+| [LP-952](../tickets/LP-952.md) Reading state and Read again (items 4, 5) | REVIEWED | `1fdce809` | the commit titled `LP-952 review: …` | reviewer: fresh subagent (peer session not sanctioned); 6 findings fixed (import/lender/code-map doors queued a second reading beside a running one; state marked on the imported round but read from the newest; failed with 0 unread offered a refused Read again; cached reading state not refetched after lender set / import / attach; refused Read again left the stale panel; three claims untested). Builder full runs before review: backend 9055 passed, 1 failed (named sonnet); frontend 2169/2169. Full suites NOT re-run after review |
 | LP-953 Linking (items 6, 7) | TODO | | | |
 | LP-954 Reading keeps every clause (item 13) | TODO | | | |
 | LP-955 "I'll do it" actions (item 8) | TODO | | | |
@@ -1075,3 +1075,6 @@ drawer) waits for mockups and is not built.
   is 8 digits where the UWM sheets print 10, so it is not wired in.
 - **Older bug, not built:** after attaching a PDF to a round, the success toast says "No new conditions"
   even when the PDF added some (found in the LP-951 review).
+- **Should attaching or forwarding a PDF onto an imported round read the conditions it adds?** (LP-952
+  review.) Import reads automatically; attach does not. The reading panel now shows them as unread, with
+  Read conditions. Owner to decide.

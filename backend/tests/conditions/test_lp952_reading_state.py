@@ -284,3 +284,139 @@ async def test_import_through_the_route_marks_the_round_queued(
     assert refreshed is not None and refreshed.reading_run is not None
     assert refreshed.reading_run["state"] == QUEUED
     assert queued == [str(draft.id)]
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-952 review — the reading is the FILE's: one at a time, on the newest round, whatever the door
+# --------------------------------------------------------------------------------------------- #
+
+
+async def _second_imported_round(db: AsyncSession, loan_file: Any, first: ConditionRound) -> Any:
+    """Round 2, created after round 1 (explicitly: one transaction gives both the same `now()`)."""
+    from app.models.condition_round import ConditionSourceKind
+    from app.services.condition_import import import_round
+    from app.services.condition_rounds import SheetBytes, create_round_from_sheet
+    from app.tasks.conditions import parse_round
+    from tests.conditions.fixture_helpers import UWM_ROUND_1
+    from tests.conditions.uwm_pdf_fixture import render_uwm_pdf
+
+    second = await create_round_from_sheet(
+        db,
+        loan_file=loan_file,
+        sheet=SheetBytes(
+            content=render_uwm_pdf(UWM_ROUND_1), source_kind=ConditionSourceKind.PDF_UPLOAD
+        ),
+    )
+    second.created_at = first.created_at + timedelta(minutes=5)
+    await db.flush()
+    await parse_round(db, second.id)
+    await db.refresh(second)
+    await import_round(db, round_=second)
+    return second
+
+
+async def test_no_door_queues_a_second_reading_beside_a_running_one(
+    db_session: AsyncSession, queued: list[str]
+) -> None:
+    """The lender, a mapped code and import queue through the helper; it skips a running reading."""
+    from app.api.conditions import queue_unread_reading
+
+    loan_file, round_ = await _file_without_lender(db_session)
+    round_.reading_run = {"state": READING, "at": _ago(1)}
+    await db_session.flush()
+    await queue_unread_reading(db_session, loan_file_id=loan_file.id)
+    assert queued == []
+    assert round_.reading_run["state"] == READING  # not overwritten by `queued`
+    # The positive control: once that reading is done, the same door queues.
+    round_.reading_run = {"state": DONE}
+    await db_session.flush()
+    await queue_unread_reading(db_session, loan_file_id=loan_file.id)
+    assert queued == [str(round_.id)]
+
+
+async def test_the_reading_is_queued_on_the_newest_round_and_reported_on_every_round(
+    db_session: AsyncSession, queued: list[str]
+) -> None:
+    """An older round imported after a newer one: the panel (newest) must see its reading."""
+    from app.api.conditions import queue_round_reading
+
+    loan_file, older = await _file_without_lender(db_session)
+    newest = await _second_imported_round(db_session, loan_file, older)
+    assert await queue_round_reading(db_session, older)
+    assert queued == [str(newest.id)]
+    assert newest.reading_run is not None and newest.reading_run["state"] == QUEUED
+    for asked in (older, newest):
+        assert (await reading_state(db_session, round_=asked))["state"] == QUEUED
+
+
+async def test_a_reading_running_on_another_round_refuses_read_again(
+    db_session: AsyncSession, queued: list[str]
+) -> None:
+    from tests.conditions.test_lender_condition_settings import _clients
+
+    loan_file, older = await _file_without_lender(db_session)
+    newest = await _second_imported_round(db_session, loan_file, older)
+    older.reading_run = {"state": READING, "at": _ago(1)}
+    newest.reading_run = {"state": DONE}
+    await db_session.flush()
+    client, _, processor = await _clients(db_session, loan_file)
+    async with client:
+        base = f"/api/v1/condition-rounds/{newest.id}"
+        got = await client.get(f"{base}/reading", headers=processor)
+        assert got.json()["state"] == READING
+        refused = await client.post(f"{base}/read", headers=processor)
+        assert refused.status_code == 409
+        assert refused.json()["error"]["data"]["code"] == "reading_running"
+    assert queued == []
+
+
+async def test_a_failure_with_nothing_left_unread_offers_nothing(
+    db_session: AsyncSession, model: list[str]
+) -> None:
+    """ "0 conditions still unread" with a Read again the server refuses: say nothing instead."""
+    _, round_ = await _file_without_lender(db_session)
+    await read_round(db_session, round_id=round_.id)
+    mark(round_, FAILED, error="OperationalError")
+    assert await reading_state(db_session, round_=round_) == {
+        "state": DONE,
+        "unread": 0,
+        "error": None,
+    }
+
+
+async def test_the_task_marks_reading_before_it_reads_and_failed_after_it_gives_up(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The task's own marks, through `_run_read` and `_mark_read_failed`, not `mark` by hand."""
+    from contextlib import asynccontextmanager
+
+    from app.tasks import conditions as tasks
+
+    _, round_ = await _file_without_lender(db_session)
+
+    @asynccontextmanager
+    async def _session() -> Any:
+        yield db_session
+
+    seen: list[str] = []
+
+    async def _read(db: AsyncSession, *, round_id: Any) -> None:
+        got = await db.get(ConditionRound, round_id)
+        assert got is not None and got.reading_run is not None
+        seen.append(got.reading_run["state"])
+
+    async def _plan(db: AsyncSession, *, round_id: Any) -> None:
+        return None
+
+    monkeypatch.setattr(tasks, "task_session", _session)
+    monkeypatch.setattr(condition_reading, "read_round", _read)
+    monkeypatch.setattr("app.services.condition_plan.build_plan", _plan)
+    await tasks._run_read(str(round_.id))
+    assert seen == [READING]
+
+    await tasks._mark_read_failed(str(round_.id), "OperationalError")
+    assert round_.reading_run is not None
+    assert (round_.reading_run["state"], round_.reading_run["error"]) == (
+        FAILED,
+        "OperationalError",
+    )

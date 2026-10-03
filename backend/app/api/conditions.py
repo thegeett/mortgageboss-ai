@@ -974,19 +974,21 @@ async def read_round_again(round_: ScopedRound, db: DbSession) -> ReadingStatePu
     file's newest imported round, which is the one `read_round` and the plan are built around.
     """
     from app.services.condition_reading_state import (
-        is_running,
         newest_imported_round,
         reading_state,
+        running_round,
         unread_count,
     )
 
+    await _lock_file_reading(db, round_.loan_file_id)
     target = await newest_imported_round(db, loan_file_id=round_.loan_file_id)
     if target is None:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             detail={"message": "Import the sheet first.", "code": "not_imported"},
         )
-    if is_running(target):
+    # FILE-WIDE (review): a reading recorded on another round of this file is running too.
+    if await running_round(db, loan_file_id=round_.loan_file_id) is not None:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             detail={"message": "These conditions are being read now.", "code": "reading_running"},
@@ -999,7 +1001,7 @@ async def read_round_again(round_: ScopedRound, db: DbSession) -> ReadingStatePu
                 "code": "nothing_unread",
             },
         )
-    await queue_round_reading(db, target)
+    await queue_round_reading(db, target, locked=True)
     await db.refresh(target)
     return ReadingStatePublic.model_validate(await reading_state(db, round_=target))
 
@@ -1340,20 +1342,51 @@ async def switch_round_completeness(
     return await _round_card(db, round_)
 
 
-async def queue_round_reading(db: DbSession, round_: ConditionRound) -> None:
-    """Mark the round QUEUED, commit, then queue the reading (LP-952). Every door that reads goes here.
+async def _lock_file_reading(db: DbSession, loan_file_id: UUID) -> None:
+    """Hold the file's row until the commit, so two doors cannot both see "nothing running" (review)."""
+    await db.execute(select(LoanFile.id).where(LoanFile.id == loan_file_id).with_for_update())
+
+
+async def queue_round_reading(
+    db: DbSession, round_: ConditionRound, *, locked: bool = False
+) -> bool:
+    """Mark the file's reading QUEUED, commit, then send it (LP-952). Every door that reads goes here.
 
     THE MARK IS COMMITTED BEFORE THE TASK IS SENT, so the worker can never mark READING before the queue
     mark lands and be overwritten by it. A broker that refuses the task leaves the round FAILED
     ("not_queued"), which the screen offers to read again.
-    """
-    from app.services.condition_reading_state import FAILED, QUEUED, mark
 
-    mark(round_, QUEUED)
+    LP-952 review:
+    - NOT BESIDE A RUNNING ONE. The refusal was the POST's alone; import, the lender and a mapped code
+      queued a second reading over a running one (both read the same unread conditions, and the queued
+      mark overwrote `reading`). Here every door skips it, under the file's row lock; a condition that
+      arrives after the running reading took its list shows as unread, with Read conditions.
+    - ON THE FILE'S NEWEST IMPORTED ROUND, the round the panel, the POST and `unread_round_to_read` all
+      name. The import door passed the round it imported, which is not the newest when an older draft
+      is imported after a newer one; its state then sat where no screen looked.
+    Returns whether a reading was sent.
+    """
+    from app.services.condition_reading_state import (
+        FAILED,
+        QUEUED,
+        mark,
+        newest_imported_round,
+        running_round,
+    )
+
+    if not locked:
+        await _lock_file_reading(db, round_.loan_file_id)
+    if await running_round(db, loan_file_id=round_.loan_file_id) is not None:
+        await db.commit()  # release the lock
+        return False
+    target = await newest_imported_round(db, loan_file_id=round_.loan_file_id) or round_
+    mark(target, QUEUED)
     await db.commit()
-    if _enqueue_reading(round_.id) is False:
-        mark(round_, FAILED, error="not_queued")
+    if _enqueue_reading(target.id) is False:
+        mark(target, FAILED, error="not_queued")
         await db.commit()
+        return False
+    return True
 
 
 async def queue_unread_reading(db: DbSession, *, loan_file_id: UUID) -> None:

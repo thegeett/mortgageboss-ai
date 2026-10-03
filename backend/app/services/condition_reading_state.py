@@ -88,12 +88,29 @@ def _state_of(run: dict[str, Any] | None, *, now: datetime) -> tuple[str | None,
 
 
 async def reading_state(db: AsyncSession, *, round_: ConditionRound) -> dict[str, Any]:
-    """`ReadingStatePublic`'s data for a round: its reading's state and the file's unread count."""
+    """`ReadingStatePublic`'s data for a round's FILE: its reading's state and the unread count.
+
+    THE FILE'S READING, NOT THIS ROUND'S RECORD (LP-952 review). A reading is file-wide (`read_round`
+    reads every unread condition on the file), and it is recorded on the round a door queued it on. So
+    the state reported is the file's running reading wherever it is recorded, else the newest imported
+    round's record, which is the round every door now queues on. Read from the asked round alone, an
+    older round imported after a newer draft said "not read" beside a running reading, and offered a
+    second one.
+    """
     unread = await unread_count(db, loan_file_id=round_.loan_file_id)
-    state, error = _state_of(round_.reading_run, now=_now())
+    source = (
+        await running_round(db, loan_file_id=round_.loan_file_id)
+        or await newest_imported_round(db, loan_file_id=round_.loan_file_id)
+        or round_
+    )
+    state, error = _state_of(source.reading_run, now=_now())
     if state in (None, DONE) and unread:
         # Read once, then more arrived unread (or never queued at all): offer to read them.
         state = NOT_QUEUED
+    if state == FAILED and not unread:
+        # A failure with nothing left to read (another door read them since): "N still unread" would
+        # be false, and its Read again would be refused as nothing_unread (LP-952 review).
+        state = DONE
     if state is None:
         state = DONE
     return {"state": state, "unread": unread, "error": error if state == FAILED else None}
@@ -118,6 +135,26 @@ async def newest_imported_round(db: AsyncSession, *, loan_file_id: Any) -> Condi
             .order_by(ConditionRound.created_at.desc(), ConditionRound.id.desc())
             .limit(1),
             ConditionRound,
-        )
+        ).execution_options(populate_existing=True)
     )
     return newest
+
+
+async def running_round(db: AsyncSession, *, loan_file_id: Any) -> ConditionRound | None:
+    """The file's round whose reading is queued or running (not stale), or None (LP-952 review).
+
+    FILE-WIDE, because a reading is: a door that checked only its own round started a second reading
+    beside one recorded on another round. `populate_existing` so a caller holding the file lock sees
+    the committed record, not the session's cached one.
+    """
+    rounds = (
+        await db.scalars(
+            only_active(
+                select(ConditionRound)
+                .where(ConditionRound.loan_file_id == loan_file_id)
+                .order_by(ConditionRound.created_at.desc(), ConditionRound.id.desc()),
+                ConditionRound,
+            ).execution_options(populate_existing=True)
+        )
+    ).all()
+    return next((r for r in rounds if is_running(r)), None)
