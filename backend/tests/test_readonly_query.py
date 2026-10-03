@@ -438,11 +438,9 @@ EXCLUDED: dict[str, frozenset[str]] = {
             "draft_rows",
             "parse_report",
             "comparison",
+            # LP-956 — the raw run stays out (its `error` is free text); the view carries its state and
+            # counts as derived columns. The plan's timestamps are now exposed.
             "reading_run",
-            # LP-920 — the plan's timestamps and who confirmed it; excluded to avoid a view rebuild.
-            "plan_ready_at",
-            "plan_confirmed_at",
-            "plan_confirmed_by_user_id",
         }
     ),
     # LP-912 adds `prep_note` and `verdict`. `prep_note` is a short line a processor typed about one
@@ -457,20 +455,18 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # LP-919 adds the reading. `reading` restates the lender's amounts, banks and last fours, so it is
     # NPI and in `NEVER_EXPOSED` too. Its status, source and confidence name nobody, and are excluded
     # only because exposing them means rebuilding the view for columns no query uses yet.
+    # LP-956 — the new view drops the three columns that carry the lender's words: `name` (can restate
+    # the condition), `acceptable` (likewise) and `specifics` (amounts, banks, account last fours).
+    "condition_items": frozenset({"name", "acceptable", "specifics"}),
     "conditions": frozenset(
         {
             "verbatim_text",
             "underwriter_notes",
             "prep_note",
             "verdict",
+            # The model's summary of the lender's text. LP-956 exposed the reading's STATUS, source and
+            # confidence, and the plan's `next_step` and `plan_reason`; the reading itself stays out.
             "reading",
-            "reading_status",
-            "reading_source",
-            "reading_confidence",
-            # LP-920 — `plan_reason` is built by code and names no borrower; `next_step` is a category.
-            # Both excluded only to avoid rebuilding the view.
-            "next_step",
-            "plan_reason",
         }
     ),
     # LP-919 — the items she confirmed for a code: names and performers, no specifics. Excluded rather
@@ -575,6 +571,11 @@ NEVER_EXPOSED: tuple[tuple[str, str], ...] = (
     ("borrowers", "ssn"),
     # LP-919 — the reading restates the lender's words (amounts, banks, last fours).
     ("conditions", "reading"),
+    # LP-956 — the items view is new; these restate the lender's words, amounts and account endings.
+    # EXCLUDED only records that; this asserts absence. `name` cannot be pinned here (other views have a
+    # `name` column legitimately), so `test_the_items_view_never_selects_name` pins it for that view.
+    ("condition_items", "acceptable"),
+    ("condition_items", "specifics"),
     ("users", "hashed_password"),
     ("loan_files", "inbox_token"),
     ("findings", "source_snippet"),
@@ -747,18 +748,14 @@ def test_every_view_targets_a_real_table() -> None:
 # Empty today, and that is the point: every application table is exposed. Alembic's
 # own bookkeeping table is not in `Base.metadata`, so it never reaches this check.
 EXCLUDED_TABLES: dict[str, str] = {
-    "condition_items": (
-        "LP-920 — each item's `specifics` restates the lender's amounts, banks and last fours (NPI), "
-        "and `name` can carry the lender's wording. A view would have to drop both; nobody queries "
-        "items yet, so the table is excluded whole rather than half-exposed."
-    ),
     "condition_packages": (
         "LP-925 — each row's note restates the file's figures and the documents' names (NPI). "
         "Excluded whole, like `condition_evidence`."
     ),
     "condition_evidence": (
         "LP-923 — each check's reason and each finding restate a statement's amounts, dates and "
-        "account ending (NPI). Excluded whole, like `condition_items`."
+        "account ending (NPI). Excluded whole: unlike `condition_items` (LP-956), there is no useful "
+        "column set without them."
     ),
     "condition_drafts": (
         "LP-922 — links a round's conditions to their draft emails (the `communications` rows, "
@@ -1361,3 +1358,11 @@ def test_every_migration_that_recreates_a_readonly_view_regrants_it() -> None:
     assert not offenders, "\n".join(offenders)
     # THE CONTROL: a tree where no migration recreates a view satisfies the line above.
     assert checked > 0, "no migration recreates a readonly view; this test proved nothing"
+
+
+def test_the_items_view_never_selects_name() -> None:
+    """LP-956 — an item's `name` can restate the lender's wording. Measured: adding it to the view passed
+    every other test here, because `name` is a legitimate column of other views and the global guard
+    above cannot name it. So this checks the one view's select list."""
+    body = _view_bodies()["condition_items"]
+    assert re.search(r"\bname\b", body.split("FROM")[0]) is None

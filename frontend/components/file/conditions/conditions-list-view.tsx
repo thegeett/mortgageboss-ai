@@ -50,6 +50,7 @@ import { RoundDetailsSheet } from "./round-details-sheet";
 import { RoundDrafts } from "./round-drafts";
 import { RoundPlanPanel } from "./round-plan-panel";
 import { RoundStrip } from "./round-strip";
+import { WaitingOnDialog, waitingOnFor } from "./waiting-on-dialog";
 import { WithdrawnSection } from "./withdraw-condition";
 
 /**
@@ -139,6 +140,12 @@ export function ConditionsListView({
     mode: "move-back" | "reopen";
   } | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
+  // LP-956 — a move to Waiting on a condition whose owner is her: who does it wait on?
+  const [waitingAsk, setWaitingAsk] = useState<{
+    condition: Condition;
+    to: ConditionPrepStatus;
+    reason?: string;
+  } | null>(null);
   // HIDDEN BY ROUND ID, NOT BY A BOOLEAN. *Not now* and *Hide* dismiss the panel for the round she
   // dismissed; importing a newer sheet brings the new round's panel up rather than staying hidden
   // because she closed the previous one.
@@ -205,11 +212,17 @@ export function ConditionsListView({
       setMoveBack({ condition, to, mode: "move-back" });
       return;
     }
+    // LP-956 — A CONDITION HER OWN CANNOT WAIT ON HER: ask who it waits on instead of sending her.
+    if (to === "waiting" && waitingOnFor(condition) === null) {
+      setRefusal(null);
+      setWaitingAsk({ condition, to });
+      return;
+    }
     prepStatus.mutate(
       {
         conditionId: condition.id,
         to,
-        waiting_on: to === "waiting" ? condition.effective_owner : null,
+        waiting_on: to === "waiting" ? waitingOnFor(condition) : null,
         expected_updated_at: condition.updated_at,
       },
       {
@@ -610,18 +623,50 @@ export function ConditionsListView({
               { conditionId: condition.id, reason, expected_updated_at: condition.updated_at },
               settle,
             );
+          } else if (to === "waiting" && waitingOnFor(condition) === null) {
+            // LP-956 — moving back to Waiting on her own task: ask who, carrying her reason along.
+            setMoveBack(null);
+            setWaitingAsk({ condition, to, reason });
           } else if (to) {
             prepStatus.mutate(
               {
                 conditionId: condition.id,
                 to,
                 reason,
-                waiting_on: to === "waiting" ? condition.effective_owner : null,
+                waiting_on: to === "waiting" ? waitingOnFor(condition) : null,
                 expected_updated_at: condition.updated_at,
               },
               settle,
             );
           }
+        }}
+      />
+
+      <WaitingOnDialog
+        condition={waitingAsk?.condition ?? null}
+        open={waitingAsk !== null}
+        onOpenChange={(next) => {
+          if (!next) setWaitingAsk(null);
+        }}
+        refusal={refusal}
+        pending={prepStatus.isPending}
+        onChoose={(owner) => {
+          if (!waitingAsk) return;
+          setRefusal(null);
+          const { condition, to, reason } = waitingAsk;
+          prepStatus.mutate(
+            {
+              conditionId: condition.id,
+              to,
+              reason,
+              waiting_on: owner,
+              expected_updated_at: condition.updated_at,
+            },
+            {
+              onSuccess: () => setWaitingAsk(null),
+              onError: (error: unknown) => setRefusal(getErrorMessage(error)),
+            },
+          );
         }}
       />
     </div>

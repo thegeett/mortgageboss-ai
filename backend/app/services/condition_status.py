@@ -41,6 +41,7 @@ from app.models.condition import (
     Condition,
     ConditionLenderStatus,
     ConditionPrepStatus,
+    OwnerHint,
 )
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_round import ConditionRound
@@ -77,6 +78,8 @@ class RefusalCode(StrEnum):
     # Each needs a sentence because the alternative is a 422 with a field path, which tells a processor
     # which key was wrong rather than what to do.
     WAITING_NEEDS_OWNER = "waiting_needs_owner"
+    #: LP-956 — "Waiting on Processor" is waiting on herself: a status nothing can resolve.
+    WAITING_ON_SELF = "waiting_on_self"
     NOTHING_TO_REOPEN = "nothing_to_reopen"
     VERDICT_NEEDS_ROUND = "verdict_needs_round"
     STATUS_NOT_OFFERED = "status_not_offered"
@@ -102,6 +105,9 @@ _STALE = "Someone else changed this condition — reload to see their change."
 
 #: Mine. Written to name the next action rather than the broken field.
 _WAITING_NEEDS_OWNER = "Say who you are waiting on."
+#: LP-956 — the staging trial's 0006 sat at "Waiting on Processor": its owner was the processor, and a
+#: move to Waiting sends the owner. The processor is a valid OWNER (her task), never someone she waits on.
+_WAITING_ON_SELF = "You can't wait on yourself. Choose who you are waiting on, or keep it in To do."
 _NOTHING_TO_REOPEN = "Only a condition the lender cleared or waived can be reopened."
 _VERDICT_NEEDS_ROUND = (
     "A verdict that came from a round comparison or an underwriter's note has to name the round it "
@@ -308,6 +314,8 @@ async def move_prep_status(
 
     if target is ConditionPrepStatus.WAITING and payload.waiting_on is None:
         raise _refuse(RefusalCode.WAITING_NEEDS_OWNER, _WAITING_NEEDS_OWNER)
+    if target is ConditionPrepStatus.WAITING and payload.waiting_on is OwnerHint.PROCESSOR:
+        raise _refuse(RefusalCode.WAITING_ON_SELF, _WAITING_ON_SELF)
 
     # A MOVE TO WHERE IT ALREADY IS CHANGES NOTHING, SO IT WRITES NOTHING (LP-912 review). The first
     # version wrote an event and reset `prep_status_changed_at` anyway, so a bulk "Waiting on Borrower"

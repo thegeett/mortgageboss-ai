@@ -141,6 +141,8 @@ def test_every_refusal_code_has_a_sentence_and_none_is_orphaned() -> None:
         RefusalCode.VERDICT_NEEDS_ROUND: status._VERDICT_NEEDS_ROUND,
         RefusalCode.STATUS_NOT_OFFERED: status._STATUS_NOT_OFFERED,
         RefusalCode.CONDITION_WAS_REPLACED: status._CONDITION_WAS_REPLACED,
+        # LP-956 — authored for the staging trial's "Waiting on Processor".
+        RefusalCode.WAITING_ON_SELF: status._WAITING_ON_SELF,
     }
 
     uncovered = sorted(code.value for code in RefusalCode if code not in sentences)

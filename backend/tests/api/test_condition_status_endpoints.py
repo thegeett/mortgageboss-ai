@@ -183,6 +183,25 @@ async def test_a_backward_move_with_a_reason_keeps_it_in_the_history(
     assert event.detail["prep_status_from"] == "with_underwriter"
 
 
+async def test_waiting_on_the_processor_is_refused(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """LP-956 — the processor is a valid owner, never someone she waits on (the trial's 0006)."""
+    condition, auth, _file = await _one(db_session)
+
+    response = await client.post(
+        f"{API}/conditions/{condition.id}/prep-status",
+        headers=auth,
+        json={"to": "waiting", "waiting_on": "processor"},
+    )
+
+    assert response.status_code == 409, response.text
+    assert _error(response)["data"]["code"] == "waiting_on_self"
+    assert "can't wait on yourself" in _error(response)["message"]
+    await db_session.refresh(condition)
+    assert condition.prep_status is ConditionPrepStatus.TO_DO
+
+
 async def test_waiting_without_an_owner_is_refused(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
@@ -1052,6 +1071,8 @@ async def test_every_refusal_code_the_service_can_raise_has_been_exercised() -> 
         # `superseded_by_id` until the reworded pair could be confirmed, which is why LP-916's review
         # handed the guard forward to this ticket instead of asking for it then.
         "condition_was_replaced",
+        # LP-956 — "Waiting on Processor", refused through the endpoint below.
+        "waiting_on_self",
     }
     known_elsewhere: set[str] = set()
 

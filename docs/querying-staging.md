@@ -88,6 +88,19 @@ Dropped entirely, because there is no useful redaction of them:
 The full list, with the reasoning for each, is in `docs/tickets/C7-query-stage-result.md`
 and in comments beside each view in the migration.
 
+**Conditions (LP-956).** The condition views answer "was this file read, is its plan confirmed, what is
+linked to what":
+
+| View | Carries | Leaves out |
+|---|---|---|
+| `readonly.conditions` | statuses, owner, step (`next_step`), `plan_reason`, `reading_status` / `reading_source` / `reading_confidence` | the lender's text (`verbatim_text`), the reading itself, notes, the verdict's note |
+| `readonly.condition_rounds` | status, reader, counts, `plan_ready_at` / `plan_confirmed_at`, and the reading's `reading_state` / `reading_read` / `reading_used_ai` / `reading_fell_back` / `reading_model` | the sheet's text and header, draft rows, the raw `reading_run` (its error is free text) |
+| `readonly.condition_items` | key, who acts, step, status, document types and checks, the linked document and page, waits-on, draft, part | `name`, `acceptable`, `specifics` (the lender's wording, amounts, account endings) |
+| `readonly.condition_item_unlinks` | her unlinks: item, document, who, when | nothing (ids only) |
+
+`condition_evidence`, `condition_drafts` and `condition_packages` stay out entirely: their rows restate amounts,
+account endings and document names.
+
 Everything else is available, with free text and JSON scrubbed: findings and their
 `details` and `load_bearing_tags`, extractions (structure and confidences intact,
 amounts and dates intact), snapshots, observations, verifications, needs, stated

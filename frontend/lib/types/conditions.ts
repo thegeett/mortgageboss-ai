@@ -202,6 +202,7 @@ export type ConditionRefusalCode =
   | "verdict_needs_source"
   | "stale"
   | "waiting_needs_owner"
+  | "waiting_on_self"
   | "nothing_to_reopen"
   | "verdict_needs_round"
   | "status_not_offered"
