@@ -71,6 +71,11 @@ const EMAIL_WORD: Record<Performer, string> = {
   other_party: "other party",
 };
 
+/** LP-958 — "borrower", "LO", "title": how an email is named by who it goes to. */
+export function emailWord(performer: Performer): string {
+  return EMAIL_WORD[performer];
+}
+
 /** Title and attorney share one email (S3-05), so they count as one recipient. */
 function emailKey(performer: Performer): string {
   if (performer === "attorney") return "title";
@@ -108,6 +113,27 @@ export function tail(drafts: readonly DraftTail[]): string {
   const dates = drafts.map((draft) => draft.sent_on ?? "").sort();
   const last = dates[dates.length - 1];
   return last ? ` · sent ${last.slice(5).replace("-", "/")}` : " · sent";
+}
+
+/** LP-958 — the unsent drafts carrying the condition's OPEN asks (not done, not dropped), once each. */
+export function unsentAskDrafts(condition: Condition): DraftTail[] {
+  const out: DraftTail[] = [];
+  for (const item of condition.items) {
+    if (!live(item) || item.status === "done" || !ASKS.includes(item.option)) continue;
+    if (item.draft?.status === "draft" && !out.some((each) => each.id === item.draft?.id)) {
+      out.push(item.draft);
+    }
+  }
+  return out;
+}
+
+/** LP-958 — whether the server's package takes it now: `condition_package._goes_in`, mirrored. */
+export function goesInPackage(condition: Condition): boolean {
+  return (
+    condition.prep_status === "ready" &&
+    (condition.lender_status === "open" || condition.lender_status === "not_cleared") &&
+    !condition.info_only
+  );
 }
 
 /** The recipients of the condition's open asks, in item order, one per email. */
@@ -182,9 +208,30 @@ export function nextStepToken(condition: Condition): NextStepToken | null {
       tone: "attention",
     };
   }
-  // Its evidence passed and it is Ready: say what made it so, rather than a blank cell.
-  if (condition.prep_status === "ready" && (condition.evidence ?? []).length > 0) {
-    return { icon: "file", text: "Evidence checked", tone: "action" };
+  // LP-958 — READY SAYS WHERE IT GOES. The owner set every row Ready and the column still showed
+  // the plan's emails, so nothing said what came next. An ask still in an unsent draft is the one
+  // thing that makes Ready doubtful, so it says that first.
+  if (condition.prep_status === "ready") {
+    const unsent = unsentAskDrafts(condition)[0];
+    if (unsent) {
+      return {
+        icon: "mail",
+        text: "Ready, but its email is unsent: send it or mark the item not needed",
+        tone: "attention",
+        draftId: unsent.id,
+      };
+    }
+    if (goesInPackage(condition)) {
+      const checked = (condition.evidence ?? []).length > 0;
+      return {
+        icon: "file",
+        text: `Goes in the lender package${checked ? " · evidence checked" : ""}`,
+        tone: "action",
+      };
+    }
+  }
+  if (condition.prep_status === "with_underwriter" && condition.lender_status === "open") {
+    return { icon: "lender", text: "Sent to lender · waiting for their answer", tone: "quiet" };
   }
   if (step === "lender_doing_it")
     return { icon: "lender", text: "Lender is doing it", tone: "quiet" };

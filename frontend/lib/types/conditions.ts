@@ -1094,6 +1094,23 @@ export interface ConditionItem {
   route_note?: string | null;
   /** LP-946 — the item this one was split from (each destination of a multi-performer item). */
   part_of_item_id?: string | null;
+  /**
+   * LP-958 — its acceptable form is still the reading's placeholder ("What the lender's words
+   * describe"), so the drawer shows the lender's words in its place.
+   */
+  generic?: boolean;
+}
+
+/** LP-958 — one document of the file, as the Link dialog offers it. */
+export interface LinkCandidate {
+  document_id: string;
+  name: string;
+  type_label: string;
+  created_at: string;
+  /** The server's one matching rule (type, the library's words, her unlinks) for this item. */
+  matches: boolean;
+  linked: boolean;
+  unlinked_by_her: boolean;
 }
 
 export interface RoundPlanDraft {

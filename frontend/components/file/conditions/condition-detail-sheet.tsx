@@ -3,6 +3,7 @@
 import { ConditionRoutes } from "@/components/file/conditions/condition-routes";
 import { EvidenceSection } from "@/components/file/conditions/evidence-section";
 import { ItemLinkActions } from "@/components/file/conditions/item-links";
+import { NextBox } from "@/components/file/conditions/next-box";
 import { ReadingBox, ReadingItems } from "@/components/file/conditions/reading-box";
 import { WithdrawControl } from "@/components/file/conditions/withdraw-condition";
 import { StatusToken } from "@/components/status-token";
@@ -12,6 +13,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCondition, useConditionEvents } from "@/lib/api/conditions";
 import { conditionHistoryLine } from "@/lib/conditions/history";
+import { lenderAnswerLabel } from "@/lib/conditions/next-action";
 import { becomes, stepOptions, waitingLabel } from "@/lib/conditions/next-step";
 import { OWNER_LABEL } from "@/lib/conditions/owners";
 import { OPTION_LABEL } from "@/lib/conditions/plan-words";
@@ -194,6 +196,7 @@ export function ConditionDetailSheet({
   onSetNextStep,
   onMarkItemDone,
   onOpenDraft,
+  onShowPackage,
   fileId,
 }: {
   /** The list's rows, in the list's order — the filter and sort come with them. */
@@ -228,6 +231,8 @@ export function ConditionDetailSheet({
   onOpenDraft?: (draftId: string) => void;
   /** LP-923 — the file, for the evidence section's actions and its Open link. */
   fileId?: string;
+  /** LP-958 — the Next box's "Open the lender package": the caller closes the sheet and shows it. */
+  onShowPackage?: () => void;
 }) {
   const index = conditions.findIndex((row) => row.id === openId);
   const row = index >= 0 ? conditions[index] : undefined;
@@ -287,6 +292,7 @@ export function ConditionDetailSheet({
             onSetNextStep={onSetNextStep}
             onMarkItemDone={onMarkItemDone}
             onOpenDraft={onOpenDraft}
+            onShowPackage={onShowPackage}
             fileId={fileId}
           />
         ) : null}
@@ -312,6 +318,7 @@ function SheetBody({
   onSetNextStep,
   onMarkItemDone,
   onOpenDraft,
+  onShowPackage,
   fileId,
   conditions,
 }: {
@@ -333,6 +340,7 @@ function SheetBody({
   onSetNextStep?: (condition: Condition, option: PlanOption | null) => void;
   onMarkItemDone?: (condition: Condition, item: ConditionItem, done: boolean) => void;
   onOpenDraft?: (draftId: string) => void;
+  onShowPackage?: () => void;
   fileId?: string;
 }) {
   const detail = useCondition(row.id);
@@ -415,6 +423,16 @@ function SheetBody({
       {/* `SheetContent` brings no padding and `SheetHeader` carries its own, so the body supplies its
           gutter — the same correction S1-09 needed (LP-909 §5). */}
       <div className="flex flex-col gap-3 px-4 pb-6">
+        {/* LP-958 — what to do next, first: the owner set everything Ready and asked "what next?". */}
+        {fileId && replacedById === null ? (
+          <NextBox
+            fileId={fileId}
+            condition={condition}
+            onShowPackage={onShowPackage}
+            onOpenDraft={onOpenDraft}
+            onRecordAnswer={() => onRecordAnswer(condition)}
+          />
+        ) : null}
         <section>
           <div className="flex items-center justify-between">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -465,6 +483,7 @@ function SheetBody({
         {condition.items.length > 0 || condition.next_step !== null ? (
           <ReadingItems
             items={condition.items}
+            lenderWords={condition.verbatim_text}
             onAdd={
               onAddItem ? (name, performer) => onAddItem(condition, name, performer) : undefined
             }
@@ -565,10 +584,15 @@ function SheetBody({
             </div>
 
             <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Lender
+              Lender’s answer
             </span>
             <div className="flex items-center justify-between gap-2">
-              <StatusToken meta={lenderMeta} />
+              <StatusToken
+                meta={{
+                  ...lenderMeta,
+                  label: lenderAnswerLabel(condition.lender_status, lenderMeta.label),
+                }}
+              />
               {replacedById !== null ? null : reopenable ? (
                 <Button variant="outline" size="sm" onClick={() => onReopen(condition)}>
                   <Undo2 className="h-3 w-3" aria-hidden />
@@ -576,7 +600,7 @@ function SheetBody({
                 </Button>
               ) : (
                 <Button variant="outline" size="sm" onClick={() => onRecordAnswer(condition)}>
-                  Record lender’s answer
+                  Record answer
                 </Button>
               )}
             </div>

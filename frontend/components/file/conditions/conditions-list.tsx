@@ -7,6 +7,7 @@ import { Select } from "@/components/ui/select";
 import { groupConditions } from "@/lib/conditions/grouping";
 import type { ConditionGroupBy, ConditionListUrlState } from "@/lib/conditions/list-url";
 import { describeConditionFilters } from "@/lib/conditions/list-url";
+import { lenderAnswerLabel } from "@/lib/conditions/next-action";
 import { isDisplayOnly, waitingLabel } from "@/lib/conditions/next-step";
 import { OWNER_LABEL } from "@/lib/conditions/owners";
 import { displayWording } from "@/lib/conditions/wording";
@@ -62,6 +63,7 @@ export function ConditionsList({
   onOpen,
   onMovePrepStatus,
   onOpenDraft,
+  onRecordAnswer,
   onClearFilters,
   suggestedIds,
   suggestedRoundNumber,
@@ -89,6 +91,8 @@ export function ConditionsList({
   onMovePrepStatus: (condition: Condition, to: ConditionPrepStatus) => void;
   /** LP-922 — opens a draft email from its Next step token. */
   onOpenDraft?: (draftId: string) => void;
+  /** LP-958 — the row's "Record" beside "Not cleared yet": opens S2-04 for that one condition. */
+  onRecordAnswer?: (condition: Condition) => void;
   onClearFilters: () => void;
   /**
    * Conditions a round's comparison suggests probably cleared (LP-915, S2-06).
@@ -231,6 +235,7 @@ export function ConditionsList({
             onOpen={onOpen}
             onMovePrepStatus={onMovePrepStatus}
             onOpenDraft={onOpenDraft}
+            onRecordAnswer={onRecordAnswer}
             suggestedIds={suggestedIds}
             suggestedRoundNumber={suggestedRoundNumber}
           />
@@ -260,6 +265,7 @@ function ConditionGroup({
   onOpen,
   onMovePrepStatus,
   onOpenDraft,
+  onRecordAnswer,
   suggestedIds,
   suggestedRoundNumber,
 }: {
@@ -272,6 +278,7 @@ function ConditionGroup({
   onMovePrepStatus: (condition: Condition, to: ConditionPrepStatus) => void;
   /** LP-922 — opens a draft email from its Next step token. */
   onOpenDraft?: (draftId: string) => void;
+  onRecordAnswer?: (condition: Condition) => void;
   suggestedIds?: ReadonlySet<string>;
   suggestedRoundNumber?: number | null;
 }) {
@@ -293,7 +300,7 @@ function ConditionGroup({
         <span className="ml-auto text-xs text-muted-foreground">{rows.length}</span>
       </div>
 
-      <div className="grid grid-cols-[1.5rem_3.5rem_minmax(0,1fr)_14rem_10.5rem_7.5rem] gap-3 border-b border-input px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <div className="grid grid-cols-[1.5rem_3.5rem_minmax(0,1fr)_14rem_10.5rem_9.5rem] gap-3 border-b border-input px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
         <span />
         <span>Code</span>
         <span>Lender’s words</span>
@@ -301,7 +308,8 @@ function ConditionGroup({
             the detail sheet. */}
         <span>Next step</span>
         <span>Our status</span>
-        <span>Lender</span>
+        {/* LP-958 — "Lender" read as a state of ours ("What is that Open last column for?"). */}
+        <span>Lender’s answer</span>
       </div>
 
       {rows.map((condition) => (
@@ -313,6 +321,7 @@ function ConditionGroup({
           onOpen={() => onOpen(condition.id)}
           onMovePrepStatus={onMovePrepStatus}
           onOpenDraft={onOpenDraft}
+          onRecordAnswer={onRecordAnswer ? () => onRecordAnswer(condition) : undefined}
           suggestedInRound={suggestedIds?.has(condition.id) ? (suggestedRoundNumber ?? null) : null}
         />
       ))}
@@ -327,6 +336,7 @@ function ConditionRow({
   onOpen,
   onMovePrepStatus,
   onOpenDraft,
+  onRecordAnswer,
   suggestedInRound,
 }: {
   condition: Condition;
@@ -336,6 +346,7 @@ function ConditionRow({
   onMovePrepStatus: (condition: Condition, to: ConditionPrepStatus) => void;
   /** LP-922 — opens a draft email from its Next step token. */
   onOpenDraft?: (draftId: string) => void;
+  onRecordAnswer?: () => void;
   /** The round that suggests this one probably cleared, or null when none does. */
   suggestedInRound?: number | null;
 }) {
@@ -344,7 +355,7 @@ function ConditionRow({
   return (
     <div
       className={cn(
-        "relative grid grid-cols-[1.5rem_3.5rem_minmax(0,1fr)_14rem_10.5rem_7.5rem] items-start gap-3 border-b border-input px-3 py-2.5 last:border-b-0",
+        "relative grid grid-cols-[1.5rem_3.5rem_minmax(0,1fr)_14rem_10.5rem_9.5rem] items-start gap-3 border-b border-input px-3 py-2.5 last:border-b-0",
         checked && "bg-primary/5",
       )}
     >
@@ -456,8 +467,26 @@ function ConditionRow({
         </Select>
       )}
 
-      <span className="pt-0.5">
-        <StatusToken meta={lenderMeta} />
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pt-0.5">
+        <StatusToken
+          meta={{
+            ...lenderMeta,
+            label: lenderAnswerLabel(condition.lender_status, lenderMeta.label),
+          }}
+        />
+        {/* Only while the lender still owes an answer and the row takes writes (not a replaced one). */}
+        {onRecordAnswer &&
+        condition.superseded_by_id === null &&
+        (condition.lender_status === "open" || condition.lender_status === "not_cleared") ? (
+          <button
+            type="button"
+            onClick={onRecordAnswer}
+            aria-label={`Record the lender’s answer for ${condition.lender_code ?? "this condition"}`}
+            className="text-xs text-primary hover:underline"
+          >
+            Record
+          </button>
+        ) : null}
       </span>
     </div>
   );

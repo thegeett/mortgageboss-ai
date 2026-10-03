@@ -994,6 +994,10 @@ class ConditionItemPublic(BaseModel):
     #: LP-946 — the item this one was split from, when an item's performers are asked in different
     #: places; the item row lists where each of its parts went.
     part_of_item_id: UUID | None = None
+    #: LP-958 — its acceptable form is still the reading's placeholder ("What the lender's words
+    #: describe"): no library type gave one and she has not written her own. The drawer shows the
+    #: lender's words in its place; once she edits it, hers shows.
+    generic: bool = False
     #: LP-922 — the draft that asks for it: its id (to open it), "draft" or "sent", and the send date.
     draft: DraftTailPublic | None = None
 
@@ -2217,3 +2221,16 @@ class RouteRequest(BaseModel):
 
 
 ConditionPublic.model_rebuild()
+
+
+class LinkCandidatePublic(BaseModel):
+    """LP-958 — one document of the file, offered in the Link dialog."""
+
+    document_id: UUID
+    name: str
+    type_label: str
+    created_at: datetime
+    #: The one matching rule's answer for this item (type, the library's words, her unlinks).
+    matches: bool
+    linked: bool
+    unlinked_by_her: bool

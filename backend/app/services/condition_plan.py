@@ -64,7 +64,7 @@ from app.models.lender import Lender
 from app.models.loan_file import LoanFile
 from app.models.needs_item import NeedsItem, NeedsItemDisposition, NeedsItemOrigin, NeedsItemStatus
 from app.services.activity_log import log_activity
-from app.services.condition_reading import GENERIC_NAME
+from app.services.condition_reading import GENERIC_ACCEPTABLE, GENERIC_NAME
 from app.services.needs_items import create_needs_item
 
 logger = structlog.get_logger(__name__)
@@ -1430,6 +1430,7 @@ async def items_public_for_file(db: AsyncSession, *, loan_file_id: UUID) -> dict
                     key=item.key,
                     name=item.name,
                     acceptable=item.acceptable,
+                    generic=item.acceptable.rstrip(".") == GENERIC_ACCEPTABLE,
                     performer=item.performer,
                     performers=[Performer(p) for p in item.performers] or [item.performer],
                     option=item.option,

@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
-/** LP-953 — her link actions on an item: Link a document (with a page), Change, Upload here. */
-import type { Condition, ConditionItem } from "@/lib/types/conditions";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+/**
+ * LP-953, redrawn by LP-958 — her actions on an item: Add document ▾ (Link a document on this file…,
+ * which opens the Link dialog, and Upload a new document…), Ask someone ▾, and Change.
+ */
+import type { Condition, ConditionItem, LinkCandidate } from "@/lib/types/conditions";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const calls = vi.hoisted(() => ({
@@ -9,18 +12,12 @@ const calls = vi.hoisted(() => ({
   upload: [] as unknown[],
   update: [] as unknown[],
 }));
+const candidates = vi.hoisted(() => ({ data: [] as LinkCandidate[] }));
 vi.mock("@/lib/api/conditions", () => ({
   useLinkItemDocument: () => ({ isPending: false, mutate: (b: unknown) => calls.link.push(b) }),
   useUploadToItem: () => ({ isPending: false, mutate: (b: unknown) => calls.upload.push(b) }),
   useUpdateItem: () => ({ isPending: false, mutate: (b: unknown) => calls.update.push(b) }),
-}));
-vi.mock("@/lib/api/documents", () => ({
-  useLoanFileDocuments: () => ({
-    data: [
-      { id: "d1", standard_name: "Service invoice — credit report", original_filename: "a.pdf" },
-      { id: "d2", standard_name: "Credit report", original_filename: "b.pdf" },
-    ],
-  }),
+  useLinkCandidates: () => ({ isPending: false, isError: false, data: candidates.data }),
 }));
 
 import { ItemLinkActions } from "./item-links";
@@ -32,38 +29,70 @@ afterEach(() => {
   calls.update = [];
 });
 
-const CONDITION = { id: "c1" } as Condition;
+const CONDITION = { id: "c1", lender_code: "0006" } as Condition;
 const ITEM = {
   id: "i1",
   name: "Credit report invoice",
   option: "i_will_do_it",
 } as ConditionItem;
 
+function doc(id: string, name: string, extra: Partial<LinkCandidate> = {}): LinkCandidate {
+  return {
+    document_id: id,
+    name,
+    type_label: "Service invoice",
+    created_at: "2026-07-15T12:00:00Z",
+    matches: false,
+    linked: false,
+    unlinked_by_her: false,
+    ...extra,
+  };
+}
+
+candidates.data = [
+  doc("d1", "Credit report invoice", { matches: true }),
+  doc("d2", "Credit report", { type_label: "Credit report" }),
+];
+
+function openMenu(label: string) {
+  fireEvent.click(screen.getByRole("button", { name: label }));
+  return screen.getByRole("menu", { name: label });
+}
+
 describe("ItemLinkActions", () => {
-  it("links the chosen document with its page", () => {
+  it("Add document ▾ offers Link and Upload; Link opens the dialog and links with its page", () => {
     render(<ItemLinkActions fileId="f1" condition={CONDITION} item={ITEM} />);
-    fireEvent.click(screen.getByRole("button", { name: "Link a document" }));
-    fireEvent.change(screen.getByLabelText("Document on this file"), { target: { value: "d1" } });
-    fireEvent.change(screen.getByLabelText("Page"), { target: { value: "2" } });
-    fireEvent.click(screen.getByRole("button", { name: "Link" }));
+    const menu = openMenu("Add document");
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((m) => m.textContent),
+    ).toEqual(["Link a document on this file…", "Upload a new document…"]);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /Link a document/ }));
+    const dialog = screen.getByRole("dialog", { name: "Link a document to 0006" });
+    fireEvent.click(within(dialog).getByRole("radio", { name: /Credit report invoice/ }));
+    fireEvent.change(within(dialog).getByLabelText("Page (optional)"), { target: { value: "2" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Link document" }));
     expect(calls.link).toEqual([
       { conditionId: "c1", itemId: "i1", document_id: "d1", page: 2, replace_document_id: null },
     ]);
   });
 
-  it("changes a link: the old document is not offered and is sent as the one replaced", () => {
+  it("changes a link: the dialog opens at once, without the old document, and sends it replaced", () => {
     render(
       <ItemLinkActions fileId="f1" condition={CONDITION} item={ITEM} replaceDocumentId="d2" />,
     );
-    const options = Array.from(
-      (screen.getByLabelText("Change to") as HTMLSelectElement).options,
-    ).map((o) => o.value);
-    expect(options).toEqual(["", "d1"]);
-    fireEvent.change(screen.getByLabelText("Change to"), { target: { value: "d1" } });
-    fireEvent.click(screen.getByRole("button", { name: "Use this document" }));
+    const dialog = screen.getByRole("dialog", { name: "Change the document for 0006" });
+    expect(within(dialog).getAllByRole("radio")).toHaveLength(1);
+    fireEvent.click(within(dialog).getByRole("radio", { name: /Credit report invoice/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Use this document" }));
     expect(calls.link).toEqual([
       { conditionId: "c1", itemId: "i1", document_id: "d1", page: null, replace_document_id: "d2" },
     ]);
+    // No menus in the Change form: the card already has its own controls. `hidden: true` because
+    // the open dialog hides everything behind it from the accessibility tree, which would make a
+    // plain query pass whether the menus rendered or not.
+    expect(screen.queryByRole("button", { name: "Add document", hidden: true })).toBeNull();
   });
 
   it("uploads here, linked to this item", () => {
@@ -77,12 +106,13 @@ describe("ItemLinkActions", () => {
 
   it("asks someone for her task: the LO gets it as an ask (LP-955)", () => {
     render(<ItemLinkActions fileId="f1" condition={CONDITION} item={ITEM} />);
-    fireEvent.change(screen.getByLabelText("Ask someone for Credit report invoice"), {
-      target: { value: "lo" },
-    });
+    const menu = openMenu("Ask someone");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "The LO" }));
     expect(calls.update).toEqual([
       { conditionId: "c1", itemId: "i1", option: "ask_third_party", performers: ["lo"] },
     ]);
+    // The menu closes on a choice.
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("offers every recipient an ask reaches, and routes the insurance agent to their own email", () => {
@@ -90,25 +120,21 @@ describe("ItemLinkActions", () => {
     // unreachable from the only door that delegates her task — and an insurance ask sent as "Someone
     // else" lands in the other-party draft without the mortgagee clause the insurance email carries.
     render(<ItemLinkActions fileId="f1" condition={CONDITION} item={ITEM} />);
-    const select = screen.getByLabelText("Ask someone for Credit report invoice");
-    const offered = [...select.querySelectorAll("option")]
-      .map((o) => (o as HTMLOptionElement).value)
-      .filter((v) => v !== "");
-    expect(offered).toEqual([
-      "lo",
-      "borrower",
-      "title",
-      "insurance",
-      "hoa",
-      "employer",
-      "other_party",
+    const menu = openMenu("Ask someone");
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((m) => m.textContent),
+    ).toEqual([
+      "The LO",
+      "The borrower",
+      "Title",
+      "The insurance agent",
+      "The HOA",
+      "The employer",
+      "Someone else",
     ]);
-    // The absences, each deliberate: her own task, Title's shared email, and the lender's draft.
-    expect(offered).not.toContain("processor");
-    expect(offered).not.toContain("attorney");
-    expect(offered).not.toContain("lender");
-    expect(offered).not.toContain("appraiser");
-    fireEvent.change(select, { target: { value: "insurance" } });
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "The insurance agent" }));
     expect(calls.update).toEqual([
       { conditionId: "c1", itemId: "i1", option: "ask_third_party", performers: ["insurance"] },
     ]);
@@ -116,15 +142,27 @@ describe("ItemLinkActions", () => {
 
   it("asks the borrower as the borrower's ask, and is not offered on an ask", () => {
     const { unmount } = render(<ItemLinkActions fileId="f1" condition={CONDITION} item={ITEM} />);
-    fireEvent.change(screen.getByLabelText("Ask someone for Credit report invoice"), {
-      target: { value: "borrower" },
-    });
+    fireEvent.click(
+      within(openMenu("Ask someone")).getByRole("menuitem", { name: "The borrower" }),
+    );
     expect(calls.update).toEqual([
       { conditionId: "c1", itemId: "i1", option: "ask_borrower", performers: ["borrower"] },
     ]);
     unmount();
     const asked = { ...ITEM, option: "ask_third_party" } as ConditionItem;
     render(<ItemLinkActions fileId="f1" condition={CONDITION} item={asked} />);
-    expect(screen.queryByLabelText("Ask someone for Credit report invoice")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ask someone" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Add document" })).toBeTruthy();
+  });
+
+  it("Escape closes a menu without closing what it sits in", () => {
+    render(<ItemLinkActions fileId="f1" condition={CONDITION} item={ITEM} />);
+    openMenu("Add document");
+    const outer = vi.fn();
+    document.addEventListener("keydown", outer);
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    document.removeEventListener("keydown", outer);
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(outer).not.toHaveBeenCalled();
   });
 });

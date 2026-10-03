@@ -54,8 +54,8 @@ describe("ConditionsSummaryBar", () => {
       "Your tasks",
       "Ready to send",
       "Failed a check",
-      "Prior to docs open",
-      "Prior to funding open",
+      "Sent to lender",
+      "Cleared by lender",
     ]);
   });
 
@@ -83,6 +83,7 @@ describe("ConditionsSummaryBar", () => {
     ["Your tasks", { step: ["i_will_do_it"] }],
     ["Ready to send", { prepStatus: ["ready"] }],
     ["Failed a check", { check: "failed" }],
+    ["Sent to lender", { prepStatus: ["with_underwriter"] }],
   ] as const)("%s sets its own filter on open conditions", (label, want) => {
     const onFilter = vi.fn<(next: ConditionListUrlState) => void>();
     render(
@@ -94,6 +95,22 @@ describe("ConditionsSummaryBar", () => {
       lenderStatus: ["open", "not_cleared"],
       ...want,
     });
+  });
+
+  it("LP-958 — Sent counts the server's open with_underwriter; Cleared filters the lender's", () => {
+    const onFilter = vi.fn<(next: ConditionListUrlState) => void>();
+    render(
+      <ConditionsSummaryBar
+        summary={{ ...S3_12, by_prep_status: { with_underwriter: 4, ready: 1 }, cleared: 3 }}
+        state={EMPTY_LIST_URL_STATE}
+        onFilter={onFilter}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /^Sent to lender/ }).textContent).toBe(
+      "Sent to lender4",
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Cleared by lender/ }));
+    expect(onFilter).toHaveBeenCalledWith({ ...EMPTY_LIST_URL_STATE, lenderStatus: ["cleared"] });
   });
 
   it("clicking the lit number clears it, the step included", () => {

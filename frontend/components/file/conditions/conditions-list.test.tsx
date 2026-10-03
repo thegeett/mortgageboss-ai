@@ -170,3 +170,58 @@ describe("ConditionsList (S3-12)", () => {
     expect(select.selectedOptions[0]?.textContent).toBe("Waiting on LO");
   });
 });
+
+describe("ConditionsList — Lender's answer (LP-958)", () => {
+  function renderWith(rows: Condition[], onRecordAnswer = vi.fn()) {
+    render(
+      <ConditionsList
+        conditions={rows}
+        state={EMPTY_LIST_URL_STATE}
+        search=""
+        capped={false}
+        selected={new Set()}
+        onSelectedChange={vi.fn()}
+        onOpen={vi.fn()}
+        onMovePrepStatus={vi.fn()}
+        onRecordAnswer={onRecordAnswer}
+        onClearFilters={vi.fn()}
+      />,
+    );
+    return onRecordAnswer;
+  }
+
+  it("names the column as an answer and an open one as Not cleared yet, with Record", () => {
+    const ready = condition({ id: "r", lender_code: "0006", prep_status: "ready" });
+    const onRecordAnswer = renderWith([ready]);
+    expect(screen.getByText("Lender’s answer")).toBeDefined();
+    expect(screen.queryByText("Lender")).toBeNull();
+    const cells = within(row("0006"));
+    expect(cells.getByText("Not cleared yet")).toBeDefined();
+    expect(cells.queryByText("Open")).toBeNull();
+    cells.getByRole("button", { name: "Record the lender’s answer for 0006" }).click();
+    expect(onRecordAnswer).toHaveBeenCalledWith(ready);
+    // Ready says where it goes, not what the plan once asked.
+    expect(cells.getByText("Goes in the lender package")).toBeDefined();
+  });
+
+  it("offers Record only while the lender owes an answer, and never on a replaced row", () => {
+    renderWith([
+      condition({ id: "x", lender_code: "0007", lender_status: "not_cleared" }),
+      condition({ id: "y", lender_code: "0008", superseded_by_id: "x" }),
+    ]);
+    expect(within(row("0007")).getByText("Came back")).toBeDefined();
+    expect(
+      within(row("0007")).getByRole("button", { name: /Record the lender’s answer/ }),
+    ).toBeDefined();
+    expect(
+      within(row("0008")).queryByRole("button", { name: /Record the lender’s answer/ }),
+    ).toBeNull();
+  });
+
+  it("a sent row waits for the lender's answer", () => {
+    renderWith([condition({ id: "s", lender_code: "1947", prep_status: "with_underwriter" })]);
+    expect(
+      within(row("1947")).getByText("Sent to lender · waiting for their answer"),
+    ).toBeDefined();
+  });
+});

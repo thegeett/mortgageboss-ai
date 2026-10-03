@@ -84,15 +84,22 @@ function planCells(summary: ConditionSummary): Cell[] {
       filter: { ...OPEN, check: "failed" },
       tone: "blocking",
     },
+    // LP-958 — THE LAST TWO STEPS OF THE TRACK, where "Prior to docs / funding open" were. The owner
+    // set everything Ready and the bar stopped there: nothing counted what was sent or what came
+    // back cleared. Sent is the server's `by_prep_status` (open conditions only, as every number
+    // here), so clicking it shows exactly that many rows; Cleared is the lender's, from a verdict.
+    // The prior-to filters stay in the filter row's heading choices.
     {
-      label: "Prior to docs open",
-      value: summary.open_prior_to_docs,
-      filter: { ...OPEN, bucketKind: ["prior_to_docs"] },
+      label: "Sent to lender",
+      value: summary.by_prep_status.with_underwriter ?? 0,
+      filter: { ...OPEN, prepStatus: ["with_underwriter"] },
+      tone: "progress",
     },
     {
-      label: "Prior to funding open",
-      value: summary.open_prior_to_funding,
-      filter: { ...OPEN, bucketKind: ["prior_to_funding"] },
+      label: "Cleared by lender",
+      value: summary.cleared,
+      filter: { lenderStatus: ["cleared"] },
+      tone: "verified",
     },
   ];
 }

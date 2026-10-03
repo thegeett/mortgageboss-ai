@@ -31,9 +31,8 @@ vi.mock("@/lib/api/conditions", () => ({
   useLinkItemDocument: () => ({ isPending: false, mutate: vi.fn() }),
   useUpdateItem: () => ({ isPending: false, mutate: vi.fn() }),
   useUploadToItem: () => ({ isPending: false, mutate: vi.fn() }),
-}));
-vi.mock("@/lib/api/documents", () => ({
-  useLoanFileDocuments: () => ({ data: [] }),
+  // LP-958 — Change opens the Link dialog, which lists the file's documents from the server.
+  useLinkCandidates: () => ({ isPending: false, isError: false, data: [] }),
 }));
 
 import { EvidenceSection } from "./evidence-section";
@@ -266,7 +265,8 @@ describe("EvidenceSection", () => {
       { conditionId: "c1", itemId: S3_07.item_id, documentId: S3_07.document_id },
     ]);
     fireEvent.click(screen.getByRole("button", { name: "Change" }));
-    expect(screen.getByText("Change to")).toBeTruthy();
+    // LP-958 — Change is the Link dialog, in its Change form.
+    expect(screen.getByRole("dialog", { name: /Change the document for/ })).toBeTruthy();
   });
 
   it("says an automatic link is automatic", () => {

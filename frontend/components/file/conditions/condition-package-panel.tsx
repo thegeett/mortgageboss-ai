@@ -48,25 +48,34 @@ export function ConditionPackagePanel({ fileId }: { fileId: string }) {
     );
   }
 
+  // LP-958 — THE LIST'S "NEXT" BANNER. The owner set every condition Ready and asked "what next?"
+  // (2026-10-03): this panel was the answer, drawn as one more card among the cards. Now it says the
+  // next step in a sentence, in the primary colour, above everything it is next for.
   if (data.status === null) {
+    const n = data.ready_count;
     return (
-      <section className="flex flex-wrap items-center gap-3 rounded-lg border border-primary/35 bg-card px-4 py-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-foreground-2">{title}</p>
-          <p className="text-sm text-foreground">
-            {data.ready_count} condition{data.ready_count === 1 ? "" : "s"} ready to send
+      <section
+        aria-label="Next"
+        className="flex flex-wrap items-center gap-3 rounded-lg bg-primary px-4 py-3 text-primary-foreground"
+      >
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <p className="text-xs font-semibold uppercase tracking-wide opacity-80">Next · {title}</p>
+          <p className="text-base font-medium">
+            {n} condition{n === 1 ? " is" : "s are"} ready to send. Build the lender package and
+            upload it to {data.lender_short}.
           </p>
         </div>
         <Button
           type="button"
-          className="ml-auto"
+          variant="outline"
+          className="ml-auto border-transparent bg-background text-primary hover:bg-background/90"
           disabled={build.isPending}
           onClick={() => build.mutate(undefined, { onError: (e) => setNote(getErrorMessage(e)) })}
         >
           <Package className="h-4 w-4" aria-hidden />
-          {build.isPending ? "Building…" : "Build package"}
+          {build.isPending ? "Building…" : "Build lender package"}
         </Button>
-        {note ? <p className="w-full text-sm text-destructive">{note}</p> : null}
+        {note ? <p className="w-full text-sm">{note}</p> : null}
       </section>
     );
   }

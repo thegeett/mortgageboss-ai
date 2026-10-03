@@ -122,8 +122,11 @@ describe("ConditionPackagePanel", () => {
   it("offers Build package before it is built, and nothing when nothing is ready", () => {
     state.data = { ...S3_10, status: null, rows: [], ready_count: 6 };
     const { unmount } = render(<ConditionPackagePanel fileId="f1" />);
-    screen.getByText("6 conditions ready to send");
-    fireEvent.click(screen.getByRole("button", { name: /Build package/ }));
+    // LP-958 — the Next banner: the count, and the step in a sentence naming the lender.
+    screen.getByText(
+      /6 conditions are ready to send\. Build the lender package and upload it to UWM\./,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Build lender package/ }));
     expect(state.built).toBe(1);
     unmount();
     state.data = { ...S3_10, status: null, rows: [], ready_count: 0 };

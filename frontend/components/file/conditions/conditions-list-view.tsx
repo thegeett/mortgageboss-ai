@@ -365,7 +365,10 @@ export function ConditionsListView({
 
       {/* LP-924: what accepted evidence changes in the file's figures (S3-09), until applied. */}
       <FiguresCheckPanel fileId={fileId} />
-      <ConditionPackagePanel fileId={fileId} />
+      {/* LP-958 — the drawer's "Open the lender package" scrolls here. */}
+      <div id="lender-package" className="scroll-mt-4 empty:hidden">
+        <ConditionPackagePanel fileId={fileId} />
+      </div>
 
       {/* LP-922: the round's unsent drafts, once the plan panel is gone. */}
       <RoundDrafts fileId={fileId} onOpenDraft={setDraftId} />
@@ -417,6 +420,10 @@ export function ConditionsListView({
           onOpen={setOpenConditionId}
           onOpenDraft={setDraftId}
           onMovePrepStatus={movePrep}
+          onRecordAnswer={(condition) => {
+            setRefusal(null);
+            setAnswerFor([condition]);
+          }}
           onClearFilters={() => {
             setSearchInput("");
             applyUrl({
@@ -486,6 +493,17 @@ export function ConditionsListView({
         onRecordAnswer={(condition) => {
           setRefusal(null);
           setAnswerFor([condition]);
+        }}
+        onShowPackage={() => {
+          setOpenConditionId(null);
+          // After the sheet's close, so the scroll is not undone by its focus return.
+          window.setTimeout(
+            () =>
+              document
+                .getElementById("lender-package")
+                ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+            250,
+          );
         }}
         onReopen={(condition) => {
           setRefusal(null);

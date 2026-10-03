@@ -38,6 +38,7 @@ import type {
   DraftUpdateInput,
   FiguresCheck,
   FileLender,
+  LinkCandidate,
   OwnerHint,
   OwnerInput,
   PasteConditionsInput,
@@ -1426,6 +1427,23 @@ export function useLinkItemDocument(fileId: string) {
       (await apiClient.post<Condition>(`${conditionPath(conditionId)}/items/${itemId}/links`, body))
         .data,
     onSuccess: (condition) => invalidateCondition(queryClient, fileId, condition.id),
+  });
+}
+
+/**
+ * LP-958 — the file's documents for the Link dialog, those that answer this item first. `matches` is
+ * the server's matching rule, so the dialog's "Matches this item" agrees with what links itself.
+ */
+export function useLinkCandidates(conditionId: string, itemId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: [...conditionQueryKey(conditionId), "link-candidates", itemId] as const,
+    queryFn: async () =>
+      (
+        await apiClient.get<LinkCandidate[]>(
+          `${conditionPath(conditionId)}/items/${itemId}/link-candidates`,
+        )
+      ).data,
+    enabled,
   });
 }
 

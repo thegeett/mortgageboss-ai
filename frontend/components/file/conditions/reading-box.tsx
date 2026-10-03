@@ -167,8 +167,14 @@ export function ReadingItems({
   onMarkDone,
   onOpenDraft,
   itemActions,
+  lenderWords,
 }: {
   items: ShownItem[];
+  /**
+   * LP-958 — the condition's words, shown in place of a generic item's placeholder acceptable form
+   * ("What the lender's words describe" is the reading's internal wording, not something to read).
+   */
+  lenderWords?: string;
   /** LP-953 — her link actions on a stored item (Link a document, Upload here). */
   itemActions?: (item: ConditionItem) => React.ReactNode;
   /** S3-01's "Add an item" (LP-920). Offered only once the plan exists. */
@@ -214,7 +220,7 @@ export function ReadingItems({
             </span>
             <div className="flex min-w-0 flex-col gap-0.5">
               <p className="text-sm font-semibold text-foreground">{item.name}</p>
-              <p className="text-xs text-foreground-2">{itemLine(item)}</p>
+              <p className="text-xs text-foreground-2">{itemLine(item, lenderWords)}</p>
               {"shared_with_codes" in item && item.shared_with_codes.length > 0 ? (
                 <p className="inline-flex items-center gap-1 text-xs text-primary">
                   <Link2 className="h-3 w-3" aria-hidden />
@@ -243,7 +249,6 @@ export function ReadingItems({
               {"id" in item ? (
                 <ItemWhere item={item} onMarkDone={onMarkDone} onOpenDraft={onOpenDraft} />
               ) : null}
-              {"id" in item && itemActions ? itemActions(item) : null}
               {"id" in item
                 ? partsOf(item.id).map((part) => (
                     <p key={part.id} className="text-xs text-foreground-2">
@@ -253,6 +258,11 @@ export function ReadingItems({
                   ))
                 : null}
             </div>
+            {/* LP-958 — her actions span the card, under it: in the 9rem column above they wrapped
+                against each other (the owner's screenshot, 2026-10-03). */}
+            {"id" in item && itemActions ? (
+              <div className="col-span-3 border-t border-input pt-2.5">{itemActions(item)}</div>
+            ) : null}
           </li>
         ))}
       </ol>
@@ -353,8 +363,9 @@ function joinCodes(codes: string[]): string {
 }
 
 /** `Statement showing the funds before the check was written · Capital One ··9912 · Jul 2026`. */
-function itemLine(item: ShownItem): string {
-  const parts = [item.acceptable];
+function itemLine(item: ShownItem, lenderWords?: string): string {
+  const generic = "generic" in item && item.generic === true;
+  const parts = [generic && lenderWords ? `As the lender asks: ${lenderWords}` : item.acceptable];
   const { account_bank: bank, account_last4: last4, month } = item.specifics;
   if (bank || last4) parts.push([bank, last4 ? `··${last4}` : null].filter(Boolean).join(" "));
   const monthText = monthLabel(month);

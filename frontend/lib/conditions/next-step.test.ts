@@ -46,6 +46,10 @@ function item(overrides: Partial<ConditionItem> = {}): ConditionItem {
 function condition(overrides: Partial<Condition> = {}): Condition {
   return {
     prep_status: "to_do",
+    // LP-958 — what every server row carries: the Ready token reads both (`goesInPackage`).
+    lender_status: "open",
+    info_only: false,
+    superseded_by_id: null,
     next_step: null,
     items: [],
     question_draft: null,
@@ -311,7 +315,7 @@ describe("evidence tokens (LP-923)", () => {
         ],
       } as unknown as Partial<Condition>),
     );
-    expect(replaced?.text).toBe("Evidence checked");
+    expect(replaced?.text).toBe("Goes in the lender package · evidence checked");
     const stillEvidence = nextStepToken(
       condition({
         evidence: [{ failed: false, replaced: false, reask: null, checks: [], findings: deposit }],
@@ -328,5 +332,43 @@ it("a condition its evidence made Ready says so", () => {
       evidence: [{ failed: false, reask: null, checks: [], findings: [] }],
     } as unknown as Partial<Condition>),
   );
-  expect(token?.text).toBe("Evidence checked");
+  expect(token?.text).toBe("Goes in the lender package · evidence checked");
+});
+
+describe("LP-958 — Ready and Sent say what comes next", () => {
+  it("an unsent ask makes Ready doubtful and opens that draft", () => {
+    const token = nextStepToken(
+      condition({
+        prep_status: "ready",
+        items: [item({ draft: { id: "dr", status: "draft", sent_on: null } })],
+      }),
+    );
+    expect(token).toEqual({
+      icon: "mail",
+      text: "Ready, but its email is unsent: send it or mark the item not needed",
+      tone: "attention",
+      draftId: "dr",
+    });
+  });
+
+  it("Ready with nothing pending goes in the package; info-only Ready does not claim it", () => {
+    expect(nextStepToken(condition({ prep_status: "ready" }))?.text).toBe(
+      "Goes in the lender package",
+    );
+    expect(
+      nextStepToken(condition({ prep_status: "ready", info_only: true }))?.text ?? "",
+    ).not.toMatch(/package/);
+  });
+
+  it("Sent and still open waits for the lender; a came-back one does not say waiting", () => {
+    expect(nextStepToken(condition({ prep_status: "with_underwriter" }))).toEqual({
+      icon: "lender",
+      text: "Sent to lender · waiting for their answer",
+      tone: "quiet",
+    });
+    expect(
+      nextStepToken(condition({ prep_status: "with_underwriter", lender_status: "not_cleared" }))
+        ?.text,
+    ).not.toBe("Sent to lender · waiting for their answer");
+  });
 });

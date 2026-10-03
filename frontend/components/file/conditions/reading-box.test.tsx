@@ -212,4 +212,55 @@ describe("LP-954 — a clause nothing covers", () => {
     render(<ReadingBox condition={condition({ reading: reading({ uncovered: [] }) })} />);
     expect(screen.queryByText("Not covered by an item yet:")).toBeNull();
   });
+
+  it("LP-958 — a generic item shows the lender's words, not the placeholder; her own words win", () => {
+    const generic = {
+      id: "g1",
+      key: "item_1",
+      name: "Copy of the credit report invoice",
+      acceptable: "What the lender's words describe",
+      generic: true,
+      performer: "processor",
+      performers: ["processor"],
+      option: "i_will_do_it",
+      status: "open",
+      specifics: { amounts: [], account_bank: null, account_last4: null, month: null, names: [] },
+      draft: null,
+    } as unknown as ConditionItem;
+    const { unmount } = render(
+      <ReadingItems items={[generic]} lenderWords="Provide copy of invoice for credit report." />,
+    );
+    expect(
+      screen.getByText("As the lender asks: Provide copy of invoice for credit report."),
+    ).toBeDefined();
+    expect(screen.queryByText(/What the lender's words describe/)).toBeNull();
+    unmount();
+    // Once she writes her own acceptable form, the server's flag is false and hers is shown.
+    render(
+      <ReadingItems
+        items={[{ ...generic, acceptable: "Her words", generic: false } as ConditionItem]}
+        lenderWords="Provide copy of invoice for credit report."
+      />,
+    );
+    expect(screen.getByText("Her words")).toBeDefined();
+  });
+
+  it("LP-958 — her actions span the card, under it, not in the right-hand column", () => {
+    const task = {
+      id: "t1",
+      key: "invoice",
+      name: "Credit report invoice",
+      acceptable: "The invoice",
+      performer: "processor",
+      performers: ["processor"],
+      option: "i_will_do_it",
+      status: "open",
+      specifics: { amounts: [], account_bank: null, account_last4: null, month: null, names: [] },
+      draft: null,
+    } as unknown as ConditionItem;
+    render(<ReadingItems items={[task]} itemActions={() => <button type="button">Act</button>} />);
+    const row = screen.getByRole("button", { name: "Act" }).parentElement;
+    expect(row?.className).toContain("col-span-3");
+    expect(row?.parentElement?.tagName).toBe("LI");
+  });
 });

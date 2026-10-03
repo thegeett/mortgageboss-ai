@@ -96,6 +96,7 @@ from app.schemas.condition import (
     ItemLinkRequest,
     LenderDeclineRequest,
     LenderProcessingRequest,
+    LinkCandidatePublic,
     NextStepRequest,
     OwnerRequest,
     PackagePublic,
@@ -1649,6 +1650,22 @@ async def choose_condition_route(
     except PlanRefused as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
     return await _condition_response(db, condition)
+
+
+@conditions_by_id_router.get(
+    "/{condition_id}/items/{item_id}/link-candidates", response_model=list[LinkCandidatePublic]
+)
+async def item_link_candidates(
+    condition: ScopedCondition, item_id: UUID, db: DbSession
+) -> list[LinkCandidatePublic]:
+    """LP-958 — the file's documents for the Link dialog, those that answer this item first."""
+    from app.services.condition_links import link_candidates
+
+    item = await _scoped_item(db, condition, item_id)
+    return [
+        LinkCandidatePublic.model_validate(row)
+        for row in await link_candidates(db, condition=condition, item=item)
+    ]
 
 
 @conditions_by_id_router.post(

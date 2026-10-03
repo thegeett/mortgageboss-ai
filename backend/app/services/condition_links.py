@@ -309,3 +309,58 @@ async def unlink_document(
         item_id=str(item.id),
         document_id=str(document.id),
     )
+
+
+async def link_candidates(
+    db: AsyncSession, *, condition: Condition, item: ConditionItem
+) -> list[dict[str, Any]]:
+    """LP-958 — the file's documents for the Link dialog, the ones that answer this item first.
+
+    `matches` is THE matching rule (`condition_matching.document_answers`: type, the library's words, her
+    unlinks), never a second one in the client. Current versions only, newest first within each group.
+    """
+    from app.documents.display_names import display_name
+    from app.services.condition_matching import document_answers, match_words_for, unlinked_pairs
+
+    documents = list(
+        await db.scalars(
+            only_active(
+                select(Document)
+                .where(
+                    Document.loan_file_id == condition.loan_file_id, Document.is_current.is_(True)
+                )
+                .order_by(Document.created_at.desc(), Document.id),
+                Document,
+            )
+        )
+    )
+    linked = set(
+        await db.scalars(
+            select(ConditionEvidence.document_id).where(ConditionEvidence.item_id == item.id)
+        )
+    )
+    unlinked = await unlinked_pairs(db, loan_file_id=condition.loan_file_id)
+    words = match_words_for(condition.canonical_type_id, item.key)
+    out: list[dict[str, Any]] = []
+    for document in documents:
+        out.append(
+            {
+                "document_id": document.id,
+                "name": document.document_name or document.original_filename,
+                "type_label": display_name(document.document_type)
+                if document.document_type
+                else "Not read yet",
+                "created_at": document.created_at,
+                "matches": document_answers(
+                    wanted=item.documents,
+                    match_words=words,
+                    document=document,
+                    item_id=item.id,
+                    unlinked=unlinked,
+                ),
+                "linked": document.id in linked or item.document_id == document.id,
+                "unlinked_by_her": (item.id, document.id) in unlinked,
+            }
+        )
+    out.sort(key=lambda row: not row["matches"])  # stable: newest first within each group
+    return out
