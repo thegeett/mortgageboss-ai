@@ -29,6 +29,7 @@ vi.mock("@/lib/api/conditions", () => ({
     mutate: (body: unknown) => calls.unlink.push(body),
   }),
   useLinkItemDocument: () => ({ isPending: false, mutate: vi.fn() }),
+  useUpdateItem: () => ({ isPending: false, mutate: vi.fn() }),
   useUploadToItem: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 vi.mock("@/lib/api/documents", () => ({

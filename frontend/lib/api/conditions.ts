@@ -1454,3 +1454,16 @@ export function useUploadToItem(fileId: string) {
     },
   });
 }
+
+/** LP-955 — she picks how this condition gets done at its lender. 409 for a choice not offered. */
+export function useChooseRoute(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ conditionId, route }: { conditionId: string; route: string }) =>
+      (await apiClient.put<Condition>(`${conditionPath(conditionId)}/route`, { route })).data,
+    onSuccess: (condition) => {
+      invalidateCondition(queryClient, fileId, condition.id);
+      invalidatePlan(queryClient, fileId);
+    },
+  });
+}

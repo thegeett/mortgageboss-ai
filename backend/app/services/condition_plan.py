@@ -140,6 +140,70 @@ _CANONICAL_DEFAULTS: dict[str, dict[str, Any]] = {
     "sunwest": {"upload_fields": ["note", "name_of_source", "date_verified"]},
 }
 
+
+@dataclass(frozen=True)
+class Route:
+    """LP-955 — one way a condition gets done at one lender, offered as a choice on the condition."""
+
+    key: str
+    label: str
+    hint: str
+    #: The condition's step when she picks it; None leaves the items to carry their own (her task).
+    step: PlanOption | None
+
+
+#: LP-955 — the choices a condition offers at a lender, by (canonical lender key, library type). Data,
+#: not branches: a new lender or type is a new row. IV-01 at UWM: credit pulled in UWM's own system
+#: means UWM holds the invoice, so the underwriter is asked to clear it; pulled through the broker's own
+#: vendor, the invoice is hers to upload.
+ROUTES: dict[tuple[str, str], tuple[Route, ...]] = {
+    ("uwm", "IV-01"): (
+        Route(
+            key="lender_system",
+            label="Pulled in UWM's system",
+            hint="UWM has the invoice: the underwriter is asked to clear it.",
+            step=PlanOption.ASK_UNDERWRITER,
+        ),
+        Route(
+            key="our_vendor",
+            label="Our vendor",
+            hint="Your task: upload the vendor's invoice.",
+            step=None,
+        ),
+    ),
+}
+
+
+def routes_for(lender_key: str | None, type_id: str | None) -> tuple[Route, ...]:
+    if not lender_key or not type_id:
+        return ()
+    return ROUTES.get((lender_key, type_id), ())
+
+
+def chosen_route(condition: Condition, routes: tuple[Route, ...]) -> str | None:
+    """The route her condition is on: the one whose step it has. None until she has chosen a stepped
+    one (the task route is the condition's default state, so it reads as chosen only after a change)."""
+    for route in routes:
+        if route.step is not None and condition.next_step is route.step:
+            return route.key
+    return None
+
+
+async def choose_route(
+    db: AsyncSession, *, condition: Condition, route_key: str, actor_user_id: UUID
+) -> None:
+    """LP-955 — she picks how this condition gets done. The step follows; the plan re-syncs its drafts
+    (the underwriter's question appears or goes) through `set_next_step`, the one door for steps."""
+    lender = await db.get(Lender, condition.lender_id) if condition.lender_id else None
+    routes = routes_for(
+        lender.canonical_lender_key if lender else None, condition.canonical_type_id
+    )
+    route = next((each for each in routes if each.key == route_key), None)
+    if route is None:
+        raise PlanRefused("That choice is not offered for this condition.")
+    await set_next_step(db, condition=condition, next_step=route.step, actor_user_id=actor_user_id)
+
+
 #: Types the "lender orders the final inspection / appraisal updates" setting covers.
 _FINAL_INSPECTION_TYPES = frozenset({"PA-03"})
 #: LP-945 — types the "lender verifies business existence" setting covers.

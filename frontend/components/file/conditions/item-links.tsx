@@ -1,12 +1,20 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { useLinkItemDocument, useUploadToItem } from "@/lib/api/conditions";
+import { useLinkItemDocument, useUpdateItem, useUploadToItem } from "@/lib/api/conditions";
 import { useLoanFileDocuments } from "@/lib/api/documents";
 import { getErrorMessage } from "@/lib/errors/api-error";
-import type { Condition, ConditionItem } from "@/lib/types/conditions";
+import type { Condition, ConditionItem, Performer } from "@/lib/types/conditions";
 import { Link2, Upload } from "lucide-react";
 import { useId, useRef, useState } from "react";
+
+/** Who "Ask someone for it" can ask. The processor is not one: it is her own task already. */
+const ASK_WHO: [Performer, string][] = [
+  ["lo", "The LO"],
+  ["borrower", "The borrower"],
+  ["title", "Title"],
+  ["other_party", "Someone else"],
+];
 
 /**
  * LP-953 — her own links on one item: "Link a document" (a document already on the file, and a page)
@@ -36,13 +44,14 @@ export function ItemLinkActions({
   const [page, setPage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const link = useLinkItemDocument(fileId);
+  const update = useUpdateItem(fileId);
   const upload = useUploadToItem(fileId);
   const documents = useLoanFileDocuments(fileId, { enabled: picking });
   const fileInput = useRef<HTMLInputElement>(null);
   const pickerId = useId();
 
   const choices = (documents.data ?? []).filter((doc) => doc.id !== replaceDocumentId);
-  const pending = link.isPending || upload.isPending;
+  const pending = link.isPending || upload.isPending || update.isPending;
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -68,6 +77,36 @@ export function ItemLinkActions({
             <Upload className="h-3.5 w-3.5" aria-hidden />
             Upload here
           </Button>
+          {item.option === "i_will_do_it" ? (
+            <select
+              aria-label={`Ask someone for ${item.name}`}
+              value=""
+              disabled={pending}
+              onChange={(event) => {
+                const who = event.target.value as Performer;
+                if (!who) return;
+                setError(null);
+                // LP-955 — her task becomes an ask in that person's draft: the step and who acts.
+                update.mutate(
+                  {
+                    conditionId: condition.id,
+                    itemId: item.id,
+                    option: who === "borrower" ? "ask_borrower" : "ask_third_party",
+                    performers: [who],
+                  },
+                  { onError: (err) => setError(getErrorMessage(err)) },
+                );
+              }}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+            >
+              <option value="">Ask someone for it…</option>
+              {ASK_WHO.map(([who, label]) => (
+                <option key={who} value={who}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          ) : null}
           <input
             ref={fileInput}
             type="file"

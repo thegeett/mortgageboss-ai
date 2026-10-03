@@ -107,6 +107,8 @@ from app.schemas.condition import (
     RewordedDecisionRequest,
     RoundCompletenessUpdate,
     RoundPlanPublic,
+    RoutePublic,
+    RouteRequest,
     UnderwriterNotePublic,
     VerdictRequest,
     WithdrawnConditionPublic,
@@ -622,6 +624,7 @@ def _condition_public(
     items: list[ConditionItemPublic] | None = None,
     question_draft: DraftTailPublic | None = None,
     evidence: list[ConditionEvidencePublic] | None = None,
+    lender_keys: dict[UUID, str | None],
 ) -> ConditionPublic:
     """One condition as the wire sees it, with the SERVICE's rules supplying the derived fields.
 
@@ -646,7 +649,40 @@ def _condition_public(
         evidence=evidence,
         # LP-947: the server's rule for who the next send waits on, not a client copy of it.
         waiting_on_when_sent=waiting_on_when_sent(condition.next_step, items or []),
+        # LP-955: how this condition can get done at its lender ("Pulled in UWM's system" / "Our
+        # vendor"). REQUIRED of every caller (`lender_keys`), so no door leaves the choice off.
+        routes=_routes_public(condition, lender_keys),
     )
+
+
+def _routes_public(
+    condition: Condition, lender_keys: dict[UUID, str | None]
+) -> tuple[list[RoutePublic], str | None]:
+    from app.services.condition_plan import chosen_route, routes_for
+
+    key = lender_keys.get(condition.lender_id) if condition.lender_id else None
+    routes = routes_for(key, condition.canonical_type_id)
+    return (
+        [RoutePublic(key=r.key, label=r.label, hint=r.hint) for r in routes],
+        chosen_route(condition, routes),
+    )
+
+
+async def _lender_keys(db: DbSession, loan_file_id: UUID) -> dict[UUID, str | None]:
+    """The canonical key of every lender the file's conditions name, in one query (LP-955)."""
+    from app.models.lender import Lender
+
+    rows = await db.execute(
+        select(Lender.id, Lender.canonical_lender_key).where(
+            Lender.id.in_(
+                select(Condition.lender_id).where(
+                    Condition.loan_file_id == loan_file_id, Condition.lender_id.is_not(None)
+                )
+            )
+        )
+    )
+    # A LIST FIRST: `dict()` treats anything with `.keys()` as a mapping, and a SQLAlchemy result has one.
+    return dict(list(rows.tuples()))
 
 
 #: Set when the read hit `MAX_CONDITIONS`, so a client can tell a full page from a truncated one.
@@ -762,6 +798,7 @@ async def list_file_conditions(
     items = await items_public_for_file(db, loan_file_id=loan_file.id)
     questions = await question_tails_for_file(db, loan_file_id=loan_file.id)
     evidence = await evidence_public_for_file(db, loan_file_id=loan_file.id)
+    lender_keys = await _lender_keys(db, loan_file.id)
     return [
         _condition_public(
             condition,
@@ -770,6 +807,7 @@ async def list_file_conditions(
             items=items.get(condition.id, []),
             question_draft=questions.get(condition.id),
             evidence=evidence.get(condition.id, []),
+            lender_keys=lender_keys,
         )
         for condition in conditions
     ]
@@ -1500,6 +1538,7 @@ async def add_condition_by_hand(
     numbers, _ = await appearances_for_file(db, loan_file_id=loan_file.id)
     return _condition_public(
         condition,
+        lender_keys=await _lender_keys(db, condition.loan_file_id),
         round_numbers=numbers.get(condition.id, []),
         today=datetime.now(UTC).date(),
         items=(await items_public_for_file(db, loan_file_id=condition.loan_file_id)).get(
@@ -1550,6 +1589,7 @@ async def _condition_response(
     numbers, _ = await appearances_for_file(db, loan_file_id=condition.loan_file_id)
     return _condition_public(
         condition,
+        lender_keys=await _lender_keys(db, condition.loan_file_id),
         round_numbers=numbers.get(condition.id, []),
         today=datetime.now(UTC).date(),
         items=(await items_public_for_file(db, loan_file_id=condition.loan_file_id)).get(
@@ -1590,6 +1630,23 @@ async def set_condition_next_step(
         )
     except PlanRefused as exc:
         # LP-953 — "Already in the file" without a linked document is refused with the sentence.
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    return await _condition_response(db, condition)
+
+
+@conditions_by_id_router.put("/{condition_id}/route", response_model=ConditionPublic)
+async def choose_condition_route(
+    condition: ScopedCondition, payload: RouteRequest, db: DbSession, current_user: CurrentUser
+) -> ConditionPublic:
+    """LP-955 — how this condition gets done at its lender (IV-01 at UWM: "Pulled in UWM's system" asks
+    the underwriter to clear it; "Our vendor" keeps it her task). 409 for a choice not offered here."""
+    from app.services.condition_plan import choose_route
+
+    try:
+        await choose_route(
+            db, condition=condition, route_key=payload.route, actor_user_id=current_user.id
+        )
+    except PlanRefused as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
     return await _condition_response(db, condition)
 
@@ -1930,6 +1987,7 @@ async def get_condition(condition: ScopedCondition, db: DbSession) -> ConditionD
 
     public = _condition_public(
         condition,
+        lender_keys=await _lender_keys(db, condition.loan_file_id),
         round_numbers=sorted(seen_on),
         today=datetime.now(UTC).date(),
         items=(await items_public_for_file(db, loan_file_id=condition.loan_file_id)).get(

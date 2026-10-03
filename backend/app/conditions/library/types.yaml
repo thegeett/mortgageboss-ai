@@ -782,6 +782,8 @@ types:
     category: invoice
     rule: {kind: lender_requirement}
     playbook: Usually already in the file from when credit was pulled; point to it.
+    # LP-955 — when credit was pulled in the lender's own system, the lender holds the invoice.
+    question: "The credit report for this loan was pulled in {lender_short}'s system, so {lender_short} has the invoice. Could you clear {code}, or let me know what else you need?"
     items:
       - key: invoice
         name: Credit report invoice

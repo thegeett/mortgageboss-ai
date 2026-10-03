@@ -50,6 +50,8 @@ function condition(overrides: Partial<Condition> = {}): Condition {
     items: [],
     question_draft: null,
     waiting_on_when_sent: null,
+    routes: [],
+    chosen_route: null,
     ...overrides,
   } as Condition;
 }

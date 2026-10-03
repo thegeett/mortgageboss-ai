@@ -551,6 +551,9 @@ export interface Condition {
    * server's rule, the one its send applies. Rendered by `becomes`, never recomputed here.
    */
   waiting_on_when_sent: OwnerHint | null;
+  /** LP-955 — how this condition can get done at its lender, and the one chosen. Usually empty. */
+  routes: ConditionRoute[];
+  chosen_route: string | null;
   /**
    * When the row last changed — the value an LP-912 write must echo back.
    *
@@ -1357,4 +1360,11 @@ export interface ReadingState {
   unread: number;
   /** `stalled`, `not_queued`, or an error type name. Never message text. */
   error: string | null;
+}
+
+/** LP-955 — one way a condition gets done at its lender ("Pulled in UWM's system", "Our vendor"). */
+export interface ConditionRoute {
+  key: string;
+  label: string;
+  hint: string;
 }

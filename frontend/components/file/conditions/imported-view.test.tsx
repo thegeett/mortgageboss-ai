@@ -111,6 +111,8 @@ function condition(overrides: Partial<Condition> = {}): Condition {
     lender_status: "open",
     waiting_on: null,
     waiting_on_when_sent: null,
+    routes: [],
+    chosen_route: null,
     updated_at: "2026-08-28T10:00:00Z",
     effective_owner: "unknown",
     effective_owner_source: "none",

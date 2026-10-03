@@ -1112,6 +1112,10 @@ class ConditionPublic(BaseModel):
     #: LP-947 — who we WILL be waiting on when the next email is marked sent (S3-01's "Becomes
     #: Waiting on Borrower when…"). The server's rule, sent so the client renders it, not recomputes it.
     waiting_on_when_sent: OwnerHint | None = None
+    #: LP-955 — the ways this condition can get done at its lender, and the one chosen (see
+    #: `condition_plan.ROUTES`). Empty for every condition no route is defined for.
+    routes: list["RoutePublic"] = Field(default_factory=list)
+    chosen_route: str | None = None
 
     #: WITHOUT THIS, LP-912's `stale` REFUSAL IS UNREACHABLE. Its writes are optimistic on
     #: `updated_at`, and a client cannot echo a value it was never given — which is exactly how
@@ -1188,6 +1192,7 @@ class ConditionPublic(BaseModel):
         question_draft: DraftTailPublic | None = None,
         evidence: list[ConditionEvidencePublic] | None = None,
         waiting_on_when_sent: OwnerHint | None = None,
+        routes: tuple[list["RoutePublic"], str | None] = ([], None),
     ) -> "ConditionPublic":
         """Build the public view.
 
@@ -1240,6 +1245,8 @@ class ConditionPublic(BaseModel):
             lender_status=condition.lender_status,
             waiting_on=condition.waiting_on,
             waiting_on_when_sent=waiting_on_when_sent,
+            routes=routes[0],
+            chosen_route=routes[1],
             updated_at=condition.updated_at,
             effective_owner=effective_owner,
             effective_owner_source=effective_owner_source,
@@ -2194,3 +2201,18 @@ class ItemLinkRequest(BaseModel):
     document_id: UUID
     page: int | None = Field(default=None, ge=1, le=10000)
     replace_document_id: UUID | None = None
+
+
+class RoutePublic(BaseModel):
+    """LP-955 — one way a condition gets done at its lender, offered as a choice."""
+
+    key: str
+    label: str
+    hint: str
+
+
+class RouteRequest(BaseModel):
+    route: str = Field(min_length=1, max_length=40)
+
+
+ConditionPublic.model_rebuild()

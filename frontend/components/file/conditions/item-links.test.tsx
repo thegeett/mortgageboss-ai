@@ -4,10 +4,15 @@ import type { Condition, ConditionItem } from "@/lib/types/conditions";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const calls = vi.hoisted(() => ({ link: [] as unknown[], upload: [] as unknown[] }));
+const calls = vi.hoisted(() => ({
+  link: [] as unknown[],
+  upload: [] as unknown[],
+  update: [] as unknown[],
+}));
 vi.mock("@/lib/api/conditions", () => ({
   useLinkItemDocument: () => ({ isPending: false, mutate: (b: unknown) => calls.link.push(b) }),
   useUploadToItem: () => ({ isPending: false, mutate: (b: unknown) => calls.upload.push(b) }),
+  useUpdateItem: () => ({ isPending: false, mutate: (b: unknown) => calls.update.push(b) }),
 }));
 vi.mock("@/lib/api/documents", () => ({
   useLoanFileDocuments: () => ({
@@ -24,10 +29,15 @@ afterEach(() => {
   cleanup();
   calls.link = [];
   calls.upload = [];
+  calls.update = [];
 });
 
 const CONDITION = { id: "c1" } as Condition;
-const ITEM = { id: "i1", name: "Credit report invoice" } as ConditionItem;
+const ITEM = {
+  id: "i1",
+  name: "Credit report invoice",
+  option: "i_will_do_it",
+} as ConditionItem;
 
 describe("ItemLinkActions", () => {
   it("links the chosen document with its page", () => {
@@ -63,5 +73,29 @@ describe("ItemLinkActions", () => {
       target: { files: [file] },
     });
     expect(calls.upload).toEqual([{ conditionId: "c1", itemId: "i1", files: [file] }]);
+  });
+
+  it("asks someone for her task: the LO gets it as an ask (LP-955)", () => {
+    render(<ItemLinkActions fileId="f1" condition={CONDITION} item={ITEM} />);
+    fireEvent.change(screen.getByLabelText("Ask someone for Credit report invoice"), {
+      target: { value: "lo" },
+    });
+    expect(calls.update).toEqual([
+      { conditionId: "c1", itemId: "i1", option: "ask_third_party", performers: ["lo"] },
+    ]);
+  });
+
+  it("asks the borrower as the borrower's ask, and is not offered on an ask", () => {
+    const { unmount } = render(<ItemLinkActions fileId="f1" condition={CONDITION} item={ITEM} />);
+    fireEvent.change(screen.getByLabelText("Ask someone for Credit report invoice"), {
+      target: { value: "borrower" },
+    });
+    expect(calls.update).toEqual([
+      { conditionId: "c1", itemId: "i1", option: "ask_borrower", performers: ["borrower"] },
+    ]);
+    unmount();
+    const asked = { ...ITEM, option: "ask_third_party" } as ConditionItem;
+    render(<ItemLinkActions fileId="f1" condition={CONDITION} item={asked} />);
+    expect(screen.queryByLabelText("Ask someone for Credit report invoice")).toBeNull();
   });
 });

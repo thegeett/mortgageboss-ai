@@ -134,7 +134,17 @@ class LibraryItem:
 #: LP-922 — the only words code fills into library wording. Anything else in braces is refused, so a
 #: template cannot name a fact nothing supplies.
 EMAIL_PLACEHOLDERS = frozenset(
-    {"amount", "amount_short", "loan_number", "required", "verified", "instruction"}
+    {
+        "amount",
+        "amount_short",
+        "loan_number",
+        "required",
+        "verified",
+        "instruction",
+        # LP-955 — a type's `question` to the underwriter names the lender and the condition's code.
+        "lender_short",
+        "code",
+    }
 )
 _PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
 
@@ -153,6 +163,9 @@ class ConditionType:
     #: lender asks, as the borrower email's grey "Why:" line finishes "the lender needs to see …".
     short: str | None = None
     why: str | None = None
+    #: LP-955 — the type's own question to the underwriter, when "Ask the underwriter" is its answer
+    #: (IV-01 at UWM: the credit was pulled in the lender's system, so the lender holds the invoice).
+    question: str | None = None
 
     @property
     def label(self) -> str:
@@ -339,6 +352,7 @@ def parse_library(data: Any, *, documents_known: frozenset[str] | None = None) -
             waits_on_type=raw.get("waits_on_type"),
             short=_wording(raw.get("short"), where, "short"),
             why=_wording(raw.get("why"), where, "why"),
+            question=_wording(raw.get("question"), where, "question"),
         )
 
     for condition_type in types.values():

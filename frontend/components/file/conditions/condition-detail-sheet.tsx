@@ -1,5 +1,6 @@
 "use client";
 
+import { ConditionRoutes } from "@/components/file/conditions/condition-routes";
 import { EvidenceSection } from "@/components/file/conditions/evidence-section";
 import { ItemLinkActions } from "@/components/file/conditions/item-links";
 import { ReadingBox, ReadingItems } from "@/components/file/conditions/reading-box";
@@ -479,6 +480,10 @@ function SheetBody({
           />
         ) : condition.reading ? (
           <ReadingItems items={condition.reading.items} />
+        ) : null}
+        {/* LP-955: how this condition gets done at its lender, when there is more than one way. */}
+        {fileId && replacedById === null ? (
+          <ConditionRoutes fileId={fileId} condition={condition} />
         ) : null}
         {condition.items.length > 0 || condition.next_step !== null ? (
           <NextStepChips

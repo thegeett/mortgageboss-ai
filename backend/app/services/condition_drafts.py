@@ -703,6 +703,17 @@ def render_lender(
     return subject, body
 
 
+def _type_question(condition: Condition, letter: LetterFacts) -> str | None:
+    """The library type's `question`, filled by code (the lender's short name, the code), or None."""
+    library_type = load_library().get(condition.canonical_type_id)
+    if library_type is None or not library_type.question:
+        return None
+    return fill(
+        library_type.question,
+        {"lender_short": letter.lender_short or None, "code": condition.lender_code or None},
+    )
+
+
 def render_question(
     *,
     condition: Condition,
@@ -733,6 +744,11 @@ def render_question(
             "should not apply.</p>"
             f"<p>Could you clear {code}, or let me know what else you need?</p>"
         )
+    elif condition.next_step is PlanOption.ASK_UNDERWRITER and (
+        asked := _type_question(condition, letter)
+    ):
+        # LP-955 — THE TYPE'S OWN QUESTION (IV-01 at UWM: credit pulled in the lender's system).
+        middle = f"<p>{asked}</p>"
     else:
         summary = html.escape(
             mask_accounts(
