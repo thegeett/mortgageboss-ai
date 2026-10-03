@@ -1121,7 +1121,16 @@ export function useApplyFigures(fileId: string) {
 
 // --- LP-925: the package for the lender (S3-10) ------------------------------------------------ //
 
-export const conditionPackageQueryKey = (fileId: string) => ["condition-package", fileId] as const;
+/**
+ * UNDER THE CONDITIONS PREFIX ON PURPOSE (LP-957). Which conditions go in the package follows their
+ * status, so anything that refreshes the file's conditions must refresh the package too. As its own key,
+ * only the package's own mutations refreshed it: she moved six conditions to Ready to send and the
+ * "6 ready to send · Build package" panel stayed hidden until a reload. Nesting the key makes every one
+ * of the doors that invalidate `conditionsQueryPrefix` (status moves, verdicts, bulk, links, the lender
+ * change, the reading) cover the package, including doors added later.
+ */
+export const conditionPackageQueryKey = (fileId: string) =>
+  [...conditionsQueryPrefix(fileId), "package"] as const;
 const packagePath = (fileId: string) => `${filePath(fileId)}/condition-package`;
 
 export function useConditionPackage(fileId: string) {

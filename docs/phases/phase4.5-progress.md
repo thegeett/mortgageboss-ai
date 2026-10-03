@@ -1119,3 +1119,12 @@ tsc and the build clean.
 
 **The shared dev database is behind HEAD** (the reviewer saw the old event-kind CHECK on `mortgageboss_dev`):
 run `alembic upgrade head` there before clicking these features through on dev; staging needs a deploy.
+
+## Batch 4 follow-ups (the owner, 2026-10-03)
+
+| Ticket | Status | Build SHA | Review SHA | Notes |
+|---|---|---|---|---|
+| [LP-957](../tickets/LP-957.md) The lender-package panel follows the conditions | AWAITING_REVIEW | the commit titled `LP-957: …` | | reviewer: mortgageboss-ai-cf; frontend 2192/2192 |
+
+The drawer and list redesign (the owner's screenshot of 2026-10-03: the cramped link/upload controls, no "what
+next" after Ready, the unexplained "Open" column) is mocked up for the owner before anything is built (item 9).
