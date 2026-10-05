@@ -319,7 +319,7 @@ Two things to know:
 
 - **Every stage that touches the database or runs an apply refuses while the
   environment is down**, and says so: `deploy`, `migrate`, `query`, `query-setup`,
-  `add-user`, `bootstrap-admin`, `backfill-mismo`, `verify`, `phase1` and `phase2`.
+  `add-user`, `add-company`, `bootstrap-admin`, `backfill-mismo`, `verify`, `phase1` and `phase2`.
   They would otherwise fail confusingly — Terraform can fail mid-apply against a
   stopped instance, and a service left at desired 0 reaches steady state instantly,
   so `deploy` would report success for an image no task is running. The database

@@ -387,7 +387,7 @@ The site returns **503**. The ALB, Cognito, DNS and ElastiCache stay up; only th
 tasks and the database go away.
 
 Every stage that touches Postgres or runs an apply **refuses**, and tells you to run
-`up`: `deploy`, `migrate`, `query`, `query-setup`, `add-user`, `bootstrap-admin`,
+`up`: `deploy`, `migrate`, `query`, `query-setup`, `add-user`, `add-company`, `bootstrap-admin`,
 `backfill-mismo`, `verify`, `phase1`, `phase2`. Do not `terraform apply` by hand
 either — modifying a stopped instance can fail mid-apply.
 

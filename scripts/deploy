@@ -20,7 +20,7 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 # shellcheck source=scripts/deploy-lib.sh
 . "$SCRIPT_DIR/deploy-lib.sh"
 
-STAGES="bootstrap phase1 dns images secrets migrate phase2 smoke all status bootstrap-admin add-user query-setup query deploy backfill-mismo verify down up"
+STAGES="bootstrap phase1 dns images secrets migrate phase2 smoke all status bootstrap-admin add-user add-company query-setup query deploy backfill-mismo verify down up"
 
 # How long `dns` waits for the registrar's delegation to propagate, and how long
 # `migrate` waits for the one-off task to stop. Both overridable for a slow
@@ -86,6 +86,10 @@ ARGUMENTS
                bcrypt hash. Refuses if the database already has any user.
     add-user   Add one user to an existing company, same mechanism. Refuses an
                unknown company slug or an email that is already taken.
+    add-company
+               Create a NEW company and its first admin in a populated
+               environment, same mechanism. Refuses a slug any company has, a
+               name a live company has, or an email that is already taken.
 
     query-setup
                Create the mbai_readonly role and its grants. Run ONCE per
@@ -1396,11 +1400,11 @@ stage_migrate() {
 }
 
 # --------------------------------------------------------------------------- #
-# Account provisioning -- bootstrap-admin and add-user
+# Account provisioning -- bootstrap-admin, add-user and add-company
 #
 # There is no registration route in this application: no signup endpoint, no
 # users router, no password-reset flow. Accounts are made by a deliberate act,
-# and these two stages are it.
+# and these three stages are it.
 #
 # THE PASSWORD IS HASHED ON THIS MACHINE AND NEVER SENT.
 #
@@ -1798,6 +1802,100 @@ stage_add_user() {
   ok "add-user complete."
   info ""
   info "Remember the matching Cognito user, or they cannot reach the application."
+}
+
+stage_add_company() {
+  banner "add-company -- a NEW company and its first admin in '$ENV_NAME'"
+  need_cmd aws; need_cmd jq; need_cmd terraform
+  require_identity "$ACCOUNT_ID"
+  require_provisioning_environment
+  # Outputs first: require_cognito_enabled reads one.
+  require_outputs "$ENV_DIR"
+  require_cognito_enabled
+  require_db_up "this stage"
+
+  local cluster taskdef container subnets sgs netcfg request
+  cluster=$(out ecs_cluster_name)
+  taskdef=$(out_map ecs_task_definition_arns migrate)
+  container=$(oneoff_container_name "$taskdef")
+  [ -n "$container" ] && [ "$container" != "None" ] || die \
+    "Could not resolve the container name from the migrate task definition."
+
+  info ""
+  info "Creates ONE new company (tenant) and its first ADMIN, together. The script"
+  info "refuses a slug any company already has (soft-deleted included), a name a"
+  info "live company already has, and an email that is already taken. To add a"
+  info "user to a company that exists, use the add-user stage instead."
+  info ""
+
+  local coname coslug email first last hash
+  coname=$(ask_required "Company name")
+  coslug=$(ask_required "Company slug (lowercase, url-safe, e.g. acme-mortgage)")
+  # The script validates this too; checking here refuses before the password prompt.
+  printf '%s' "$coslug" | grep -Eqx '[a-z0-9]+(-[a-z0-9]+)*' || die \
+    "Slug '$coslug' is not lowercase letters, digits and single hyphens." "Nothing was run."
+  email=$(ask_required "Admin email")
+  first=$(ask_required "Admin first name")
+  last=$(ask_required "Admin last name")
+
+  info ""
+  info "  The password is hashed HERE and never sent. Only the bcrypt hash travels."
+  hash=$(hash_password_locally)
+  ok "hashed locally (60 chars, never displayed)"
+
+  ensure_secret_tmpdir
+  netcfg=$(oneoff_network "$cluster")
+  subnets=$(printf '%s' "$netcfg" | awk -F'\t' '{print $1}')
+  sgs=$(printf '%s' "$netcfg" | awk -F'\t' '{print $2}')
+
+  hr
+  info "  environment : $ENV_NAME"
+  info "  company     : $coname ($coslug)"
+  info "  admin       : $email"
+  info "  password    : hashed locally, not shown, not sent"
+  hr
+  confirm "Create this company and admin user?" || die "Aborted. Nothing was run."
+
+  request="$SECRET_TMPDIR/add-company.$$.json"
+  (
+    umask 077
+    ONEOFF_CLUSTER="$cluster" ONEOFF_TD="$taskdef" ONEOFF_CONTAINER="$container" \
+    ONEOFF_SUBNETS="$subnets" ONEOFF_SGS="$sgs" \
+    ADD_COMPANY_NAME="$coname" ADD_COMPANY_SLUG="$coslug" \
+    ADD_COMPANY_ADMIN_EMAIL="$email" ADD_COMPANY_ADMIN_PASSWORD_HASH="$hash" \
+    ADD_COMPANY_ADMIN_FIRST_NAME="$first" ADD_COMPANY_ADMIN_LAST_NAME="$last" \
+    ADD_COMPANY_ALLOWED_ENVIRONMENTS="$PROVISIONING_ENVIRONMENTS" \
+      jq -n '{
+        cluster: env.ONEOFF_CLUSTER,
+        taskDefinition: env.ONEOFF_TD,
+        launchType: "FARGATE",
+        networkConfiguration: {awsvpcConfiguration: {
+          subnets: (env.ONEOFF_SUBNETS | split(",")),
+          securityGroups: (env.ONEOFF_SGS | split(",")),
+          assignPublicIp: "DISABLED"}},
+        overrides: {containerOverrides: [{
+          name: env.ONEOFF_CONTAINER,
+          command: ["uv","run","python","-m","app.scripts.add_company"],
+          environment: [
+            {name:"ADD_COMPANY_NAME",                 value: env.ADD_COMPANY_NAME},
+            {name:"ADD_COMPANY_SLUG",                 value: env.ADD_COMPANY_SLUG},
+            {name:"ADD_COMPANY_ADMIN_EMAIL",          value: env.ADD_COMPANY_ADMIN_EMAIL},
+            {name:"ADD_COMPANY_ADMIN_PASSWORD_HASH",  value: env.ADD_COMPANY_ADMIN_PASSWORD_HASH},
+            {name:"ADD_COMPANY_ADMIN_FIRST_NAME",     value: env.ADD_COMPANY_ADMIN_FIRST_NAME},
+            {name:"ADD_COMPANY_ADMIN_LAST_NAME",      value: env.ADD_COMPANY_ADMIN_LAST_NAME},
+            {name:"ADD_COMPANY_ALLOWED_ENVIRONMENTS", value: env.ADD_COMPANY_ALLOWED_ENVIRONMENTS}
+          ]}]}
+      }' >"$request"
+  ) || die "Could not build the run-task request."
+  hash=""
+
+  run_oneoff_task "add-company" "$request" "$cluster" "$container"
+  ok "add-company complete."
+  info ""
+  info "Next: create the matching COGNITO user -- this account gets you past the"
+  info "application's own login, not past the load balancer:"
+  info "  aws cognito-idp admin-create-user --user-pool-id \$(terraform -chdir=$ENV_DIR output -raw cognito_user_pool_id) \\"
+  info "    --username $email --user-attributes Name=email,Value=$email Name=email_verified,Value=true"
 }
 
 # ---------------------------------------------------------------------------
@@ -3673,6 +3771,7 @@ main() {
     status)    stage_status ;;
     bootstrap-admin) stage_bootstrap_admin ;;
     add-user)  stage_add_user ;;
+    add-company) stage_add_company ;;
     query-setup) stage_query_setup ;;
     query)     stage_query ;;
     backfill-mismo) stage_backfill_mismo ;;

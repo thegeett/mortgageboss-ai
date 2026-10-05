@@ -46,7 +46,7 @@ import sys
 from dataclasses import dataclass
 
 import structlog
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -55,6 +55,7 @@ from app.models.company import Company
 from app.models.user import User, UserRole
 from app.scripts._provisioning import (
     ProvisioningError,
+    assert_email_unused,
     assert_environment_allowed,
     normalize_email,
     require_env,
@@ -153,22 +154,12 @@ async def add_user(
             f"No live company with slug {config.company_slug!r} (a soft-deleted one does "
             f"not count). Refusing to create one: a typo'd slug that silently made a "
             f"second company would produce a user who logs in successfully into the "
-            f"wrong, empty tenant."
+            f"wrong, empty tenant. To create a new company, use the add-company stage."
         )
 
-    # Case-insensitive, unlike the unique index on `users.email`. Email is
-    # case-insensitive in practice but the index is not, so an exact-match guard
-    # would let `Admin@example.com` through while `admin@example.com` exists --
-    # two rows for one human, possibly in two different companies. That is the
-    # tenant confusion the company guard above refuses, arriving by another door.
-    existing = await db.scalar(select(User).where(func.lower(User.email) == email.lower()))
-    if existing is not None:
-        raise ProvisioningError(
-            f"A user with email {email} already exists (matched without regard to case). "
-            f"Email is globally unique across all companies, not per company, so this "
-            f"collides even if the existing user belongs to a different one. Nothing was "
-            f"changed."
-        )
+    # The tenant confusion the company guard above refuses can arrive by another
+    # door: one human, two rows, two companies. See assert_email_unused.
+    await assert_email_unused(db, email)
 
     user = User(
         company_id=company.id,

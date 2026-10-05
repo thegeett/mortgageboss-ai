@@ -1,6 +1,7 @@
 """Shared guards for the account-provisioning scripts.
 
-Used by :mod:`app.scripts.bootstrap_admin` and :mod:`app.scripts.add_user`.
+Used by :mod:`app.scripts.bootstrap_admin`, :mod:`app.scripts.add_user` and
+:mod:`app.scripts.add_company`.
 Both run as one-off ECS tasks against a deployed environment, so every guard
 here exists to make a mistake fail *before* it touches the database rather than
 after.
@@ -25,6 +26,10 @@ import os
 
 import bcrypt
 from email_validator import EmailNotValidError, validate_email
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.user import User
 
 # The two bcrypt variants this application produces or accepts. `$2y$` is
 # deliberately absent: it is a PHP-era marker for the same algorithm, and
@@ -134,4 +139,24 @@ def assert_environment_allowed(*, current: str, allowed_raw: str, allowlist_var:
             f"Refusing to run: ENVIRONMENT is {current!r}, and {allowlist_var} "
             f"permits only {sorted(allowed)}. If this really is intended, set "
             f"{allowlist_var} explicitly for this invocation."
+        )
+
+
+async def assert_email_unused(db: AsyncSession, email: str) -> None:
+    """Refuse an email any user already has, in ANY company, ignoring case.
+
+    Case-insensitive, unlike the unique index on `users.email`. Email is
+    case-insensitive in practice but the index is not, so an exact-match guard
+    would let `Admin@example.com` through while `admin@example.com` exists --
+    two rows for one human, possibly in two different companies. Soft-deleted
+    users count too: the unique index does, so skipping them would only trade
+    this refusal for an IntegrityError traceback.
+    """
+    existing = await db.scalar(select(User).where(func.lower(User.email) == email.lower()))
+    if existing is not None:
+        raise ProvisioningError(
+            f"A user with email {email} already exists (matched without regard to case). "
+            f"Email is globally unique across all companies, not per company, so this "
+            f"collides even if the existing user belongs to a different one. Nothing was "
+            f"changed."
         )

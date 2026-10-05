@@ -92,7 +92,7 @@ entirely avoidable.
 > references it, and this whole class of error disappears.
 
 **When you rebuild, remember what is already in the image.** Any script the deploy
-runs as a one-off task — `alembic`, `bootstrap_admin`, `add_user` — lives in the
+runs as a one-off task — `alembic`, `bootstrap_admin`, `add_user`, `add_company` — lives in the
 image. Writing it locally is not enough.
 
 ---
@@ -366,10 +366,11 @@ required, and they are different systems.
 
 ```bash
 ./scripts/deploy staging bootstrap-admin    # first company + admin, refuses if any user exists
-./scripts/deploy staging add-user           # everyone after that
+./scripts/deploy staging add-user           # everyone after that, into an existing company
+./scripts/deploy staging add-company        # a NEW company + its first admin (LP-960)
 ```
 
-Both hash the password **locally** and send only the bcrypt hash, so no plaintext
+All three hash the password **locally** and send only the bcrypt hash, so no plaintext
 credential enters CloudTrail, a task definition, or a log.
 
 Then the Cognito side, which the script prints for you:
