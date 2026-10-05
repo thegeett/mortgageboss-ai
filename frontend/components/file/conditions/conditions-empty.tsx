@@ -214,11 +214,13 @@ export function ConditionsEmpty({
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
-        <WayIn title="Upload the approval letter" recommended>
+        <WayIn title="Upload the lender’s conditions" recommended>
+          {/* LP-959 — names no lender: any lender's sheet is read, and the extras (lender team,
+              figures, expiry dates) only for the layouts we know, so the old wording overclaimed. */}
           <p className="text-sm text-muted-foreground">
-            The lender’s PDF (UWM “Loan Approval Conditions”, Champions “Conditional Approval
-            Certificate”). We read every condition plus the lender team, loan figures and
-            document-expiry dates.
+            Upload the conditional approval or condition sheet PDF you received from the lender. We
+            pull out each condition and set it up for you to review. Nothing is added to the file
+            until you confirm it.
           </p>
           <div
             {...getRootProps()}

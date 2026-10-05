@@ -182,7 +182,7 @@ describe("the Conditions tab with no rounds (S1-01)", () => {
     // straight from the design — so `getByText` matches two nodes and throws. Asking for the heading
     // is unambiguous and is the stronger claim anyway: it pins that these titles are headings.
     for (const title of [
-      "Upload the approval letter",
+      "Upload the lender’s conditions",
       "Paste conditions",
       "Forward the lender’s email",
       "Add one by hand",

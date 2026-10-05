@@ -239,7 +239,18 @@ function show(data: ConditionRound[] | undefined, state: "ok" | "pending" | "err
 describe("which screen the Conditions tab shows", () => {
   it("offers the four ways in when the file has no rounds", () => {
     show([]);
-    expect(screen.getByRole("heading", { name: "Upload the approval letter" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Upload the lender’s conditions" })).toBeDefined();
+  });
+
+  it("LP-959 — the upload card names no lender: any lender's sheet is read", () => {
+    show([]);
+    const card = screen
+      .getByText(
+        /Upload the conditional approval or condition sheet PDF you received from the lender\./,
+      )
+      .closest("div");
+    expect(card?.textContent).toMatch(/Nothing is added to the file until you confirm it\./);
+    expect(card?.textContent).not.toMatch(/UWM|Champions|lender team|loan figures/);
   });
 
   it("treats a file whose only round was DISCARDED as having none", () => {
@@ -247,7 +258,7 @@ describe("which screen the Conditions tab shows", () => {
     // that they did. So "is there anything to work on" has to exclude them rather than take the
     // newest row, or the tab shows a thrown-away draft as the current work.
     show([round({ status: "discarded", draft_rows: rows(6) })]);
-    expect(screen.getByRole("heading", { name: "Upload the approval letter" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Upload the lender’s conditions" })).toBeDefined();
   });
 
   it("shows the reading card while the sheet is being read", () => {
