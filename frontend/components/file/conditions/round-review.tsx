@@ -19,7 +19,7 @@ import type {
   DraftRow,
   WrongFile,
 } from "@/lib/types/conditions";
-import { CircleCheck, Info, Sparkles, TriangleAlert } from "lucide-react";
+import { Info, Sparkles, TriangleAlert } from "lucide-react";
 import { useId, useState } from "react";
 import { FLAGGED_BELOW, ReviewRows } from "./review-rows";
 import { ReviewSidePanel } from "./review-side-panel";
@@ -58,38 +58,6 @@ function usDate(value: string | null): string | null {
   if (!value) return null;
   const [year, month, day] = value.split("-");
   return year && month && day ? `${month}/${day}/${year}` : value;
-}
-
-/**
- * How the reader describes itself, for the line under the format (S1-04, S1-10).
- *
- * THE AI CASE IS NOT "reader: split". `parse_report.reader` is "split" after an AI split and the
- * version is `SPLIT_VERSION`, and the design says "Split by AI (split v1) · rules found no rows" —
- * which names both what ran AND what the rules managed, because a processor reading "split v1"
- * alone cannot tell whether the rules contributed anything.
- *
- * AND `SPLIT_VERSION` IS "split_v1", SO THE PLAIN JOIN PRINTED "(split split_v1)" (LP-909 §5).
- * The version carries the reader's own name because it names the prompt file
- * (`conditions/split_v1.txt`) — right on the server, doubled on screen. The `<reader>_` prefix comes
- * off here rather than being renamed there, because the prompt file IS the version. `READER_VERSION`
- * is a bare "v1", so the rules line never had this and still reads "uwm v1".
- *
- * A MISSING VERSION WAS WRONG IN A PLACE `.trim()` COULD NOT REACH. The old AI arm produced
- * "Split by AI (split ) · …" — the stray space is INSIDE the parens, where trimming the ends never
- * lands. The rules arm had patched its own copy of that hole with `.replace(" )", ")")` and the fix
- * was never carried across: two arms, two different half-measures. Deciding the parenthesis content
- * before formatting removes the hole instead of patching each arm.
- */
-function readerLine(round: ConditionRound): string {
-  const { reader, reader_version, ai_used } = round.parse_report;
-  if (!reader) return "No reader ran";
-  const version = reader_version?.startsWith(`${reader}_`)
-    ? reader_version.slice(reader.length + 1)
-    : reader_version;
-  const named = version ? `${reader} ${version}` : reader;
-  return ai_used
-    ? `Split by AI (${named}) · rules found no rows`
-    : `Read by rules (${named}) — no AI`;
 }
 
 /**
@@ -219,7 +187,7 @@ export function RoundReview({
   }
 
   return (
-    <div className="flex flex-col gap-3 pb-20">
+    <div className="flex flex-col gap-3">
       <Card>
         <CardContent className="flex flex-col gap-2 p-3.5">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -256,7 +224,8 @@ export function RoundReview({
                     {COMPLETENESS_CHIP.partial}
                   </span>
                 ) : null}
-                <span className="text-xs text-muted-foreground">{readerLine(round)}</span>
+                {/* LP-961 — no "Read by rules (uwm v1) — no AI": how a sheet was read is for whoever
+                    debugs the reader, not for the processor (the owner, 2026-10-04). */}
               </div>
             </div>
             <div className="flex shrink-0 flex-col items-end gap-1 text-xs text-muted-foreground">
@@ -325,22 +294,9 @@ export function RoundReview({
                 </span>
               </>
             ) : null}
-            <span>·</span>
-            <span
-              className={
-                report.warnings.length + unassigned.length + report.duplicates_dropped === 0
-                  ? "flex items-center gap-1 text-success"
-                  : "flex items-center gap-1 text-warning"
-              }
-            >
-              {report.warnings.length + unassigned.length + report.duplicates_dropped === 0 ? (
-                <CircleCheck className="h-3 w-3" aria-hidden />
-              ) : (
-                <TriangleAlert className="h-3 w-3" aria-hidden />
-              )}
-              {report.warnings.length} warnings · {unassigned.length} lines left over ·{" "}
-              {report.duplicates_dropped} duplicates
-            </span>
+            {/* LP-961 — NO "2 warnings · 0 lines left over · 0 duplicates". The owner: a count of
+                warnings with no warning beside it, and a reader's bookkeeping, add nothing she can
+                act on. What she can act on, a line that fits no condition, is in the box below. */}
           </div>
         </CardContent>
       </Card>
@@ -374,7 +330,11 @@ export function RoundReview({
         </p>
       ) : null}
 
-      {needsCheck || report.warnings.length > 0 ? (
+      {/* LP-961 — ONLY WHAT SHE MUST LOOK AT: a line the reader could not place in any condition (it
+          could be a condition lost) and the rows the AI split. The reader's own warnings ("unrecognised
+          loan-information line at line 435", where 435 was a position on the page, not a line) stay in
+          `parse_report` for debugging and are no longer shown. */}
+      {needsCheck ? (
         <Card className="border-warning/40">
           <CardContent className="flex flex-col gap-2 p-3.5">
             <p className="text-sm font-semibold text-foreground">Check before importing</p>
@@ -387,11 +347,12 @@ export function RoundReview({
               </p>
             ) : null}
 
-            {report.warnings.map((warning) => (
-              <p key={warning} className="text-xs text-muted-foreground">
-                {warning}
+            {unassigned.length > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {unassigned.length === 1 ? "This line" : `These ${unassigned.length} lines`} from
+                the sheet did not fit into any condition. If one is a condition, add it.
               </p>
-            ))}
+            ) : null}
 
             {unassigned.map((line) => (
               <div key={line} className="flex flex-wrap items-start gap-2 rounded-md bg-muted p-2">
@@ -414,43 +375,59 @@ export function RoundReview({
         <WrongFileWarning wrongFile={wrongFile} confirmed={rightFile} onConfirm={setRightFile} />
       ) : null}
 
+      {/* THE ACTION BAR SITS ABOVE THE ROWS, PINNED (the owner, 2026-10-06). The mocks (S1-04..S1-11)
+          put it in a sticky footer; in the app that footer sat at the very bottom of the window, below
+          the rows, and was easy to miss. Missing it is not cosmetic: a processor who never sees Import
+          can leave believing the conditions are on the file when nothing was written. The owner placed
+          it after the round summary and the wrong-file warning, so she reads what the round is and
+          whether it belongs here, then meets Import before the rows; `sticky` keeps it in view while
+          she scrolls them.
+
+          `-top-4` CANCELS THE SCROLLER'S `p-4` (the file layout's work surface). Sticky offsets are
+          measured inside the scroll container's padding, so `top-0` would stop 16px short and let
+          the rows show through the gap above the bar. So the wrapper carries `pt-4` of opaque
+          `bg-background` to fill that gap once stuck, and `-mt-3` gives back this column's `gap-3`
+          at rest, so the bar does not sit further from the card above than any other section.
+          `bg-background` behind the tint for the same reason as the gap: the tint is translucent. */}
+      <div className="sticky -top-4 z-10 -mx-1 -mt-3 bg-background px-1 pb-1 pt-4">
+        <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius-container)] border border-warning/40 bg-warning/10 px-3.5 py-2.5">
+          {/* Design rule 6, verbatim — the two sentences that make the screen trustworthy. */}
+          <span className="text-sm font-medium text-foreground">
+            Nothing is saved to the file until you import. Import never removes or clears a
+            condition.
+          </span>
+          {needsCheck ? (
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-foreground-2">
+              <input
+                id={checkboxId}
+                type="checkbox"
+                checked={checked}
+                onChange={(event) => setChecked(event.target.checked)}
+                className="accent-primary"
+              />
+              I checked the flagged rows
+            </label>
+          ) : null}
+
+          <div className="ml-auto flex items-center gap-2">
+            <Button variant="ghost" size="sm" className="text-destructive" onClick={onDiscard}>
+              Discard
+            </Button>
+            <Button
+              size="sm"
+              onClick={importNow}
+              disabled={busy || (needsCheck && !checked) || (wrongFile !== null && !rightFile)}
+            >
+              {busy && <Spinner className="mr-2 h-4 w-4" />}
+              Import {rows.length} conditions
+            </Button>
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-[1fr_330px]">
         <ReviewRows rows={rows} onChange={setRows} />
         <ReviewSidePanel round={round} />
-      </div>
-
-      <div className="fixed inset-x-0 bottom-0 z-10 flex flex-wrap items-center gap-3 border-t border-input bg-background/95 px-4 py-2.5 backdrop-blur">
-        {/* Design rule 6, verbatim — the two sentences that make the screen trustworthy. */}
-        <span className="text-xs text-muted-foreground">
-          Nothing is saved to the file until you import. Import never removes or clears a condition.
-        </span>
-
-        {needsCheck ? (
-          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-foreground-2">
-            <input
-              id={checkboxId}
-              type="checkbox"
-              checked={checked}
-              onChange={(event) => setChecked(event.target.checked)}
-              className="accent-primary"
-            />
-            I checked the flagged rows
-          </label>
-        ) : null}
-
-        <div className="ml-auto flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="text-destructive" onClick={onDiscard}>
-            Discard
-          </Button>
-          <Button
-            size="sm"
-            onClick={importNow}
-            disabled={busy || (needsCheck && !checked) || (wrongFile !== null && !rightFile)}
-          >
-            {busy && <Spinner className="mr-2 h-4 w-4" />}
-            Import {rows.length} conditions
-          </Button>
-        </div>
       </div>
     </div>
   );

@@ -247,11 +247,45 @@ describe("the flagged-rows gate (S1-10)", () => {
 });
 
 describe("what the screen says about the sheet", () => {
-  it("names the format and the reader, and marks it as not imported", () => {
+  it("names the format and marks it as not imported, but not how it was read (LP-961)", () => {
     show();
     expect(screen.getByText("Review · not imported yet")).toBeDefined();
     expect(screen.getByText("UWM · Loan Approval Conditions")).toBeDefined();
-    expect(screen.getByText("Read by rules (uwm v1) — no AI")).toBeDefined();
+    expect(screen.queryByText(/Read by rules/)).toBeNull();
+    expect(screen.queryByText(/uwm v1/)).toBeNull();
+  });
+
+  it("LP-961 — no reader bookkeeping: no warnings, duplicates or left-over count, and no warning text", () => {
+    show({
+      parse_report: {
+        ...round().parse_report,
+        warnings: ["unrecognised loan-information line at line 435"],
+        duplicates_dropped: 1,
+      },
+    });
+    // Positive control: the summary line itself still renders.
+    expect(screen.getByText("1 conditions")).toBeDefined();
+    expect(screen.queryByText(/warnings ·/)).toBeNull();
+    expect(screen.queryByText(/duplicates/)).toBeNull();
+    expect(screen.queryByText(/unrecognised loan-information line/)).toBeNull();
+    // A reader warning alone is nothing she must check, so the box does not appear.
+    expect(screen.queryByText("Check before importing")).toBeNull();
+  });
+
+  it("LP-961 — a line that fits no condition is still shown, with what to do about it", () => {
+    show({
+      parse_report: {
+        ...round().parse_report,
+        unassigned_lines: ["A line the reader could not place"],
+      },
+    });
+    expect(screen.getByText("Check before importing")).toBeDefined();
+    expect(screen.getByText("A line the reader could not place")).toBeDefined();
+    expect(
+      screen.getByText(
+        /This line from the sheet did not fit into any condition\. If one is a condition, add it\./,
+      ),
+    ).toBeDefined();
   });
 
   it("says a recognised PASTE was recognised in the pasted text, not that a letter arrived (S1-07)", () => {
@@ -326,44 +360,34 @@ describe("what the screen says about the sheet", () => {
     expect(sent.expected_updated_at).toBe("2026-08-28T10:05:00Z");
   });
 
-  it("draws a named owner as a chip with its glyph, and an unknown one as plain text (S1-04)", () => {
-    // SCOPED WITHIN THE ROW, BECAUSE "Title" IS ALSO AN EXPIRY KEY in the side panel — the same
-    // trap the provenance test below documents.
+  it("LP-961 — a review row shows no owner guess and no source for it", () => {
     show({
       draft_rows: [
         draftRow({ sequence: 1, owner_hint: "title", owner_hint_source: "prefix" }),
         draftRow({
           sequence: 2,
           owner_hint: "unknown",
-          owner_hint_source: "none",
+          owner_hint_source: "code_map",
           verbatim_text: "Nobody obvious owns this one.",
         }),
       ],
     });
-
+    // SCOPED TO THE ROW: "Title" is also an expiry key in the side panel.
     const named = screen
       .getByText("Final inspection is required.")
       .closest("div.grid") as HTMLElement;
-    const chip = within(named).getByText("Title");
-    expect(chip.querySelector("svg")).not.toBeNull();
-
-    // THE ABSENCE IS THE DESIGN, NOT A MISSING ICON. "Owner not known" draws as plain muted text
-    // with no chip and no glyph: a chip says "here is who acts", and an absence of evidence does not
-    // belong in the same container as a named party.
+    expect(within(named).queryByText("Title")).toBeNull();
+    expect(within(named).queryByText(/from .TC:. prefix/)).toBeNull();
     const anonymous = screen
       .getByText("Nobody obvious owns this one.")
       .closest("div.grid") as HTMLElement;
-    // "Owner not known" ON THIS SCREEN, as S1-04 draws it. LP-913 shortened the shared label to
-    // S2's "Not known" and moved this string with it; its review restored the long form here, since
-    // the review rows are a Stage 1 screen that is still live.
-    const plain = within(anonymous).getByText("Owner not known");
-    expect(plain.querySelector("svg")).toBeNull();
-    expect(plain.className).not.toContain("border");
+    expect(within(anonymous).queryByText("Owner not known")).toBeNull();
+    expect(within(anonymous).queryByText("from code map")).toBeNull();
+    // Positive control: the row's own controls are still there.
+    expect(within(anonymous).getByTitle("Edit the wording")).toBeDefined();
   });
 
-  it("names the AI split without doubling the reader into its own version", () => {
-    // `SPLIT_VERSION` is "split_v1" because it names the prompt file, so joining reader and version
-    // printed "(split split_v1)". The design's line is "(split v1)".
+  it("LP-961 — an AI-split round does not describe its reader either", () => {
     show({
       parse_report: {
         ...round().parse_report,
@@ -372,22 +396,9 @@ describe("what the screen says about the sheet", () => {
         ai_used: true,
       },
     });
-    expect(screen.getByText("Split by AI (split v1) · rules found no rows")).toBeDefined();
-  });
-
-  it("and leaves no gap inside the parens when there is no version at all", () => {
-    // The old AI arm produced "Split by AI (split ) · …". The stray space is INSIDE the parens,
-    // where the `.trim()` it carried could never reach — while the rules arm patched its own copy
-    // with `.replace(" )", ")")` and the fix was never carried across.
-    show({
-      parse_report: {
-        ...round().parse_report,
-        reader: "split",
-        reader_version: null,
-        ai_used: true,
-      },
-    });
-    expect(screen.getByText("Split by AI (split) · rules found no rows")).toBeDefined();
+    expect(screen.getByText("Review · not imported yet")).toBeDefined();
+    expect(screen.queryByText(/Split by AI \(/)).toBeNull();
+    expect(screen.queryByText(/rules found no rows/)).toBeNull();
   });
 
   it("omits the Date printed chip when the sheet has none (S1-07, S1-11)", () => {
@@ -404,6 +415,23 @@ describe("what the screen says about the sheet", () => {
         /Nothing is saved to the file until you import\. Import never removes or clears a condition\./,
       ),
     ).toBeDefined();
+  });
+
+  it("puts the import bar after the summary and ABOVE the rows, pinned (the owner, 2026-10-06)", () => {
+    // At the bottom of the window it was missed, and a missed Import leaves nothing on the file.
+    // jsdom has no layout, so the placement is asserted as document order plus the pinning class.
+    show();
+    const importButton = screen.getByRole("button", { name: /^Import \d+ conditions?$/ });
+    const follows = (a: Node, b: Node) =>
+      Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(screen.getByText("Review · not imported yet"), importButton)).toBe(true);
+    expect(follows(importButton, screen.getByText("Final inspection is required."))).toBe(true);
+
+    const sentence = screen.getByText(/Nothing is saved to the file until you import\./);
+    const bar = sentence.closest(".sticky");
+    expect(bar).not.toBeNull();
+    expect(bar?.contains(importButton)).toBe(true);
+    expect(document.querySelector(".fixed.bottom-0")).toBeNull();
   });
 
   it("says a paste has no letter rather than rendering empty lender fields (S1-07)", () => {
@@ -522,21 +550,6 @@ describe("how the rows are grouped and ordered", () => {
     expect(screen.getByText("Master")).toBeDefined();
     expect(screen.queryByText("Master (applies to the whole file)")).toBeNull();
   });
-
-  it("shows the owner hint with where it came from, because the hints are not equally good", () => {
-    show({
-      draft_rows: [draftRow({ owner_hint: "title", owner_hint_source: "prefix" })],
-    });
-
-    // SCOPED TO THE ROW, BECAUSE "Title" IS ALSO AN EXPIRY KEY. The side panel renders all twelve
-    // of the lender's expiry rows — Title among them — so an unscoped `getByText("Title")` finds two
-    // elements and fails. Loosening it to `getAllByText` would have passed while asserting nothing
-    // about WHERE the label appeared, which is the whole point: the hint belongs on the row.
-    const row = screen.getByText("Final inspection is required.").closest("div.grid");
-    expect(row).not.toBeNull();
-    expect(within(row as HTMLElement).getByText("Title")).toBeDefined();
-    expect(within(row as HTMLElement).getByText(/from .TC:. prefix/)).toBeDefined();
-  });
 });
 
 describe("LP-951 — a sheet that may be another file's", () => {
@@ -548,6 +561,16 @@ describe("LP-951 — a sheet that may be another file's", () => {
     borrower_differs: true,
     loan_number_differs: false,
   };
+
+  it("puts the import bar after the warning, so she answers it before reaching Import", () => {
+    wrong.file = MISMATCH;
+    show();
+    const warning = screen.getByText(/This sheet may be for another file/);
+    const importButton = screen.getByRole("button", { name: /^Import \d+ conditions?$/ });
+    expect(
+      warning.compareDocumentPosition(importButton) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
 
   it("says what differs and keeps Import off until she says it is this file's", () => {
     wrong.file = MISMATCH;

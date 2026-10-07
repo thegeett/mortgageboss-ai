@@ -2,14 +2,12 @@
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { OWNER_NOT_KNOWN_LONG } from "@/lib/conditions/owners";
 import { displayWording } from "@/lib/conditions/wording";
 import { BUCKET_KIND_CHIP } from "@/lib/types/conditions";
 import type { DraftRow, UnderwriterNote } from "@/lib/types/conditions";
 import { cn } from "@/lib/utils";
 import { Pencil, Sparkles, X } from "lucide-react";
 import { useState } from "react";
-import { OwnerCell } from "./owner-cell";
 
 /** Anything at or above this is a row the rules read; below it needs checking before import. */
 export const FLAGGED_BELOW = 0.8;
@@ -137,11 +135,8 @@ function Row({
       {/* The design's `meta` cell is a COLUMN — owner above, the row's controls below it — rather
           than the two side by side. S1-04's mock draws the pencil and × under the chip. */}
       <div className="flex flex-col items-end gap-1">
-        <OwnerCell
-          hint={row.owner_hint}
-          source={row.owner_hint_source}
-          unknownLabel={OWNER_NOT_KNOWN_LONG}
-        />
+        {/* LP-961 — NO OWNER GUESS HERE. "Owner not known · from code map" and "from “TC:” prefix" were
+            a stand-in for who acts; the plan, made after import, says that for each item. */}
         {!editing ? (
           <div className="flex shrink-0 gap-0.5">
             <Button
