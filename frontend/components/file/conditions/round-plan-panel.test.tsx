@@ -145,7 +145,9 @@ describe("RoundPlanPanel", () => {
     expect(
       screen.getByText(/Nothing is emailed or changed on the file until you do\./),
     ).toBeTruthy();
-    expect(screen.getByText(/to draft — Borrower, Title\/attorney, LO/)).toBeTruthy();
+    // LP-967 — "Your first moves" replaces the pills: the plan's three drafts are the first thing to do.
+    expect(screen.getByText("Your first moves")).toBeTruthy();
+    expect(screen.getByText("Review and send 3 emails.")).toBeTruthy();
     const confirm = screen.getByRole("button", { name: "Confirm plan and draft 3 emails" });
     expect((confirm as HTMLButtonElement).disabled).toBe(true);
     expect(
@@ -354,6 +356,65 @@ describe("RoundPlanPanel", () => {
     expect(fix).toHaveLength(1);
     fireEvent.click(fix[0] as HTMLElement);
     expect(onConfirmReading).toHaveBeenCalledWith("c2");
+  });
+
+  it("opens a task to its path: who does each step, from now until it is checked (LP-967)", () => {
+    show([condition({ lender_code: "1947", items: [TITLE_ITEM] })], unblocked());
+    fireEvent.click(screen.getByRole("button", { name: "What you need to do" }));
+    expect(screen.getByText("The plan, step by step")).toBeTruthy();
+    expect(
+      screen.getByText("We draft the email to Title / escrow when you confirm the plan"),
+    ).toBeTruthy();
+    expect(screen.getByText("Review the email and send it")).toBeTruthy();
+    expect(screen.getByText("Title / escrow sends it back")).toBeTruthy();
+    expect(screen.getByText("Link it to this task")).toBeTruthy();
+    expect(
+      screen.getByText("It should be: The final seller CD, with the closing package."),
+    ).toBeTruthy();
+    // The shared ending.
+    expect(
+      screen.getByText(
+        "When every task is done, the condition is ready and goes in the package for the lender",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("The lender clears it")).toBeTruthy();
+  });
+
+  it("the path follows the task's step: the same task as her own job reads as her steps", () => {
+    const mine = { ...TITLE_ITEM, option: "i_will_do_it" as PlanOption, task: "upload the CD" };
+    show([condition({ lender_code: "1947", items: [mine] })], unblocked());
+    fireEvent.click(screen.getByRole("button", { name: "What you need to do" }));
+    expect(screen.getByText("Upload the CD")).toBeTruthy();
+    expect(screen.queryByText("Review the email and send it")).toBeNull();
+  });
+
+  it("first moves: emails, tasks now, tasks waiting, who we wait on, what is in the file", () => {
+    show(
+      [
+        condition({}),
+        condition({ id: "c2", lender_code: "1947", sequence: 2, items: [TITLE_ITEM] }),
+        condition({
+          id: "c3",
+          lender_code: "0007",
+          sequence: 3,
+          items: [item({ id: "i3", name: "Inspection invoice", waits_on_code: "1228" })],
+        }),
+        condition({
+          id: "c4",
+          lender_code: "1582",
+          sequence: 4,
+          items: [item({ id: "i4", option: "already_in_file" })],
+        }),
+      ],
+      { ...basePlan, blocking_codes: [], drafts: [basePlan.drafts[1] as RoundPlan["drafts"][0]] },
+    );
+    expect(
+      screen.getByText(
+        "Review and send 1 email, then do 1 task yourself. 1 more task waits on another condition.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("Title / escrow.")).toBeTruthy();
+    expect(screen.getByText("1582.")).toBeTruthy();
   });
 
   it("says what Confirm will do: the emails, the ready ones and her tasks", () => {

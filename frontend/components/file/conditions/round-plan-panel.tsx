@@ -10,6 +10,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useConfirmPlan, useRoundPlan, useSetNextStep, useUpdateItem } from "@/lib/api/conditions";
+import {
+  type PathStep,
+  type PathWho,
+  endingPath,
+  firstMoves,
+  ownStepPath,
+  taskPath,
+} from "@/lib/conditions/plan-path";
 import { OPTION_LABEL } from "@/lib/conditions/plan-words";
 import {
   BUCKET_KIND_MEANING,
@@ -140,34 +148,16 @@ export function RoundPlanPanel({
         </HowStep>
       </ol>
 
-      <div className="flex flex-wrap gap-2">
-        <Pill>
-          <b className="font-semibold text-foreground">
-            {emails} {emails === 1 ? "email" : "emails"}
-          </b>{" "}
-          to draft
-          {emails > 0 ? ` — ${data.drafts.map((draft) => draft.label).join(", ")}` : ""}
-        </Pill>
-        <Pill>
-          <b className="font-semibold text-foreground">
-            {data.your_tasks} {data.your_tasks === 1 ? "task" : "tasks"}
-          </b>{" "}
-          for you
-        </Pill>
-        <Pill>
-          <b className="font-semibold text-foreground">{data.already_in_file}</b> already in the
-          file
-        </Pill>
-        {data.push_back > 0 ? (
-          <Pill>
-            <b className="font-semibold text-foreground">{data.push_back}</b> to push back
-          </Pill>
-        ) : null}
-        {data.lender_doing_it > 0 ? (
-          <Pill>
-            <b className="font-semibold text-foreground">{data.lender_doing_it}</b> the lender does
-          </Pill>
-        ) : null}
+      <FirstMovesBox rows={rows} drafts={data.drafts} />
+
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-foreground-2">
+        <span className="font-semibold text-foreground">Who does each step:</span>
+        {LEGEND.map(([who, label]) => (
+          <span key={who} className="inline-flex items-center gap-1.5">
+            <span aria-hidden className={cn("h-2.5 w-2.5 rounded-full", WHO_DOT[who])} />
+            {label}
+          </span>
+        ))}
         {data.needs_confirmation > 0 ? (
           <Pill tone="warning">
             <TriangleAlert className="h-3.5 w-3.5" aria-hidden />
@@ -383,15 +373,15 @@ function PlanRow({
 
           <div className="flex flex-col gap-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-foreground-2">
-              What you need to do
+              The plan, step by step
             </p>
             {ownStep ? (
               <StepCard
                 n={null}
                 name="The whole condition"
-                doneWhen={null}
                 option={ownStep}
                 item={null}
+                path={ownStepPath(ownStep)}
                 onChange={onChangeStep}
                 onHelp={() => onHelp(`the whole condition (${code})`, ownStep)}
               />
@@ -407,14 +397,21 @@ function PlanRow({
                 key={item.id}
                 n={index + 1}
                 name={item.name}
-                doneWhen={item.generic ? null : item.acceptable}
-                extra={extraFor(item)}
                 option={item.option}
                 item={item}
+                path={taskPath(item)}
                 onChange={(to) => onChangeItem(item, to)}
                 onHelp={() => onHelp(`${item.name} (${code})`, item.option)}
               />
             ))}
+            {!unworked && endingPath(condition).length > 0 ? (
+              <div className="rounded-[var(--radius-container)] border border-dashed border-border px-3.5 py-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground-2">
+                  Then
+                </p>
+                <PathList steps={endingPath(condition)} />
+              </div>
+            ) : null}
             {condition.library_type?.playbook ? (
               <p className="flex items-start gap-2 border-t border-dashed border-border pt-3 text-sm text-foreground-2">
                 <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
@@ -508,19 +505,20 @@ function Detail({ heading, children }: { heading: string; children: React.ReactN
 function StepCard({
   n,
   name,
-  doneWhen,
   extra,
   option,
   item,
+  path,
   onChange,
   onHelp,
 }: {
   n: number | null;
   name: string;
-  doneWhen: string | null;
   extra?: string | null;
   option: PlanOption;
   item: ConditionItem | null;
+  /** LP-967 — this task's steps from now until it is done; changes with the select. */
+  path: PathStep[];
   onChange: (to: PlanOption) => void;
   onHelp: () => void;
 }) {
@@ -537,12 +535,6 @@ function StepCard({
       ) : null}
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <p className="text-sm font-semibold text-foreground">{name}</p>
-        {doneWhen ? (
-          <p className="text-sm text-foreground-2">
-            <strong className="font-semibold text-foreground">Done when you have:</strong>{" "}
-            {doneWhen}
-          </p>
-        ) : null}
         {extra ? <p className="text-xs text-muted-foreground">{extra}</p> : null}
         <div className="flex flex-wrap items-center gap-2">
           <label htmlFor={selectId} className="text-xs text-foreground-2">
@@ -584,9 +576,117 @@ function StepCard({
           <strong className="font-semibold text-primary">{OPTION_LABEL[option]}:</strong>{" "}
           {meaningFor(option, item)}
         </p>
+        {path.length > 0 ? (
+          <div className="mt-1">
+            <PathList steps={path} />
+          </div>
+        ) : null}
       </div>
     </div>
   );
+}
+
+/** LP-967 — the colour of each kind of step, and the legend that names them. */
+const WHO_DOT: Record<PathWho, string> = {
+  we: "bg-ai",
+  you: "bg-primary",
+  them: "bg-warning",
+  lender: "bg-muted-foreground",
+};
+const WHO_TEXT: Record<PathWho, string> = {
+  we: "text-ai",
+  you: "text-primary",
+  them: "text-warning",
+  lender: "text-muted-foreground",
+};
+const LEGEND: [PathWho, string][] = [
+  ["we", "We prepare or check it"],
+  ["you", "You"],
+  ["them", "Someone else, we wait"],
+  ["lender", "The lender"],
+];
+
+/** A run of steps as a timeline: a dot per step, coloured by who does it, joined by a line. */
+function PathList({ steps }: { steps: PathStep[] }) {
+  return (
+    <ol className="flex flex-col">
+      {steps.map((step, index) => (
+        <li key={`${index}-${step.text}`} className="flex gap-3">
+          <div className="flex w-3 shrink-0 flex-col items-center">
+            <span
+              aria-hidden
+              className={cn("mt-1.5 h-2.5 w-2.5 rounded-full", WHO_DOT[step.who])}
+            />
+            {index < steps.length - 1 ? (
+              <span aria-hidden className="w-px flex-1 bg-border" />
+            ) : null}
+          </div>
+          <div className="flex min-w-0 flex-col gap-0.5 pb-3">
+            <span
+              className={cn(
+                "text-[11px] font-semibold uppercase tracking-wide",
+                WHO_TEXT[step.who],
+              )}
+            >
+              {step.whoLabel}
+            </span>
+            <span className="text-sm text-foreground">{step.text}</span>
+            {step.detail ? (
+              <span className="text-xs text-muted-foreground">{step.detail}</span>
+            ) : null}
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** LP-967 — "Your first moves": what she does first across the round, then who it waits on. */
+function FirstMovesBox({ rows, drafts }: { rows: Condition[]; drafts: { codes: string[] }[] }) {
+  const moves = firstMoves(rows, drafts);
+  const doNow: string[] = [];
+  if (moves.emails > 0) {
+    doNow.push(`review and send ${moves.emails} ${moves.emails === 1 ? "email" : "emails"}`);
+  }
+  if (moves.tasksNow > 0) {
+    doNow.push(`do ${moves.tasksNow} ${moves.tasksNow === 1 ? "task" : "tasks"} yourself`);
+  }
+  return (
+    <div className="grid gap-3 sm:grid-cols-3">
+      <div className="flex flex-col gap-1 rounded-[var(--radius-container)] bg-primary px-4 py-3 text-primary-foreground">
+        <span className="text-xs font-semibold uppercase tracking-wide opacity-85">
+          Your first moves
+        </span>
+        <span className="text-sm">
+          {doNow.length > 0
+            ? `${capitalise(doNow.join(", then "))}${moves.tasksLater > 0 ? `. ${moves.tasksLater} more ${moves.tasksLater === 1 ? "task waits" : "tasks wait"} on another condition.` : "."}`
+            : "Nothing to send or do yet."}
+        </span>
+      </div>
+      <div className="flex flex-col gap-1 rounded-[var(--radius-container)] bg-muted/50 px-4 py-3">
+        <span className="text-xs font-semibold uppercase tracking-wide text-foreground-2">
+          Then we wait on
+        </span>
+        <span className="text-sm text-foreground">
+          {moves.waitingOn.length > 0
+            ? `${capitalise(moves.waitingOn.join(", "))}.`
+            : "Nobody yet."}
+        </span>
+      </div>
+      <div className="flex flex-col gap-1 rounded-[var(--radius-container)] bg-muted/50 px-4 py-3">
+        <span className="text-xs font-semibold uppercase tracking-wide text-foreground-2">
+          Already in the file
+        </span>
+        <span className="text-sm text-foreground">
+          {moves.handled.length > 0 ? `${moves.handled.join(", ")}.` : "Nothing yet."}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function capitalise(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /**
