@@ -1,6 +1,7 @@
 /**
- * LP-925 (S3-11): a lender's condition settings and its codes to review. Entered once per lender, used
- * on every file — the plan, the drafts and the package read the same stored settings.
+ * LP-925 (S3-11): a lender's condition settings. Entered once per lender, used on every file — the plan,
+ * the drafts and the package read the same stored settings. (LP-965 removed its "codes to review": nothing
+ * is mapped per lender code any more.)
  */
 import { apiClient } from "@/lib/api/client";
 import type { LenderDetail } from "@/lib/types/lender";
@@ -22,23 +23,6 @@ export interface LenderConditionSettings {
   lender_verifies_business_existence: boolean;
   lender_orders_title_insurance_payoffs: boolean;
   new_files_lender_processing: boolean;
-}
-
-export interface LenderCodeToReview {
-  code: string;
-  example_wording: string;
-  files: number;
-  canonical_type_id: string | null;
-  /** LP-949 — the reading's proposed type while the code is unmapped. Used only once she picks it. */
-  proposed_type_id?: string | null;
-  proposed_type_label?: string | null;
-}
-
-export interface LibraryTypeOption {
-  id: string;
-  name: string;
-  /** "CR-05 Credit inquiry letter". */
-  label: string;
 }
 
 export function useLender(lenderId: string) {
@@ -72,42 +56,6 @@ export function useSaveLenderConditionSettings(lenderId: string) {
       ).data,
     onSuccess: (data) => {
       queryClient.setQueryData(["lender-condition-settings", lenderId], data);
-    },
-  });
-}
-
-export function useLenderCodesToReview(lenderId: string) {
-  return useQuery({
-    queryKey: ["lender-codes-to-review", lenderId],
-    queryFn: async () =>
-      (await apiClient.get<LenderCodeToReview[]>(`${LENDERS_PATH}/${lenderId}/codes-to-review`))
-        .data,
-  });
-}
-
-export function useLibraryTypes() {
-  return useQuery({
-    queryKey: ["condition-library-types"],
-    queryFn: async () =>
-      (await apiClient.get<LibraryTypeOption[]>(`${LENDERS_PATH}/library-types`)).data,
-    staleTime: Number.POSITIVE_INFINITY,
-  });
-}
-
-export function useMapLenderCode(lenderId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      code,
-      canonical_type_id,
-    }: { code: string; canonical_type_id: string | null }) =>
-      (
-        await apiClient.put<LenderCodeToReview[]>(`${LENDERS_PATH}/${lenderId}/codes/${code}`, {
-          canonical_type_id,
-        })
-      ).data,
-    onSuccess: (data) => {
-      queryClient.setQueryData(["lender-codes-to-review", lenderId], data);
     },
   });
 }

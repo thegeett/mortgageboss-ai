@@ -4,8 +4,10 @@ Stage 3's tests never call a real model: the plan's acceptance test runs "with t
 the one mock, shared by the tests, the Stage 3A acceptance test and the visual-check seed, so the
 screens and the assertions read the same answers.
 
-It answers the way a well-behaved model would under `read_v1.txt`: items by the library's keys,
-specifics copied from the lender's text, a confidence per condition. The confidences are S3-02's:
+It answers the way a well-behaved model would under `read_v4.txt`: a `library_type` per condition (the
+type UWM's shipped code map gives the code, so the old typed expectations still hold now that the type
+comes from the reading, LP-965), items by that type's keys, specifics copied from the lender's text, a
+confidence per condition. The confidences are S3-02's:
 0132 at 0.64 is the one below the 0.75 bar. `fake_complete` parses the real request the service builds,
 so a request that stopped carrying a condition would get no answer for it.
 
@@ -24,6 +26,7 @@ from app.ai.client import AICompletion
 #: code → what the mocked model says about it.
 CANNED: dict[str, dict[str, Any]] = {
     "1228": {
+        "library_type": "PA-03",
         "summary": "Final inspection must confirm construction is complete",
         "explanation": "The lender needs a final inspection confirming the new construction was "
         "completed to the plans and specs.",
@@ -54,6 +57,7 @@ CANNED: dict[str, dict[str, Any]] = {
         "confidence": 0.88,
     },
     "7086": {
+        "library_type": "AS-10",
         "summary": "Show more in assets to cover closing",
         "explanation": "The lender needs two months of statements showing enough funds to close; "
         "$38,210.40 is required and $11,062.18 is verified.",
@@ -75,6 +79,7 @@ CANNED: dict[str, dict[str, Any]] = {
         "confidence": 0.95,
     },
     "6132": {
+        "library_type": "AS-01",
         "summary": "One more consecutive month, Capital One ··9912",
         "explanation": "The lender needs one more consecutive monthly statement for the Capital One "
         "account ending 9912, so it has two full months.",
@@ -92,6 +97,7 @@ CANNED: dict[str, dict[str, Any]] = {
         "confidence": 0.97,
     },
     "6637": {
+        "library_type": "AS-04",
         "summary": "Earnest money $2,850: source, receipt, clearance",
         "explanation": "The lender wants proof of where the $2,850 earnest money came from, that the "
         "title company received it, and that the check cleared.",
@@ -107,6 +113,7 @@ CANNED: dict[str, dict[str, Any]] = {
         "confidence": 0.93,
     },
     "6178": {
+        "library_type": "IN-01",
         "summary": "Insurance starts 09/30; current policy only if closing earlier",
         "explanation": "The lender needs updated insurance declarations; the policy starts 09/30/2026, "
         "and the current policy is needed only if closing happens earlier.",
@@ -114,6 +121,7 @@ CANNED: dict[str, dict[str, Any]] = {
         "confidence": 0.86,
     },
     "0132": {
+        "library_type": "DI-01",
         "summary": "SC attorney disclosure with an approved attorney, matching wire instructions",
         "explanation": "The lender needs the SC attorney disclosure re-signed with an approved "
         "attorney, and wire instructions that match that attorney.",
@@ -125,30 +133,35 @@ CANNED: dict[str, dict[str, Any]] = {
         "confidence": 0.64,
     },
     "1947": {
+        "library_type": "TI-03",
         "summary": "Title: final seller CD with the closing package",
         "explanation": "Title must provide the final seller Closing Disclosure with the closing package.",
         "items": [{"key": "seller_cd", "performers": ["title"], "specifics": {}}],
         "confidence": 0.96,
     },
     "1582": {
+        "library_type": "IV-02",
         "summary": "Third-party processing invoice",
         "explanation": "The lender needs a copy of the third-party processing invoice.",
         "items": [{"key": "invoice", "performers": ["processor"], "specifics": {}}],
         "confidence": 0.99,
     },
     "0006": {
+        "library_type": "IV-01",
         "summary": "Credit report invoice",
         "explanation": "The lender needs a copy of the credit report invoice.",
         "items": [{"key": "invoice", "performers": ["processor"], "specifics": {}}],
         "confidence": 0.99,
     },
     "0007": {
+        "library_type": "IV-03",
         "summary": "Final inspection invoice",
         "explanation": "The lender needs a copy of the final inspection invoice.",
         "items": [{"key": "invoice", "performers": ["processor"], "specifics": {}}],
         "confidence": 0.97,
     },
     "6378": {
+        "library_type": "TI-04",
         "summary": "Title: loan number on every check to the lender",
         "explanation": "Title must put the lender's loan number on every check sent to the lender.",
         "items": [{"key": "instruction", "performers": ["title"], "specifics": {}}],

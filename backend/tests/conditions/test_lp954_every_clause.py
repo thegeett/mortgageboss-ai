@@ -42,7 +42,7 @@ def _ai(**overrides: Any) -> dict[str, Any]:
 def _compose(ai: dict[str, Any] | None) -> tuple[dict[str, Any], Any, Any, Any]:
     condition = Condition(verbatim_text=TEXT_1228, lender_code="1228", underwriter_notes=[])
     return compose_reading(
-        condition, condition_type=load_library().get("PA-03"), confirmed=None, ai=ai, round_=None
+        condition, condition_type=load_library().get("PA-03"), ai=ai, round_=None
     )
 
 

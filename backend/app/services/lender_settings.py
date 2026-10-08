@@ -1,7 +1,8 @@
 """Lender settings for conditions (LP-925, S3-11): entered once per lender, used on every file.
 
 The mortgagee clause (the column, used in insurance emails), the upload cutoff, what the upload asks per
-condition, who does what at this lender, and the lender's codes seen on sheets but not yet in the library.
+condition, and who does what at this lender. LP-965 removed the lender's "Codes to review": nothing is
+mapped per lender code any more (ADR-419).
 `lender_condition_settings` (LP-920) reads the same `condition_settings` keys this writes, so a change
 here is what the next plan, draft and package use.
 """
@@ -9,17 +10,15 @@ here is what the next plan, draft and package use.
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.conditions.library import load_library
 from app.models.condition import Condition
 from app.models.condition_round import ConditionRound
 from app.models.lender import Lender
-from app.models.lender_condition_code import LenderCodeStatus, LenderConditionCode
 
 UPLOAD_FIELDS = ("note", "name_of_source", "date_verified")
 
@@ -101,87 +100,3 @@ def _is_time(value: str) -> bool:
     except ValueError:
         return False
     return True
-
-
-async def codes_to_review(db: AsyncSession, *, lender: Lender) -> list[dict[str, Any]]:
-    """Codes seen on this lender's sheets that a person has to give a meaning (or already has)."""
-    rows = list(
-        (
-            await db.execute(
-                select(LenderConditionCode)
-                .where(
-                    LenderConditionCode.lender_id == lender.id,
-                    LenderConditionCode.status.in_(
-                        (LenderCodeStatus.OBSERVED_UNMAPPED, LenderCodeStatus.MAPPED)
-                    ),
-                )
-                .order_by(LenderConditionCode.last_seen_at.desc(), LenderConditionCode.code)
-            )
-        ).scalars()
-    )
-    out: list[dict[str, Any]] = []
-    for row in rows:
-        example = (
-            await db.execute(
-                select(Condition.verbatim_text)
-                .where(Condition.lender_id == lender.id, Condition.lender_code == row.code)
-                .order_by(Condition.created_at.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        files = await db.scalar(
-            select(func.count(func.distinct(Condition.loan_file_id))).where(
-                Condition.lender_id == lender.id, Condition.lender_code == row.code
-            )
-        )
-        proposed = (
-            load_library().get(row.proposed_type_id)
-            if row.proposed_type_id and row.canonical_type_id is None
-            else None
-        )
-        out.append(
-            {
-                "code": row.code,
-                "example_wording": (example or row.label or "")[:300],
-                "files": int(files or 0),
-                "canonical_type_id": row.canonical_type_id,
-                # LP-949 — shown only while nobody has given the code a meaning.
-                "proposed_type_id": proposed.id if proposed else None,
-                "proposed_type_label": proposed.label if proposed else None,
-            }
-        )
-    return out
-
-
-async def map_code(
-    db: AsyncSession, *, lender: Lender, code: str, canonical_type_id: str | None
-) -> None:
-    """She gives a code its meaning: new imports use it from then on.
-
-    Conditions already on files that carry the code and NO type take it too (LP-949,
-    `condition_lender.type_conditions_for_code`, called by the route); a typed one keeps its own.
-    """
-    if canonical_type_id is not None and load_library().get(canonical_type_id) is None:
-        raise SettingsRefused(f"{canonical_type_id} is not a type in the library.")
-    row = (
-        await db.execute(
-            select(LenderConditionCode).where(
-                LenderConditionCode.lender_id == lender.id, LenderConditionCode.code == code
-            )
-        )
-    ).scalar_one_or_none()
-    if row is None or row.status is LenderCodeStatus.SEEDED:
-        raise SettingsRefused("That code is not one waiting for review.")
-    row.canonical_type_id = canonical_type_id
-    row.status = (
-        LenderCodeStatus.MAPPED if canonical_type_id else LenderCodeStatus.OBSERVED_UNMAPPED
-    )
-    row.last_seen_at = row.last_seen_at or datetime.now(UTC)
-    await db.flush()
-
-
-def library_types() -> list[dict[str, str]]:
-    return [
-        {"id": t.id, "name": t.name, "label": t.label}
-        for t in sorted(load_library().types.values(), key=lambda t: t.id)
-    ]

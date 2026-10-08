@@ -7,16 +7,15 @@ mortgagee clause is filled from the approval letter until an admin saves one.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
 import pytest
 from app.models.lender import Lender
-from app.models.lender_condition_code import LenderCodeStatus, LenderConditionCode
+from app.models.lender_condition_code import LenderConditionCode
 from app.models.loan_file import LoanFile
 from app.services.condition_plan import lender_condition_settings
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.conditions.test_condition_reading import _file_with_round
 
@@ -72,26 +71,6 @@ def _drop_db_override() -> Any:
     app.dependency_overrides.pop(get_db, None)
 
 
-async def _unmapped(db: AsyncSession, lender: Lender) -> None:
-    now = datetime.now(UTC)
-    for code, label in (
-        ("7812", "Provide signed and dated letter of explanation for the credit inquiry"),
-        ("6521", "Provide most recent paystub covering 30 days with year-to-date earnings."),
-    ):
-        db.add(
-            LenderConditionCode(
-                lender_id=lender.id,
-                code=code,
-                label=label,
-                status=LenderCodeStatus.OBSERVED_UNMAPPED,
-                times_seen=1,
-                first_seen_at=now,
-                last_seen_at=now,
-            )
-        )
-    await db.flush()
-
-
 async def test_the_settings_are_s3_11_and_save_for_every_file(db_session: AsyncSession) -> None:
     loan_file, _ = await _file_with_round(db_session)
     lender = await db_session.get(Lender, loan_file.lender_id)
@@ -134,49 +113,25 @@ async def test_the_settings_are_s3_11_and_save_for_every_file(db_session: AsyncS
     assert lender.mortgagee_clause == CLAUSE
 
 
-async def test_codes_to_review_are_mapped_by_an_admin(db_session: AsyncSession) -> None:
+async def test_codes_to_review_are_gone(db_session: AsyncSession) -> None:
+    """LP-965 — nothing is mapped per lender code (ADR-419): the review list, the mapping route and the
+    library-types list it fed no longer exist, and the settings route beside them still answers."""
     loan_file, _ = await _file_with_round(db_session)
     lender = await db_session.get(Lender, loan_file.lender_id)
     assert lender is not None
-    await _unmapped(db_session, lender)
-    client, admin, processor = await _clients(db_session, loan_file)
+    client, admin, _processor = await _clients(db_session, loan_file)
     base = f"/api/v1/lenders/{lender.id}"
     async with client:
-        listed = (await client.get(f"{base}/codes-to-review", headers=processor)).json()
-        assert {r["code"] for r in listed} == {"7812", "6521"}
-        assert all(r["canonical_type_id"] is None for r in listed)
-        types = (await client.get("/api/v1/lenders/library-types", headers=processor)).json()
-        cr05 = next(t for t in types if t["id"] == "CR-05")
-        assert cr05["label"].startswith("CR-05 ")
-        assert (
-            await client.put(
-                f"{base}/codes/7812", json={"canonical_type_id": "CR-05"}, headers=processor
-            )
-        ).status_code == 403
+        assert (await client.get(f"{base}/codes-to-review", headers=admin)).status_code == 404
         mapped = await client.put(
             f"{base}/codes/7812", json={"canonical_type_id": "CR-05"}, headers=admin
         )
-        assert mapped.status_code == 200, mapped.text
-        assert {r["code"]: r["canonical_type_id"] for r in mapped.json()} == {
-            "7812": "CR-05",
-            "6521": None,
-        }
-        bad = await client.put(
-            f"{base}/codes/6521", json={"canonical_type_id": "ZZ-99"}, headers=admin
-        )
-        assert bad.status_code == 422
-        seeded = await client.put(
-            f"{base}/codes/6637", json={"canonical_type_id": "AS-04"}, headers=admin
-        )
-        assert seeded.status_code == 422  # a shipped code is not one waiting for review
-    row = (
-        await db_session.execute(
-            select(LenderConditionCode).where(
-                LenderConditionCode.lender_id == lender.id, LenderConditionCode.code == "7812"
-            )
-        )
-    ).scalar_one()
-    assert (row.status, row.canonical_type_id) == (LenderCodeStatus.MAPPED, "CR-05")
+        assert mapped.status_code in (404, 405)
+        assert (await client.get("/api/v1/lenders/library-types", headers=admin)).status_code != 200
+        # THE POSITIVE CONTROL: the lender's settings, on the same router, are still served.
+        assert (await client.get(f"{base}/condition-settings", headers=admin)).status_code == 200
+    rows = await db_session.scalar(select(func.count(LenderConditionCode.id)))
+    assert rows == 0
 
 
 async def test_another_companys_lender_is_not_found(db_session: AsyncSession) -> None:

@@ -1,25 +1,19 @@
-"""The file's lender, as the Conditions tab needs it (LP-949, ADR-417).
-
-A condition gets its library type ONLY from its lender's code map, at import
-(`condition_import._apply_code_defaults`). A file with no lender therefore imports every condition
-untyped, the reading splits each one itself, and nothing downstream that needs a type works: emails
-carry no library wording, no document is found already in the file, no condition waits on another. The
-staging trial of 2026-09-30 (LF-DH8V) was exactly that. This module closes it in three places:
+"""The file's lender, as the Conditions tab needs it (LP-949, ADR-417; LP-965, ADR-419).
 
 1. **She is asked.** `lender_suggestion` reads which lender the newest sheet names
    (`app.conditions.lender_detect`) and offers it; `set_file_lender` sets it only when she confirms.
    Nothing here ever sets a lender by itself.
-2. **Setting the lender types what is untyped.** `on_file_lender_changed` runs inside every lender
-   change (`loan_files.update_loan_file`) and applies the new lender's code map to the file's UNTYPED
-   conditions. A typed condition is never re-typed, and a condition already read keeps its reading: the
-   caller queues a reading only for conditions still unread, so "never re-read a read or confirmed
-   condition" holds (LP-952 states the same rule for its route).
-3. **The AI may propose, a person decides.** A code with no meaning in the map is recorded for review
-   (`OBSERVED_UNMAPPED`, as import already does), with the reading's proposed type copied onto it
-   (`proposed_type_id`). `type_conditions_for_code` applies a type only after she maps the code in
-   "Codes to review".
+2. **The rounds and conditions follow the file's lender.** `on_file_lender_changed` runs inside every
+   lender change (`loan_files.update_loan_file`) and moves the file's rounds and live conditions to the
+   new lender, so matching across rounds by (lender, code) keeps working.
 
-NO NPI IN LOGS: ids, codes, type ids and counts only.
+LP-965 — NO CODE MAP (the owner, 2026-10-07; ADR-419). This module used to type the file's untyped
+conditions from the new lender's code map, record unknown codes for review, and copy the AI's proposed
+type onto them for an admin to map. A condition's type now comes only from its reading, which asks the AI
+fresh every time, so setting a lender types nothing. The lender still matters: its key decides how a
+condition gets done there (LP-955 routes), and it scopes matching.
+
+NO NPI IN LOGS: ids and counts only.
 """
 
 from __future__ import annotations
@@ -34,19 +28,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.conditions.lender_codes.loader import lender_label, seeded_lender_keys
 from app.conditions.lender_detect import DetectedLender, detect_lender
-from app.conditions.library import load_library
-from app.models.base import utcnow
-from app.models.condition import (
-    Condition,
-    ConditionLenderStatus,
-    ConditionReadingStatus,
-    OwnerHintSource,
-)
+from app.models.condition import Condition, ConditionLenderStatus, ConditionReadingStatus
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_round import ConditionRound, ConditionRoundStatus
 from app.models.helpers import only_active
 from app.models.lender import Lender
-from app.models.lender_condition_code import LenderCodeStatus, LenderConditionCode
 from app.models.loan_file import LoanFile
 
 logger = structlog.get_logger(__name__)
@@ -77,11 +63,10 @@ class Suggestion:
 
 
 async def _company_lender_for(db: AsyncSession, *, company_id: UUID, key: str) -> Lender | None:
-    """Her company's lender for a shipped key: by `canonical_lender_key`, else by the printed name.
+    """Her company's lender for a known key: by `canonical_lender_key`, else by the printed name.
 
-    THE NAME MATCH NEVER ATTACHES THE KEY. The seed's rule is that a lender with no key is "skipped and
-    reported, never guessed at" (`seed_lender_codes.py`), so a same-named lender without the key is the
-    file's lender but carries no code map until an admin sets the key. `set_file_lender` says so.
+    THE NAME MATCH NEVER ATTACHES THE KEY: a same-named lender without it is the file's lender, and an
+    admin sets the key deliberately.
     """
     by_key = await db.scalar(
         only_active(
@@ -149,38 +134,12 @@ async def lender_suggestion(db: AsyncSession, *, loan_file: LoanFile) -> Suggest
     return None
 
 
-async def _has_code_map(db: AsyncSession, lender_id: UUID) -> bool:
-    """Whether ANY of this lender's codes has a library type, which is what typing needs.
-
-    MEASURED ON THE ROWS, NOT THE KEY (review). The build said `canonical_lender_key in shipped`, so a
-    keyless lender whose codes an admin had mapped was still "has no condition codes in the app" on the
-    banner, and a keyed lender whose seed had not run claimed a map it did not have.
-    """
-    found = await db.scalar(
-        select(LenderConditionCode.id)
-        .where(
-            LenderConditionCode.lender_id == lender_id,
-            LenderConditionCode.canonical_type_id.is_not(None),
-        )
-        .limit(1)
-    )
-    return found is not None
-
-
 async def file_lender_payload(db: AsyncSession, *, loan_file: LoanFile) -> dict[str, Any]:
     """`FileLenderPublic`'s data: the file's lender, or what the sheet suggests."""
     lender = await db.get(Lender, loan_file.lender_id) if loan_file.lender_id else None
     suggestion = await lender_suggestion(db, loan_file=loan_file)
     return {
-        "lender": (
-            {
-                "id": lender.id,
-                "name": lender.name,
-                "has_code_map": await _has_code_map(db, lender.id),
-            }
-            if lender is not None
-            else None
-        ),
+        "lender": ({"id": lender.id, "name": lender.name} if lender is not None else None),
         "suggestion": (
             {
                 "round_id": suggestion.round_id,
@@ -188,11 +147,6 @@ async def file_lender_payload(db: AsyncSession, *, loan_file: LoanFile) -> dict[
                 "name": suggestion.detected.name,
                 "source": suggestion.detected.source,
                 "lender_exists": suggestion.lender_id is not None,
-                # Whether confirming types anything (review): a lender she adds here is created
-                # with its key and seeded, so it does; a same-named lender without the key does not,
-                # and the banner must not promise that it will.
-                "has_code_map": suggestion.lender_id is None
-                or await _has_code_map(db, suggestion.lender_id),
             }
             if suggestion is not None
             else None
@@ -206,9 +160,7 @@ async def file_lender_payload(db: AsyncSession, *, loan_file: LoanFile) -> dict[
 
 
 async def _lender_for_key(db: AsyncSession, *, company_id: UUID, key: str) -> Lender:
-    """Her company's lender for a shipped key, created with that key (and its code map) if absent."""
-    from app.scripts.seed_lender_codes import seed_lender
-
+    """Her company's lender for a known key, created with that key if absent."""
     if key not in seeded_lender_keys():
         raise LenderRefused("That lender is not one the app knows.")
     existing = await _company_lender_for(db, company_id=company_id, key=key)
@@ -222,7 +174,6 @@ async def _lender_for_key(db: AsyncSession, *, company_id: UUID, key: str) -> Le
         raise LenderRefused(exc.args[0] if exc.args else "The lender could not be added.") from exc
     lender.canonical_lender_key = key
     await db.flush()
-    await seed_lender(db, lender=lender)
     logger.info("file_lender_created_from_sheet", lender_id=str(lender.id), key=key)
     return lender
 
@@ -238,7 +189,7 @@ async def set_file_lender(
     """She confirms the file's lender: a shipped key from the suggestion, or one of her lenders.
 
     Goes through `update_loan_file`, the one door every lender change takes, so the underwriter is
-    cleared (LP-813) and the conditions are typed (`on_file_lender_changed`) whichever screen she used.
+    cleared (LP-813) and the conditions follow it (`on_file_lender_changed`) whichever screen she used.
     Flushes; the caller commits and then queues the reading (`unread_round_to_read`).
     """
     from app.schemas.loan_file import LoanFileUpdate
@@ -288,101 +239,8 @@ async def decline_suggestion(
 
 
 # --------------------------------------------------------------------------------------------- #
-# Typing what is untyped
+# The file's rounds and conditions follow its lender
 # --------------------------------------------------------------------------------------------- #
-
-
-def _apply_type(
-    condition: Condition, code_row: LenderConditionCode, *, by: str, actor_user_id: UUID | None
-) -> ConditionEvent | None:
-    """Give an untyped condition the code map's type, as import would have. None when there is none.
-
-    The same three things import's `_apply_code_defaults` applies, and only those: the type,
-    `info_only` (raised, never lowered) and the owner hint WHERE THE SHEET GAVE NONE.
-    """
-    if condition.canonical_type_id is not None or not code_row.canonical_type_id:
-        return None
-    condition.canonical_type_id = code_row.canonical_type_id
-    if code_row.info_only:
-        condition.info_only = True
-    if (
-        condition.owner_hint_source is OwnerHintSource.NONE
-        and code_row.default_owner_hint is not None
-    ):
-        condition.owner_hint = code_row.default_owner_hint
-        condition.owner_hint_source = OwnerHintSource.CODE_MAP
-    return ConditionEvent(
-        company_id=condition.company_id,
-        loan_file_id=condition.loan_file_id,
-        condition_id=condition.id,
-        kind=ConditionEventKind.CONDITION_TYPED,
-        actor_user_id=actor_user_id,
-        detail={
-            "by": by,
-            "type_id": code_row.canonical_type_id,
-            "lender_id": str(code_row.lender_id),
-            "code": condition.lender_code,
-        },
-    )
-
-
-def _proposal(condition: Condition) -> str | None:
-    """The reading's proposed type for an untyped condition, if it names a real library type."""
-    proposed = (condition.reading or {}).get("proposed_type_id")
-    if isinstance(proposed, str) and load_library().get(proposed) is not None:
-        return proposed
-    return None
-
-
-async def record_proposals(
-    db: AsyncSession, *, lender_id: UUID, conditions: list[Condition]
-) -> int:
-    """Copy each untyped condition's proposed type onto its code's review row. Returns how many.
-
-    Only onto a row still `OBSERVED_UNMAPPED`: a seeded or mapped code already has a person's answer,
-    and a proposal must never sit beside it looking like a second one. A proposal already there is
-    kept: the first reading's guess is not replaced by a later one without a person looking.
-    """
-    wanted = {
-        condition.lender_code: proposed
-        for condition in conditions
-        if condition.canonical_type_id is None
-        and condition.lender_code
-        and (proposed := _proposal(condition)) is not None
-    }
-    if not wanted:
-        return 0
-    rows = await db.scalars(
-        select(LenderConditionCode).where(
-            LenderConditionCode.lender_id == lender_id,
-            LenderConditionCode.code.in_(list(wanted)),
-            LenderConditionCode.status == LenderCodeStatus.OBSERVED_UNMAPPED,
-            LenderConditionCode.proposed_type_id.is_(None),
-        )
-    )
-    written = 0
-    for row in rows:
-        row.proposed_type_id = wanted[row.code]
-        written += 1
-    return written
-
-
-async def _untyped(db: AsyncSession, *, where: list[Any]) -> list[Condition]:
-    return list(
-        await db.scalars(
-            only_active(
-                select(Condition)
-                .where(
-                    Condition.canonical_type_id.is_(None),
-                    Condition.lender_code.is_not(None),
-                    Condition.lender_status != ConditionLenderStatus.SUPERSEDED,
-                    *where,
-                )
-                .order_by(Condition.sequence, Condition.created_at, Condition.id),
-                Condition,
-            )
-        )
-    )
 
 
 async def on_file_lender_changed(
@@ -392,116 +250,48 @@ async def on_file_lender_changed(
     previous_lender_id: UUID | None,
     actor_user_id: UUID | None,
 ) -> int:
-    """Apply the file's new lender to its rounds and its UNTYPED conditions. Returns how many got a type.
+    """Move the file's rounds and live conditions to its new lender. Returns how many conditions moved.
 
-    - Every round on the file takes the new lender: the sheet is now known to be this lender's.
-    - Every untyped condition on the file takes the new lender, then its type from that lender's code
-      map (whatever lender it carried before: an earlier lender of this file, through any number of
-      changes, including one to no lender). A code the map does not know is recorded for review
-      (`OBSERVED_UNMAPPED`, as import does), with the reading's proposal copied on.
-    - Nothing typed is touched, and nothing is read here: the caller queues the reading after commit,
-      and the reading takes only unread conditions.
+    EVERY ONE, NOT ONLY THE UNTYPED (LP-965). Typed conditions used to keep their lender because their
+    type came from that lender's code map; a type now comes from the reading, so nothing ties a condition
+    to an earlier lender. Nothing is typed or read here.
     """
     new_id = loan_file.lender_id
     if new_id is None or new_id == previous_lender_id:
         return 0
     new_lender = await db.get(Lender, new_id)
     if new_lender is None or new_lender.company_id != loan_file.company_id:
-        # TENANCY (review): never write review rows onto, or type from, another company's lender.
-        # The PATCH route refuses such an id; this is the second lock on the same door.
+        # TENANCY (review): never move a file's conditions onto another company's lender. The PATCH
+        # route refuses such an id; this is the second lock on the same door.
         logger.warning(
             "file_lender_not_applied_foreign", loan_file_id=str(loan_file.id), lender_id=str(new_id)
         )
         return 0
-    # EVERY ROUND AND EVERY UNTYPED CONDITION ON THE FILE FOLLOWS THE FILE'S LENDER (review). The
-    # build moved only those with no lender or the PREVIOUS one, so A -> none -> B left A's untyped
-    # conditions at A for ever, while A -> B moved them. Nothing else puts a lender on a round or a
-    # condition but the file's lender at the time, so "the previous one" was only ever a proxy for
-    # "an earlier lender of this file", and the none hop broke the proxy.
     for round_ in await db.scalars(
         select(ConditionRound).where(ConditionRound.loan_file_id == loan_file.id)
     ):
         round_.lender_id = new_id
-
-    conditions = await _untyped(db, where=[Condition.loan_file_id == loan_file.id])
-    if not conditions:
-        await db.flush()
-        return 0
-    for condition in conditions:
-        condition.lender_id = new_id
-
-    codes = sorted({c.lender_code for c in conditions if c.lender_code})
-    code_map = {
-        row.code: row
-        for row in await db.scalars(
-            select(LenderConditionCode).where(
-                LenderConditionCode.lender_id == new_id, LenderConditionCode.code.in_(codes)
+    conditions = list(
+        await db.scalars(
+            only_active(
+                select(Condition).where(
+                    Condition.loan_file_id == loan_file.id,
+                    Condition.lender_status != ConditionLenderStatus.SUPERSEDED,
+                ),
+                Condition,
             )
         )
-    }
-    now = utcnow()
-    for code in codes:
-        if code not in code_map:
-            # THE SAME ROW IMPORT WRITES FOR A CODE NOBODY HAS MAPPED (`_record_codes`): the label is
-            # the code itself, because an unknown code has no meaning by definition.
-            created = LenderConditionCode(
-                lender_id=new_id,
-                code=code,
-                label=code,
-                status=LenderCodeStatus.OBSERVED_UNMAPPED,
-                times_seen=1,
-                first_seen_at=now,
-                last_seen_at=now,
-            )
-            db.add(created)
-            code_map[code] = created
-    await db.flush()
-
-    typed = 0
+    )
     for condition in conditions:
-        code_row = code_map.get(condition.lender_code or "")
-        if code_row is None:
-            continue
-        event = _apply_type(condition, code_row, by="lender_set", actor_user_id=actor_user_id)
-        if event is not None:
-            db.add(event)
-            typed += 1
-    await record_proposals(db, lender_id=new_id, conditions=conditions)
+        condition.lender_id = new_id
     await db.flush()
     logger.info(
         "file_lender_applied_to_conditions",
         loan_file_id=str(loan_file.id),
         lender_id=str(new_id),
-        untyped=len(conditions),
-        typed=typed,
+        conditions=len(conditions),
     )
-    return typed
-
-
-async def type_conditions_for_code(
-    db: AsyncSession, *, lender: Lender, code: str, actor_user_id: UUID | None
-) -> set[UUID]:
-    """After she maps a code: type every untyped condition with that code at that lender.
-
-    Returns the files that gained a type, so the caller can queue the reading for the unread ones.
-    """
-    mapped: LenderConditionCode | None = await db.scalar(
-        select(LenderConditionCode).where(
-            LenderConditionCode.lender_id == lender.id, LenderConditionCode.code == code
-        )
-    )
-    if mapped is None or not mapped.canonical_type_id:
-        return set()
-    files: set[UUID] = set()
-    for condition in await _untyped(
-        db, where=[Condition.lender_id == lender.id, Condition.lender_code == code]
-    ):
-        event = _apply_type(condition, mapped, by="code_confirmed", actor_user_id=actor_user_id)
-        if event is not None:
-            db.add(event)
-            files.add(condition.loan_file_id)
-    await db.flush()
-    return files
+    return len(conditions)
 
 
 async def unread_round_to_read(db: AsyncSession, *, loan_file_id: UUID) -> UUID | None:

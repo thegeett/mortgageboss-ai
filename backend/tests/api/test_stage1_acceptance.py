@@ -242,14 +242,13 @@ async def test_the_uwm_file_end_to_end(
     assert {"6132", "6637"} <= noted, "step 1: notes on 6132 and 6637"
     assert await _event_count(db_session, r1["id"], ConditionEventKind.CONDITION_CREATED) == 11
 
-    # "Unknown codes (if any) recorded as unmapped." A test database carries no seeded code map, so
-    # every code on the sheet is unknown here — and each must now have a row rather than be dropped.
-    sheet_codes = {c["lender_code"] for c in conditions if c["lender_code"]}
-    assert set(imported_1["unmapped_codes"]) == sheet_codes
+    # LP-965 SUPERSEDES THE SPEC'S "Unknown codes (if any) recorded as unmapped": nothing is recorded
+    # per lender code any more (ADR-419), so the import reports no codes and writes no rows.
+    assert "unmapped_codes" not in imported_1
     recorded = await db_session.execute(
         select(LenderConditionCode.code).where(LenderConditionCode.lender_id == loan_file.lender_id)
     )
-    assert sheet_codes <= set(recorded.scalars().all())
+    assert list(recorded.scalars().all()) == []
 
     # ── Step 2: round 2 by paste, "just some" ─────────────────────────────────────────────────────
     pasted = await client.post(

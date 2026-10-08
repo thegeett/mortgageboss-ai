@@ -41,7 +41,6 @@ from dataclasses import dataclass
 from datetime import date
 
 from app.ai.extraction.parsing import coerce_date
-from app.conditions.lender_codes.loader import LenderCodeSeedError, load_seed
 from app.conditions.readers.lines import Line
 from app.conditions.readers.model import (
     RULE_CONFIDENCE,
@@ -498,13 +497,12 @@ def _notes(text: str, reference: date | None) -> list[UnderwriterNote]:
 
 
 def _owner_hint(
-    text: str, *, processor_assist: bool, kind: BucketKind, code: str
+    text: str, *, processor_assist: bool, kind: BucketKind
 ) -> tuple[OwnerHint, OwnerHintSource]:
-    """Rule 7, in the spec's precedence order: the lender's own markers beat everything.
+    """Rule 7: only the lender's own markers on the sheet.
 
-    The order is the point. A `TC:` prefix the lender typed is far stronger evidence than a default
-    looked up from a code map, so it wins — and `owner_hint_source` records which it was, because a
-    UI that showed them identically would invite trusting the weak one.
+    LP-965 — NO CODE-MAP DEFAULT (ADR-419). A hint used to be looked up from `uwm.yaml` when the sheet
+    gave none; who acts is now the reading's to say, fresh every time.
     """
     if text.startswith("TC:"):
         return OwnerHint.TITLE, OwnerHintSource.PREFIX
@@ -512,14 +510,6 @@ def _owner_hint(
         return OwnerHint.LENDER, OwnerHintSource.PREFIX
     if kind is BucketKind.LENDER_TO_CLEAR:
         return OwnerHint.LENDER, OwnerHintSource.BUCKET
-    try:
-        for row in load_seed(UWM_LENDER_KEY):
-            if row.code == code and row.default_owner_hint is not None:
-                return row.default_owner_hint, OwnerHintSource.CODE_MAP
-    except LenderCodeSeedError:
-        # A malformed shipped map must not take the reader down with it: the sheet still parses and
-        # every row simply lacks a code-map hint. The seed step is where that error is fatal.
-        return OwnerHint.UNKNOWN, OwnerHintSource.NONE
     return OwnerHint.UNKNOWN, OwnerHintSource.NONE
 
 
@@ -975,9 +965,7 @@ def read_uwm(lines: Sequence[Line], *, conditions_from: int | None = None) -> Pa
             continue
         seen.add(key)
 
-        hint, source = _owner_hint(
-            text, processor_assist=row.processor_assist, kind=row.kind, code=row.code
-        )
+        hint, source = _owner_hint(text, processor_assist=row.processor_assist, kind=row.kind)
         sheet.rows.append(
             ParsedRow(
                 sequence=len(sheet.rows) + 1,

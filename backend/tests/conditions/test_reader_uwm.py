@@ -116,13 +116,15 @@ def test_round1_the_verbatim_text_keeps_its_notes() -> None:
 
 
 def test_round1_owner_hints_prefer_the_lenders_own_marker() -> None:
-    """§7.1: 1947 and 6378 → TITLE by PREFIX (`TC:`); the rest come from the code map."""
+    """§7.1: 1947 and 6378 → TITLE by PREFIX (`TC:`). LP-965: the rest carry NO hint; the code map no
+    longer supplies one (ADR-419), so who acts is the reading's to say."""
     sheet = _read(UWM_ROUND_1)
     hints = {row.lender_code: (row.owner_hint, row.owner_hint_source) for row in sheet.rows}
 
     assert hints["1947"] == (OwnerHint.TITLE, OwnerHintSource.PREFIX)
     assert hints["6378"] == (OwnerHint.TITLE, OwnerHintSource.PREFIX)
-    assert hints["0006"][1] is OwnerHintSource.CODE_MAP
+    assert hints["0006"] == (OwnerHint.UNKNOWN, OwnerHintSource.NONE)
+    assert all(source is not OwnerHintSource.CODE_MAP for _, source in hints.values())
 
 
 def test_round1_lender_team_and_the_empty_closer() -> None:

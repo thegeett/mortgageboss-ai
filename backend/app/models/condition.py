@@ -98,6 +98,9 @@ class OwnerHintSource(StrEnum):
     #: real override raised `IntegrityError` on commit. `ck_conditions_ownerhintsource` is swapped in
     #: LP-912's migration, and `tests/test_activity_type_migrations.py::_CASES` watches it.
     MANUAL = "manual"
+    #: LP-965 — the reading's first item's performer, where the sheet named nobody (ADR-419). It took
+    #: the code map's place. Also a migration: `lp965_owner_from_reading` swaps the CHECK.
+    READING = "reading"
 
 
 class ConditionPrepStatus(StrEnum):

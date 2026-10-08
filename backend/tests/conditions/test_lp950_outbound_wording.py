@@ -33,7 +33,6 @@ from app.services.condition_drafts import (
 )
 from app.services.condition_reading import GENERIC_ACCEPTABLE, GENERIC_NAME
 from sqlalchemy.ext.asyncio import AsyncSession
-from tests.conditions.reading_fixture import fake_complete
 
 LOAN = "1226474352"
 PLACEHOLDERS = (GENERIC_NAME, GENERIC_ACCEPTABLE, "what the lender's words describe")
@@ -390,7 +389,8 @@ def test_the_guard_would_catch_the_placeholder() -> None:
 
 
 # --------------------------------------------------------------------------------------------- #
-# LF-DH8V end to end: no lender, so every condition is generic
+# LF-DH8V end to end: every condition generic (LP-965: a model that recognises no library type, which is
+# how a condition is untyped now that the code map is gone)
 # --------------------------------------------------------------------------------------------- #
 
 
@@ -403,9 +403,13 @@ async def test_lf_dh8v_drafts_carry_the_lenders_words_and_ask_the_lender(
     from app.services.condition_reading import ConfirmedItem, confirm_reading, read_round
     from sqlalchemy import select
     from tests.conditions.test_condition_plan import _actor
-    from tests.conditions.test_lp949_lender_on_the_file import _by_code, _file_without_lender
+    from tests.conditions.test_lp949_lender_on_the_file import (
+        _by_code,
+        _file_without_lender,
+        _no_type_model,
+    )
 
-    monkeypatch.setattr(condition_reading, "complete", fake_complete())
+    monkeypatch.setattr(condition_reading, "complete", _no_type_model([]))
     loan_file, round_ = await _file_without_lender(db_session)
     await read_round(db_session, round_id=round_.id)
     await build_plan(db_session, round_id=round_.id)

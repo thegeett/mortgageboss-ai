@@ -33,9 +33,7 @@ from app.models.condition_round import (
     ConditionRoundCompleteness,
     ConditionRoundStatus,
 )
-from app.models.lender_condition_code import LenderCodeStatus, LenderConditionCode
 from app.models.loan_file import LoanFile
-from app.scripts.seed_lender_codes import seed_lender_codes
 from app.services.loan_files import create_loan_file
 from app.tasks import conditions as task_module
 from app.tasks.conditions import parse_round
@@ -95,18 +93,6 @@ async def _file_with_codes(db: AsyncSession) -> tuple[LoanFile, dict[str, str]]:
     loan_file.lender_id = lender.id
     await db.flush()
 
-    result = await seed_lender_codes(db)
-    assert result.inserted > 0, "the UWM map must have seeded"
-    rows = (
-        (
-            await db.execute(
-                select(LenderConditionCode).where(LenderConditionCode.lender_id == lender.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    assert rows and all(row.status is LenderCodeStatus.SEEDED for row in rows)
     return loan_file, {"Authorization": f"Bearer {create_access_token(user.id)}"}
 
 

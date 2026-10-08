@@ -7,11 +7,11 @@ pass against rows shaped to suit it — and the one assertion this ticket is nam
 on borrower returns exactly 7086 6132 6637") is only worth anything if the owners were derived rather
 than typed.
 
-THE CODE MAP IS SEEDED THROUGH THE PRODUCT'S OWN PATH. `seed_lender_codes` is public and split from its
-CLI precisely so a test can drive it, and it is what fills `default_owner_hint` — without it NINE of
-the eleven conditions come back `unknown` (only `1947` and `6378` keep `title`, from the lender's own
-`TC:` prefix, which the reader sets with no map at all). That failure would read as a broken filter
-rather than as a fixture that seeded nothing, so `_seeded_uwm_file` asserts the rows landed.
+THE OWNERS COME FROM THE READING (LP-965, ADR-419). The code map that used to fill `owner_hint` is gone;
+the round is read by the shared mocked model (`reading_fixture`) after import, and each condition's owner
+is its reading's first item's performer where the sheet named nobody. Without the read, NINE of the
+eleven come back `unknown` (only `1947` and `6378` keep `title`, from the lender's own `TC:` prefix), so
+`imported` asserts the reading ran rather than letting that read as a broken filter.
 """
 
 from __future__ import annotations
@@ -30,9 +30,9 @@ from app.core.security import hash_password
 from app.main import app
 from app.models import Company, User, UserRole
 from app.models.condition import Condition, ConditionLenderStatus, ConditionPrepStatus
-from app.models.lender_condition_code import LenderCodeStatus, LenderConditionCode
 from app.models.loan_file import LoanFile
-from app.scripts.seed_lender_codes import seed_lender_codes
+from app.services import condition_reading
+from app.services.condition_reading import read_round
 from app.services.conditions import MAX_CONDITIONS
 from app.services.loan_files import create_loan_file
 from app.tasks import conditions as task_module
@@ -41,6 +41,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.conditions.fixture_helpers import UWM_ROUND_1, portal_excerpt
+from tests.conditions.reading_fixture import fake_complete
 from tests.conditions.uwm_pdf_fixture import render_uwm_pdf
 from tests.models.conftest_helpers import make_lender
 
@@ -105,38 +106,13 @@ async def _company_user(db: AsyncSession, *, slug: str) -> tuple[Company, dict[s
     return company, {"Authorization": f"Bearer {create_access_token(user.id)}"}
 
 
-async def _seeded_uwm_file(db: AsyncSession, company: Company) -> LoanFile:
-    """A UWM file whose code map is seeded the way the application seeds it.
-
-    `canonical_lender_key` IS THE WHOLE MECHANISM AND `make_lender` DOES NOT SET IT. `seed_lender_codes`
-    matches lenders on that key alone (ADR-407: a slug is per-company and cannot identify "UWM"), so a
-    fixture that omits it seeds nothing, reports the key unclaimed, and leaves every owner `unknown`.
-    The assertion below is what makes that show up as a fixture error rather than as a filter that
-    appears not to work.
-    """
+async def _uwm_file(db: AsyncSession, company: Company) -> LoanFile:
+    """A UWM file. LP-965 — nothing is seeded: no code map exists to seed (ADR-419)."""
     loan_file = await create_loan_file(db, company_id=company.id)
     lender = await make_lender(db, company=company, name="UWM")
     lender.canonical_lender_key = "uwm"
     loan_file.lender_id = lender.id
     await db.flush()
-
-    result = await seed_lender_codes(db)
-    assert result.inserted > 0, "the UWM map must have seeded, or every owner hint below is unknown"
-    assert "uwm" not in result.unclaimed_keys, "canonical_lender_key did not match"
-
-    rows = (
-        (
-            await db.execute(
-                select(LenderConditionCode).where(LenderConditionCode.lender_id == lender.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    # SEEDED, NOT OBSERVED_UNMAPPED. `resolved_status` never demotes, and SEEDED is what makes
-    # `unmapped_codes` come back empty on import — a hand-built row defaulting to OBSERVED_UNMAPPED
-    # would change both quietly.
-    assert rows and all(row.status is LenderCodeStatus.SEEDED for row in rows)
     return loan_file
 
 
@@ -167,12 +143,18 @@ async def _import_round_1(
 
 @pytest.fixture
 async def imported(
-    client: AsyncClient, db_session: AsyncSession, enqueued: list[str]
+    client: AsyncClient,
+    db_session: AsyncSession,
+    enqueued: list[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[LoanFile, dict[str, str], str]:
-    """The state every test below reads: round 1 imported on a seeded UWM file."""
+    """The state every test below reads: round 1 imported on a UWM file, and READ (LP-965)."""
     company, auth = await _company_user(db_session, slug="read-api")
-    loan_file = await _seeded_uwm_file(db_session, company)
+    loan_file = await _uwm_file(db_session, company)
     round_id = await _import_round_1(client, auth, loan_file, db=db_session, enqueued=enqueued)
+    monkeypatch.setattr(condition_reading, "complete", fake_complete([]))
+    outcome = await read_round(db_session, round_id=UUID(round_id))
+    assert outcome.read == 11 and not outcome.fell_back, "the reading is where the owners come from"
     return loan_file, auth, round_id
 
 
@@ -238,35 +220,37 @@ async def test_every_row_carries_updated_at_so_lp912s_stale_guard_is_reachable(
 # --------------------------------------------------------------------------- #
 
 
-async def test_open_and_waiting_on_borrower_returns_exactly_the_three_asset_conditions(
+async def test_open_and_waiting_on_borrower_returns_exactly_the_four_borrower_conditions(
     client: AsyncClient, imported: tuple[LoanFile, dict[str, str], str]
 ) -> None:
-    """THE ASSERTION THIS TICKET IS NAMED FOR (spec §LP-911 Done-when).
+    """THE ASSERTION THIS TICKET IS NAMED FOR (spec §LP-911 Done-when), re-derived for LP-965.
 
-    The three owners are DERIVED, not typed: `7086`, `6132` and `6637` carry
-    `default_owner_hint: borrower` in the shipped UWM map, and nothing on the sheet says so. `6178` is
-    `insurance` and `1947`/`6378` are `title` from the lender's own `TC:` prefix, which outranks the
-    map — so this list is wrong the moment any of those three mechanisms breaks.
+    The owners are DERIVED, not typed: each is its reading's first item's performer (ADR-419), and
+    nothing on the sheet says so. `7086`, `6132` and `6637` are the three asset conditions, as before.
+    `0132` JOINED THEM: its first item is the borrower re-signing the disclosure, where the retired code
+    map said `broker`. `6178` is `insurance` and `1947`/`6378` are `title` from the lender's own `TC:`
+    prefix, which outranks the reading — so this list is wrong the moment any of those mechanisms breaks.
     """
     loan_file, auth, _round_id = imported
 
     rows = await _list(client, auth, loan_file, lender_status="open", owner="borrower")
 
-    assert sorted(_codes(rows)) == sorted(["7086", "6132", "6637"])
+    assert sorted(_codes(rows)) == sorted(["7086", "6132", "6637", "0132"])
 
 
-async def test_an_unknown_owner_is_unknown_with_the_code_map_as_its_source(
+async def test_an_owner_the_reading_cannot_name_is_unknown_with_no_source(
     client: AsyncClient, imported: tuple[LoanFile, dict[str, str], str]
 ) -> None:
-    """SURVEY D-6, AND A TRAP FOR LP-913. `1228` carries `default_owner_hint: unknown`, which the map
-    DOES apply — so its source is `code_map`, not `none`. A screen that decided "Not known" from the
-    source would render "Not known · from code map", which S2-01 does not draw."""
+    """LP-965. `1228`'s first item is the appraiser's, who is no owner of the list's, so it stays
+    `unknown` with source `none`, and a READ condition that does have one says `reading`."""
     loan_file, auth, _round_id = imported
 
     (row,) = await _list(client, auth, loan_file, lender_code="1228")
-
     assert row["effective_owner"] == "unknown"
-    assert row["effective_owner_source"] == "code_map"
+    assert row["effective_owner_source"] == "none"
+
+    (assets,) = await _list(client, auth, loan_file, lender_code="7086")
+    assert (assets["effective_owner"], assets["effective_owner_source"]) == ("borrower", "reading")
 
 
 async def test_the_bucket_filter_splits_the_sheet_six_and_five(
@@ -505,7 +489,7 @@ async def test_the_summary_is_s2_01s_seven_numbers(
     assert summary["open_prior_to_docs"] == 6
     assert summary["open_prior_to_funding"] == 5
     assert summary["by_prep_status"] == {"to_do": 11}
-    assert summary["by_owner"]["borrower"] == 3
+    assert summary["by_owner"]["borrower"] == 4  # LP-965: 0132 joins the three asset conditions
     #: 0 until LP-915 produces one — asserted so the field cannot start reading as measured.
     assert summary["pending_suggestions"] == 0
     assert summary["latest_round"]["round_number"] == 1
@@ -614,7 +598,8 @@ async def test_a_first_import_writes_only_created_even_for_a_condition_with_a_no
     response = await client.get(f"{API}/conditions/{condition.id}/events", headers=auth)
 
     assert response.status_code == 200, response.text
-    assert [event["kind"] for event in response.json()] == ["condition_created"]
+    # `condition_read` is the fixture's reading (LP-965), never a note.
+    assert [event["kind"] for event in response.json()] == ["condition_read", "condition_created"]
     # The note is on the condition all the same — it simply came with it.
     detail = await client.get(f"{API}/conditions/{condition.id}", headers=auth)
     assert detail.json()["latest_note"]["text"]
@@ -640,7 +625,8 @@ async def test_one_conditions_history_is_its_own_events_newest_first(
 
     assert response.status_code == 200, response.text
     kinds = [event["kind"] for event in response.json()]
-    assert kinds == ["condition_seen_again", "condition_created"], "newest first"
+    # `condition_read` is the fixture's reading of round 1 (LP-965).
+    assert kinds == ["condition_seen_again", "condition_read", "condition_created"], "newest first"
     # Round-level events belong to the ROUND's history, not to one condition's — the opposite filter
     # from `events_for_round`, which excludes per-condition rows.
     assert "round_imported" not in kinds

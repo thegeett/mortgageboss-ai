@@ -16842,3 +16842,54 @@ link stores existed: `condition_items.document_id` (plan-time "Already in the fi
   item and document). No new link table.
 
 *Status.* Accepted (LP-953).
+
+## ADR-419
+
+**A condition's library type comes only from its reading: the AI chooses it from the whole library, fresh
+on every import. Nothing is looked up or remembered per lender code. Supersedes the code-map parts of
+ADR-407, ADR-410 and ADR-417.**
+
+*Context.* The owner, 2026-10-07: "I want to remove the concept of saving condition code per lender and
+remember what processor select. I want each time fresh AI resolution come at least for this version." Until
+now a condition was typed only by its lender's shipped code map (`uwm.yaml`, `champions.yaml`, seeded into
+`lender_condition_codes`), at import or when the file's lender was set. The processor's answer on the
+confirm screen was saved per (lender, code) and reused on the next file without asking the AI. On a local
+file with no lender set, condition 1228 was never looked up, the reading guessed, and the confirm screen
+said "the library has no type for this condition" although PA-03 exists.
+
+*Decision (LP-965).*
+- **The reading chooses the type.** Prompt `read_v4` sends every condition with the whole library,
+  including each type's items. The model returns `library_type` and that type's items by key, or splits
+  the condition itself when no type fits. A `library_type` that is not a real id is ignored.
+  `read_round` writes the choice to `canonical_type_id`, and clears it when there is none, so no earlier
+  type survives a fresh reading. Everything that reads the type is unchanged: routes, `waits_on`,
+  evidence matching, drafts and the package.
+- **Nothing per lender code**:
+  - import no longer applies a code map's type, owner hint or info-only flag, and no longer records codes;
+  - setting the file's lender types nothing; it moves the file's rounds and live conditions to the lender;
+  - "This is right" confirms this condition only;
+  - the UWM reader takes no owner hint from `uwm.yaml`;
+  - the admin "Lender codes to review" table, its routes, `/lenders/library-types` and
+    `seed_lender_codes.py` are removed.
+- **Kept**:
+  - the YAML files, for lender detection (their `lender_label`s) and the library review table;
+  - `lender_condition_codes` and its columns, unread and unwritten, so this is reversible without a
+    migration;
+  - the `code_map` value in `OwnerHintSource`, because existing rows carry it;
+  - `condition.lender_code`, for display and for matching a condition across rounds by (lender, code).
+- **Batches.** The reading asks the model about eight conditions per call. LP-962 found a 21-condition
+  round overrunning the 8,192-token answer in one call, which sent every condition to the fallback; a
+  failed batch now takes only its own conditions.
+
+*Consequences.*
+- **Typing quality is now the model's.** LP-962 measured it at 16 of 21 matching the map on the
+  synthetic UWM sheet, with 4 untyped and 1 wrong. An untyped condition gets generic items and loses the
+  library features; a wrong type gets the wrong steps. The confirm flags and the plan are the checks.
+- **A model failure leaves its batch untyped**, with generic items from the owner hint, marked to confirm.
+  There is no map to fall back on.
+- **Each reading costs more input tokens** (the library is sent every time); the answer per batch is
+  bounded.
+- To restore the map: re-add the import lookup and the seed, which are recoverable from git, against the
+  kept table.
+
+*Status.* Accepted (LP-965).

@@ -160,19 +160,24 @@ def test_round_one_types_propose_the_plan_in_section_6() -> None:
     assert by_id["IV-03"].options == (mine,) and by_id["IV-03"].waits_on_type == "PA-03"  # 0007
 
 
-async def test_seeded_codes_and_imported_conditions_carry_their_type(db_session: Any) -> None:
-    """Through the database: the seed writes each code's type onto its row, and import copies it onto
-    the condition (Stage 1's `_apply_code_defaults` path), so 6637 arrives as AS-04."""
+async def test_imported_conditions_take_their_type_from_the_reading(
+    db_session: Any, monkeypatch: Any
+) -> None:
+    """Through the database. LP-965 — import types nothing (no code map, ADR-419); the reading's choice
+    of library type is written to each condition, so 6637 is AS-04 once read."""
     from app.models import Company
+    from app.models.condition import Condition
     from app.models.condition_round import ConditionRoundCompleteness
-    from app.models.lender_condition_code import LenderConditionCode
-    from app.scripts.seed_lender_codes import seed_lender_codes
+    from app.services import condition_reading
     from app.services.condition_import import import_round
+    from app.services.condition_reading import read_round
     from app.services.condition_rounds import create_round_from_paste
     from sqlalchemy import select
     from tests.conditions.fixture_helpers import sheet_text
+    from tests.conditions.reading_fixture import fake_complete
     from tests.models.conftest_helpers import make_lender, make_loan_file
 
+    monkeypatch.setattr(condition_reading, "complete", fake_complete([]))
     company = Company(name="Library", slug="library-lp918")
     db_session.add(company)
     await db_session.flush()
@@ -181,18 +186,6 @@ async def test_seeded_codes_and_imported_conditions_carry_their_type(db_session:
     loan_file = await make_loan_file(db_session, company=company)
     loan_file.lender_id = lender.id
     await db_session.flush()
-    await seed_lender_codes(db_session)
-
-    rows = (
-        (
-            await db_session.execute(
-                select(LenderConditionCode).where(LenderConditionCode.lender_id == lender.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    assert rows and all(row.canonical_type_id for row in rows)
 
     round_ = await create_round_from_paste(
         db_session,
@@ -201,15 +194,15 @@ async def test_seeded_codes_and_imported_conditions_carry_their_type(db_session:
         completeness=ConditionRoundCompleteness.FULL,
     )
     await import_round(db_session, round_=round_)
-    from app.models.condition import Condition
 
-    types = {
-        c.lender_code: c.canonical_type_id
-        for c in (
-            await db_session.execute(
-                select(Condition).where(Condition.loan_file_id == loan_file.id)
-            )
-        ).scalars()
-    }
-    assert types["6637"] == "AS-04" and types["7086"] == "AS-10" and types["1228"] == "PA-03"
-    assert all(types.values()), f"conditions imported without a type: {types}"
+    async def types() -> dict[str | None, str | None]:
+        rows = await db_session.scalars(
+            select(Condition).where(Condition.loan_file_id == loan_file.id)
+        )
+        return {c.lender_code: c.canonical_type_id for c in rows}
+
+    assert not any((await types()).values()), "import alone types nothing"
+    await read_round(db_session, round_id=round_.id)
+    typed = await types()
+    assert typed["6637"] == "AS-04" and typed["7086"] == "AS-10" and typed["1228"] == "PA-03"
+    assert all(typed.values()), f"conditions read without a type: {typed}"

@@ -1,8 +1,11 @@
 """Read the shipped lender code maps, and refuse a malformed one loudly (LP-910, ADR-407).
 
-Pure: no database, no network. It turns two YAML files into validated rows; putting them INTO
-`lender_condition_codes` is the seed step's job (`app/scripts/seed_lender_codes.py`), and the
-separation is what lets the whole file be checked by a test with no database at all.
+Pure: no database, no network. It turns two YAML files into validated rows.
+
+LP-965 — NO LONGER THE CODE MAP (ADR-419). Nothing seeds these rows into `lender_condition_codes` or types
+a condition from them any more; the reading chooses a condition's type fresh every time. What still reads
+this module: lender detection (`lender_label`, `seeded_lender_keys`, matching a sheet to a lender) and
+the library review table's "Seen as" column.
 
 WHAT THIS REFUSES, AND WHY EACH ONE IS WORTH AN EXCEPTION RATHER THAN A SKIP:
 

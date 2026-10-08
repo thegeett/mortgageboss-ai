@@ -31,9 +31,9 @@ from app.core.security import hash_password
 from app.main import app
 from app.models import Company, User, UserRole
 from app.models.condition import Condition
-from app.models.lender_condition_code import LenderConditionCode
 from app.models.loan_file import LoanFile
-from app.scripts.seed_lender_codes import seed_lender_codes
+from app.services import condition_reading
+from app.services.condition_reading import read_round
 from app.services.loan_files import create_loan_file
 from app.tasks import conditions as task_module
 from app.tasks.conditions import parse_round
@@ -41,6 +41,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.conditions.fixture_helpers import UWM_ROUND_1, UWM_ROUND_2, UWM_ROUND_3
+from tests.conditions.reading_fixture import fake_complete
 from tests.conditions.uwm_pdf_fixture import render_uwm_pdf
 from tests.models.conftest_helpers import make_lender
 
@@ -64,11 +65,13 @@ async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
 
 @pytest.fixture
 def enqueued(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """What the upload door handed to Celery — recorded rather than sent."""
+    """What the upload door handed to Celery — recorded rather than sent. LP-965: the reading's model is
+    the shared mock, because the owners now come from the reading (ADR-419)."""
     seen: list[str] = []
     monkeypatch.setattr(
         task_module.parse_condition_round, "delay", lambda round_id: seen.append(round_id)
     )
+    monkeypatch.setattr(condition_reading, "complete", fake_complete([]))
     return seen
 
 
@@ -92,19 +95,6 @@ async def _company_file(db: AsyncSession, name: str) -> tuple[LoanFile, dict[str
     lender.canonical_lender_key = "uwm"
     loan_file.lender_id = lender.id
     await db.flush()
-
-    result = await seed_lender_codes(db)
-    assert result.inserted > 0, "the UWM map must have seeded"
-    seeded = (
-        (
-            await db.execute(
-                select(LenderConditionCode).where(LenderConditionCode.lender_id == lender.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    assert seeded, "this lender's codes must be seeded or owners come back unknown"
     return loan_file, {"Authorization": f"Bearer {create_access_token(user.id)}"}
 
 
@@ -132,6 +122,9 @@ async def _import(
     await parse_round(db, UUID(round_id))
     imported = await client.post(f"{API}/condition-rounds/{round_id}/import", headers=auth)
     assert imported.status_code == 200, imported.text
+    # THE READING TASK'S BODY, as `parse_round` is the parse task's: import queues it, and the owners the
+    # steps below rely on come from it now that no code map supplies them (LP-965).
+    await read_round(db, round_id=UUID(round_id))
     return UUID(round_id)
 
 

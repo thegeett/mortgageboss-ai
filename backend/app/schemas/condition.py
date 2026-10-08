@@ -1910,7 +1910,6 @@ class ConditionImportResult(BaseModel):
     round_number: int
     created: int
     seen_again: int
-    unmapped_codes: list[str] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #
@@ -2123,9 +2122,6 @@ class PackageRowUpdate(BaseModel):
 class FileLenderNamePublic(BaseModel):
     id: UUID
     name: str
-    #: Whether the app ships a code map for this lender. False for a lender with no canonical key: its
-    #: conditions arrive untyped until an admin sets the key or maps the codes.
-    has_code_map: bool
 
 
 class LenderSuggestionPublic(BaseModel):
@@ -2138,9 +2134,6 @@ class LenderSuggestionPublic(BaseModel):
     source: str
     #: Whether her company already has this lender. When it does not, confirming adds it.
     lender_exists: bool
-    #: Whether confirming types anything: the lender (existing, or added with its key) has a code map.
-    #: False for a same-named lender without the key (LP-949 review), so the banner promises nothing.
-    has_code_map: bool
 
 
 class FileLenderPublic(BaseModel):

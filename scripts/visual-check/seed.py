@@ -91,7 +91,6 @@ from app.models.property import OccupancyType, Property, PropertyType  # noqa: E
 from app.models.stated_financials import StatedIncomeItem, StatedLiability  # noqa: E402
 from app.models.user import MailClient  # noqa: E402
 from app.schemas.dti import DtiOverrideInput  # noqa: E402
-from app.scripts.seed_lender_codes import seed_lender_codes  # noqa: E402
 from app.services.condition_import import import_round  # noqa: E402
 from app.services.condition_rounds import SheetBytes, create_round_from_sheet  # noqa: E402
 from app.services.dti import (  # noqa: E402
@@ -232,7 +231,6 @@ async def _the_file(db: AsyncSession, company: Company) -> LoanFile:
         )
     )
     await db.flush()
-    await seed_lender_codes(db)
     return loan_file
 
 

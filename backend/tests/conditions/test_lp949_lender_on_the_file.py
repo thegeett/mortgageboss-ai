@@ -1,16 +1,19 @@
-"""LP-949 — the lender on the file: detected from the sheet, set only when she confirms, and the
-untyped conditions typed from its code map (items 1 and 10b of the 2026-09-30 staging trial).
+"""LP-949 — the lender on the file: detected from the sheet, set only when she confirms (items 1 and 10b
+of the 2026-09-30 staging trial). LP-965 — and nothing about a condition's TYPE comes from the lender any
+more: the reading chooses it, fresh every time (ADR-418).
 
-The scenario is LF-DH8V's: a UWM sheet imported onto a file with NO lender, so every condition arrives
-untyped. The fixture sheet carries the same six codes (0006, 0007, 1228, 1582, 1947, 6378) and more.
+The scenario is LF-DH8V's: a UWM sheet imported onto a file with NO lender. The fixture sheet carries the
+same six codes (0006, 0007, 1228, 1582, 1947, 6378) and more.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from uuid import uuid4
 
 import pytest
+from app.ai.client import AICompletion
 from app.conditions.lender_detect import detect_lender
 from app.models import Company
 from app.models.condition import Condition, ConditionReadingStatus
@@ -18,9 +21,8 @@ from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_item import ConditionItem
 from app.models.condition_round import ConditionRound, ConditionSheetFormat, ConditionSourceKind
 from app.models.lender import Lender
-from app.models.lender_condition_code import LenderCodeStatus, LenderConditionCode
+from app.models.lender_condition_code import LenderConditionCode
 from app.models.loan_file import LoanFile
-from app.scripts.seed_lender_codes import seed_lender_codes
 from app.services import condition_reading
 from app.services.condition_import import import_round
 from app.services.condition_lender import (
@@ -28,24 +30,21 @@ from app.services.condition_lender import (
     decline_suggestion,
     file_lender_payload,
     lender_suggestion,
-    record_proposals,
     set_file_lender,
-    type_conditions_for_code,
     unread_round_to_read,
 )
 from app.services.condition_plan import build_plan
-from app.services.condition_reading import _ai_input, compose_reading, read_round
+from app.services.condition_reading import _ai_input, chosen_type, read_round
 from app.services.condition_rounds import SheetBytes, create_round_from_sheet
-from app.services.lender_settings import codes_to_review, map_code
 from app.tasks.conditions import parse_round
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.conditions.fixture_helpers import UWM_ROUND_1
-from tests.conditions.reading_fixture import fake_complete
+from tests.conditions.reading_fixture import canned_response, fake_complete
 from tests.conditions.uwm_pdf_fixture import render_uwm_pdf
 from tests.models.conftest_helpers import make_lender, make_loan_file
 
-#: The fixture sheet's codes with the type UWM's shipped map gives each (`uwm.yaml`).
+#: The type the (mocked) reading chooses for each fixture code: the one UWM's old shipped map gave it.
 UWM_TYPES = {"0006": "IV-01", "0007": "IV-03", "1228": "PA-03", "1947": "TI-03", "6378": "TI-04"}
 
 
@@ -152,7 +151,6 @@ async def test_a_file_with_no_lender_imports_untyped_and_is_offered_the_sheets_l
         "name": "United Wholesale Mortgage",
         "source": "reader",
         "lender_exists": False,
-        "has_code_map": True,
     }
 
 
@@ -168,7 +166,7 @@ async def test_nothing_is_set_until_she_confirms(db_session: AsyncSession) -> No
     assert lenders == 0
 
 
-async def test_confirming_adds_the_lender_with_its_code_map_and_types_the_untyped(
+async def test_confirming_adds_the_lender_and_moves_the_file_to_it_typing_nothing(
     db_session: AsyncSession,
 ) -> None:
     loan_file, round_ = await _file_without_lender(db_session)
@@ -179,29 +177,18 @@ async def test_confirming_adds_the_lender_with_its_code_map_and_types_the_untype
     lender = await db_session.get(Lender, loan_file.lender_id)
     assert lender is not None and lender.canonical_lender_key == "uwm"
     assert lender.company_id == loan_file.company_id
-    seeded = await db_session.scalar(
-        select(func.count(LenderConditionCode.id)).where(
-            LenderConditionCode.lender_id == lender.id,
-            LenderConditionCode.status == LenderCodeStatus.SEEDED,
-        )
-    )
-    assert seeded and seeded > len(UWM_TYPES)
-
     conditions = await _by_code(db_session, loan_file)
-    for code, type_id in UWM_TYPES.items():
-        assert conditions[code].canonical_type_id == type_id, code
-        assert conditions[code].lender_id == lender.id
+    assert all(c.lender_id == lender.id for c in conditions.values())
     await db_session.refresh(round_)
     assert round_.lender_id == lender.id
 
-    typed = await _events(db_session, loan_file, ConditionEventKind.CONDITION_TYPED)
-    by_condition = {event.condition_id: event.detail for event in typed}
-    assert by_condition[conditions["1228"].id] == {
-        "by": "lender_set",
-        "type_id": "PA-03",
-        "lender_id": str(lender.id),
-        "code": "1228",
-    }
+    # LP-965 — no code map: nothing typed, nothing seeded, no typing events.
+    assert all(c.canonical_type_id is None for c in conditions.values())
+    rows = await db_session.scalar(
+        select(func.count(LenderConditionCode.id)).where(LenderConditionCode.lender_id == lender.id)
+    )
+    assert rows == 0
+    assert await _events(db_session, loan_file, ConditionEventKind.CONDITION_TYPED) == []
     assert (await file_lender_payload(db_session, loan_file=loan_file))["suggestion"] is None
 
 
@@ -253,7 +240,7 @@ async def test_a_same_named_lender_without_the_key_is_used_and_the_key_is_not_gu
     await db_session.refresh(named)
     assert named.canonical_lender_key is None
     payload = await file_lender_payload(db_session, loan_file=loan_file)
-    assert payload["lender"]["has_code_map"] is False
+    assert payload["lender"] == {"id": named.id, "name": "United Wholesale Mortgage"}
 
 
 async def test_declining_hides_the_suggestion_and_records_it(db_session: AsyncSession) -> None:
@@ -274,44 +261,45 @@ async def test_declining_hides_the_suggestion_and_records_it(db_session: AsyncSe
 
 
 # --------------------------------------------------------------------------------------------- #
-# Typed is never re-typed; read is never re-read
+# LP-965 — the type comes from the reading, fresh every time
 # --------------------------------------------------------------------------------------------- #
 
 
-async def test_a_typed_condition_keeps_its_type(db_session: AsyncSession) -> None:
-    loan_file, _ = await _file_without_lender(db_session)
-    conditions = await _by_code(db_session, loan_file)
-    conditions["1228"].canonical_type_id = "PA-04"
-    await db_session.flush()
+def _no_type_model(calls: list[str]):  # type: ignore[no-untyped-def]
+    """The shared mock with every `library_type` taken out: a model that recognises nothing."""
 
-    await set_file_lender(
-        db_session, loan_file=loan_file, lender_key="uwm", lender_id=None, actor_user_id=None
-    )
-    assert conditions["1228"].canonical_type_id == "PA-04"
-    assert conditions["0007"].canonical_type_id == "IV-03"
-    typed = {
-        e.condition_id
-        for e in await _events(db_session, loan_file, ConditionEventKind.CONDITION_TYPED)
-    }
-    assert conditions["1228"].id not in typed
-    assert conditions["0007"].id in typed
+    async def _complete(**kwargs: Any) -> AICompletion:
+        content = kwargs["messages"][0]["content"]
+        calls.append(content)
+        answer = json.loads(canned_response(content))
+        for entry in answer["conditions"]:
+            entry.pop("library_type", None)
+        return AICompletion(
+            text=json.dumps(answer),
+            input_tokens=1200,
+            output_tokens=900,
+            model=kwargs["model"],
+            stop_reason="end_turn",
+            cache_read_tokens=0,
+            cache_write_tokens=0,
+        )
+
+    return _complete
 
 
-async def test_unread_conditions_are_read_with_their_types_and_0007_waits_on_1228(
+async def test_the_reading_types_each_condition_with_no_lender_and_0007_waits_on_1228(
     db_session: AsyncSession, model: list[str]
 ) -> None:
+    """A lender is no longer needed for a type: the reading chooses it."""
     loan_file, round_ = await _file_without_lender(db_session)
     assert await unread_round_to_read(db_session, loan_file_id=loan_file.id) == round_.id
-
-    await set_file_lender(
-        db_session, loan_file=loan_file, lender_key="uwm", lender_id=None, actor_user_id=None
-    )
     await read_round(db_session, round_id=round_.id)
     await build_plan(db_session, round_id=round_.id)
-    conditions = await _by_code(db_session, loan_file)
-    assert conditions["1228"].reading is not None
-    assert conditions["1228"].reading["type_id"] == "PA-03"
 
+    conditions = await _by_code(db_session, loan_file)
+    assert {code: conditions[code].canonical_type_id for code in UWM_TYPES} == UWM_TYPES
+    reading = conditions["1228"].reading
+    assert reading is not None and reading["type_id"] == "PA-03"
     items = list(
         await db_session.scalars(
             select(ConditionItem).where(ConditionItem.condition_id == conditions["0007"].id)
@@ -321,20 +309,73 @@ async def test_unread_conditions_are_read_with_their_types_and_0007_waits_on_122
     assert await unread_round_to_read(db_session, loan_file_id=loan_file.id) is None
 
 
-async def test_without_the_lender_0007_waits_on_nothing(
-    db_session: AsyncSession, model: list[str]
+async def test_a_model_that_chooses_no_type_leaves_them_untyped_and_nothing_waits(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The positive control for the test above: the wait comes from the types, not the fixture."""
+    """The positive control for the test above: the type and the wait come from the model's choice."""
+    calls: list[str] = []
+    monkeypatch.setattr(condition_reading, "complete", _no_type_model(calls))
     loan_file, round_ = await _file_without_lender(db_session)
     await read_round(db_session, round_id=round_.id)
     await build_plan(db_session, round_id=round_.id)
+
     conditions = await _by_code(db_session, loan_file)
+    assert calls
+    assert all(c.canonical_type_id is None for c in conditions.values())
     items = list(
         await db_session.scalars(
             select(ConditionItem).where(ConditionItem.condition_id == conditions["0007"].id)
         )
     )
     assert items and all(i.waits_on_condition_id is None for i in items)
+
+
+def test_only_a_real_library_type_is_taken() -> None:
+    chosen = chosen_type({"library_type": "IV-01"})
+    assert chosen is not None and chosen.id == "IV-01"
+    assert chosen_type({"library_type": "ZZ-99"}) is None
+    assert chosen_type({"library_type": None}) is None
+    assert chosen_type(None) is None
+
+
+async def test_a_fresh_reading_replaces_an_earlier_type(
+    db_session: AsyncSession, model: list[str]
+) -> None:
+    """Nothing typed before the reading survives it: the AI's choice is the type."""
+    loan_file, round_ = await _file_without_lender(db_session)
+    conditions = await _by_code(db_session, loan_file)
+    conditions["1228"].canonical_type_id = "PA-04"
+    await db_session.flush()
+
+    await read_round(db_session, round_id=round_.id)
+    assert conditions["1228"].canonical_type_id == "PA-03"
+
+
+async def test_nothing_is_remembered_per_lender_code(
+    db_session: AsyncSession, model: list[str]
+) -> None:
+    """Import, the lender, and the reading together write no `lender_condition_codes` row."""
+    loan_file, round_ = await _file_without_lender(db_session)
+    await set_file_lender(
+        db_session, loan_file=loan_file, lender_key="uwm", lender_id=None, actor_user_id=None
+    )
+    await read_round(db_session, round_id=round_.id)
+    rows = await db_session.scalar(select(func.count(LenderConditionCode.id)))
+    assert rows == 0
+
+
+def test_the_whole_library_with_its_items_goes_to_the_model() -> None:
+    from app.conditions.library import load_library
+
+    invoice = load_library().get("IV-01")
+    assert invoice is not None
+    sent = json.loads(
+        _ai_input([(1, Condition(verbatim_text="x", lender_code="9", underwriter_notes=[]))], {})
+    )
+    by_id = {entry["id"]: entry for entry in sent["library"]}
+    assert by_id["IV-01"]["name"] == invoice.name
+    assert [item["key"] for item in by_id["IV-01"]["items"]] == [i.key for i in invoice.items]
+    assert "type" not in sent["conditions"][0]
 
 
 async def test_a_condition_already_read_is_not_read_again(
@@ -351,111 +392,6 @@ async def test_a_condition_already_read_is_not_read_again(
     after = await _by_code(db_session, loan_file)
     assert all(after[code].reading == before[code] for code in before)
     assert all(c.reading_status is not ConditionReadingStatus.UNREAD for c in after.values())
-
-
-# --------------------------------------------------------------------------------------------- #
-# The AI proposes; a person decides (ADR-417)
-# --------------------------------------------------------------------------------------------- #
-
-
-def _condition(text: str = "Provide copy of invoice for credit report.") -> Condition:
-    return Condition(verbatim_text=text, lender_code="9001", underwriter_notes=[])
-
-
-def test_a_proposal_is_kept_only_for_an_untyped_condition_and_a_real_type() -> None:
-    from app.conditions.library import load_library
-
-    library = load_library()
-    ai = {"items": [], "confidence": 0.9, "library_type": "IV-01"}
-    reading, *_ = compose_reading(
-        _condition(), condition_type=None, confirmed=None, ai=ai, round_=None
-    )
-    assert reading["proposed_type_id"] == "IV-01"
-
-    invented, *_ = compose_reading(
-        _condition(),
-        condition_type=None,
-        confirmed=None,
-        ai={**ai, "library_type": "ZZ-99"},
-        round_=None,
-    )
-    assert invented["proposed_type_id"] is None
-
-    typed, *_ = compose_reading(
-        _condition(), condition_type=library.get("IV-02"), confirmed=None, ai=ai, round_=None
-    )
-    assert typed["proposed_type_id"] is None
-    assert typed["type_id"] == "IV-02"
-
-
-def test_the_library_goes_to_the_model_only_when_a_condition_is_untyped() -> None:
-    import json
-
-    from app.conditions.library import load_library
-
-    invoice = load_library().get("IV-01")
-    assert invoice is not None
-    untyped = json.loads(_ai_input([(1, _condition(), None)], {}))
-    assert {"id": "IV-01", "name": invoice.name} in untyped["library"]
-    typed = json.loads(_ai_input([(1, _condition(), invoice)], {}))
-    assert "library" not in typed
-
-
-async def test_a_proposal_reaches_review_and_is_used_only_once_she_maps_the_code(
-    db_session: AsyncSession,
-) -> None:
-    """A lender WITHOUT a shipped map, so every code is unmapped: the proposal is all there is."""
-    loan_file, _ = await _file_without_lender(db_session)
-    company = await db_session.get(Company, loan_file.company_id)
-    assert company is not None
-    lender = await make_lender(db_session, company=company, name="Small Lender")
-    conditions = await _by_code(db_session, loan_file)
-    conditions["0006"].reading = {"proposed_type_id": "IV-01"}
-    conditions["1582"].reading = {"proposed_type_id": "ZZ-99"}
-    await db_session.flush()
-
-    await set_file_lender(
-        db_session, loan_file=loan_file, lender_key=None, lender_id=lender.id, actor_user_id=None
-    )
-    assert all(c.canonical_type_id is None for c in conditions.values())
-    review = {row["code"]: row for row in await codes_to_review(db_session, lender=lender)}
-    assert review["0006"]["proposed_type_id"] == "IV-01"
-    assert review["0006"]["proposed_type_label"]
-    assert review["0006"]["canonical_type_id"] is None
-    assert review["1582"]["proposed_type_id"] is None
-
-    await map_code(db_session, lender=lender, code="0006", canonical_type_id="IV-01")
-    files = await type_conditions_for_code(
-        db_session, lender=lender, code="0006", actor_user_id=None
-    )
-    assert files == {loan_file.id}
-    assert conditions["0006"].canonical_type_id == "IV-01"
-    assert conditions["1582"].canonical_type_id is None
-    typed = await _events(db_session, loan_file, ConditionEventKind.CONDITION_TYPED)
-    assert [(e.condition_id, e.detail["by"]) for e in typed] == [
-        (conditions["0006"].id, "code_confirmed")
-    ]
-    review = {row["code"]: row for row in await codes_to_review(db_session, lender=lender)}
-    assert review["0006"]["proposed_type_id"] is None
-
-
-async def test_a_proposal_never_lands_on_a_seeded_code(db_session: AsyncSession) -> None:
-    company = await _company(db_session)
-    lender = await make_lender(db_session, company=company)
-    lender.canonical_lender_key = "uwm"
-    await db_session.flush()
-    await seed_lender_codes(db_session)
-    condition = _condition()
-    condition.lender_code = "0006"
-    condition.lender_id = lender.id
-    condition.reading = {"proposed_type_id": "IV-02"}
-    assert await record_proposals(db_session, lender_id=lender.id, conditions=[condition]) == 0
-    row = await db_session.scalar(
-        select(LenderConditionCode).where(
-            LenderConditionCode.lender_id == lender.id, LenderConditionCode.code == "0006"
-        )
-    )
-    assert row is not None and row.proposed_type_id is None and row.canonical_type_id == "IV-01"
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -503,7 +439,7 @@ async def test_the_routes_offer_set_and_queue_the_reading(
         put = await client.put(base, json={"lender_key": "uwm"}, headers=processor)
         assert put.status_code == 200, put.text
         assert put.json()["lender"]["name"] == "United Wholesale Mortgage"
-        assert put.json()["lender"]["has_code_map"] is True
+        assert "has_code_map" not in put.json()["lender"]
         assert put.json()["suggestion"] is None
     assert queued == [str(round_.id)]
 
@@ -539,7 +475,6 @@ async def test_decline_route_and_a_lender_patch_both_work(
     lender = await make_lender(db_session, company=company, name="UWM")
     lender.canonical_lender_key = "uwm"
     await db_session.flush()
-    await seed_lender_codes(db_session)
     client, _, processor = await _clients(db_session, loan_file)
     base = f"/api/v1/loan-files/{loan_file.id}/conditions/lender"
     async with client:
@@ -553,7 +488,7 @@ async def test_decline_route_and_a_lender_patch_both_work(
         )
         assert again.status_code == 409
 
-        # THE OVERVIEW EDITOR'S DOOR: the same typing and the same queued reading.
+        # THE OVERVIEW EDITOR'S DOOR: the conditions follow the lender, and the same reading is queued.
         patched = await client.patch(
             f"/api/v1/loan-files/{loan_file.id}",
             json={"lender_id": str(lender.id)},
@@ -561,7 +496,8 @@ async def test_decline_route_and_a_lender_patch_both_work(
         )
         assert patched.status_code == 200, patched.text
     conditions = await _by_code(db_session, loan_file)
-    assert conditions["1228"].canonical_type_id == "PA-03"
+    assert conditions["1228"].lender_id == lender.id
+    assert conditions["1228"].canonical_type_id is None  # typed by its reading, not the lender
     assert queued == [str(round_.id)]
 
 

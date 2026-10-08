@@ -1,13 +1,22 @@
-"""Reading each condition into items (LP-919, plan §5 LP-919): ONE AI call per round, checked by code.
+"""Reading each condition into items (LP-919, plan §5 LP-919), checked by code.
 
-THE ORDER OF AUTHORITY (principle 5, "the library beats the AI"):
+LP-965 — EVERY READING IS FRESH (the owner, 2026-10-07: "I want each time fresh AI resolution come at
+least for this version"; ADR-419). Nothing is looked up or remembered per (lender, code): no shipped code
+map types a condition at import, and her answer on the confirm screen is not saved for the next file.
 
-1. **Her confirmed answer for this (lender, code)** (`lender_condition_codes.confirmed_reading`, S3-03).
-   Used as is; the AI is not asked about that condition.
-2. **The library type** (`canonical_type_id`) decides the ITEMS: keys, names, performers, options,
-   documents and checks. The AI fills in specifics and may widen a performer the text names (0132's
-   "signed by Borrower(s) and Loan Officer" makes item 1 Borrower + LO).
-3. **The AI** proposes items only for a condition no library type covers.
+THE ORDER OF AUTHORITY:
+
+1. **The AI chooses the library type** for each condition from the whole library, judged by the lender's
+   words. The choice becomes `canonical_type_id`, which everything library-driven reads (routes, evidence
+   matching, drafts, the package). A choice that is not a real type is ignored.
+2. **The library type** then decides the ITEMS: keys, names, performers, options, documents and checks.
+   The AI fills in specifics and may widen a performer the text names (0132's "signed by Borrower(s) and
+   Loan Officer" makes item 1 Borrower + LO), and adds an item for a clause the type does not cover.
+3. **The AI** splits a condition itself only when no library type fits.
+
+ONE CALL PER BATCH OF `_BATCH_SIZE` CONDITIONS, not one per round. LP-962 found a 21-condition round
+overrunning `_MAX_TOKENS` in one call, which made EVERY condition on it fall back; a batch that fails now
+takes only its own conditions down.
 
 WHAT CODE DOES, NOT THE AI (principle 1):
 
@@ -19,9 +28,10 @@ WHAT CODE DOES, NOT THE AI (principle 1):
 - The confidence bar (`settings.condition_reading_confidence_bar`) decides `ready` against
   `needs_confirmation`. Below it nothing is drafted for the condition (README rule 3).
 
-THE ROUND IS NEVER STUCK. If the model fails or returns something unreadable, every condition gets its
-library reading (or one generic item from its owner hint), marked `needs_confirmation`, and the failure
-is recorded on `condition_rounds.reading_run`. Reading never raises into the import.
+THE ROUND IS NEVER STUCK. If the model fails or returns something unreadable for a batch, each condition
+in it gets one generic item from its owner hint (no type: the AI is what chooses one), marked
+`needs_confirmation`, and the failure is recorded on `condition_rounds.reading_run`. Reading never raises
+into the import.
 
 NO LOAN SNAPSHOT GOES IN (principle 7): the lender's text and notes, the library's items, and a short
 file summary built here. NO NPI IN LOGS: counts, ids and model names only.
@@ -36,8 +46,7 @@ THE READING'S SHAPE (`conditions.reading`, JSONB):
                 "names"}}],
      "figures": {"shortfall": {"required", "verified", "amount"}} | {},
      "push_back": {"must_not_close_before", "policy_starts"} | null,
-     "confidence": float | null, "prompt_version": "read_v3" | null,
-     "proposed_type_id": str | null}
+     "confidence": float | null, "prompt_version": "read_v4" | null, "uncovered": [str]}
 """
 
 from __future__ import annotations
@@ -68,19 +77,22 @@ from app.models.condition import (
     ConditionReadingSource,
     ConditionReadingStatus,
     OwnerHint,
+    OwnerHintSource,
 )
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_round import ConditionRound
 from app.models.condition_vocabulary import Performer, PlanOption
 from app.models.lender import Lender
-from app.models.lender_condition_code import LenderConditionCode
 from app.models.loan_file import LoanFile
 
 logger = structlog.get_logger(__name__)
 
-PROMPT_PATH = "conditions/read_v3.txt"
-READING_VERSION = "read_v3"
+PROMPT_PATH = "conditions/read_v4.txt"
+READING_VERSION = "read_v4"
 _MAX_TOKENS = 8192
+#: Conditions per model call. A condition's answer runs to a few hundred tokens with its clauses, so
+#: eight stay well inside `_MAX_TOKENS`; a round of 21 is three calls.
+_BATCH_SIZE = 8
 
 _OWNER_TO_PERFORMER: dict[OwnerHint, Performer] = {
     OwnerHint.BORROWER: Performer.BORROWER,
@@ -90,6 +102,50 @@ _OWNER_TO_PERFORMER: dict[OwnerHint, Performer] = {
     OwnerHint.BROKER: Performer.LO,
     OwnerHint.PROCESSOR: Performer.PROCESSOR,
 }
+
+
+#: LP-965 — who a reading's first item names, as the list's owner. Performers with no owner of their own
+#: (appraiser, HOA, employer, other party) give none.
+_PERFORMER_TO_OWNER: dict[Performer, OwnerHint] = {
+    Performer.BORROWER: OwnerHint.BORROWER,
+    Performer.TITLE: OwnerHint.TITLE,
+    Performer.ATTORNEY: OwnerHint.TITLE,
+    Performer.INSURANCE: OwnerHint.INSURANCE,
+    Performer.LENDER: OwnerHint.LENDER,
+    Performer.LO: OwnerHint.BROKER,
+    Performer.PROCESSOR: OwnerHint.PROCESSOR,
+}
+
+#: The hint sources a reading may overwrite: its own earlier guess, the retired code map's, or none. The
+#: lender's own marker (prefix, heading) and her choice (manual) are never replaced.
+_REPLACEABLE_SOURCES = frozenset(
+    {OwnerHintSource.NONE, OwnerHintSource.CODE_MAP, OwnerHintSource.READING}
+)
+
+
+def owner_from_reading(reading: dict[str, Any]) -> OwnerHint | None:
+    """LP-965 — the owner a reading implies: the lender when it does the work, else whoever the FIRST
+    item names. The code map used to supply this (ADR-419)."""
+    if reading.get("lender_doing_it"):
+        return OwnerHint.LENDER
+    for item in reading.get("items") or []:
+        for value in item.get("performers") or []:
+            try:
+                return _PERFORMER_TO_OWNER.get(Performer(str(value)))
+            except ValueError:
+                return None
+    return None
+
+
+def _apply_owner(condition: Condition, reading: dict[str, Any]) -> None:
+    """Fill the owner hint from the reading where the sheet named nobody; clear a stale guess."""
+    if condition.owner_hint_source not in _REPLACEABLE_SOURCES:
+        return
+    owner = owner_from_reading(reading)
+    if owner is None:
+        condition.owner_hint, condition.owner_hint_source = OwnerHint.UNKNOWN, OwnerHintSource.NONE
+    else:
+        condition.owner_hint, condition.owner_hint_source = owner, OwnerHintSource.READING
 
 
 def option_for(performer: Performer) -> PlanOption:
@@ -137,7 +193,7 @@ class RoundReading:
 
 
 # --------------------------------------------------------------------------------------------- #
-# Items: from her confirmed answer, the library, the AI, or the owner hint
+# Items: from the library, the AI, or the owner hint
 # --------------------------------------------------------------------------------------------- #
 
 
@@ -156,28 +212,6 @@ def _item_from_library(item: LibraryItem) -> dict[str, Any]:
         "checks": [check.value for check in item.checks],
         "specifics": _empty_specifics(),
     }
-
-
-def _items_from_confirmed(
-    saved: dict[str, Any], condition_type: ConditionType | None
-) -> list[dict[str, Any]]:
-    library_items = {item.key: item for item in (condition_type.items if condition_type else ())}
-    out: list[dict[str, Any]] = []
-    for raw in saved.get("items") or []:
-        performers = _performers(raw.get("performers"))
-        if not performers:
-            continue
-        base = library_items.get(str(raw.get("key") or ""))
-        item = (
-            _item_from_library(base)
-            if base
-            else _generic_item(performers[0], str(raw.get("name") or ""))
-        )
-        item["name"] = str(raw.get("name") or item["name"])[:200]
-        item["performers"] = [p.value for p in performers]
-        item["option"] = str(raw.get("option") or option_for(performers[0]).value)
-        out.append(item)
-    return out
 
 
 def _name_the_amount(item: dict[str, Any], condition_type: ConditionType | None) -> None:
@@ -324,96 +358,92 @@ def compose_reading(
     condition: Condition,
     *,
     condition_type: ConditionType | None,
-    confirmed: dict[str, Any] | None,
     ai: dict[str, Any] | None,
     round_: ConditionRound | None,
 ) -> tuple[dict[str, Any], ConditionReadingSource, ConditionReadingStatus, Decimal | None]:
-    """Build one condition's reading. Pure apart from reading `settings`; tested directly."""
+    """Build one condition's reading. Pure apart from reading `settings`; tested directly.
+
+    `condition_type` is the AI's choice for this condition (`chosen_type`), or None.
+    """
     text = condition.verbatim_text
     figures = _code_figures(condition, condition_type)
     push_back = facts.date_push_back(text, _must_not_close_before(round_))
     info_only = bool(condition.info_only)
     confidence: Decimal | None = None
 
-    if confirmed:
-        items = _items_from_confirmed(confirmed, condition_type)
-        source, status = ConditionReadingSource.CONFIRMED, ConditionReadingStatus.CONFIRMED
+    if condition_type is not None:
+        items = [_item_from_library(item) for item in condition_type.items]
     else:
+        items = []
+    if ai is not None:
+        ai_items = [raw for raw in ai.get("items") or [] if isinstance(raw, dict)]
         if condition_type is not None:
-            items = [_item_from_library(item) for item in condition_type.items]
+            by_key = {str(raw.get("key")): raw for raw in ai_items}
+            for item in items:
+                raw = by_key.get(item["key"])
+                if raw is None:
+                    continue
+                item["specifics"] = _checked_specifics(raw.get("specifics"), text)
+                _name_the_amount(item, condition_type)
+                widened = _performers(raw.get("performers"))
+                if widened and Performer(item["performers"][0]) in widened:
+                    item["performers"] = [p.value for p in widened]
+            # LP-954 — A CLAUSE THE TYPE DOES NOT COVER becomes an item of its own, after the
+            # library's (1228's "possibly a Change of Circumstance" is the LO's re-disclosure). The
+            # library still decides its own items; these are additions, never replacements.
+            library_keys = {item["key"] for item in items}
+            for raw in ai_items[:6]:
+                key = re.sub(r"[^a-z0-9_]", "", str(raw.get("key") or "").lower())[:40]
+                performers = _performers(raw.get("performers"))
+                if not key or key in library_keys or not performers:
+                    continue
+                extra = _generic_item(performers[0], str(raw.get("name") or "")[:200])
+                extra["key"] = key
+                extra["performers"] = [p.value for p in performers]
+                extra["specifics"] = _checked_specifics(raw.get("specifics"), text)
+                items.append(extra)
+                library_keys.add(key)
         else:
-            items = []
-        if ai is not None:
-            ai_items = [raw for raw in ai.get("items") or [] if isinstance(raw, dict)]
-            if condition_type is not None:
-                by_key = {str(raw.get("key")): raw for raw in ai_items}
-                for item in items:
-                    raw = by_key.get(item["key"])
-                    if raw is None:
-                        continue
-                    item["specifics"] = _checked_specifics(raw.get("specifics"), text)
-                    _name_the_amount(item, condition_type)
-                    widened = _performers(raw.get("performers"))
-                    if widened and Performer(item["performers"][0]) in widened:
-                        item["performers"] = [p.value for p in widened]
-                # LP-954 — A CLAUSE THE TYPE DOES NOT COVER becomes an item of its own, after the
-                # library's (1228's "possibly a Change of Circumstance" is the LO's re-disclosure). The
-                # library still decides its own items; these are additions, never replacements.
-                library_keys = {item["key"] for item in items}
-                for raw in ai_items[:6]:
-                    key = re.sub(r"[^a-z0-9_]", "", str(raw.get("key") or "").lower())[:40]
-                    performers = _performers(raw.get("performers"))
-                    if not key or key in library_keys or not performers:
-                        continue
-                    extra = _generic_item(performers[0], str(raw.get("name") or "")[:200])
-                    extra["key"] = key
-                    extra["performers"] = [p.value for p in performers]
-                    extra["specifics"] = _checked_specifics(raw.get("specifics"), text)
-                    items.append(extra)
-                    library_keys.add(key)
-            else:
-                for index, raw in enumerate(ai_items[:6]):
-                    performers = _performers(raw.get("performers"))
-                    if not performers:
-                        continue
-                    item = _generic_item(performers[0], str(raw.get("name") or "")[:200])
-                    item["key"] = f"item_{index + 1}"
-                    item["performers"] = [p.value for p in performers]
-                    item["specifics"] = _checked_specifics(raw.get("specifics"), text)
-                    items.append(item)
-            info_only = info_only or bool(ai.get("information_only") and not items)
-            try:
-                confidence = Decimal(str(ai.get("confidence"))).quantize(Decimal("0.01"))
-            except (ArithmeticError, ValueError):
-                confidence = None
-            if confidence is not None and not (Decimal(0) <= confidence <= Decimal(1)):
-                confidence = None
-            source = ConditionReadingSource.AI
-        else:
-            source = ConditionReadingSource.LIBRARY
+            for index, raw in enumerate(ai_items[:6]):
+                performers = _performers(raw.get("performers"))
+                if not performers:
+                    continue
+                item = _generic_item(performers[0], str(raw.get("name") or "")[:200])
+                item["key"] = f"item_{index + 1}"
+                item["performers"] = [p.value for p in performers]
+                item["specifics"] = _checked_specifics(raw.get("specifics"), text)
+                items.append(item)
+        info_only = info_only or bool(ai.get("information_only") and not items)
+        try:
+            confidence = Decimal(str(ai.get("confidence"))).quantize(Decimal("0.01"))
+        except (ArithmeticError, ValueError):
+            confidence = None
+        if confidence is not None and not (Decimal(0) <= confidence <= Decimal(1)):
+            confidence = None
+        source = ConditionReadingSource.AI
+    else:
+        source = ConditionReadingSource.LIBRARY
 
-        if not items and condition_type is None and not info_only:
-            performer = _OWNER_TO_PERFORMER.get(condition.owner_hint)
-            if performer is not None:
-                items = [_generic_item(performer)]
+    if not items and condition_type is None and not info_only:
+        performer = _OWNER_TO_PERFORMER.get(condition.owner_hint)
+        if performer is not None:
+            items = [_generic_item(performer)]
 
-        bar = Decimal(str(settings.condition_reading_confidence_bar))
-        # LP-954 — A CONDITIONAL CLAUSE NOTHING COVERS puts the reading below the bar, so she confirms
-        # it before anything is drafted: the clauses a processor misses are the ones the AI drops.
-        uncovered = (
-            uncovered_conditionals(text, ai, items) if source is ConditionReadingSource.AI else []
-        )
-        if uncovered and confidence is not None and confidence >= bar:
-            confidence = (bar - Decimal("0.01")).quantize(Decimal("0.01"))
-        ready = (
-            source is ConditionReadingSource.AI
-            and confidence is not None
-            and confidence >= bar
-            and not uncovered
-        )
-        status = (
-            ConditionReadingStatus.READY if ready else ConditionReadingStatus.NEEDS_CONFIRMATION
-        )
+    bar = Decimal(str(settings.condition_reading_confidence_bar))
+    # LP-954 — A CONDITIONAL CLAUSE NOTHING COVERS puts the reading below the bar, so she confirms
+    # it before anything is drafted: the clauses a processor misses are the ones the AI drops.
+    uncovered = (
+        uncovered_conditionals(text, ai, items) if source is ConditionReadingSource.AI else []
+    )
+    if uncovered and confidence is not None and confidence >= bar:
+        confidence = (bar - Decimal("0.01")).quantize(Decimal("0.01"))
+    ready = (
+        source is ConditionReadingSource.AI
+        and confidence is not None
+        and confidence >= bar
+        and not uncovered
+    )
+    status = ConditionReadingStatus.READY if ready else ConditionReadingStatus.NEEDS_CONFIRMATION
 
     if condition.bucket_kind is BucketKind.LENDER_TO_CLEAR or (
         condition_type is not None and condition_type.default_option is PlanOption.LENDER_DOING_IT
@@ -447,13 +477,9 @@ def compose_reading(
         ),
         "confidence": float(confidence) if confidence is not None else None,
         "prompt_version": READING_VERSION if source is ConditionReadingSource.AI else None,
-        # LP-949 — THE AI'S PROPOSED LIBRARY TYPE for an untyped condition, kept only when it names a
-        # real type. A proposal: nothing here uses it. It reaches the lender's "Codes to review", and a
-        # type is applied only when a person maps the code there (ADR-417).
-        "proposed_type_id": _proposed_type(condition_type, confirmed, ai),
         # LP-954 — the conditional clauses ("possibly", "if applicable", "and/or") nothing covers, in
         # the lender's words, for the confirm screen. Empty when every one has an item or a note.
-        "uncovered": uncovered if not confirmed else [],
+        "uncovered": uncovered,
     }
     return reading, source, status, confidence
 
@@ -507,21 +533,18 @@ def uncovered_conditionals(
     return out
 
 
-def _proposed_type(
-    condition_type: ConditionType | None,
-    confirmed: dict[str, Any] | None,
-    ai: dict[str, Any] | None,
-) -> str | None:
-    if condition_type is not None or confirmed or ai is None:
+def chosen_type(ai: dict[str, Any] | None) -> ConditionType | None:
+    """LP-965 — the library type the AI chose for a condition, when it names a real one. Else None."""
+    if ai is None:
         return None
-    proposed = ai.get("library_type")
-    if isinstance(proposed, str) and load_library().get(proposed) is not None:
-        return proposed
+    chosen = ai.get("library_type")
+    if isinstance(chosen, str):
+        return load_library().get(chosen)
     return None
 
 
 # --------------------------------------------------------------------------------------------- #
-# The round: one call, then every condition composed and recorded
+# The round: one call per batch, then every condition composed and recorded
 # --------------------------------------------------------------------------------------------- #
 
 
@@ -539,40 +562,39 @@ def _file_summary(
     }
 
 
-def _ai_input(
-    pending: list[tuple[int, Condition, ConditionType | None]],
-    summary: dict[str, Any],
-) -> str:
-    conditions = []
-    for ref, condition, condition_type in pending:
-        entry: dict[str, Any] = {
+def _library_for_model() -> list[dict[str, Any]]:
+    """The whole library with each type's items, so the model can choose a type and fill its items."""
+    return [
+        {
+            "id": each.id,
+            "name": each.name,
+            "items": [
+                {"key": item.key, "name": item.name, "performer": item.performer.value}
+                for item in each.items
+            ],
+        }
+        for each in sorted(load_library().types.values(), key=lambda t: t.id)
+    ]
+
+
+def _ai_input(pending: list[tuple[int, Condition]], summary: dict[str, Any]) -> str:
+    conditions = [
+        {
             "ref": str(ref),
             "code": condition.lender_code or "",
             "text": condition.verbatim_text,
             "notes": [str(note.get("text") or "") for note in condition.underwriter_notes or []],
         }
-        if condition_type is not None:
-            entry["type"] = {
-                "id": condition_type.id,
-                "name": condition_type.name,
-                "items": [
-                    {"key": item.key, "name": item.name, "performer": item.performer.value}
-                    for item in condition_type.items
-                ],
-            }
-        conditions.append(entry)
-    request: dict[str, Any] = {"file": summary, "conditions": conditions}
-    if any(condition_type is None for _, _, condition_type in pending):
-        # LP-949 — only when a condition has no type, so the model has something to propose from.
-        request["library"] = [
-            {"id": each.id, "name": each.name}
-            for each in sorted(load_library().types.values(), key=lambda t: t.id)
-        ]
-    return json.dumps(request)
+        for ref, condition in pending
+    ]
+    return json.dumps({"file": summary, "conditions": conditions, "library": _library_for_model()})
 
 
 async def _ask_model(prompt_input: str, outcome: RoundReading) -> dict[str, dict[str, Any]] | None:
-    """The one call. Returns ref → the model's entry, or None (and records why) when it cannot."""
+    """One batch's call. Returns ref → the model's entry, or None (and records why) when it cannot.
+
+    Tokens and cost ADD UP across a round's batches; the model is the last one that answered.
+    """
     try:
         result = await complete(
             model=settings.anthropic_model_extraction,
@@ -585,9 +607,9 @@ async def _ask_model(prompt_input: str, outcome: RoundReading) -> dict[str, dict
         outcome.error = type(exc).__name__
         return None
     outcome.model = result.model
-    outcome.input_tokens = result.input_tokens
-    outcome.output_tokens = result.output_tokens
-    outcome.cost_estimate = estimate_cost(
+    outcome.input_tokens += result.input_tokens
+    outcome.output_tokens += result.output_tokens
+    outcome.cost_estimate += estimate_cost(
         model=result.model,
         input_tokens=result.input_tokens,
         output_tokens=result.output_tokens,
@@ -609,25 +631,14 @@ async def _ask_model(prompt_input: str, outcome: RoundReading) -> dict[str, dict
     }
 
 
-async def _confirmed_by_code(db: AsyncSession, lender_id: UUID | None) -> dict[str, dict[str, Any]]:
-    if lender_id is None:
-        return {}
-    rows = (
-        await db.execute(
-            select(LenderConditionCode.code, LenderConditionCode.confirmed_reading).where(
-                LenderConditionCode.lender_id == lender_id,
-                LenderConditionCode.confirmed_reading.is_not(None),
-            )
-        )
-    ).all()
-    return {code: saved for code, saved in rows if saved}
-
-
 async def read_round(db: AsyncSession, *, round_id: UUID, use_ai: bool = True) -> RoundReading:
     """Read every not-yet-read condition on this round's file. Flushes; the caller commits.
 
     CONDITIONS ALREADY READ ARE LEFT ALONE: a condition seen again keeps its reading and its plan (plan
-    §4a change 3). Only `unread` conditions go to the model, in ONE call.
+    §4a change 3). Only `unread` conditions go to the model, `_BATCH_SIZE` to a call.
+
+    THE AI'S TYPE IS WRITTEN TO THE CONDITION (LP-965). `canonical_type_id` is set from the reading's
+    choice, and cleared when there is none: no earlier type survives a fresh reading.
     """
     outcome = RoundReading()
     round_ = await db.get(ConditionRound, round_id)
@@ -659,34 +670,28 @@ async def read_round(db: AsyncSession, *, round_id: UUID, use_ai: bool = True) -
         round_.reading_run = outcome.as_run()
         return outcome
 
-    library = load_library()
-    confirmed = await _confirmed_by_code(db, loan_file.lender_id)
-    pending: list[tuple[int, Condition, ConditionType | None]] = []
-    for ref, condition in enumerate(unread, start=1):
-        if condition.lender_code and condition.lender_code in confirmed:
-            continue
-        pending.append((ref, condition, library.get(condition.canonical_type_id)))
-
-    answers: dict[str, dict[str, Any]] | None = None
-    if use_ai and pending:
+    pending = list(enumerate(unread, start=1))
+    answers: dict[str, dict[str, Any]] = {}
+    if use_ai:
         outcome.used_ai = True
-        answers = await _ask_model(
-            _ai_input(pending, _file_summary(loan_file, lender, round_)), outcome
-        )
-    outcome.fell_back = outcome.used_ai and answers is None
+        summary = _file_summary(loan_file, lender, round_)
+        for start in range(0, len(pending), _BATCH_SIZE):
+            batch = pending[start : start + _BATCH_SIZE]
+            got = await _ask_model(_ai_input(batch, summary), outcome)
+            if got is None:
+                outcome.fell_back = True
+                continue
+            answers.update(got)
 
-    for ref, condition in enumerate(unread, start=1):
-        condition_type = library.get(condition.canonical_type_id)
-        saved = confirmed.get(condition.lender_code or "")
-        ai_entry = (answers or {}).get(str(ref)) if answers is not None else None
+    for ref, condition in pending:
+        ai_entry = answers.get(str(ref))
+        condition_type = chosen_type(ai_entry)
+        condition.canonical_type_id = condition_type.id if condition_type else None
         reading, source, status, confidence = compose_reading(
-            condition,
-            condition_type=condition_type,
-            confirmed=saved,
-            ai=ai_entry if not saved else None,
-            round_=round_,
+            condition, condition_type=condition_type, ai=ai_entry, round_=round_
         )
         condition.reading = reading
+        _apply_owner(condition, reading)
         condition.reading_source = source
         condition.reading_status = status
         condition.reading_confidence = confidence
@@ -711,15 +716,6 @@ async def read_round(db: AsyncSession, *, round_id: UUID, use_ai: bool = True) -
         if status is ConditionReadingStatus.NEEDS_CONFIRMATION:
             outcome.needs_confirmation += 1
 
-    if loan_file.lender_id is not None:
-        # LP-949 — an unmapped code's proposal goes to that lender's review queue, for a person.
-        from app.services.condition_lender import record_proposals
-
-        await record_proposals(
-            db,
-            lender_id=loan_file.lender_id,
-            conditions=[c for c in unread if c.lender_id == loan_file.lender_id],
-        )
     round_.reading_run = outcome.as_run()
     await db.flush()
     logger.info(
@@ -781,7 +777,6 @@ async def _record_confirmed(
     condition: Condition,
     items: list[dict[str, Any]],
     actor_user_id: UUID,
-    saved_for_code: bool,
     how: str,
 ) -> None:
     reading = dict(condition.reading or {})
@@ -798,7 +793,7 @@ async def _record_confirmed(
             round_id=condition.last_seen_round_id,
             kind=ConditionEventKind.CONDITION_READING_CONFIRMED,
             actor_user_id=actor_user_id,
-            detail={"how": how, "items": len(items), "saved_for_code": saved_for_code},
+            detail={"how": how, "items": len(items)},
         )
     )
     await db.flush()
@@ -811,11 +806,10 @@ async def confirm_reading(
     items: list[ConfirmedItem],
     actor_user_id: UUID,
 ) -> None:
-    """S3-03's "This is right": her items replace the reading, and are saved for this lender code.
+    """S3-03's "This is right": her items replace THIS condition's reading, and nothing else.
 
-    SAVED WITHOUT SPECIFICS. What is remembered for the code is each item's key, name, performers and
-    option — never an amount, an account or a person — so the next file's reading carries her split,
-    not this borrower's data.
+    LP-965 — NOT SAVED FOR THE LENDER CODE. It used to be remembered per (lender, code) and reused on the
+    next file without asking the AI; every reading is fresh now (ADR-419).
     """
     condition_type = load_library().get(condition.canonical_type_id)
     built = _confirmed_items(items, condition_type)
@@ -824,33 +818,11 @@ async def confirm_reading(
     for item in built:
         if item["key"] in previous:
             item["specifics"] = previous[item["key"]].get("specifics") or _empty_specifics()
-    saved = False
-    if condition.lender_id is not None and condition.lender_code:
-        code_row = await db.scalar(
-            select(LenderConditionCode).where(
-                LenderConditionCode.lender_id == condition.lender_id,
-                LenderConditionCode.code == condition.lender_code,
-            )
-        )
-        if code_row is not None:
-            code_row.confirmed_reading = {
-                "items": [
-                    {
-                        "key": item["key"],
-                        "name": item["name"],
-                        "performers": item["performers"],
-                        "option": item["option"],
-                    }
-                    for item in built
-                ]
-            }
-            saved = True
     await _record_confirmed(
         db,
         condition=condition,
         items=built,
         actor_user_id=actor_user_id,
-        saved_for_code=saved,
         how="edited",
     )
 
@@ -870,7 +842,6 @@ async def use_library_default(
         condition=condition,
         items=items,
         actor_user_id=actor_user_id,
-        saved_for_code=False,
         how="library",
     )
 
@@ -881,9 +852,11 @@ __all__ = [
     "ConfirmedItem",
     "ReadingRefused",
     "RoundReading",
+    "chosen_type",
     "compose_reading",
     "confirm_reading",
     "option_for",
+    "owner_from_reading",
     "read_round",
     "use_library_default",
 ]

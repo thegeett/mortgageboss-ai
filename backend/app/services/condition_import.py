@@ -25,7 +25,7 @@ events is only as good as its enumeration of the writers.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 from uuid import UUID
@@ -36,7 +36,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.conditions.fingerprint import fingerprint
-from app.conditions.lender_codes.status import resolved_status
 from app.models.activity_log import ActivityType
 from app.models.base import utcnow
 from app.models.condition import (
@@ -56,7 +55,6 @@ from app.models.condition_round import (
     ConditionSourceKind,
 )
 from app.models.helpers import only_active
-from app.models.lender_condition_code import LenderCodeStatus, LenderConditionCode
 from app.models.loan_file import LoanFile
 from app.schemas.condition import ConditionCreateRequest, DraftRowPublic, VerdictSourceKind
 from app.services.activity_log import log_activity
@@ -95,9 +93,6 @@ class ImportOutcome:
     round_number: int
     created: int = 0
     seen_again: int = 0
-    #: `(lender, code)` pairs this sheet carried that the map has no meaning for. Recorded as
-    #: `OBSERVED_UNMAPPED` so the backlog grows from what lenders actually send.
-    unmapped_codes: list[str] = field(default_factory=list)
 
 
 async def _next_round_number(db: AsyncSession, *, loan_file_id: UUID) -> int:
@@ -368,117 +363,6 @@ def _resolve_notes(
 
 
 # --------------------------------------------------------------------------- #
-# The lender code map (spec step 4)
-# --------------------------------------------------------------------------- #
-
-
-def _codes_on_sheet(rows: list[dict[str, Any]]) -> list[str]:
-    """Distinct codes, in sheet order. Order matters only so the upsert is deterministic."""
-    ordered: list[str] = []
-    for row in rows:
-        code = row.get("lender_code")
-        if isinstance(code, str) and code and code not in ordered:
-            ordered.append(code)
-    return ordered
-
-
-async def _load_code_map(
-    db: AsyncSession, *, lender_id: UUID, codes: list[str]
-) -> dict[str, LenderConditionCode]:
-    if not codes:
-        return {}
-    rows = await db.scalars(
-        select(LenderConditionCode).where(
-            LenderConditionCode.lender_id == lender_id,
-            LenderConditionCode.code.in_(codes),
-        )
-    )
-    return {row.code: row for row in rows}
-
-
-async def _record_codes(
-    db: AsyncSession,
-    *,
-    lender_id: UUID,
-    codes: list[str],
-    code_map: dict[str, LenderConditionCode],
-) -> list[str]:
-    """Bump what we know about each code this sheet carried. Returns the ones with no meaning.
-
-    "BUMP THE COUNTERS, NEVER RESET THE MEANING". `status` goes through `resolved_status`, which
-    is the single statement of "raised, never lowered" — shared with `seed_lender_codes.py` rather
-    than restated here, because two independently shaped versions of one rule is how they drift. A
-    sheet mentioning a code a person has already MAPPED must not demote it.
-    """
-    unmapped: list[str] = []
-    now = utcnow()
-
-    for code in codes:
-        existing = code_map.get(code)
-        if existing is None:
-            # THE LABEL IS THE CODE ITSELF, AND THAT IS A DECISION THE SPEC DOES NOT MAKE.
-            # `label` is NOT NULL (spec lists it without the `?` that marks the optional columns),
-            # but an unknown code has no meaning by definition — that is what OBSERVED_UNMAPPED
-            # says. The alternatives were worse: the row's `lender_category` is the lender's
-            # category for the CONDITION, not a meaning for the CODE, and storing it here would
-            # read as a mapping somebody made; an empty string reads as missing data rather than
-            # as absent meaning. The code is at least true, and `status` is what the review queue
-            # reads to know nobody has looked.
-            created = LenderConditionCode(
-                lender_id=lender_id,
-                code=code,
-                label=code,
-                status=LenderCodeStatus.OBSERVED_UNMAPPED,
-                times_seen=1,
-                first_seen_at=now,
-                last_seen_at=now,
-            )
-            db.add(created)
-            code_map[code] = created
-            unmapped.append(code)
-            continue
-
-        existing.times_seen += 1
-        existing.last_seen_at = now
-        existing.status = resolved_status(existing.status, LenderCodeStatus.OBSERVED_UNMAPPED)
-        if existing.status is LenderCodeStatus.OBSERVED_UNMAPPED:
-            unmapped.append(code)
-
-    await db.flush()
-    return unmapped
-
-
-def _apply_code_defaults(
-    row: dict[str, Any],
-    *,
-    code_row: LenderConditionCode | None,
-    owner_hint: OwnerHint,
-    owner_hint_source: OwnerHintSource,
-) -> tuple[OwnerHint, OwnerHintSource, bool, str | None]:
-    """The code map's contribution to a NEW condition (spec step 4).
-
-    THE OWNER HINT IS APPLIED ONLY WHERE THE SHEET GAVE NONE. The spec's wording is "apply the
-    owner hint when no prefix/bucket hint was found", and the reason is in `OwnerHintSource`'s own
-    docstring: the hints are not equally good. A `TC:` the lender typed is far stronger evidence
-    than a default looked up from the map, and overwriting the first with the second would destroy
-    the better answer while leaving the field looking just as populated.
-
-    `default_bucket_kind` IS DELIBERATELY NOT APPLIED. Spec step 4 lists three things — info_only,
-    canonical_type_id and the owner hint — and the bucket is not among them. The heading printed on
-    the sheet is the lender's own statement of when this condition is due; a default from the code
-    map would override the specific with the general.
-    """
-    if code_row is None:
-        return owner_hint, owner_hint_source, False, None
-
-    if owner_hint_source is OwnerHintSource.NONE and code_row.default_owner_hint is not None:
-        owner_hint = code_row.default_owner_hint
-        owner_hint_source = OwnerHintSource.CODE_MAP
-
-    return owner_hint, owner_hint_source, bool(code_row.info_only), code_row.canonical_type_id
-
-
-# --------------------------------------------------------------------------- #
 # Row handling
 # --------------------------------------------------------------------------- #
 
@@ -499,14 +383,12 @@ def _create_condition(
     row: dict[str, Any],
     *,
     round_: ConditionRound,
-    code_row: LenderConditionCode | None,
     origin: ConditionOrigin = ConditionOrigin.SHEET,
 ) -> Condition:
+    """A new condition from a row. LP-965 — NOTHING IS LOOKED UP BY CODE (ADR-419): its type, owner and
+    information-only flag come from its reading, which asks the AI fresh every time."""
     owner_hint = _enum_from(row, "owner_hint", OwnerHint, OwnerHint.UNKNOWN)
     owner_hint_source = _enum_from(row, "owner_hint_source", OwnerHintSource, OwnerHintSource.NONE)
-    owner_hint, owner_hint_source, info_only, canonical_type_id = _apply_code_defaults(
-        row, code_row=code_row, owner_hint=owner_hint, owner_hint_source=owner_hint_source
-    )
     code = row.get("lender_code")
 
     return Condition(
@@ -528,8 +410,6 @@ def _create_condition(
         underwriter_notes=_notes_from_row(row, round_id=round_.id),
         owner_hint=owner_hint,
         owner_hint_source=owner_hint_source,
-        info_only=info_only,
-        canonical_type_id=canonical_type_id,
         # THE CALLER NAMES THE DOOR, AND THERE IS ONLY ONE CONSTRUCTOR ON PURPOSE. Import passes
         # SHEET; the manual door passes MANUAL. This module's docstring states the rule every writer
         # of a `Condition` must honour — emit `CONDITION_CREATED` — and a second constructor is
@@ -748,28 +628,19 @@ async def import_round(
             by_code.setdefault((condition.lender_id, condition.lender_code), condition)
         by_text.setdefault(condition.text_fingerprint, []).append(condition)
 
-    # `lender_id` IS NULLABLE AND A FILE WITH NO LENDER MUST STILL IMPORT. `(lender, code)` is
-    # meaningless without the lender (ADR-407), so the code-map step is SKIPPED rather than guessed
-    # at — the conditions still land, carrying their codes as printed. LP-905 already treats a
-    # lender-less file as a real state rather than an error.
+    # `lender_id` IS NULLABLE AND A FILE WITH NO LENDER MUST STILL IMPORT: the conditions land,
+    # carrying their codes as printed. LP-905 already treats a lender-less file as a real state.
     # Loaded once for the whole import: what bounds an undated saved note (see `_resolve_notes`).
     round_dates = await _round_dates(db, loan_file_id=round_.loan_file_id)
-
-    codes = _codes_on_sheet(rows)
-    code_map: dict[str, LenderConditionCode] = {}
-    if round_.lender_id is not None:
-        code_map = await _load_code_map(db, lender_id=round_.lender_id, codes=codes)
 
     created_count = 0
     seen_again_count = 0
 
     for row in rows:
         match, possible = _match(row, by_code=by_code, by_text=by_text, lender_id=round_.lender_id)
-        code = row.get("lender_code")
-        code_row = code_map.get(code) if isinstance(code, str) and code else None
 
         if match is None:
-            condition = _create_condition(row, round_=round_, code_row=code_row)
+            condition = _create_condition(row, round_=round_)
             db.add(condition)
             # `flush` first: the event needs the condition's id, and `db.add` alone does not assign
             # one — `UUIDMixin`'s default is Python-side and applied at flush.
@@ -905,12 +776,6 @@ async def import_round(
                 )
             )
 
-    unmapped: list[str] = []
-    if round_.lender_id is not None:
-        unmapped = await _record_codes(
-            db, lender_id=round_.lender_id, codes=codes, code_map=code_map
-        )
-
     # EVERYTHING SETTLED BEFORE THE SAVEPOINT. A rollback inside `_assign_round_number` discards
     # whatever is still unflushed in its window; the conditions and events above must not be in it.
     await db.flush()
@@ -929,7 +794,6 @@ async def import_round(
                 "rows": len(rows),
                 "created": created_count,
                 "seen_again": seen_again_count,
-                "unmapped_codes": unmapped,
             },
         )
     )
@@ -946,7 +810,6 @@ async def import_round(
             "round_number": number,
             "created": created_count,
             "seen_again": seen_again_count,
-            "unmapped_codes": unmapped,
         },
     )
 
@@ -978,14 +841,12 @@ async def import_round(
         rows=len(rows),
         created=created_count,
         seen_again=seen_again_count,
-        unmapped_codes=len(unmapped),
     )
 
     return ImportOutcome(
         round_number=number,
         created=created_count,
         seen_again=seen_again_count,
-        unmapped_codes=unmapped,
     )
 
 
@@ -1079,20 +940,11 @@ async def create_manual_condition(
     printed on a sheet. `origin` carries that distinction: `SHEET` for a row read off a letter,
     `MANUAL` for this. Emitting nothing instead would reproduce the enrich bug exactly.
 
-    THE CODE MAP'S DEFAULTS ARE APPLIED; ITS COUNTERS ARE NOT. `times_seen` is what orders the
-    unmapped backlog, and it is supposed to answer "how often do lenders actually send this code" —
-    a processor typing one is not the lender sending it, so counting it would inflate the queue with
-    our own keystrokes. Looking the code up to fill `info_only`, `canonical_type_id` and an owner
-    hint costs nothing and is the same meaning the import would have applied.
+    NOTHING IS LOOKED UP BY ITS CODE (LP-965, ADR-419). Its reading types it, fresh, like any other.
     """
     round_ = await latest_imported_round(db, loan_file_id=loan_file.id)
     if round_ is None:
         round_ = await _manual_round(db, loan_file=loan_file, actor_user_id=actor_user_id)
-
-    code_row: LenderConditionCode | None = None
-    if round_.lender_id is not None and payload.lender_code:
-        found = await _load_code_map(db, lender_id=round_.lender_id, codes=[payload.lender_code])
-        code_row = found.get(payload.lender_code)
 
     # Through `DraftRowPublic` like every other row in this domain, so a hand-typed condition and a
     # parsed one are the same shape by construction rather than by agreement.
@@ -1111,9 +963,7 @@ async def create_manual_condition(
         verbatim_text=payload.verbatim_text,
     ).model_dump(mode="json")
 
-    condition = _create_condition(
-        row, round_=round_, code_row=code_row, origin=ConditionOrigin.MANUAL
-    )
+    condition = _create_condition(row, round_=round_, origin=ConditionOrigin.MANUAL)
     db.add(condition)
     # `flush` first: the event needs the condition's id, and `db.add` alone does not assign one.
     await db.flush()

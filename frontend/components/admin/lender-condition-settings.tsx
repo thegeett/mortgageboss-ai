@@ -4,10 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   type LenderConditionSettings as Settings,
-  useLenderCodesToReview,
   useLenderConditionSettings,
-  useLibraryTypes,
-  useMapLenderCode,
   useSaveLenderConditionSettings,
 } from "@/lib/api/lender-settings";
 import { getErrorMessage } from "@/lib/errors/api-error";
@@ -174,13 +171,6 @@ export function LenderConditionSettings({ lenderId, name }: { lenderId: string; 
             ))}
           </div>
         </SettingRow>
-
-        <SettingRow
-          label="Lender codes to review"
-          hint="Seen on sheets, not yet in the library. New imports use the type you choose."
-        >
-          <CodesToReview lenderId={lenderId} />
-        </SettingRow>
       </div>
     </section>
   );
@@ -202,88 +192,6 @@ function SettingRow({
         {hint ? <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p> : null}
       </div>
       <div>{children}</div>
-    </div>
-  );
-}
-
-function CodesToReview({ lenderId }: { lenderId: string }) {
-  const { data: codes } = useLenderCodesToReview(lenderId);
-  const { data: types } = useLibraryTypes();
-  const map = useMapLenderCode(lenderId);
-  const [error, setError] = useState<string | null>(null);
-  if (!codes) return null;
-  if (codes.length === 0) {
-    return <p className="text-sm text-muted-foreground">No codes waiting for review.</p>;
-  }
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-foreground-2">
-            <th className="w-16 py-1.5 pr-2 font-semibold">Code</th>
-            <th className="py-1.5 pr-2 font-semibold">Example wording</th>
-            <th className="w-20 py-1.5 pr-2 font-semibold">Seen</th>
-            <th className="w-64 py-1.5 font-semibold">Condition type</th>
-          </tr>
-        </thead>
-        <tbody>
-          {codes.map((c) => (
-            <tr key={c.code} className="border-b border-border align-top last:border-b-0">
-              <td className="py-2 pr-2 font-mono font-medium">{c.code}</td>
-              <td className="py-2 pr-2 text-foreground-2">{c.example_wording}</td>
-              <td className="py-2 pr-2 tabular-nums text-muted-foreground">
-                {c.files} file{c.files === 1 ? "" : "s"}
-              </td>
-              <td className="py-2">
-                <select
-                  aria-label={`Library type for ${c.code}`}
-                  value={c.canonical_type_id ?? ""}
-                  onChange={(e) =>
-                    map.mutate(
-                      { code: c.code, canonical_type_id: e.target.value || null },
-                      { onError: (err) => setError(getErrorMessage(err)) },
-                    )
-                  }
-                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
-                >
-                  <option value="">Choose a type…</option>
-                  {(types ?? []).map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-                {/* LP-949 — THE AI'S PROPOSAL, AS A PROPOSAL (ADR-417). It is not pre-selected: the code
-                    stays unmapped, and nothing uses the type, until she presses the button. */}
-                {!c.canonical_type_id && c.proposed_type_id ? (
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-foreground-2">
-                    <span>
-                      AI suggests{" "}
-                      <span className="font-medium text-foreground">
-                        {c.proposed_type_label ?? c.proposed_type_id}
-                      </span>
-                    </span>
-                    <button
-                      type="button"
-                      className="font-medium text-primary underline-offset-2 hover:underline"
-                      disabled={map.isPending}
-                      onClick={() =>
-                        map.mutate(
-                          { code: c.code, canonical_type_id: c.proposed_type_id ?? null },
-                          { onError: (err) => setError(getErrorMessage(err)) },
-                        )
-                      }
-                    >
-                      Use it
-                    </button>
-                  </div>
-                ) : null}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {error ? <p className="mt-1 text-sm text-destructive">{error}</p> : null}
     </div>
   );
 }

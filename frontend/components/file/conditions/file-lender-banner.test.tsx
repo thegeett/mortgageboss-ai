@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * LP-949 — the file's lender above the conditions: offered from the sheet, set only on her click,
- * declined on her click, and gone once the file has a lender with a code map.
+ * declined on her click, and gone once the file has a lender. LP-965 — it says nothing about code maps.
  */
 import type { FileLender, LenderSuggestion } from "@/lib/types/conditions";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -42,7 +42,6 @@ const SUGGESTED: FileLender = {
     name: "United Wholesale Mortgage",
     source: "reader",
     lender_exists: false,
-    has_code_map: true,
   },
 };
 
@@ -51,7 +50,9 @@ describe("FileLenderBanner", () => {
     state.data = SUGGESTED;
     render(<FileLenderBanner fileId="f1" />);
     expect(screen.getByText(/the sheet’s layout/)).toBeTruthy();
-    expect(screen.getByText(/is added to your lenders/)).toBeTruthy();
+    expect(
+      screen.getByText(/Setting it also adds United Wholesale Mortgage to your lenders\./),
+    ).toBeTruthy();
     expect(state.set).toEqual([]);
     fireEvent.click(
       screen.getByRole("button", { name: "Set United Wholesale Mortgage as the lender" }),
@@ -60,23 +61,18 @@ describe("FileLenderBanner", () => {
     expect(state.declined).toEqual([]);
   });
 
-  it("promises no match to the library when the lender it would set has no codes (review)", () => {
-    state.data = {
-      lender: null,
-      suggestion: {
-        ...(SUGGESTED.suggestion as LenderSuggestion),
-        lender_exists: true,
-        has_code_map: false,
-      },
-    };
-    render(<FileLenderBanner fileId="f1" />);
-    expect(screen.queryByText(/matched to the library\./)).toBeNull();
-    expect(screen.getByText(/has no condition codes in the app yet/)).toBeTruthy();
-    // THE POSITIVE CONTROL: with a code map, the same banner does promise the match.
-    cleanup();
+  it("says nothing about the library, and only adds the lender when it is new", () => {
     state.data = SUGGESTED;
     render(<FileLenderBanner fileId="f1" />);
-    expect(screen.getByText(/Its conditions are then matched to the library/)).toBeTruthy();
+    expect(screen.queryByText(/library/)).toBeNull();
+    expect(screen.queryByText(/condition codes/)).toBeNull();
+    cleanup();
+    state.data = {
+      lender: null,
+      suggestion: { ...(SUGGESTED.suggestion as LenderSuggestion), lender_exists: true },
+    };
+    render(<FileLenderBanner fileId="f1" />);
+    expect(screen.queryByText(/to your lenders/)).toBeNull();
   });
 
   it("declines for the round the suggestion came from", () => {
@@ -97,15 +93,8 @@ describe("FileLenderBanner", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 
-  it("says when the file's lender has no codes, and is gone once it has", () => {
-    state.data = {
-      lender: { id: "l1", name: "Small Lender", has_code_map: false },
-      suggestion: null,
-    };
-    const { unmount } = render(<FileLenderBanner fileId="f1" />);
-    expect(screen.getByText(/has no condition codes in the app/)).toBeTruthy();
-    unmount();
-    state.data = { lender: { id: "l2", name: "UWM", has_code_map: true }, suggestion: null };
+  it("is gone once the file has a lender, whatever lender it is", () => {
+    state.data = { lender: { id: "l1", name: "Small Lender" }, suggestion: null };
     const { container } = render(<FileLenderBanner fileId="f1" />);
     expect(container.innerHTML).toBe("");
   });

@@ -20,6 +20,8 @@ const SOURCE_LABEL: Record<OwnerHintSource, string> = {
   // A manual owner is the processor's decision and outranks all of them, so it says so rather than
   // citing a source. "set by hand" over "from a person", because the point is that somebody chose it.
   manual: "set by hand",
+  // LP-965 — the reading's first item named who acts; a guess like the others, so "from …".
+  reading: "from the reading",
 };
 
 /**

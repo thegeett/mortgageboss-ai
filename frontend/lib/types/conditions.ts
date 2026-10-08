@@ -149,7 +149,8 @@ export type OwnerHint =
  * than a default looked up from the code map, and a UI showing them identically would invite
  * trusting the weak one. S1-04 renders this under the chip ("from code map" / "from “TC:” prefix").
  */
-export type OwnerHintSource = "prefix" | "bucket" | "code_map" | "none" | "manual";
+/** `reading` (LP-965): the reading's first item named the owner, where the sheet named nobody. */
+export type OwnerHintSource = "prefix" | "bucket" | "code_map" | "none" | "manual" | "reading";
 
 /** Whether the condition came off a sheet or was typed by a processor. */
 export type ConditionOrigin = "sheet" | "manual";
@@ -933,7 +934,6 @@ export interface ConditionImportResult {
   created: number;
   /** Never implies anything was closed: a condition missing from a new sheet is simply not touched. */
   seen_again: number;
-  unmapped_codes: string[];
 }
 
 /** What attaching the lender's PDF to an existing round did (LP-907, screen S1-09). */
@@ -1341,8 +1341,6 @@ export interface WithdrawnCondition {
 export interface FileLenderName {
   id: string;
   name: string;
-  /** Whether any of the lender's codes has a library type (measured on its codes, not its key). */
-  has_code_map: boolean;
 }
 
 /** The lender the newest sheet names, offered while the file has none. Never set by itself. */
@@ -1353,8 +1351,6 @@ export interface LenderSuggestion {
   source: "reader" | "mortgagee_clause" | "header";
   /** Whether her company already has this lender; confirming adds it when not. */
   lender_exists: boolean;
-  /** Whether confirming types anything: false for a same-named lender without the app's key. */
-  has_code_map: boolean;
 }
 
 export interface FileLender {

@@ -7,9 +7,10 @@ With the AI MOCKED (`reading_fixture`), round 1 must produce exactly:
 - 1582 and 0007 as her tasks (0007 waits on 1228), 0006 already in the file (the credit invoice of
   07/15, page 1), 6178 a push-back, 1228 "Lender is doing it", and 0132 needing confirmation at 0.64.
 
-Marking the three drafts sent moves exactly those conditions to Waiting on the right owner. The same
-plan comes out with the AI switched off (library fallback, every reading marked to confirm), and after
-round 2 is imported the six conditions seen again keep their plan.
+Marking the three drafts sent moves exactly those conditions to Waiting on the right owner, and after
+round 2 is imported the six conditions seen again keep their plan. LP-965 — with the AI switched off the
+plan is NOT the same any more: the AI is what chooses each condition's library type (ADR-419), so without
+it nothing is typed and every reading is marked to confirm.
 
 The table below is written from plan §6 by hand, not from the code's output.
 """
@@ -233,20 +234,18 @@ async def test_confirming_makes_the_three_drafts_and_the_question(db_session: As
     assert {c.lender_status.value for c in conditions.values()} == {"open"}
 
 
-async def test_the_same_plan_with_the_ai_switched_off(db_session: AsyncSession) -> None:
+async def test_with_the_ai_switched_off_nothing_is_typed_and_everything_waits_for_her(
+    db_session: AsyncSession,
+) -> None:
+    """LP-965 — this used to produce §6's plan from the library alone, because the code map typed every
+    condition at import. Nothing types a condition now but the AI's reading (ADR-419): without it, no
+    condition has a type, none carries a library item, and nothing is drafted past the eleven."""
     loan_file, round_ = await _round_one(db_session, use_ai=False)
-    # WITHOUT THE AI NOBODY READS 1228'S CLAUSES: the library's PA-03 alone, the lender's, as §6 had it.
-    # The reading is marked for her to confirm (below), which is where the re-disclosure is added.
-    library_only = {
-        **SECTION_6,
-        "1228": (
-            PlanOption.LENDER_DOING_IT,
-            [("inspection", ["appraiser"], PlanOption.LENDER_DOING_IT)],
-        ),
-    }
-    assert await _plan(db_session, loan_file) == library_only
     conditions = await _conditions(db_session, loan_file)
-    # Library fallback: every reading is marked for her to confirm, and nothing is drafted past them.
+    assert all(c.canonical_type_id is None for c in conditions.values())
+    library_keys = {"inspection", "statements", "source", "receipt", "clearance", "disclosure"}
+    plan = await _plan(db_session, loan_file)
+    assert not any(key in library_keys for _, items in plan.values() for key, _, _ in items)
     assert {c.reading_status for c in conditions.values()} == {
         ConditionReadingStatus.NEEDS_CONFIRMATION
     }

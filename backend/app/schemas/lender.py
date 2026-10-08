@@ -155,23 +155,3 @@ class LenderConditionSettingsUpdate(BaseModel):
     lender_verifies_business_existence: bool = False
     lender_orders_title_insurance_payoffs: bool = False
     new_files_lender_processing: bool = False
-
-
-class LenderCodeToReviewPublic(BaseModel):
-    code: str
-    example_wording: str
-    files: int
-    canonical_type_id: str | None
-    #: LP-949 — the reading's proposed type while the code is unmapped. Never used until she picks it.
-    proposed_type_id: str | None = None
-    proposed_type_label: str | None = None
-
-
-class LenderCodeMapRequest(BaseModel):
-    canonical_type_id: str | None = Field(default=None, max_length=8)
-
-
-class LibraryTypeOptionPublic(BaseModel):
-    id: str
-    name: str
-    label: str

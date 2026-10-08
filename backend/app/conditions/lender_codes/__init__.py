@@ -1,4 +1,7 @@
-"""The (lender, code) → meaning map: the shipped seed data and its loader (LP-910, ADR-407).
+"""The (lender, code) → meaning map: the shipped data and its loader (LP-910, ADR-407).
+
+LP-965 — retired as a code map (ADR-419): read now only for lender detection and the library review
+table. See `loader.py`.
 
 A lender condition code is that lender's own template id — `7086` is short funds to close at UWM and
 means nothing at Champions, where the same demand is `268`. So every row is keyed `(lender, code)`

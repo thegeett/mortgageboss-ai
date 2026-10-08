@@ -411,68 +411,14 @@ async def test_the_two_status_fields_are_never_moved(db_session: AsyncSession) -
 
 
 # --------------------------------------------------------------------------- #
-# Step 4 — the code map
+# Step 4 — the code map is gone (LP-965, ADR-419)
 # --------------------------------------------------------------------------- #
 
 
-async def _code_row(db: AsyncSession, lender_id: Any, code: str) -> LenderConditionCode | None:
-    return await db.scalar(
-        select(LenderConditionCode).where(
-            LenderConditionCode.lender_id == lender_id, LenderConditionCode.code == code
-        )
-    )
-
-
-async def test_an_unknown_code_is_recorded_rather_than_dropped(
-    db_session: AsyncSession,
-) -> None:
-    """The map grows from what lenders actually send, not from what someone predicted."""
-    round_, _file, lender = await _draft(db_session)
-
-    outcome = await import_round(db_session, round_=round_)
-
-    assert outcome.unmapped_codes == ["7086"]
-    row = await _code_row(db_session, lender.id, "7086")
-    assert row is not None
-    assert row.status is LenderCodeStatus.OBSERVED_UNMAPPED
-    assert row.times_seen == 1
-    # The label is the code itself: an unknown code has no meaning, and anything else here would
-    # read as a mapping somebody made.
-    assert row.label == "7086"
-
-
-async def test_a_mapped_code_is_counted_but_never_demoted(db_session: AsyncSession) -> None:
-    """ "BUMP THE COUNTERS, NEVER RESET THE MEANING". A person reviewed this code; a sheet
-    mentioning it again is not a reason to forget that."""
-    round_, _file, lender = await _draft(db_session)
-    db_session.add(
-        LenderConditionCode(
-            lender_id=lender.id,
-            code="7086",
-            label="Short funds to close",
-            status=LenderCodeStatus.MAPPED,
-            times_seen=5,
-            canonical_type_id="funds_to_close",
-            info_only=False,
-        )
-    )
-    await db_session.flush()
-
-    outcome = await import_round(db_session, round_=round_)
-
-    row = await _code_row(db_session, lender.id, "7086")
-    assert row is not None
-    assert row.status is LenderCodeStatus.MAPPED, "a human decision outranks a sheet"
-    assert row.times_seen == 6
-    assert outcome.unmapped_codes == [], "a mapped code is not in the backlog"
-
-
-async def test_the_map_fills_only_the_hint_the_sheet_did_not_give(
-    db_session: AsyncSession,
-) -> None:
-    """THE HINTS ARE NOT EQUALLY GOOD. A marker the lender typed is far stronger evidence than a
-    default looked up from the map, and overwriting the first with the second would destroy the
-    better answer while leaving the field just as populated."""
+async def test_import_neither_reads_nor_writes_the_code_map(db_session: AsyncSession) -> None:
+    """A mapped row for the sheet's code, with a type, an owner hint and info-only, changes nothing:
+    the condition arrives untyped with the sheet's own hint, and the row is not counted. The type comes
+    from the reading, fresh every time."""
     rows = [
         _row(sequence=1, lender_code="7086"),
         _row(
@@ -484,41 +430,51 @@ async def test_the_map_fills_only_the_hint_the_sheet_did_not_give(
         ),
     ]
     round_, loan_file, lender = await _draft(db_session, rows=rows)
-    for code in ("7086", "0006"):
-        db_session.add(
-            LenderConditionCode(
-                lender_id=lender.id,
-                code=code,
-                label=f"Known {code}",
-                status=LenderCodeStatus.SEEDED,
-                default_owner_hint=OwnerHint.TITLE,
-                canonical_type_id=f"type_{code}",
-                info_only=True,
-            )
+    db_session.add(
+        LenderConditionCode(
+            lender_id=lender.id,
+            code="7086",
+            label="Short funds to close",
+            status=LenderCodeStatus.MAPPED,
+            times_seen=5,
+            default_owner_hint=OwnerHint.TITLE,
+            canonical_type_id="AS-10",
+            info_only=True,
         )
+    )
     await db_session.flush()
 
     await import_round(db_session, round_=round_)
 
-    filled, kept = await _conditions(db_session, loan_file.id)
-    assert filled.owner_hint is OwnerHint.TITLE
-    assert filled.owner_hint_source is OwnerHintSource.CODE_MAP
-    assert filled.canonical_type_id == "type_7086"
-    assert filled.info_only is True
-
+    untouched, kept = await _conditions(db_session, loan_file.id)
+    assert untouched.canonical_type_id is None
+    assert untouched.owner_hint is OwnerHint.UNKNOWN
+    assert untouched.owner_hint_source is OwnerHintSource.NONE
+    assert untouched.info_only is False
     assert kept.owner_hint is OwnerHint.BORROWER, "the lender's own marker stands"
     assert kept.owner_hint_source is OwnerHintSource.PREFIX
 
+    row = await db_session.scalar(
+        select(LenderConditionCode).where(
+            LenderConditionCode.lender_id == lender.id, LenderConditionCode.code == "7086"
+        )
+    )
+    assert row is not None and row.times_seen == 5
+    unknown = await db_session.scalar(
+        select(LenderConditionCode).where(
+            LenderConditionCode.lender_id == lender.id, LenderConditionCode.code == "0006"
+        )
+    )
+    assert unknown is None, "an unknown code is no longer recorded"
+
 
 async def test_a_file_with_no_lender_still_imports(db_session: AsyncSession) -> None:
-    """A REAL STATE, NOT AN EDGE CASE. `(lender, code)` is meaningless without the lender, so the
-    code-map step is skipped rather than guessed at — the conditions still land."""
+    """A REAL STATE, NOT AN EDGE CASE: the conditions still land, carrying their codes as printed."""
     round_, loan_file, _ = await _draft(db_session, with_lender=False)
 
     outcome = await import_round(db_session, round_=round_)
 
     assert outcome.created == 1
-    assert outcome.unmapped_codes == []
     (condition,) = await _conditions(db_session, loan_file.id)
     assert condition.lender_code == "7086", "the code is still carried as printed"
     assert condition.lender_id is None

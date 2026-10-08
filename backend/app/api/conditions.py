@@ -1130,7 +1130,6 @@ async def import_condition_round(
         created=outcome.created,
         seen_again=outcome.seen_again,
         # Codes, never wording. The code map is explicitly not NPI (LP-904); the conditions are.
-        unmapped_codes=outcome.unmapped_codes,
     )
 
 

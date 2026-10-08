@@ -2,10 +2,15 @@
 
 Round 1 comes in as a PDF, parsed by the task body and imported by the service, because a paste has no
 letter header and 6178's push-back reads the letter's Must Not Close Before.
+
+LP-965 — every reading is fresh: the mocked model chooses each condition's library type (the one UWM's old
+code map gave it), nothing is seeded or remembered per lender code, and the round is read in batches of
+`_BATCH_SIZE` (ADR-419).
 """
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -16,18 +21,18 @@ from app.models import Company
 from app.models.condition import Condition, ConditionReadingSource, ConditionReadingStatus
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_round import ConditionRound, ConditionSourceKind
+from app.models.condition_vocabulary import Performer
 from app.models.lender_condition_code import LenderConditionCode
 from app.models.loan_file import LoanFile
-from app.scripts.seed_lender_codes import seed_lender_codes
 from app.services import condition_reading
 from app.services.condition_import import import_round
-from app.services.condition_reading import read_round
+from app.services.condition_reading import ConfirmedItem, confirm_reading, read_round
 from app.services.condition_rounds import SheetBytes, create_round_from_sheet
 from app.tasks.conditions import parse_round
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.conditions.fixture_helpers import UWM_ROUND_1
-from tests.conditions.reading_fixture import fake_complete
+from tests.conditions.reading_fixture import canned_response, fake_complete
 from tests.conditions.uwm_pdf_fixture import render_uwm_pdf
 from tests.models.conftest_helpers import make_lender, make_loan_file
 
@@ -43,7 +48,6 @@ async def _file_with_round(
     loan_file = await make_loan_file(db, company=company)
     loan_file.lender_id = lender.id
     await db.flush()
-    await seed_lender_codes(db)
     round_ = await create_round_from_sheet(
         db,
         loan_file=loan_file,
@@ -63,6 +67,24 @@ async def _by_code(db: AsyncSession, loan_file: LoanFile) -> dict[str, Condition
         await db.execute(select(Condition).where(Condition.loan_file_id == loan_file.id))
     ).scalars()
     return {row.lender_code or "": row for row in rows}
+
+
+async def _user_id(db: AsyncSession, loan_file: LoanFile) -> Any:
+    from app.core.security import hash_password
+    from app.models import User, UserRole
+
+    user = User(
+        company_id=loan_file.company_id,
+        email=f"u-{uuid4().hex[:8]}@example.com",
+        hashed_password=hash_password("irrelevant"),
+        first_name="Priya",
+        last_name="Raman",
+        role=UserRole.PROCESSOR,
+        is_active=True,
+    )
+    db.add(user)
+    await db.flush()
+    return user.id
 
 
 def _performers(condition: Condition) -> list[list[str]]:
@@ -85,9 +107,12 @@ async def test_round_one_reads_as_the_plan_says(
     outcome = await read_round(db_session, round_id=round_.id)
     by_code = await _by_code(db_session, loan_file)
 
-    # ONE call for the whole round, not one per condition.
-    assert len(model_calls) == 1
+    # LP-965 — batches of eight: eleven conditions are two calls, 8 then 3, never one per condition.
+    sizes = [len(json.loads(call)["conditions"]) for call in model_calls]
+    assert sizes == [8, 3]
     assert outcome.read == 11 and outcome.used_ai and not outcome.fell_back
+    # The type is the reading's choice, written to the condition.
+    assert by_code["6637"].canonical_type_id == "AS-04"
 
     # 6637 becomes three items across the borrower and title/escrow.
     assert _performers(by_code["6637"]) == [["borrower"], ["title"], ["borrower"]]
@@ -123,7 +148,7 @@ async def test_round_one_reads_as_the_plan_says(
         "The lender did not find it in the last upload — asked again below."
     )
 
-    # Every condition read, each with an event; the round records one call's cost.
+    # Every condition read, each with an event; the round records both calls' cost.
     events = await db_session.scalar(
         select(func.count()).where(
             ConditionEvent.round_id == round_.id,
@@ -132,6 +157,7 @@ async def test_round_one_reads_as_the_plan_says(
     )
     assert events == 11
     assert round_.reading_run is not None and round_.reading_run["cost_estimate"] > 0
+    assert round_.reading_run["input_tokens"] == 2 * 1200  # summed across the batches
     assert round_.reading_run["model"] and round_.reading_run["used_ai"] is True
 
 
@@ -140,8 +166,8 @@ async def test_the_model_never_sees_the_loan_snapshot(
 ) -> None:
     _, round_ = await _file_with_round(db_session)
     await read_round(db_session, round_id=round_.id)
-    sent: Any = __import__("json").loads(model_calls[0])
-    assert set(sent) == {"file", "conditions"}
+    sent: Any = json.loads(model_calls[0])
+    assert set(sent) == {"file", "conditions", "library"}
     assert set(sent["file"]) <= {
         "borrowers",
         "lender",
@@ -149,14 +175,17 @@ async def test_the_model_never_sees_the_loan_snapshot(
         "earnest_money",
         "loan_purpose",
     }
-    assert all(
-        set(entry) <= {"ref", "code", "text", "notes", "type"} for entry in sent["conditions"]
-    )
+    assert all(set(entry) <= {"ref", "code", "text", "notes"} for entry in sent["conditions"])
+    # The library is the app's own reference data: ids, names and item keys, nothing from the file.
+    assert all(set(entry) == {"id", "name", "items"} for entry in sent["library"])
 
 
-async def test_without_the_ai_the_library_plan_stands_and_asks_her_to_confirm(
+async def test_without_the_ai_nothing_is_typed_and_she_confirms_every_condition(
     db_session: AsyncSession, model_calls: list[str]
 ) -> None:
+    """LP-965 — the AI is what types a condition now, so with it switched off nothing is typed: no
+    library items, and no figure only a type knows how to compute (7086's shortfall). Every condition
+    asks her to confirm it."""
     loan_file, round_ = await _file_with_round(db_session)
     outcome = await read_round(db_session, round_id=round_.id, use_ai=False)
     by_code = await _by_code(db_session, loan_file)
@@ -166,9 +195,45 @@ async def test_without_the_ai_the_library_plan_stands_and_asks_her_to_confirm(
         c.reading_status is ConditionReadingStatus.NEEDS_CONFIRMATION for c in by_code.values()
     )
     assert all(c.reading_source is ConditionReadingSource.LIBRARY for c in by_code.values())
-    # The library alone still splits 6637 and still computes 7086's shortfall.
-    assert _performers(by_code["6637"]) == [["borrower"], ["title"], ["borrower"]]
-    assert by_code["7086"].reading["figures"]["shortfall"]["amount"] == "27148.22"  # type: ignore[index]
+    assert all(c.canonical_type_id is None for c in by_code.values())
+    assert by_code["7086"].reading["figures"] == {}  # type: ignore[index]
+
+
+async def test_a_failing_batch_takes_down_only_its_own_conditions(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LP-962 found one 21-condition call overrunning the answer cap and sending EVERY condition to the
+    fallback. A batch that fails now costs only its own conditions."""
+    from app.ai.client import AICompletion
+
+    calls: list[str] = []
+
+    async def _second_fails(**kwargs: Any) -> AICompletion:
+        content = kwargs["messages"][0]["content"]
+        calls.append(content)
+        if len(calls) == 2:
+            raise AIClientError("cut off")
+        return AICompletion(
+            text=canned_response(content),
+            input_tokens=1200,
+            output_tokens=900,
+            model=kwargs["model"],
+            stop_reason="end_turn",
+            cache_read_tokens=0,
+            cache_write_tokens=0,
+        )
+
+    monkeypatch.setattr(condition_reading, "complete", _second_fails)
+    loan_file, round_ = await _file_with_round(db_session)
+    outcome = await read_round(db_session, round_id=round_.id)
+
+    assert len(calls) == 2 and outcome.fell_back and outcome.read == 11
+    first = {entry["code"] for entry in json.loads(calls[0])["conditions"]}
+    second = {entry["code"] for entry in json.loads(calls[1])["conditions"]}
+    by_code = await _by_code(db_session, loan_file)
+    assert all(by_code[code].reading_source is ConditionReadingSource.AI for code in first)
+    assert all(by_code[code].reading_source is ConditionReadingSource.LIBRARY for code in second)
+    assert all(by_code[code].canonical_type_id is None for code in second)
 
 
 async def test_a_failing_model_never_sticks_the_round(
@@ -206,30 +271,30 @@ async def test_the_page_break_sheets_lender_items_are_the_lenders(
     assert all((row.reading or {}).get("lender_doing_it") for row in lender_rows)
 
 
-async def test_a_confirmed_answer_for_the_code_is_used_next_time(
+async def test_her_answer_on_one_file_is_not_used_on_the_next(
     db_session: AsyncSession, model_calls: list[str]
 ) -> None:
+    """LP-965 — nothing is remembered per lender code: the next file's 0132 goes to the model again."""
     loan_file, round_ = await _file_with_round(db_session)
-    code_row = await db_session.scalar(
-        select(LenderConditionCode).where(
-            LenderConditionCode.lender_id == loan_file.lender_id, LenderConditionCode.code == "0132"
-        )
-    )
-    assert code_row is not None
-    code_row.confirmed_reading = {
-        "items": [
-            {"key": "disclosure", "name": "Re-signed disclosure", "performers": ["borrower", "lo"]},
-            {"key": "wire_instructions", "name": "Wire instructions", "performers": ["attorney"]},
-        ]
-    }
-    await db_session.flush()
-
     await read_round(db_session, round_id=round_.id)
-    condition = (await _by_code(db_session, loan_file))["0132"]
-    assert condition.reading_status is ConditionReadingStatus.CONFIRMED
-    assert _performers(condition) == [["borrower", "lo"], ["attorney"]]
-    # And it was not sent to the model at all.
-    assert '"code": "0132"' not in model_calls[0]
+    first = (await _by_code(db_session, loan_file))["0132"]
+    await confirm_reading(
+        db_session,
+        condition=first,
+        items=[ConfirmedItem(name="Re-signed disclosure", performers=(Performer.BORROWER,))],
+        actor_user_id=await _user_id(db_session, loan_file),
+    )
+    assert first.reading_status is ConditionReadingStatus.CONFIRMED
+
+    calls_before = len(model_calls)
+    next_file, next_round = await _file_with_round(db_session)
+    await read_round(db_session, round_id=next_round.id)
+    again = (await _by_code(db_session, next_file))["0132"]
+    assert again.reading_status is ConditionReadingStatus.NEEDS_CONFIRMATION  # the AI's 0.64
+    assert _performers(again) == [["borrower", "lo"], ["lo"], ["attorney"]]
+    assert any('"code": "0132"' in call for call in model_calls[calls_before:])
+    rows = await db_session.scalar(select(func.count(LenderConditionCode.id)))
+    assert rows == 0
 
 
 async def test_a_condition_already_read_is_not_read_again(
@@ -237,8 +302,9 @@ async def test_a_condition_already_read_is_not_read_again(
 ) -> None:
     _, round_ = await _file_with_round(db_session)
     await read_round(db_session, round_id=round_.id)
+    calls = len(model_calls)
     second = await read_round(db_session, round_id=round_.id)
-    assert second.read == 0 and len(model_calls) == 1
+    assert second.read == 0 and len(model_calls) == calls
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -274,7 +340,7 @@ async def _client_for(db: AsyncSession, loan_file: LoanFile) -> tuple[Any, dict[
     return client, {"Authorization": f"Bearer {create_access_token(user.id)}"}
 
 
-async def test_confirming_0132_saves_her_split_for_the_code_without_specifics(
+async def test_confirming_0132_saves_her_split_on_this_condition_only(
     db_session: AsyncSession, model_calls: list[str]
 ) -> None:
     from app.core.database import get_db
@@ -327,22 +393,18 @@ async def test_confirming_0132_saves_her_split_for_the_code_without_specifics(
     finally:
         app.dependency_overrides.pop(get_db, None)
 
-    code_row = await db_session.scalar(
-        select(LenderConditionCode).where(
-            LenderConditionCode.lender_id == loan_file.lender_id, LenderConditionCode.code == "0132"
+    # LP-965 — nothing saved for the lender code.
+    rows = await db_session.scalar(select(func.count(LenderConditionCode.id)))
+    assert rows == 0
+    confirmed = list(
+        await db_session.scalars(
+            select(ConditionEvent).where(
+                ConditionEvent.condition_id == condition.id,
+                ConditionEvent.kind == ConditionEventKind.CONDITION_READING_CONFIRMED,
+            )
         )
     )
-    assert code_row is not None and code_row.confirmed_reading is not None
-    saved_items = code_row.confirmed_reading["items"]
-    assert saved_items[0]["name"] == "Re-sign the disclosure"
-    assert all(set(item) == {"key", "name", "performers", "option"} for item in saved_items)
-    events = await db_session.scalar(
-        select(func.count()).where(
-            ConditionEvent.condition_id == condition.id,
-            ConditionEvent.kind == ConditionEventKind.CONDITION_READING_CONFIRMED,
-        )
-    )
-    assert events == 1
+    assert [event.detail for event in confirmed] == [{"how": "edited", "items": 3}]
 
 
 async def test_the_library_default_confirms_the_types_items(

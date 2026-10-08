@@ -12,14 +12,15 @@ import pytest
 from app.models import Company
 from app.models.condition import Condition
 from app.models.lender_condition_code import LenderConditionCode
+from app.services import condition_reading
 from app.services.condition_lender import (
     LenderRefused,
-    file_lender_payload,
     set_file_lender,
 )
-from app.services.lender_settings import map_code
+from app.services.condition_reading import read_round
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.conditions.reading_fixture import fake_complete
 from tests.conditions.test_lp949_lender_on_the_file import (
     _by_code,
     _company,
@@ -28,6 +29,7 @@ from tests.conditions.test_lp949_lender_on_the_file import (
 from tests.models.conftest_helpers import make_lender
 
 #: ALL SIX of LF-DH8V's codes (the trial brief, item 1), 1582 included: the build's table left it out.
+#: LP-965 — now the type the reading chooses for each (the mocked model's), not the code map's.
 LF_DH8V_TYPES = {
     "0006": "IV-01",
     "0007": "IV-03",
@@ -56,16 +58,19 @@ def _drop_db_override() -> Any:
     app.dependency_overrides.pop(get_db, None)
 
 
-async def test_all_six_lf_dh8v_codes_get_their_uwm_types(db_session: AsyncSession) -> None:
-    loan_file, _ = await _file_without_lender(db_session)
-    await set_file_lender(
-        db_session, loan_file=loan_file, lender_key="uwm", lender_id=None, actor_user_id=None
-    )
+async def test_all_six_lf_dh8v_codes_get_their_types_from_the_reading(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(condition_reading, "complete", fake_complete([]))
+    loan_file, round_ = await _file_without_lender(db_session)
+    await read_round(db_session, round_id=round_.id)
     conditions = await _by_code(db_session, loan_file)
     assert {code: conditions[code].canonical_type_id for code in LF_DH8V_TYPES} == LF_DH8V_TYPES
 
 
-async def test_a_lender_cleared_then_set_still_types_the_untyped(db_session: AsyncSession) -> None:
+async def test_a_lender_cleared_then_set_still_moves_every_condition(
+    db_session: AsyncSession,
+) -> None:
     """A -> none -> UWM must do what A -> UWM does. The build left A's untyped conditions at A."""
     loan_file, round_ = await _file_without_lender(db_session)
     company = await db_session.get(Company, loan_file.company_id)
@@ -75,8 +80,7 @@ async def test_a_lender_cleared_then_set_still_types_the_untyped(db_session: Asy
         db_session, loan_file=loan_file, lender_key=None, lender_id=wrong.id, actor_user_id=None
     )
     conditions = await _by_code(db_session, loan_file)
-    assert conditions["1228"].lender_id == wrong.id  # the premise: A took them, untyped
-    assert conditions["1228"].canonical_type_id is None
+    assert conditions["1228"].lender_id == wrong.id  # the premise: A took them
 
     from app.schemas.loan_file import LoanFileUpdate
     from app.services.loan_files import update_loan_file
@@ -86,8 +90,7 @@ async def test_a_lender_cleared_then_set_still_types_the_untyped(db_session: Asy
         db_session, loan_file=loan_file, lender_key="uwm", lender_id=None, actor_user_id=None
     )
     conditions = await _by_code(db_session, loan_file)
-    assert {code: conditions[code].canonical_type_id for code in LF_DH8V_TYPES} == LF_DH8V_TYPES
-    assert conditions["1228"].lender_id == loan_file.lender_id
+    assert all(c.lender_id == loan_file.lender_id for c in conditions.values())
     await db_session.refresh(round_)
     assert round_.lender_id == loan_file.lender_id
 
@@ -143,40 +146,6 @@ async def test_a_patch_that_does_not_change_the_lender_queues_nothing(
         )
         assert same.status_code == 200, same.text
     assert queued == []
-
-
-async def test_the_suggestion_says_when_its_lender_has_no_codes(db_session: AsyncSession) -> None:
-    """A same-named lender without the key: the banner must not promise a match to the library."""
-    loan_file, _ = await _file_without_lender(db_session)
-    payload = await file_lender_payload(db_session, loan_file=loan_file)
-    assert payload["suggestion"]["has_code_map"] is True  # created with the key and seeded
-
-    company = await db_session.get(Company, loan_file.company_id)
-    assert company is not None
-    await make_lender(db_session, company=company, name="United Wholesale Mortgage")
-    payload = await file_lender_payload(db_session, loan_file=loan_file)
-    assert payload["suggestion"]["lender_exists"] is True
-    assert payload["suggestion"]["has_code_map"] is False
-
-
-async def test_a_keyless_lender_has_a_code_map_once_a_code_is_mapped(
-    db_session: AsyncSession,
-) -> None:
-    """The banner said "has no condition codes in the app" for ever, after an admin mapped them."""
-    loan_file, _ = await _file_without_lender(db_session)
-    company = await db_session.get(Company, loan_file.company_id)
-    assert company is not None
-    lender = await make_lender(db_session, company=company, name="Small Lender")
-    await set_file_lender(
-        db_session, loan_file=loan_file, lender_key=None, lender_id=lender.id, actor_user_id=None
-    )
-    assert (await file_lender_payload(db_session, loan_file=loan_file))["lender"][
-        "has_code_map"
-    ] is False
-    await map_code(db_session, lender=lender, code="0006", canonical_type_id="IV-01")
-    assert (await file_lender_payload(db_session, loan_file=loan_file))["lender"][
-        "has_code_map"
-    ] is True
 
 
 async def test_only_a_shipped_lender_can_be_added_from_the_tab(db_session: AsyncSession) -> None:

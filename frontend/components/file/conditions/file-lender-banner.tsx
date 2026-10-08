@@ -14,12 +14,12 @@ const WHERE: Record<LenderSuggestion["source"], string> = {
 };
 
 /**
- * LP-949 — the file's lender, above the conditions, while it is missing or has no code map.
+ * LP-949 — the file's lender, above the conditions, while the file has none.
  *
- * A CONDITION GETS ITS LIBRARY TYPE ONLY FROM ITS LENDER'S CODES, so a file with no lender imports
- * every condition untyped: no library wording in the emails, nothing found already in the file,
- * nothing waiting on anything (the 2026-09-30 staging trial). This says so, and when the newest sheet
- * names a lender it offers that lender — set only when she presses the button, never by itself.
+ * When the newest sheet names a lender it offers that lender, set only when she presses the button,
+ * never by itself. LP-965 — NOT ABOUT TYPING ANY MORE: a condition's library type comes from its
+ * reading, fresh every time, not from the lender's codes (ADR-419). The lender still decides how a
+ * condition gets done there (who orders what), so a file without one is still worth flagging.
  */
 export function FileLenderBanner({ fileId }: { fileId: string }) {
   const lender = useFileLender(fileId);
@@ -29,33 +29,23 @@ export function FileLenderBanner({ fileId }: { fileId: string }) {
 
   const data = lender.data;
   if (!data) return null;
-  if (data.lender?.has_code_map) return null;
+  if (data.lender) return null;
 
   const overview = `/loan-files/${fileId}`;
   const pending = set.isPending || decline.isPending;
 
   let body: React.ReactNode;
-  if (data.lender) {
-    body = (
-      <p>
-        <span className="font-medium text-foreground">{data.lender.name}</span> has no condition
-        codes in the app, so its conditions can’t be matched to the library. An admin can give its
-        codes a meaning in the lender’s settings.
-      </p>
-    );
-  } else if (data.suggestion) {
+  if (data.suggestion) {
     const suggestion = data.suggestion;
     body = (
       <div className="flex flex-col gap-2">
         <p>
           <span className="font-medium text-foreground">This file has no lender.</span> The sheet
           looks like <span className="font-medium text-foreground">{suggestion.name}</span> (from{" "}
-          {WHERE[suggestion.source]}). Set it as this file’s lender?{" "}
-          {suggestion.has_code_map
-            ? `Its conditions are then matched to the library${
-                suggestion.lender_exists ? "" : `, and ${suggestion.name} is added to your lenders`
-              }.`
-            : `${suggestion.name} has no condition codes in the app yet, so its conditions are not matched to the library until an admin gives its codes a meaning.`}
+          {WHERE[suggestion.source]}). Set it as this file’s lender?
+          {suggestion.lender_exists
+            ? ""
+            : ` Setting it also adds ${suggestion.name} to your lenders.`}
         </p>
         <div className="flex flex-wrap gap-2">
           <Button
@@ -90,9 +80,8 @@ export function FileLenderBanner({ fileId }: { fileId: string }) {
   } else {
     body = (
       <p>
-        <span className="font-medium text-foreground">This file has no lender</span>, so its
-        conditions can’t be matched to the library: no document is found already in the file, and no
-        condition waits on another. Set the lender in{" "}
+        <span className="font-medium text-foreground">This file has no lender</span>, so the
+        lender’s own way of doing each condition can’t be used. Set the lender in{" "}
         <Link
           href={overview}
           className="font-medium text-primary underline-offset-2 hover:underline"

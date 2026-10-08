@@ -45,8 +45,8 @@ function whoValue(performers: Performer[]): string {
  *
  * Opened for a reading below the confidence bar, or one made without the AI. The lender's words stay
  * in full above the items (principle 6). Each item is editable text with a "who" select and a remove
- * control; **This is right** saves her items and remembers them for this lender code (names and who
- * only, never this borrower's specifics); **Use the library default** takes the library type's items.
+ * control; **This is right** saves her items on THIS condition only (LP-965: nothing is remembered for the
+ * lender code, every reading is fresh); **Use the library default** takes the library type's items.
  * Nothing is drafted for the condition until one of the two is pressed (README rule 3).
  */
 export function ConfirmReadingDialog({
@@ -189,11 +189,7 @@ export function ConfirmReadingDialog({
 
         <div className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs text-foreground-2">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" aria-hidden />
-          <p>
-            {whyUnsure(condition)} Your answer is saved for this lender code
-            {condition.lender_code ? ` (${condition.lender_code})` : ""} so the next file reads it
-            the same way.
-          </p>
+          <p>{whyUnsure(condition)}</p>
         </div>
 
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
@@ -239,7 +235,7 @@ function whyUnsure(condition: Condition): string {
   }
   const performers = new Set(reading.items.flatMap((item) => item.performers));
   if (!condition.library_type) {
-    return "Why it’s unsure: the library has no type for this condition yet.";
+    return "Why it’s unsure: no condition in the library matches this one.";
   }
   if (performers.size > 1) {
     return `Why it’s unsure: the condition mixes ${reading.items.length} different requests for ${performers.size} different people.`;
