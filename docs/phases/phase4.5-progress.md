@@ -1131,6 +1131,7 @@ run `alembic upgrade head` there before clicking these features through on dev; 
 | [LP-961](../tickets/LP-961.md) The import review shows what she must act on, not how the sheet was read (the owner, 2026-10-04) | DONE | | | not yet peer-reviewed |
 | [LP-962](../tickets/LP-962.md) Would the AI type conditions as well as the lender code maps? Measurement (the owner, 2026-10-04) | DONE | | | measurement only: UWM 16 of 21 agree, 4 untyped, 1 wrong (the list right); the Champions fixture's codes do not match its list, so that half is invalid; found the reading's 8192-token cap truncating a 21-condition round in one call; decision waits on real sheets |
 | [LP-963](../tickets/LP-963.md) The import bar sits above the rows, not at the bottom of the window (the owner, 2026-10-06) | DONE | | | not peer-reviewed; placement asserted by DOM order + 3 layout mutations; not checked by eye in a browser |
+| [LP-964](../tickets/LP-964.md) After Import, one step at a time: the reading, then the plan, then the list (the owner, 2026-10-06) | DONE | | | not peer-reviewed; list held back to one line with "Show them now", fails open; 12 mutations, 12 caught after adding one test; not watched in a browser |
 
 The drawer and list redesign (the owner's screenshot of 2026-10-03: the cramped link/upload controls, no "what
 next" after Ready, the unexplained "Open" column) is mocked up for the owner before anything is built (item 9).

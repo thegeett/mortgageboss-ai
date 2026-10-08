@@ -37,15 +37,24 @@ const ICON: Record<NextStepIcon, LucideIcon> = {
 
 /**
  * S3-12's Next step cell: one token with a glyph, from `nextStepToken`. A dash when there is no plan.
+ *
+ * LP-964 — "Plan not confirmed yet" while the round's plan waits for her. The condition already
+ * carries the AI's PROPOSED step, and drawing it as a token ("Lender + LO emails") reads as decided
+ * when nothing has been confirmed or drafted.
  */
 export function NextStepCell({
   condition,
   onOpenDraft,
+  unplanned = false,
 }: {
   condition: Condition;
   /** LP-922 — an email token opens its draft. */
   onOpenDraft?: (draftId: string) => void;
+  unplanned?: boolean;
 }) {
+  if (unplanned) {
+    return <span className="pt-0.5 text-sm text-muted-foreground">Plan not confirmed yet</span>;
+  }
   const token = nextStepToken(condition);
   if (token === null) {
     return <span className="pt-0.5 text-sm text-muted-foreground">—</span>;

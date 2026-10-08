@@ -67,6 +67,7 @@ export function ConditionsList({
   onClearFilters,
   suggestedIds,
   suggestedRoundNumber,
+  unplannedIds,
 }: {
   /** The rows the server returned for the CURRENT filters. Grouped here, in sheet order. */
   conditions: Condition[];
@@ -94,6 +95,12 @@ export function ConditionsList({
   /** LP-958 — the row's "Record" beside "Not cleared yet": opens S2-04 for that one condition. */
   onRecordAnswer?: (condition: Condition) => void;
   onClearFilters: () => void;
+  /**
+   * LP-964 — conditions whose round's plan is not confirmed yet. Their Next step reads "Plan not
+   * confirmed yet" instead of the AI's proposal, which would otherwise look decided. Only reachable
+   * when she opens the list early with "Show them now"; once the plan is confirmed this is empty.
+   */
+  unplannedIds?: ReadonlySet<string>;
   /**
    * Conditions a round's comparison suggests probably cleared (LP-915, S2-06).
    *
@@ -238,6 +245,7 @@ export function ConditionsList({
             onRecordAnswer={onRecordAnswer}
             suggestedIds={suggestedIds}
             suggestedRoundNumber={suggestedRoundNumber}
+            unplannedIds={unplannedIds}
           />
         ))
       )}
@@ -268,6 +276,7 @@ function ConditionGroup({
   onRecordAnswer,
   suggestedIds,
   suggestedRoundNumber,
+  unplannedIds,
 }: {
   heading: string;
   groupBy: ConditionGroupBy;
@@ -281,6 +290,7 @@ function ConditionGroup({
   onRecordAnswer?: (condition: Condition) => void;
   suggestedIds?: ReadonlySet<string>;
   suggestedRoundNumber?: number | null;
+  unplannedIds?: ReadonlySet<string>;
 }) {
   const first = rows[0];
   // The kind chip belongs to a LENDER HEADING. Grouped by owner or status the heading is ours, and a
@@ -323,6 +333,7 @@ function ConditionGroup({
           onOpenDraft={onOpenDraft}
           onRecordAnswer={onRecordAnswer ? () => onRecordAnswer(condition) : undefined}
           suggestedInRound={suggestedIds?.has(condition.id) ? (suggestedRoundNumber ?? null) : null}
+          unplanned={unplannedIds?.has(condition.id) ?? false}
         />
       ))}
     </div>
@@ -338,6 +349,7 @@ function ConditionRow({
   onOpenDraft,
   onRecordAnswer,
   suggestedInRound,
+  unplanned,
 }: {
   condition: Condition;
   checked: boolean;
@@ -347,6 +359,8 @@ function ConditionRow({
   /** LP-922 — opens a draft email from its Next step token. */
   onOpenDraft?: (draftId: string) => void;
   onRecordAnswer?: () => void;
+  /** LP-964 — its round's plan is not confirmed yet. */
+  unplanned: boolean;
   /** The round that suggests this one probably cleared, or null when none does. */
   suggestedInRound?: number | null;
 }) {
@@ -429,7 +443,7 @@ function ConditionRow({
         </span>
       </button>
 
-      <NextStepCell condition={condition} onOpenDraft={onOpenDraft} />
+      <NextStepCell condition={condition} onOpenDraft={onOpenDraft} unplanned={unplanned} />
 
       {/* A DISPLAY-ONLY STEP HAS NO STATUS OF ITS OWN (S3-12, LP-934 M4): "Lender is doing it" stays in
           its heading group, neutral, with no select — it is not ours to move. */}

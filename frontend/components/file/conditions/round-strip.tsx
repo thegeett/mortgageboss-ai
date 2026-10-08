@@ -6,7 +6,7 @@ import { lenderFactsFor } from "@/lib/conditions/lender-dates";
 import { COMPLETENESS_CHIP } from "@/lib/types/conditions";
 import type { ConditionRound } from "@/lib/types/conditions";
 import { cn } from "@/lib/utils";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 
 /** `2026-08-28` → `08/28/2026`. */
 function usDate(value: string | null): string {
@@ -29,6 +29,11 @@ const SOURCE_LABEL: Record<string, string> = {
  * did; a round silently vanishing reads as data loss. The dashboard filters them out of "what am I
  * working on", which is a different question from "what has happened to this file".
  *
+ * LP-964 — BUT FOLDED BESIDE A LIVE ROUND. A full card for a discarded draft next to the round she is
+ * working on was noise (the owner, 2026-10-06), so once any round is not discarded they collapse to a
+ * "1 discarded · show" link that opens them in place. The count keeps them visible; nothing vanishes.
+ * A file whose only rounds are discarded still draws them as cards: there is nothing else to show.
+ *
  * "Attach the lender's PDF" APPEARS ONLY ON A ROUND WITH NO PDF, and that is the whole of LP-907's
  * merge surfaced: it fills the letter details into THAT round and creates no second one. Offering it
  * on a round that already has a PDF would promise a merge the server refuses with "this round
@@ -48,6 +53,10 @@ export function RoundStrip({
   busyRoundId?: string | null;
 }) {
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [showDiscarded, setShowDiscarded] = useState(false);
+  const discarded = rounds.filter((round) => round.status === "discarded").length;
+  const fold = discarded > 0 && discarded < rounds.length;
+  const shown = fold && !showDiscarded ? rounds.filter((r) => r.status !== "discarded") : rounds;
 
   return (
     <div className="flex flex-wrap items-stretch gap-2">
@@ -65,7 +74,7 @@ export function RoundStrip({
           before passing it in would silently redefine `newest`, and `newest` is what decides whether
           the "left as they are" sentence appears and which round number it names.
           So the display order is reversed inside the render and the prop contract is untouched. */}
-      {[...rounds].reverse().map((round) => {
+      {[...shown].reverse().map((round) => {
         const attachable = canAttachPdf(round);
         const pendingSuggestions = round.comparison?.probably_cleared.length ?? 0;
         // THE LENDER'S OWN DATES, AS PRINTED (LP-917-lite, S2-11: "Lock 09/30/2026 · Not before
@@ -181,6 +190,16 @@ export function RoundStrip({
           </div>
         );
       })}
+
+      {fold ? (
+        <button
+          type="button"
+          onClick={() => setShowDiscarded((open) => !open)}
+          className="self-center text-xs text-muted-foreground underline-offset-2 hover:underline"
+        >
+          {showDiscarded ? "Hide discarded" : `${discarded} discarded · show`}
+        </button>
+      ) : null}
     </div>
   );
 }

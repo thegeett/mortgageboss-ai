@@ -37,12 +37,15 @@ export function RoundPlanPanel({
   conditions,
   onOpenCondition,
   onConfirmReading,
+  onHide,
 }: {
   fileId: string;
   round: ConditionRound;
   conditions: Condition[];
   onOpenCondition: (conditionId: string) => void;
   onConfirmReading: (conditionId: string) => void;
+  /** LP-964 — Hide also opens the list the page holds back while the plan waits. */
+  onHide?: () => void;
 }) {
   const plan = useRoundPlan(round.id);
   const confirm = useConfirmPlan(fileId);
@@ -94,7 +97,15 @@ export function RoundPlanPanel({
             them before confirming.
           </p>
         </div>
-        <Button type="button" variant="ghost" size="sm" onClick={() => setHidden(true)}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setHidden(true);
+            onHide?.();
+          }}
+        >
           Hide
         </Button>
       </div>

@@ -14,8 +14,10 @@ import {
   useConfirmCleared,
   useOwner,
   usePrepStatus,
+  useReadingState,
   useReopen,
   useResolveReworded,
+  useRoundPlan,
   useSetNextStep,
   useSwitchCompleteness,
   useUpdateItem,
@@ -23,6 +25,7 @@ import {
 } from "@/lib/api/conditions";
 import type { ConditionListUrlState } from "@/lib/conditions/list-url";
 import { useConditionListUrl, writeConditionListUrl } from "@/lib/conditions/list-url";
+import { planGatePhase } from "@/lib/conditions/plan-gate";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import type {
@@ -151,12 +154,45 @@ export function ConditionsListView({
   // because she closed the previous one.
   const [hiddenPanelRoundId, setHiddenPanelRoundId] = useState<string | null>(null);
   const [panelRefusal, setPanelRefusal] = useState<string | null>(null);
+  // LP-964 — the round whose held-back list she opened early ("Show them now", or Hide on the plan).
+  // BY ROUND ID, like `hiddenPanelRoundId`: the next sheet's plan holds its list back again.
+  const [listOpenRoundId, setListOpenRoundId] = useState<string | null>(null);
 
   // The round whose plan S3-02 shows: the newest imported one (rounds come newest first).
   const newestImported = rounds.find((round) => round.status === "imported") ?? null;
+
+  // LP-964 — ONE STEP AT A TIME UNTIL THE PLAN IS CONFIRMED (the owner, 2026-10-06). After Import the
+  // page showed the list at once, then "Reading…" above it, then the plan landing on top: the same
+  // conditions twice, the list's Next step column already showing the AI's proposals as if decided,
+  // and a page that jumped. Now the reading, then the plan, then the list. See `plan-gate.ts`.
+  // Both hooks are the ones `ReadingStatus` and `RoundPlanPanel` already call, so React Query
+  // shares the requests rather than doubling them.
+  const readingQuery = useReadingState(newestImported?.id ?? null, fileId);
+  const planQuery = useRoundPlan(newestImported?.id ?? null);
+  const gatePhase = planGatePhase({
+    hasImportedRound: newestImported !== null,
+    reading: readingQuery.data,
+    readingPending: readingQuery.isPending,
+    plan: planQuery.data,
+    planPending: planQuery.isPending,
+  });
+  const listHeldBack = gatePhase !== "list" && listOpenRoundId !== newestImported?.id;
+  const readingRunning =
+    readingQuery.data?.state === "queued" || readingQuery.data?.state === "reading";
+  // Only for a reading that FAILED. With the plan on screen there is no second list, not even a link to
+  // one (the owner: "once plan confirm then show it"); Hide on the plan is the way past it.
+  const showHeldBackLine = gatePhase === "reading" && !readingRunning;
   const openRound = rounds.find((round) => round.id === openRoundId) ?? null;
   const rows = filtered.data?.rows ?? [];
   const allRows = everything.data?.rows ?? [];
+  // LP-964 — the newest round's own conditions, while its plan is unconfirmed. "First seen on it", not
+  // "last seen": a condition seen again keeps the plan it already had (condition_plan.py carry-over).
+  const unplannedIds =
+    gatePhase !== "list" && newestImported
+      ? new Set(
+          allRows.filter((row) => row.first_round_id === newestImported.id).map((row) => row.id),
+        )
+      : undefined;
   const roundNumbers = rounds
     .filter((round) => round.round_number !== null && round.status === "imported")
     .map((round) => round.round_number as number);
@@ -353,6 +389,11 @@ export function ConditionsListView({
       {/* S3-02 (LP-920): the newest imported round's plan, until she confirms it. */}
       {/* LP-952: the reading's state above its plan — running, failed, or never started. */}
       {newestImported ? <ReadingStatus fileId={fileId} roundId={newestImported.id} /> : null}
+      {/* LP-964 — while the reading and the plan are still being fetched: a placeholder where the plan
+          will be, never the list, which would otherwise show and then disappear. */}
+      {gatePhase === "loading" && listHeldBack ? (
+        <Skeleton className="h-32 w-full" aria-label="Loading the plan" />
+      ) : null}
       {newestImported ? (
         <RoundPlanPanel
           fileId={fileId}
@@ -360,6 +401,7 @@ export function ConditionsListView({
           conditions={allRows}
           onOpenCondition={setOpenConditionId}
           onConfirmReading={setConfirmReadingId}
+          onHide={() => setListOpenRoundId(newestImported.id)}
         />
       ) : null}
 
@@ -373,74 +415,97 @@ export function ConditionsListView({
       {/* LP-922: the round's unsent drafts, once the plan panel is gone. */}
       <RoundDrafts fileId={fileId} onOpenDraft={setDraftId} />
 
-      {summary.data ? (
-        <ConditionsSummaryBar summary={summary.data} state={urlState} onFilter={applyUrl} />
+      {/* LP-964 — THE LIST WAITS FOR THE PLAN, AND NOTHING STANDS IN FOR IT (the owner, 2026-10-06/07).
+          While the page loads or the AI reads: the loading state alone ("why we still display '6
+          conditions are on the file…' while loading plan?"). While the plan waits: the plan alone, with
+          no line or link to a second copy of the same conditions ("showing condition again makes
+          confusing… once plan confirm then show it"). The list appears when the plan is confirmed,
+          or when she hides the plan.
+
+          ONE EXCEPTION, A READING THAT FAILED. There is no plan then, so nothing is duplicated, and the
+          reading card's Read again may fail too; "Show them now" is how she still reaches the list.
+          On round 2 that list holds the earlier rounds' work in progress. */}
+      {listHeldBack && newestImported ? (
+        showHeldBackLine ? (
+          <HeldBackList
+            total={allRows.length}
+            earlier={allRows.filter((row) => row.first_round_id !== newestImported.id).length}
+            onShow={() => setListOpenRoundId(newestImported.id)}
+          />
+        ) : null
       ) : (
-        <Skeleton className="h-14 w-full" />
+        <>
+          {summary.data ? (
+            <ConditionsSummaryBar summary={summary.data} state={urlState} onFilter={applyUrl} />
+          ) : (
+            <Skeleton className="h-14 w-full" />
+          )}
+
+          <ConditionsFilterRow
+            state={urlState}
+            onChange={applyUrl}
+            search={searchInput}
+            onSearchChange={setSearchInput}
+            roundNumbers={roundNumbers}
+          />
+
+          {/* S1-08'S SAFETY LINE SURVIVES STAGE 2. A partial round leaves everything it did not mention
+              alone, and absence must not read as removal — still true once the list has status controls,
+              and still the sentence that says so. The Stage 1 "no status control of any kind" callout is
+              NOT carried over: this screen has them, and repeating it would be false. */}
+          {rounds.find((round) => round.status === "imported")?.completeness === "partial" ? (
+            <p className="flex items-start gap-2 rounded-md border border-input bg-muted/40 p-2.5 text-xs text-muted-foreground">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span>
+                The newest round was just some conditions. Conditions that weren’t in it were left
+                as they are — nothing is removed or cleared.
+              </span>
+            </p>
+          ) : null}
+
+          {filtered.isPending ? (
+            <div className="flex flex-col gap-2" aria-busy>
+              <Skeleton className="h-24 w-full" />
+              <Skeleton className="h-24 w-full" />
+            </div>
+          ) : (
+            <ConditionsList
+              conditions={rows}
+              settledFrom={allRows}
+              suggestedIds={suggestedIds}
+              suggestedRoundNumber={suggestionRound?.comparison?.round_number ?? null}
+              state={urlState}
+              search={searchInput}
+              capped={filtered.data?.capped ?? false}
+              selected={selectedIds}
+              onSelectedChange={setSelectedIds}
+              onOpen={setOpenConditionId}
+              onOpenDraft={setDraftId}
+              onMovePrepStatus={movePrep}
+              onRecordAnswer={(condition) => {
+                setRefusal(null);
+                setAnswerFor([condition]);
+              }}
+              unplannedIds={unplannedIds}
+              onClearFilters={() => {
+                setSearchInput("");
+                applyUrl({
+                  ...urlState,
+                  roundNumber: null,
+                  lenderStatus: [],
+                  prepStatus: [],
+                  owner: [],
+                  bucketKind: [],
+                  step: [],
+                  check: null,
+                });
+              }}
+            />
+          )}
+
+          <WithdrawnSection fileId={fileId} />
+        </>
       )}
-
-      <ConditionsFilterRow
-        state={urlState}
-        onChange={applyUrl}
-        search={searchInput}
-        onSearchChange={setSearchInput}
-        roundNumbers={roundNumbers}
-      />
-
-      {/* S1-08'S SAFETY LINE SURVIVES STAGE 2. A partial round leaves everything it did not mention
-          alone, and absence must not read as removal — still true once the list has status controls,
-          and still the sentence that says so. The Stage 1 "no status control of any kind" callout is
-          NOT carried over: this screen has them, and repeating it would be false. */}
-      {rounds.find((round) => round.status === "imported")?.completeness === "partial" ? (
-        <p className="flex items-start gap-2 rounded-md border border-input bg-muted/40 p-2.5 text-xs text-muted-foreground">
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-          <span>
-            The newest round was just some conditions. Conditions that weren’t in it were left as
-            they are — nothing is removed or cleared.
-          </span>
-        </p>
-      ) : null}
-
-      {filtered.isPending ? (
-        <div className="flex flex-col gap-2" aria-busy>
-          <Skeleton className="h-24 w-full" />
-          <Skeleton className="h-24 w-full" />
-        </div>
-      ) : (
-        <ConditionsList
-          conditions={rows}
-          settledFrom={allRows}
-          suggestedIds={suggestedIds}
-          suggestedRoundNumber={suggestionRound?.comparison?.round_number ?? null}
-          state={urlState}
-          search={searchInput}
-          capped={filtered.data?.capped ?? false}
-          selected={selectedIds}
-          onSelectedChange={setSelectedIds}
-          onOpen={setOpenConditionId}
-          onOpenDraft={setDraftId}
-          onMovePrepStatus={movePrep}
-          onRecordAnswer={(condition) => {
-            setRefusal(null);
-            setAnswerFor([condition]);
-          }}
-          onClearFilters={() => {
-            setSearchInput("");
-            applyUrl({
-              ...urlState,
-              roundNumber: null,
-              lenderStatus: [],
-              prepStatus: [],
-              owner: [],
-              bucketKind: [],
-              step: [],
-              check: null,
-            });
-          }}
-        />
-      )}
-
-      <WithdrawnSection fileId={fileId} />
 
       <ConditionsBulkBar
         selected={selected}
@@ -714,4 +779,34 @@ export function ConditionsListView({
         notifyError({ title: "Nothing was changed", whatToDo: getErrorMessage(error) }),
     });
   }
+}
+
+/**
+ * LP-964 — the one line that stands in for the list when the reading FAILED: no plan exists, Read again
+ * may fail too, and the conditions must stay reachable.
+ *
+ * ROUND 2 AND LATER SAY WHERE THE REST COME FROM. Earlier rounds' conditions are work in progress
+ * (emails sent, statuses set), so the line names them rather than letting them read as new.
+ */
+function HeldBackList({
+  total,
+  earlier,
+  onShow,
+}: {
+  total: number;
+  earlier: number;
+  onShow: () => void;
+}) {
+  const conditions = `${total} ${total === 1 ? "condition is" : "conditions are"} on the file`;
+  return (
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-[var(--radius-container)] border border-input bg-card px-3 py-2 text-sm text-foreground-2">
+      <span>
+        {earlier > 0 ? `${conditions}, ${earlier} from earlier rounds.` : `${conditions}.`} The list
+        opens once they are read and you confirm the plan.
+      </span>
+      <Button variant="link" size="sm" className="h-auto p-0" onClick={onShow}>
+        Show them now
+      </Button>
+    </p>
+  );
 }
