@@ -13,6 +13,7 @@ import { useConfirmPlan, useRoundPlan, useSetNextStep, useUpdateItem } from "@/l
 import { OPTION_LABEL } from "@/lib/conditions/plan-words";
 import {
   BUCKET_KIND_MEANING,
+  ITEM_OPTION_ORDER,
   OPTION_EXAMPLE,
   OPTION_MEANING,
   OPTION_ORDER,
@@ -333,7 +334,12 @@ function PlanRow({
               extra={extraFor(item)}
             />
           ))}
-          {unworked ? <Unworked onConfirmReading={onConfirmReading} /> : null}
+          {unworked ? (
+            <Unworked
+              canCheckReading={condition.reading !== null}
+              onConfirmReading={onConfirmReading}
+            />
+          ) : null}
         </div>
         <div className="flex flex-[1_1_10rem] justify-end">
           <Button
@@ -390,7 +396,12 @@ function PlanRow({
                 onHelp={() => onHelp(`the whole condition (${code})`, ownStep)}
               />
             ) : null}
-            {unworked ? <Unworked onConfirmReading={onConfirmReading} /> : null}
+            {unworked ? (
+              <Unworked
+                canCheckReading={condition.reading !== null}
+                onConfirmReading={onConfirmReading}
+              />
+            ) : null}
             {items.map((item, index) => (
               <StepCard
                 key={item.id}
@@ -421,13 +432,34 @@ function PlanRow({
 }
 
 /** A condition with nothing worked out: say so, and offer the way to fix it. */
-function Unworked({ onConfirmReading }: { onConfirmReading: () => void }) {
+/**
+ * A row the reading worked nothing out for. LP-966 stopped filtering these away, which is right — a
+ * condition nobody can see is worse than one that says it is stuck.
+ *
+ * THE BUTTON IS ONLY THERE WHEN THERE IS A READING TO CHECK (LP-966 review). `ConfirmReadingDialog`
+ * opens on `condition.reading` and returns null without one, so on a condition that was never read —
+ * the likeliest reason a row has no items and no step at all — "Check how we read it" opened nothing.
+ * A dead control on the one row whose purpose is to say what to do next is worse than no control.
+ */
+function Unworked({
+  canCheckReading,
+  onConfirmReading,
+}: {
+  canCheckReading: boolean;
+  onConfirmReading: () => void;
+}) {
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm text-foreground-2">
-      <span>We couldn’t work out what this one needs.</span>
-      <Button type="button" variant="outline" size="sm" onClick={onConfirmReading}>
-        Check how we read it
-      </Button>
+      <span>
+        {canCheckReading
+          ? "We couldn’t work out what this one needs."
+          : "We haven’t read this one yet, so there is nothing to plan for it."}
+      </span>
+      {canCheckReading ? (
+        <Button type="button" variant="outline" size="sm" onClick={onConfirmReading}>
+          Check how we read it
+        </Button>
+      ) : null}
     </div>
   );
 }
@@ -522,7 +554,17 @@ function StepCard({
             onChange={(event) => onChange(event.target.value as PlanOption)}
             className="h-8 w-auto rounded-md border border-primary/40 bg-card px-1.5 text-sm font-medium text-primary"
           >
-            {OPTION_ORDER.map((each) => (
+            {/* A TASK IS OFFERED FEWER (LP-966 review): the two questions are the whole
+                condition's, and an item set to one belongs to no email. See `ITEM_OPTION_ORDER`.
+                A TASK ALREADY HOLDING ONE STILL LISTS IT, or the select would render blank against a
+                value not in its options and hide what the item actually is — she can move it off,
+                but nothing new lands on it. */}
+            {(item === null
+              ? OPTION_ORDER
+              : ITEM_OPTION_ORDER.includes(option)
+                ? ITEM_OPTION_ORDER
+                : [option, ...ITEM_OPTION_ORDER]
+            ).map((each) => (
               <option key={each} value={each}>
                 {OPTION_LABEL[each]}
               </option>
@@ -547,6 +589,28 @@ function StepCard({
   );
 }
 
+/**
+ * A MIRROR OF `condition_plan.ready_because`, branch for branch (LP-966 review).
+ *
+ * This read "every live item's OPTION is already_in_file", and the server reads every live item's
+ * STATUS, which is a different thing in both directions. A document she links by hand is RECEIVED and
+ * only becomes DONE when `check_link` passes it (LP-953), so a condition whose items are all
+ * "Already in the file" with one document still being read was promised "ready to send" and did not
+ * become ready. And a condition whose tasks she had already marked done was left out of the promise
+ * even though the server would move it, because no item's option was `already_in_file`.
+ *
+ * Keyed on status, so the sentence says what confirm will do. The server returns WHICH step made it
+ * ready; the summary only needs whether, so this returns a boolean.
+ */
+function willBeReady(condition: Condition, live: ConditionItem[]): boolean {
+  if (condition.next_step === "already_in_file") return true;
+  // A condition-level ask, question or push-back is owed until its send moves it; display-only never
+  // moves. Only "no step of its own" or "I'll do it" can be settled by the items.
+  if (condition.next_step !== null && condition.next_step !== "i_will_do_it") return false;
+  if (live.length === 0) return false;
+  return live.every((item) => item.status === "done");
+}
+
 /** "When you confirm, we will:", from the plan's own drafts and the rows' steps. */
 function ConfirmSummary({
   rows,
@@ -562,12 +626,7 @@ function ConfirmSummary({
   for (const condition of rows) {
     const code = condition.lender_code ?? "—";
     const items = live(condition);
-    if (
-      condition.next_step === "already_in_file" ||
-      (items.length > 0 && items.every((item) => item.option === "already_in_file"))
-    ) {
-      ready.push(code);
-    }
+    if (willBeReady(condition, items)) ready.push(code);
     if (condition.next_step === "ask_underwriter" || condition.next_step === "push_back") {
       questions.push(code);
     }

@@ -240,6 +240,38 @@ describe("RoundPlanPanel", () => {
     expect(calls.steps).toEqual([{ conditionId: "c1", next_step: "ask_underwriter" }]);
   });
 
+  it("a task is not offered the whole condition's questions, but keeps one it already has", () => {
+    // LP-966 REVIEW, at the layer it shows: every `_QUESTIONS` use on the server reads the CONDITION's
+    // next_step (condition_drafts.py:739, :747, :818, :1116), so a TASK set to `ask_underwriter` or
+    // `push_back` is in no email, raises no question draft and is not her task — it belongs nowhere,
+    // while the meaning line under its select promised a question to the underwriter.
+    const stale = item({ id: "i8", name: "Already a question", option: "push_back" });
+    const ordinary = item({ id: "i9", name: "Second task", option: "i_will_do_it" });
+    show([condition({ next_step: "push_back", items: [stale, ordinary] })], unblocked());
+    fireEvent.click(screen.getByRole("button", { name: "What you need to do" }));
+    const selects = screen.getAllByLabelText("Next step") as HTMLSelectElement[];
+    const values = (select: HTMLSelectElement) => [...select.options].map((o) => o.value);
+
+    // The whole condition keeps all eight: a question is about the condition, and that is where it lives.
+    expect(values(selects[0] as HTMLSelectElement)).toHaveLength(8);
+    expect(values(selects[0] as HTMLSelectElement)).toContain("ask_underwriter");
+
+    // An ordinary task is offered neither question, and still every step it can actually be.
+    const task = values(selects[2] as HTMLSelectElement);
+    expect(task).not.toContain("ask_underwriter");
+    expect(task).not.toContain("push_back");
+    expect(task).toContain("ask_borrower");
+    expect(task).toContain("i_will_do_it");
+    expect(task).toContain("already_in_file");
+
+    // A task ALREADY holding one still lists it, or the select would render blank against a value
+    // outside its options and hide what the item is. She can move it off; nothing new lands on it.
+    const held = values(selects[1] as HTMLSelectElement);
+    expect(held).toContain("push_back");
+    expect(held).not.toContain("ask_underwriter");
+    expect(selects[1]?.value).toBe("push_back");
+  });
+
   it("the ⓘ opens all eight steps with the current one marked, and Got it closes it", () => {
     show([condition({ lender_code: "1947", items: [TITLE_ITEM] })], unblocked());
     fireEvent.click(screen.getByRole("button", { name: "What you need to do" }));
@@ -255,6 +287,42 @@ describe("RoundPlanPanel", () => {
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Got it" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("offers no way to check a reading that never happened (LP-966 review)", () => {
+    // `ConfirmReadingDialog` opens on `condition.reading` and returns null without one, so on a
+    // condition that was never read — the likeliest reason a row has no items and no step — "Check how
+    // we read it" opened a dialog that renders nothing. A dead control on the one row whose purpose is
+    // to say what to do next is worse than no control.
+    const onConfirmReading = vi.fn();
+    plan.data = basePlan;
+    render(
+      <RoundPlanPanel
+        fileId="f1"
+        round={round}
+        conditions={[
+          condition({}),
+          condition({
+            id: "c3",
+            lender_code: "9001",
+            sequence: 3,
+            items: [],
+            next_step: null,
+            reading: null,
+          }),
+        ]}
+        onOpenCondition={vi.fn()}
+        onConfirmReading={onConfirmReading}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "9001" })).toBeTruthy();
+    expect(
+      screen.getByText("We haven’t read this one yet, so there is nothing to plan for it."),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Check how we read it" })).toBeNull();
+    // THE CONTROL: the row that DOES have a reading still offers it — see the test below, which
+    // renders the same shape with a reading and asserts exactly one such button.
   });
 
   it("shows a condition with nothing worked out, with one way to fix it", () => {
@@ -302,7 +370,10 @@ describe("RoundPlanPanel", () => {
           id: "c4",
           lender_code: "1582",
           sequence: 4,
-          items: [item({ id: "i4", option: "already_in_file" })],
+          // LP-966 REVIEW: `status: "done"` is what the server actually emits beside this option —
+          // `build_plan` sets both together. The fixture said option-only, with the default status,
+          // which is a state no writer produces, and the summary's rule keyed on the option.
+          items: [item({ id: "i4", option: "already_in_file", status: "done" })],
         }),
       ],
       { ...basePlan, blocking_codes: [], drafts: [basePlan.drafts[1] as RoundPlan["drafts"][0]] },
@@ -313,5 +384,36 @@ describe("RoundPlanPanel", () => {
     expect(
       screen.getByText(/upload the invoice \(0006\); upload the invoice \(0007, after 1228\)/),
     ).toBeTruthy();
+  });
+
+  it("promises ready for what confirm will really make ready (LP-966 review)", () => {
+    // The summary is a MIRROR of `condition_plan.ready_because`, which keys on each live item's
+    // STATUS. Keying on the option was wrong both ways: a document she linked by hand is RECEIVED
+    // until `check_link` passes it (LP-953), so the first row here was promised ready and would not
+    // have become ready; and the second was left out although the server moves it.
+    show(
+      [
+        condition({
+          id: "c5",
+          lender_code: "1582",
+          sequence: 5,
+          items: [
+            item({ id: "i5", option: "already_in_file", status: "done" }),
+            item({ id: "i6", option: "already_in_file", status: "received" }),
+          ],
+        }),
+        condition({
+          id: "c6",
+          lender_code: "7086",
+          sequence: 6,
+          items: [item({ id: "i7", option: "i_will_do_it", status: "done" })],
+        }),
+      ],
+      { ...basePlan, blocking_codes: [], drafts: [] },
+    );
+
+    const ready = screen.getByText(/Mark .* ready/).textContent ?? "";
+    expect(ready).toContain("7086");
+    expect(ready).not.toContain("1582");
   });
 });

@@ -12,8 +12,9 @@
  *   moves to Waiting on that person when the email is marked sent;
  * - questions (`ask_underwriter`, `push_back`) become a draft to the underwriter
  *   (`condition_drafts._QUESTIONS`);
- * - "Already in the file" makes the condition Ready on confirm (`condition_plan.ready_because`), and so
- *   does "I'll do it" once every task is marked done;
+ * - "Already in the file" and "I'll do it" make the condition Ready once EVERY live item is done
+ *   (`condition_plan.ready_because`, which requires `all(item.status is DONE)`) — not once this one
+ *   task is, which is what two of these sentences used to say (LP-966 review);
  * - "Lender is doing it" and "Information only" are display-only (`next-step.ts` `DISPLAY_ONLY`).
  * A change on the server that breaks one of these makes the sentence false: change both together.
  */
@@ -24,13 +25,13 @@ import type { BucketKind, ConditionItem, PlanOption } from "@/lib/types/conditio
 /** What a step does, for any task. The ⓘ dialog lists all eight. */
 export const OPTION_MEANING: Record<PlanOption, string> = {
   i_will_do_it:
-    "You do this yourself. It goes on your task list, and the condition is ready to send to the lender once you mark it done.",
+    "You do this yourself. It goes on your task list, and the condition is ready to send to the lender once every task on it is done.",
   ask_borrower:
     "We put this request in the email to the borrower. You review the email before it is sent; once sent, the condition shows as waiting on the borrower.",
   ask_third_party:
     "We put this request in an email to the person who has it, such as Title, the LO or the insurance agent. You review the email first; once sent, the condition waits on them.",
   already_in_file:
-    "We found the document already on the file. It is linked to the condition, and the condition is marked ready to send to the lender when you confirm.",
+    "We found the document already on the file. It is linked to the condition, and once every task on it is settled the condition is ready to send to the lender.",
   ask_underwriter:
     "Something in the condition is unclear, so we draft a question to the underwriter for you to review and send.",
   push_back:
@@ -51,6 +52,24 @@ export const OPTION_EXAMPLE: Record<PlanOption, string> = {
   lender_doing_it: "a desk review the lender orders itself.",
   information_only: "a note that the loan is approved subject to the conditions.",
 };
+
+/**
+ * The steps a TASK may be set to (LP-966 review). The two questions are missing on purpose: every use
+ * of `_QUESTIONS` on the server reads the CONDITION's `next_step` — `condition_drafts.py:739`, `:747`,
+ * `:818` and `:1116` — and nothing reads an item's option against it. So an item set to
+ * `ask_underwriter` or `push_back` is in no email (`recipient_for` returns None for anything outside
+ * `_ASKS`), raises no question draft, and is not her task either: it belongs nowhere, while the meaning
+ * line under the select promised "we draft a question to the underwriter for you to review and send".
+ * A question is about the whole condition, which is where the select still offers it.
+ */
+export const ITEM_OPTION_ORDER: readonly PlanOption[] = [
+  "i_will_do_it",
+  "ask_borrower",
+  "ask_third_party",
+  "already_in_file",
+  "lender_doing_it",
+  "information_only",
+];
 
 /** The order the dialog lists them in: the common ones first. */
 export const OPTION_ORDER: readonly PlanOption[] = [
@@ -83,11 +102,16 @@ export function actionFor(option: PlanOption, item: ConditionItem | null): strin
   switch (option) {
     case "i_will_do_it":
       return item?.task ? `You ${item.task}` : "You do it";
+    // THE WHOLE CONDITION'S ASK NAMES NO EMAIL (LP-966 review). The drafts are built from ITEMS —
+    // `condition_drafts` pairs each draft's items with their conditions — so a condition-level ask
+    // whose tasks are not asks puts nothing in any email. Naming one here claimed otherwise.
     case "ask_borrower":
-      return "Ask the borrower — in the borrower email";
+      return item === null
+        ? "Ask the borrower — the tasks below are what go in the email"
+        : "Ask the borrower — in the borrower email";
     case "ask_third_party":
       return item === null
-        ? "Ask a third party — by email"
+        ? "Ask someone else — the tasks below are what go in the email"
         : `Ask ${askedWho(item)} — in the ${emailWord(recipient(item))} email`;
     case "already_in_file":
       return "Already in the file";
@@ -106,6 +130,13 @@ export function actionFor(option: PlanOption, item: ConditionItem | null): strin
 export function meaningFor(option: PlanOption, item: ConditionItem | null): string {
   if (option === "ask_third_party" && item) {
     return `We put this request in the email to ${askedWho(item)}. You review the email first; once sent, the condition waits on them.`;
+  }
+  // THE WHOLE CONDITION, FOR AN ASK: what reaches an email is the tasks, not this step (LP-966
+  // review). `OPTION_MEANING`'s sentence is written for a task and would promise an email that only a
+  // task can fill.
+  if (item === null && (option === "ask_borrower" || option === "ask_third_party")) {
+    const who = option === "ask_borrower" ? "the borrower" : "someone else";
+    return `This condition is a request to ${who}. What actually goes in the email is each task below that is itself set to ask — a task set to something else is not in it.`;
   }
   return OPTION_MEANING[option];
 }
