@@ -37,7 +37,7 @@ describe("plan path", () => {
     const steps = taskPath(item({}));
     expect(steps.map((s) => [s.who, s.text])).toEqual([
       ["we", "We draft the email to Title / escrow when you confirm the plan"],
-      ["you", "Review the email and send it"],
+      ["you", "Review the email, and send it once the plan is confirmed"],
       ["them", "Title / escrow sends it back"],
       ["you", "Link it to this task"],
       ["we", "We check it against what was asked"],
@@ -46,6 +46,22 @@ describe("plan path", () => {
       "It goes in the title email, with anything else asked of Title / escrow this round.",
     );
     expect(steps[4]?.detail).toBe("It should be: The thing itself.");
+  });
+
+  it("LP-968: a drafted ask says it is drafted and carries the draft to open", () => {
+    const drafted = taskPath(
+      item({ draft: { id: "d1", status: "draft", sent_on: null } as ConditionItem["draft"] }),
+    );
+    expect(drafted[0]).toMatchObject({
+      text: "We drafted the email to Title / escrow",
+      draftId: "d1",
+    });
+    // A reading that still needs her is kept out of the drafts, and the path says why.
+    expect(taskPath(item({}), { needsConfirmation: true })[0]?.text).toBe(
+      "We draft the email to Title / escrow once you confirm how we read this condition",
+    );
+    // A task she dropped has no path left.
+    expect(taskPath(item({ status: "not_needed" }))).toEqual([]);
   });
 
   it("an ask names the server's recipient: an LO relay goes to the LO", () => {

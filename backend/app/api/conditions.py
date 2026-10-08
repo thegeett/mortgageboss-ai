@@ -141,8 +141,10 @@ from app.services.condition_plan import (
     PlanRefused,
     add_item,
     confirm_round_plan,
+    follow_drafts,
     items_public_for_file,
     remove_item,
+    revert_to_suggested,
     round_plan_summary,
     set_lender_processing,
     set_next_step,
@@ -1785,6 +1787,7 @@ async def update_condition_item(
             due_date=payload.due_date,
             actor_user_id=current_user.id,
             status=payload.status,
+            note=payload.note,
         )
     except PlanRefused as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
@@ -1807,7 +1810,10 @@ async def confirm_condition_reading(
     db: DbSession,
     current_user: CurrentUser,
 ) -> ConditionPublic:
-    """S3-03's "This is right": her items become the reading and are saved for this lender code."""
+    """S3-03's "This is right": her items become this condition's reading (LP-965: not saved per code).
+
+    LP-968 — the drafts follow: a reading that needed her was kept out of them, and now it is confirmed.
+    """
     try:
         await confirm_reading(
             db,
@@ -1820,6 +1826,7 @@ async def confirm_condition_reading(
         )
     except ReadingRefused as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    await follow_drafts(db, condition=condition, actor_user_id=current_user.id)
     return await _condition_response(db, condition)
 
 
@@ -1836,6 +1843,18 @@ async def use_condition_library_default(
         await use_library_default(db, condition=condition, actor_user_id=current_user.id)
     except ReadingRefused as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    await follow_drafts(db, condition=condition, actor_user_id=current_user.id)
+    return await _condition_response(db, condition)
+
+
+@conditions_by_id_router.post("/{condition_id}/plan/revert", response_model=ConditionPublic)
+async def revert_condition_plan(
+    condition: ScopedCondition,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionPublic:
+    """LP-968 — "Go back to the suggested plan": undo her changes to this condition's steps."""
+    await revert_to_suggested(db, condition=condition, actor_user_id=current_user.id)
     return await _condition_response(db, condition)
 
 

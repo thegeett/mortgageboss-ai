@@ -204,12 +204,16 @@ async def test_her_task_done_moves_to_ready(db_session: AsyncSession) -> None:
     assert (await _plan_moves(db_session, condition))[0]["option"] == "i_will_do_it"
 
 
-async def test_an_asked_item_is_not_marked_done_by_hand(db_session: AsyncSession) -> None:
+async def test_an_asked_item_is_not_marked_done_by_hand_without_proof(
+    db_session: AsyncSession,
+) -> None:
+    """LP-968 widened LP-921: "Already done" on someone else's task needs a note or a linked document,
+    so it is refused WITHOUT one. The positive half is `test_an_asked_item_is_done_with_her_note`."""
     _, _, conditions, actor = await _confirmed_round_one(db_session)
     condition = conditions["7086"]
     ask = (await _items(db_session, condition))[0]
     assert ask.option is PlanOption.ASK_BORROWER
-    with pytest.raises(PlanRefused, match="Only your own tasks"):
+    with pytest.raises(PlanRefused, match="Say how you know"):
         await update_item(
             db_session,
             condition=condition,
@@ -223,6 +227,26 @@ async def test_an_asked_item_is_not_marked_done_by_hand(db_session: AsyncSession
         )
     assert ask.status is not ConditionItemStatus.DONE
     assert condition.prep_status is ConditionPrepStatus.TO_DO
+
+
+async def test_an_asked_item_is_done_with_her_note(db_session: AsyncSession) -> None:
+    _, _, conditions, actor = await _confirmed_round_one(db_session)
+    condition = conditions["7086"]
+    ask = (await _items(db_session, condition))[0]
+    await update_item(
+        db_session,
+        condition=condition,
+        item=ask,
+        option=None,
+        name=None,
+        performers=None,
+        due_date=None,
+        actor_user_id=actor,
+        status=ConditionItemStatus.DONE,
+        note="statements came in by email on 09/12",
+    )
+    assert ask.status is ConditionItemStatus.DONE
+    assert ask.plan_note == "statements came in by email on 09/12"
 
 
 async def test_the_plan_never_overrides_her_move(db_session: AsyncSession) -> None:
@@ -326,7 +350,7 @@ async def test_the_summary_numbers_are_the_filters(db_session: AsyncSession) -> 
         body = (await client.get(f"{base}/summary", headers=headers)).json()
         assert (body["your_tasks"], body["ready_to_send"]) == (1, 2)
 
-        # The route refuses done on an ask, with the sentence.
+        # The route refuses done on an ask WITHOUT proof (LP-968), with the sentence.
         ask = (await _items(db_session, conditions["6637"]))[0]
         response = await client.patch(
             f"/api/v1/conditions/{conditions['6637'].id}/items/{ask.id}",
@@ -334,7 +358,7 @@ async def test_the_summary_numbers_are_the_filters(db_session: AsyncSession) -> 
             headers=headers,
         )
         assert response.status_code == 409
-        assert "Only your own tasks" in response.text
+        assert "Say how you know" in response.text
 
 
 async def test_a_file_without_a_plan_keeps_stage_twos_bar(db_session: AsyncSession) -> None:

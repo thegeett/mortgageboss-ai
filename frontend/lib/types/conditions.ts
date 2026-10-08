@@ -1101,6 +1101,8 @@ export interface ConditionItem {
    * describe"), so the drawer shows the lender's words in its place.
    */
   generic?: boolean;
+  /** LP-968 — her reason, proof or method for a change she made to this task. */
+  plan_note?: string | null;
 }
 
 /** LP-958 — one document of the file, as the Link dialog offers it. */

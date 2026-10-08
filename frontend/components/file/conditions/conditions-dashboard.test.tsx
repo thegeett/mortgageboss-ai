@@ -69,6 +69,7 @@ vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   useRestoreCondition: () => ({ mutate: vi.fn(), isPending: false }),
   useSetNextStep: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdateItem: () => ({ mutate: vi.fn(), isPending: false }),
+  useRevertPlan: () => ({ mutate: vi.fn(), isPending: false }),
   useConfirmReading: () => ({ mutate: vi.fn(), isPending: false }),
   useLibraryDefaultReading: () => ({ mutate: vi.fn(), isPending: false }),
   useConditionRounds: (...args: unknown[]) => useConditionRounds(...args),

@@ -17,6 +17,7 @@ vi.mock("@/lib/api/conditions", () => ({
   useLinkItemDocument: () => ({ isPending: false, mutate: (b: unknown) => calls.link.push(b) }),
   useUploadToItem: () => ({ isPending: false, mutate: (b: unknown) => calls.upload.push(b) }),
   useUpdateItem: () => ({ isPending: false, mutate: (b: unknown) => calls.update.push(b) }),
+  useRevertPlan: () => ({ mutate: vi.fn(), isPending: false }),
   useLinkCandidates: () => ({ isPending: false, isError: false, data: candidates.data }),
 }));
 

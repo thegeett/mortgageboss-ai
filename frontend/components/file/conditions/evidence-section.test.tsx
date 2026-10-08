@@ -30,6 +30,7 @@ vi.mock("@/lib/api/conditions", () => ({
   }),
   useLinkItemDocument: () => ({ isPending: false, mutate: vi.fn() }),
   useUpdateItem: () => ({ isPending: false, mutate: vi.fn() }),
+  useRevertPlan: () => ({ mutate: vi.fn(), isPending: false }),
   useUploadToItem: () => ({ isPending: false, mutate: vi.fn() }),
   // LP-958 — Change opens the Link dialog, which lists the file's documents from the server.
   useLinkCandidates: () => ({ isPending: false, isError: false, data: [] }),

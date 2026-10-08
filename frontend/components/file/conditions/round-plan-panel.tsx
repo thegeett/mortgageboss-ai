@@ -9,7 +9,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useConfirmPlan, useRoundPlan, useSetNextStep, useUpdateItem } from "@/lib/api/conditions";
+import {
+  useConfirmPlan,
+  useRevertPlan,
+  useRoundPlan,
+  useSetNextStep,
+  useUpdateItem,
+} from "@/lib/api/conditions";
 import {
   type PathStep,
   type PathWho,
@@ -67,17 +73,21 @@ export function RoundPlanPanel({
   conditions,
   onOpenCondition,
   onConfirmReading,
+  onOpenDraft,
 }: {
   fileId: string;
   round: ConditionRound;
   conditions: Condition[];
   onOpenCondition: (conditionId: string) => void;
   onConfirmReading: (conditionId: string) => void;
+  /** LP-968 — open a prepared draft from its step ("Review draft"). */
+  onOpenDraft?: (draftId: string) => void;
 }) {
   const plan = useRoundPlan(round.id);
   const confirm = useConfirmPlan(fileId);
   const setNextStep = useSetNextStep(fileId);
   const updateItem = useUpdateItem(fileId);
+  const revert = useRevertPlan(fileId);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [help, setHelp] = useState<{ title: string; current: PlanOption } | null>(null);
@@ -98,6 +108,15 @@ export function RoundPlanPanel({
   const changeItem = (condition: Condition, item: ConditionItem, to: PlanOption) => {
     setRefusal(null);
     updateItem.mutate({ conditionId: condition.id, itemId: item.id, option: to }, { onError });
+  };
+  // LP-968 — her edits to a task: Already done, Not needed, I'll do this myself (each with her words).
+  const markItem = (
+    condition: Condition,
+    item: ConditionItem,
+    change: { status?: "done" | "not_needed" | "open"; option?: PlanOption; note?: string },
+  ) => {
+    setRefusal(null);
+    updateItem.mutate({ conditionId: condition.id, itemId: item.id, ...change }, { onError });
   };
   const changeStep = (condition: Condition, to: PlanOption) => {
     setRefusal(null);
@@ -178,6 +197,12 @@ export function RoundPlanPanel({
             onOpenCondition={() => onOpenCondition(condition.id)}
             onConfirmReading={() => onConfirmReading(condition.id)}
             onChangeItem={(item, to) => changeItem(condition, item, to)}
+            onMarkItem={(item, change) => markItem(condition, item, change)}
+            onRevert={() => {
+              setRefusal(null);
+              revert.mutate(condition.id, { onError });
+            }}
+            onOpenDraft={onOpenDraft}
             onChangeStep={(to) => changeStep(condition, to)}
             onHelp={(title, current) => setHelp({ title, current })}
           />
@@ -195,7 +220,7 @@ export function RoundPlanPanel({
             onClick={() => confirm.mutate({ roundId: round.id }, { onError })}
           >
             <Check className="h-4 w-4" aria-hidden />
-            Confirm plan and draft {emails} {emails === 1 ? "email" : "emails"}
+            Confirm the plan
           </Button>
           <Button
             type="button"
@@ -266,6 +291,9 @@ function PlanRow({
   onOpenCondition,
   onConfirmReading,
   onChangeItem,
+  onMarkItem,
+  onRevert,
+  onOpenDraft,
   onChangeStep,
   onHelp,
 }: {
@@ -275,6 +303,9 @@ function PlanRow({
   onOpenCondition: () => void;
   onConfirmReading: () => void;
   onChangeItem: (item: ConditionItem, to: PlanOption) => void;
+  onMarkItem: (item: ConditionItem, change: ItemMark) => void;
+  onRevert: () => void;
+  onOpenDraft?: (draftId: string) => void;
   onChangeStep: (to: PlanOption) => void;
   onHelp: (title: string, current: PlanOption) => void;
 }) {
@@ -373,9 +404,19 @@ function PlanRow({
           </div>
 
           <div className="flex flex-col gap-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-foreground-2">
-              The plan, step by step
-            </p>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-foreground-2">
+                The plan, step by step
+              </p>
+              {/* LP-968 — her changes undone, replayed from the history (`revert_to_suggested`). */}
+              <button
+                type="button"
+                onClick={onRevert}
+                className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+              >
+                Go back to the suggested plan
+              </button>
+            </div>
             {ownStep ? (
               <StepCard
                 n={null}
@@ -383,6 +424,7 @@ function PlanRow({
                 option={ownStep}
                 item={null}
                 path={ownStepPath(ownStep)}
+                onOpenDraft={onOpenDraft}
                 onChange={onChangeStep}
                 onHelp={() => onHelp(`the whole condition (${code})`, ownStep)}
               />
@@ -393,14 +435,18 @@ function PlanRow({
                 onConfirmReading={onConfirmReading}
               />
             ) : null}
-            {items.map((item, index) => (
+            {/* EVERY TASK, ITS DROPPED ONES TOO (LP-968): "Not needed" leaves a task on the card, crossed
+                out with her reason and Undo, rather than letting it vanish. */}
+            {condition.items.map((item, index) => (
               <StepCard
                 key={item.id}
                 n={index + 1}
                 name={item.name}
                 option={item.option}
                 item={item}
-                path={taskPath(item)}
+                path={taskPath(item, { needsConfirmation: needsHer })}
+                onOpenDraft={onOpenDraft}
+                onMark={(change) => onMarkItem(item, change)}
                 onChange={(to) => onChangeItem(item, to)}
                 onHelp={() => onHelp(`${item.name} (${code})`, item.option)}
               />
@@ -510,6 +556,8 @@ function StepCard({
   option,
   item,
   path,
+  onOpenDraft,
+  onMark,
   onChange,
   onHelp,
 }: {
@@ -520,10 +568,43 @@ function StepCard({
   item: ConditionItem | null;
   /** LP-967 — this task's steps from now until it is done; changes with the select. */
   path: PathStep[];
+  onOpenDraft?: (draftId: string) => void;
+  /** LP-968 — her edits to a task; absent on the whole condition's own step. */
+  onMark?: (change: ItemMark) => void;
   onChange: (to: PlanOption) => void;
   onHelp: () => void;
 }) {
   const selectId = useId();
+  if (item?.status === "not_needed") {
+    return (
+      <div className="flex items-start gap-3 rounded-[var(--radius-container)] border border-dashed border-border bg-muted/30 px-3.5 py-3">
+        {n !== null ? (
+          <span
+            aria-hidden
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border text-xs font-semibold text-muted-foreground"
+          >
+            {n}
+          </span>
+        ) : null}
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <p className="text-sm font-semibold text-muted-foreground line-through">{name}</p>
+          <p className="text-sm text-foreground-2">
+            <strong className="font-semibold text-foreground">Not needed</strong>
+            {item.plan_note ? `: ${item.plan_note}` : ""}
+          </p>
+          {onMark ? (
+            <button
+              type="button"
+              onClick={() => onMark({ status: "open" })}
+              className="self-start text-xs font-medium text-primary underline-offset-2 hover:underline"
+            >
+              Undo
+            </button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="flex items-start gap-3 rounded-[var(--radius-container)] border border-border bg-card px-3.5 py-3">
       {n !== null ? (
@@ -579,9 +660,140 @@ function StepCard({
         </p>
         {path.length > 0 ? (
           <div className="mt-1">
-            <PathList steps={path} />
+            <PathList steps={path} onOpenDraft={onOpenDraft} />
           </div>
         ) : null}
+        {item?.plan_note && item.status !== "done" ? (
+          <p className="text-xs text-foreground-2">
+            <strong className="font-semibold text-foreground">Your note:</strong> {item.plan_note}
+          </p>
+        ) : null}
+        {item && onMark ? <TaskEdits item={item} onMark={onMark} /> : null}
+      </div>
+    </div>
+  );
+}
+
+/** LP-968 — what she can change on a task, and what each change asks her for. */
+export type ItemMark = {
+  status?: "done" | "not_needed" | "open";
+  option?: PlanOption;
+  note?: string;
+};
+
+const ASK_OPTIONS: readonly PlanOption[] = ["ask_borrower", "ask_third_party"];
+
+/**
+ * LP-968 — Already done / Not needed / I'll do this myself, each opening one line for her words.
+ *
+ * WHAT EACH ASKS FOR IS THE SERVER'S RULE (`condition_plan.update_item`): "Not needed" needs a reason;
+ * "Already done" on someone else's task needs a note (or a linked document); "I'll do this myself" takes
+ * an optional note on how. The button stays disabled until a required reason is typed, so the refusal
+ * is the server's backstop rather than her first sight of the rule.
+ */
+function TaskEdits({ item, onMark }: { item: ConditionItem; onMark: (change: ItemMark) => void }) {
+  const [mode, setMode] = useState<"done" | "not_needed" | "myself" | null>(null);
+  const [words, setWords] = useState("");
+  const inputId = useId();
+  if (item.status === "done") {
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-foreground-2">
+        <span>
+          <strong className="font-semibold text-foreground">Already done</strong>
+          {item.plan_note ? `: ${item.plan_note}` : ""}
+        </span>
+        <button
+          type="button"
+          onClick={() => onMark({ status: "open" })}
+          className="font-medium text-primary underline-offset-2 hover:underline"
+        >
+          Undo
+        </button>
+      </div>
+    );
+  }
+  if (item.status !== "open") return null; // asked or answered: its record stands
+  const theirs = item.option !== "i_will_do_it";
+  const required = mode === "not_needed" || (mode === "done" && theirs);
+  const prompt =
+    mode === "not_needed"
+      ? "Why isn’t it needed?"
+      : mode === "done"
+        ? theirs
+          ? "How do you know it’s done?"
+          : "Note (optional)"
+        : "How are you doing it? (optional)";
+  const placeholder =
+    mode === "not_needed"
+      ? "e.g. no new fee was charged"
+      : mode === "done"
+        ? "e.g. received on 09/12 by email"
+        : "e.g. calling the LO this afternoon";
+  const save = () => {
+    const note = words.trim() || undefined;
+    if (mode === "myself") onMark({ option: "i_will_do_it", note });
+    else if (mode) onMark({ status: mode, note });
+    setMode(null);
+    setWords("");
+  };
+  if (mode === null) {
+    return (
+      <div className="flex flex-wrap gap-x-4 gap-y-1">
+        {ASK_OPTIONS.includes(item.option) ? (
+          <button
+            type="button"
+            onClick={() => setMode("myself")}
+            className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+          >
+            I’ll do this myself
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => setMode("done")}
+          className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+        >
+          Already done
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("not_needed")}
+          className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+        >
+          Not needed
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-1.5 rounded-md border border-border bg-muted/40 p-2.5">
+      <label htmlFor={inputId} className="text-xs font-medium text-foreground-2">
+        {prompt}
+      </label>
+      <input
+        id={inputId}
+        type="text"
+        value={words}
+        maxLength={300}
+        placeholder={placeholder}
+        onChange={(event) => setWords(event.target.value)}
+        className="h-8 rounded-md border border-input bg-card px-2 text-sm text-foreground"
+      />
+      <div className="flex gap-2">
+        <Button type="button" size="sm" disabled={required && !words.trim()} onClick={save}>
+          {mode === "myself" ? "I’ll do it" : mode === "done" ? "Mark done" : "Mark not needed"}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            setMode(null);
+            setWords("");
+          }}
+        >
+          Cancel
+        </Button>
       </div>
     </div>
   );
@@ -608,7 +820,13 @@ const LEGEND: [PathWho, string][] = [
 ];
 
 /** A run of steps as a timeline: a dot per step, coloured by who does it, joined by a line. */
-function PathList({ steps }: { steps: PathStep[] }) {
+function PathList({
+  steps,
+  onOpenDraft,
+}: {
+  steps: PathStep[];
+  onOpenDraft?: (draftId: string) => void;
+}) {
   return (
     <ol className="flex flex-col">
       {steps.map((step, index) => (
@@ -635,6 +853,16 @@ function PathList({ steps }: { steps: PathStep[] }) {
             {step.detail ? (
               <span className="text-xs text-muted-foreground">{step.detail}</span>
             ) : null}
+            {step.draftId && onOpenDraft ? (
+              <Button
+                type="button"
+                size="sm"
+                className="mt-1 self-start"
+                onClick={() => onOpenDraft(step.draftId as string)}
+              >
+                Review draft
+              </Button>
+            ) : null}
           </div>
         </li>
       ))}
@@ -647,7 +875,8 @@ function FirstMovesBox({ rows, drafts }: { rows: Condition[]; drafts: { codes: s
   const moves = firstMoves(rows, drafts);
   const doNow: string[] = [];
   if (moves.emails > 0) {
-    doNow.push(`review and send ${moves.emails} ${moves.emails === 1 ? "email" : "emails"}`);
+    // LP-968 — they are drafted already: review them now, send each once the plan is confirmed.
+    doNow.push(`review the ${moves.emails} drafted ${moves.emails === 1 ? "email" : "emails"}`);
   }
   if (moves.tasksNow > 0) {
     doNow.push(`do ${moves.tasksNow} ${moves.tasksNow === 1 ? "task" : "tasks"} yourself`);
@@ -721,10 +950,10 @@ function ConfirmSummary({
     lines.push(
       <li key="emails">
         <strong className="font-semibold">
-          Draft {drafts.length} {drafts.length === 1 ? "email" : "emails"}
+          Unlock the {drafts.length} drafted {drafts.length === 1 ? "email" : "emails"} for sending
         </strong>
-        : {drafts.map((draft) => `to ${draft.label} (${draft.codes.join(", ")})`).join("; ")}. You
-        review each one before it is sent.
+        : {drafts.map((draft) => `to ${draft.label} (${draft.codes.join(", ")})`).join("; ")}. Until
+        then nothing can be sent; you can review and edit each one now.
       </li>,
     );
   }

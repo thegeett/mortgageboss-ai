@@ -1004,6 +1004,8 @@ class ConditionItemPublic(BaseModel):
     generic: bool = False
     #: LP-922 — the draft that asks for it: its id (to open it), "draft" or "sent", and the send date.
     draft: DraftTailPublic | None = None
+    #: LP-968 — her reason, proof or method for a change she made to this task.
+    plan_note: str | None = None
 
 
 class ConditionItemUpdate(BaseModel):
@@ -1013,8 +1015,10 @@ class ConditionItemUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=200)
     performers: list[Performer] | None = Field(default=None, min_length=1, max_length=3)
     due_date: date_type | None = None
-    #: LP-921 — `done` / `open` on an "I'll do it" item only; the service refuses anything else.
+    #: LP-921 / LP-968 — `done`, `not_needed`, or `open` to undo either; the service decides when.
     status: ConditionItemStatus | None = None
+    #: LP-968 — her reason, proof, or how she is doing it herself (`condition_items.plan_note`).
+    note: str | None = Field(default=None, max_length=300)
 
 
 class ConditionItemCreate(BaseModel):

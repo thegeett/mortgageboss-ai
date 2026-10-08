@@ -457,7 +457,8 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # only because exposing them means rebuilding the view for columns no query uses yet.
     # LP-956 — the new view drops the three columns that carry the lender's words: `name` (can restate
     # the condition), `acceptable` (likewise) and `specifics` (amounts, banks, account last fours).
-    "condition_items": frozenset({"name", "acceptable", "specifics"}),
+    # LP-968 — `plan_note` is her free text (why a task is not needed, how she knows it is done).
+    "condition_items": frozenset({"name", "acceptable", "specifics", "plan_note"}),
     "conditions": frozenset(
         {
             "verbatim_text",
@@ -589,6 +590,8 @@ NEVER_EXPOSED: tuple[tuple[str, str], ...] = (
     # `name` column legitimately), so `test_the_items_view_never_selects_name` pins it for that view.
     ("condition_items", "acceptable"),
     ("condition_items", "specifics"),
+    # LP-968 — her free text on a plan change: it can name a person, which no scrub can match.
+    ("condition_items", "plan_note"),
     ("users", "hashed_password"),
     ("loan_files", "inbox_token"),
     ("findings", "source_snippet"),

@@ -81,6 +81,10 @@ class ConditionItem(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         ForeignKey("conditions.id", ondelete="SET NULL"), nullable=True
     )
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    #: LP-968 — her words on a change she made to the plan: why a task is not needed, how she knows it is
+    #: already done, or how she is doing it herself. FREE TEXT, so it is kept out of the readonly views
+    #: (their column lists are explicit; LP-956), like `name`. Cleared when the task goes back to open.
+    plan_note: Mapped[str | None] = mapped_column(String(300), nullable=True)
     sequence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     #: LP-922 — the condition draft that asks for it, while one does.
     draft_id: Mapped[UUID | None] = mapped_column(

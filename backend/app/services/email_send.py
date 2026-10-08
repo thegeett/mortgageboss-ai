@@ -264,6 +264,18 @@ async def send_draft(
         raise CannotSendError(f"this message is already {draft.status.value}")
     if not (body or "").strip():
         raise CannotSendError("an empty message cannot be sent")
+    # LP-968 — A CONDITION DRAFT WAITS FOR ITS PLAN. Drafts are made when a plan is ready, before she
+    # confirms it, and "nothing is sent until you confirm" has to stay true. Here rather than in the
+    # conditions' Mark sent, because this is the one function every send passes through: the general
+    # `/communications/draft/{id}/send` can send a condition draft too.
+    from app.services.condition_drafts import unconfirmed_rounds_for
+
+    waiting = await unconfirmed_rounds_for(db, communication_id=draft.id)
+    if waiting:
+        rounds = " and ".join(f"round {number}" for number in waiting)
+        raise CannotSendError(
+            f"Confirm the plan for {rounds} first: nothing is sent before you confirm it."
+        )
     # LP-819 — a hard bounce means this mailbox does not exist. Sending again produces another
     # bounce, and enough of those damage a sending reputation shared by every borrower this system
     # writes to. Checked BEFORE the rate limit so the message says the useful thing: "this address is

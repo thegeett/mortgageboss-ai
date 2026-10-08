@@ -577,6 +577,12 @@ async def _run_read(round_id: str) -> None:
         # creating anything by hand. One commit: a reading without its plan would show a round with
         # conditions read and nothing proposed.
         await build_plan(db, round_id=round_pk)
+        # LP-968 — THE DRAFTS COME WITH THE PLAN (the owner, 2026-10-08: "go with drafting when the plan
+        # is ready"), so "Review draft" works on the plan she is checking. Nothing is sent: `send_draft`
+        # refuses until the plan is confirmed. Same commit, for the same reason as the plan itself.
+        from app.services.condition_drafts import draft_ready_plan
+
+        await draft_ready_plan(db, round_id=round_pk)
         await db.commit()
 
 

@@ -670,8 +670,13 @@ export interface ConditionItemChange {
   name?: string;
   performers?: Performer[];
   due_date?: string;
-  /** LP-921 — `done` / `open` on an "I'll do it" item only; the server refuses it on an ask. */
-  status?: "done" | "open";
+  /**
+   * LP-921 / LP-968 — `done` ("Already done": on someone else's task it needs a note or a linked
+   * document), `not_needed` (needs a reason), or `open` to undo either. The server refuses the rest.
+   */
+  status?: "done" | "open" | "not_needed";
+  /** LP-968 — her reason, proof, or how she is doing it herself. */
+  note?: string;
 }
 
 /** Change one item of the plan. */
@@ -685,6 +690,16 @@ export function useUpdateItem(fileId: string) {
     }: { conditionId: string; itemId: string } & ConditionItemChange) =>
       (await apiClient.patch<Condition>(`${conditionPath(conditionId)}/items/${itemId}`, body))
         .data,
+    onSuccess: () => invalidatePlan(queryClient, fileId),
+  });
+}
+
+/** LP-968 — "Go back to the suggested plan" for one condition. */
+export function useRevertPlan(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (conditionId: string) =>
+      (await apiClient.post<Condition>(`${conditionPath(conditionId)}/plan/revert`)).data,
     onSuccess: () => invalidatePlan(queryClient, fileId),
   });
 }

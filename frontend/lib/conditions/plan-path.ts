@@ -34,6 +34,8 @@ export interface PathStep {
   whoLabel: string;
   text: string;
   detail?: string;
+  /** LP-968 — the prepared draft this step is about, so the step can open it. */
+  draftId?: string;
 }
 
 /**
@@ -136,8 +138,18 @@ function alreadyBehind(item: ConditionItem): number {
 
 const TRACKS_PROGRESS: readonly PlanOption[] = ["ask_borrower", "ask_third_party", "i_will_do_it"];
 
+/**
+ * LP-968 — what the path needs to know about the task's CONDITION: whether its reading still needs her,
+ * which keeps its draft from being made (`condition_drafts._needs_her`).
+ */
+export interface PathContext {
+  needsConfirmation?: boolean;
+}
+
 /** One task's steps, from its own next step and how far it has got. */
-export function taskPath(item: ConditionItem): PathStep[] {
+export function taskPath(item: ConditionItem, context: PathContext = {}): PathStep[] {
+  // LP-968 — SHE TOOK IT OFF THE PLAN: nothing left on it; the card says so, with her reason.
+  if (item.status === "not_needed") return [];
   if (item.status === "done" && TRACKS_PROGRESS.includes(item.option)) return [FINISHED];
   const steps: PathStep[] = [];
   if (item.waits_on_code) {
@@ -152,13 +164,22 @@ export function taskPath(item: ConditionItem): PathStep[] {
     case "ask_third_party": {
       const who = askedWho(item);
       const email = emailWord(recipient(item));
+      // LP-968 — THE DRAFT EXISTS ONCE THE PLAN IS READY (`tasks.conditions._run_read` runs
+      // `sync_round_drafts` after `build_plan`), except for a condition whose reading still needs her,
+      // and except on a plan built before LP-968, which still drafts at confirm. Each case says its own.
+      const drafted = item.draft?.status === "draft" ? item.draft.id : undefined;
+      const together = `It goes in the ${email} email, with anything else asked of ${who} this round.`;
       steps.push(
-        WE(
-          `We draft the email to ${who} when you confirm the plan`,
-          `It goes in the ${email} email, with anything else asked of ${who} this round.`,
-        ),
+        drafted
+          ? { ...WE(`We drafted the email to ${who}`, together), draftId: drafted }
+          : WE(
+              context.needsConfirmation
+                ? `We draft the email to ${who} once you confirm how we read this condition`
+                : `We draft the email to ${who} when you confirm the plan`,
+              together,
+            ),
         YOU(
-          "Review the email and send it",
+          "Review the email, and send it once the plan is confirmed",
           // NOT ALWAYS THIS RECIPIENT (LP-967 review). `_wait_on_first_asked` is explicit that it is
           // "NOT whoever was emailed first": the owner is the recipient of the condition's FIRST live
           // ask whose email has gone, "whichever email she happened to mark sent first" — its own

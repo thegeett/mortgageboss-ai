@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/api/conditions", () => ({
   useConditionPackage: () => ({ data: { lender_short: "UWM", ready_count: 6 } }),
   useUpdateItem: () => ({ isPending: false, mutate: vi.fn() }),
+  useRevertPlan: () => ({ mutate: vi.fn(), isPending: false }),
   useUploadToItem: () => ({ isPending: false, mutate: vi.fn() }),
   useLinkItemDocument: () => ({ isPending: false, mutate: vi.fn() }),
   useLinkCandidates: () => ({ isPending: false, isError: false, data: [] }),

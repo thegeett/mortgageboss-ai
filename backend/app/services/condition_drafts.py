@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.communications.sanitise import sanitise_html
@@ -48,6 +48,7 @@ from app.models.condition import (
     Condition,
     ConditionLenderStatus,
     ConditionPrepStatus,
+    ConditionReadingStatus,
     OwnerHint,
 )
 from app.models.condition_draft import ConditionDraft, DraftRecipient
@@ -1080,6 +1081,7 @@ async def sync_round_drafts(
             if item.option in _ASKS
             and item.status is ConditionItemStatus.OPEN
             and _open_condition(condition)
+            and not _needs_her(condition)
             else None
         )
         current = await db.get(ConditionDraft, item.draft_id) if item.draft_id else None
@@ -1113,7 +1115,11 @@ async def sync_round_drafts(
         db.add(_drafted_event(condition, draft, actor_user_id))
 
     for condition in conditions:
-        asks = condition.next_step in _QUESTIONS and _open_condition(condition)
+        asks = (
+            condition.next_step in _QUESTIONS
+            and _open_condition(condition)
+            and not _needs_her(condition)
+        )
         existing = await _open_draft(
             db,
             loan_file_id=loan_file.id,
@@ -1190,6 +1196,13 @@ async def _question_sent(db: AsyncSession, condition: Condition) -> bool:
     return row.first() is not None
 
 
+def _needs_her(condition: Condition) -> bool:
+    """LP-968 — NOTHING IS DRAFTED PAST A READING THAT NEEDS HER (README rule 3). Drafting at confirm kept
+    this by construction: confirm is refused while any reading needs her. Drafting when the plan is ready
+    does not, so it is said here; confirming the reading re-syncs and the draft appears."""
+    return condition.reading_status is ConditionReadingStatus.NEEDS_CONFIRMATION
+
+
 async def _draft_items(db: AsyncSession, draft: ConditionDraft) -> list[ConditionItem]:
     return list(
         (
@@ -1201,6 +1214,38 @@ async def _draft_items(db: AsyncSession, draft: ConditionDraft) -> list[Conditio
             )
         ).scalars()
     )
+
+
+async def unconfirmed_rounds_for(db: AsyncSession, *, communication_id: UUID) -> list[int]:
+    """LP-968 — the round numbers whose plan is NOT confirmed, among the conditions this message asks
+    about. Empty for a message that is not a condition draft, or whose plans are all confirmed.
+
+    Drafts now exist from the moment a plan is ready, so something has to keep "nothing is sent until
+    you confirm" true. `email_send.send_draft` asks this, which covers both doors that send a draft:
+    the conditions' Mark sent and the general `/communications/draft/{id}/send`.
+    """
+    draft = await db.scalar(
+        select(ConditionDraft).where(ConditionDraft.communication_id == communication_id)
+    )
+    if draft is None:
+        return []
+    if draft.condition_id is not None:
+        condition_ids = [draft.condition_id]
+    else:
+        condition_ids = list(
+            dict.fromkeys(item.condition_id for item in await _draft_items(db, draft))
+        )
+    numbers: list[int] = []
+    for condition_id in condition_ids:
+        condition = await db.get(Condition, condition_id)
+        if condition is None or condition.last_seen_round_id is None:
+            continue
+        round_ = await db.get(ConditionRound, condition.last_seen_round_id)
+        if round_ is not None and round_.plan_confirmed_at is None:
+            number = round_.round_number or 0
+            if number not in numbers:
+                numbers.append(number)
+    return sorted(numbers)
 
 
 async def _discard(db: AsyncSession, *, loan_file: LoanFile, draft: ConditionDraft) -> None:
@@ -1612,13 +1657,30 @@ async def open_condition_drafts(db: AsyncSession, *, loan_file_id: UUID) -> list
     )
 
 
+async def draft_ready_plan(db: AsyncSession, *, round_id: UUID) -> list[ConditionDraft]:
+    """LP-968 — the round's drafts, made as soon as its plan is ready (the reading task calls this right
+    after `build_plan`). Nothing is sent: `send_draft` refuses while the plan is unconfirmed. Returns the
+    drafts the sync touched; empty when the round has no ready plan."""
+    round_ = await db.get(ConditionRound, round_id)
+    if round_ is None or round_.plan_ready_at is None:
+        return []
+    return await sync_round_drafts(db, round_=round_, actor_user_id=None)
+
+
 async def resync_file(db: AsyncSession, *, loan_file_id: UUID, actor_user_id: UUID | None) -> None:
-    """After a plan edit: re-sync every round of the file whose plan is confirmed."""
+    """After a plan edit: re-sync every round of the file whose plan is READY or confirmed.
+
+    LP-968 — READY, NOT ONLY CONFIRMED. Drafts are made when the plan is ready, so an edit before
+    confirm must reach them too. Sending stays behind confirm (`unconfirmed_rounds_for`).
+    """
     rounds = (
         await db.execute(
             select(ConditionRound).where(
                 ConditionRound.loan_file_id == loan_file_id,
-                ConditionRound.plan_confirmed_at.is_not(None),
+                or_(
+                    ConditionRound.plan_confirmed_at.is_not(None),
+                    ConditionRound.plan_ready_at.is_not(None),
+                ),
                 ConditionRound.deleted_at.is_(None),
             )
         )

@@ -106,6 +106,15 @@ ITEM_DONE_ONLY_FOR_TASKS = (
     "Only your own tasks are marked done here — an item you asked for is done when it arrives."
 )
 
+#: LP-968 — "Already done" on a task she did not do here needs its proof: a note or a linked document.
+DONE_NEEDS_PROOF = (
+    "Say how you know it's already done, or link the document: a task someone else owed needs one."
+)
+#: LP-968 — "Not needed" needs its reason, so the file says why nothing was asked.
+NOT_NEEDED_NEEDS_REASON = "Say why it isn't needed, so the file records the reason."
+#: LP-968 — only her own marks can be undone here; a task asked and answered keeps its record.
+REOPEN_ONLY_HER_MARKS = "Only a task you marked done or not needed can be set back to open here."
+
 
 # --------------------------------------------------------------------------------------------- #
 # Per-lender settings (decision 1, 4, 5): who orders what, and what the upload asks
@@ -808,12 +817,126 @@ def ready_because(condition: Condition, items: list[ConditionItem]) -> PlanOptio
 async def _resync_drafts(
     db: AsyncSession, *, condition: Condition, actor_user_id: UUID | None
 ) -> None:
-    """LP-922 — after a plan edit on a confirmed round, the round's unsent drafts follow the edit."""
-    if not await _plan_in_force(db, condition):
+    """LP-922 — after a plan edit, the round's unsent drafts follow the edit.
+
+    LP-968 — ONCE THE PLAN IS READY, NOT ONLY CONFIRMED: drafts exist from then on. Status moves stay
+    behind confirm (`apply_step_status` keeps `_plan_in_force`), and so does sending (`send_draft`).
+    """
+    if not await _plan_drafted(db, condition):
         return
     from app.services.condition_drafts import resync_file
 
     await resync_file(db, loan_file_id=condition.loan_file_id, actor_user_id=actor_user_id)
+
+
+async def follow_drafts(
+    db: AsyncSession, *, condition: Condition, actor_user_id: UUID | None
+) -> None:
+    """LP-968 — the drafts follow a change made outside the plan's own edits (a confirmed reading)."""
+    await _resync_drafts(db, condition=condition, actor_user_id=actor_user_id)
+
+
+#: Statuses a revert sets back: her own marks. A task asked (REQUESTED) or answered (RECEIVED) keeps its
+#: record; a revert never un-asks a sent email.
+_HER_MARKS = (ConditionItemStatus.DONE, ConditionItemStatus.NOT_NEEDED)
+
+
+async def revert_to_suggested(
+    db: AsyncSession, *, condition: Condition, actor_user_id: UUID
+) -> int:
+    """LP-968 — "Go back to the suggested plan": undo her changes to this condition's plan. Returns how
+    many tasks (and the condition's own step) changed back.
+
+    THE SUGGESTION IS REPLAYED FROM THE HISTORY, because nothing else keeps it: the reading's item options
+    are taken BEFORE the plan's own adjustments (`_item_option`, `route_ask`, splits), so rebuilding from
+    them would not be the plan she was shown. Every edit she makes writes `condition_plan_changed` with
+    the value it replaced, so the FIRST recorded `from` of each field is what the plan suggested.
+
+    WHAT IT LEAVES ALONE: a task whose ask went out or was answered (REQUESTED, RECEIVED); a task she
+    added herself (no suggestion to go back to); wording, who acts and due dates (edits to the task, not
+    to its step).
+    """
+    events = (
+        await db.execute(
+            select(ConditionEvent)
+            .where(
+                ConditionEvent.condition_id == condition.id,
+                ConditionEvent.kind == ConditionEventKind.CONDITION_PLAN_CHANGED,
+            )
+            .order_by(ConditionEvent.occurred_at, ConditionEvent.id)
+        )
+    ).scalars()
+    first_option: dict[str, str] = {}
+    first_status: dict[str, str] = {}
+    first_step: tuple[bool, str | None] = (False, None)
+    for event in events:
+        detail = event.detail or {}
+        if detail.get("change") == "next_step" and not first_step[0]:
+            first_step = (True, detail.get("from"))
+        if detail.get("change") != "item":
+            continue
+        key = str(detail.get("item_key") or "")
+        option = detail.get("option")
+        if isinstance(option, dict) and key not in first_option:
+            first_option[key] = str(option.get("from"))
+        status = detail.get("status")
+        if isinstance(status, dict) and key not in first_status:
+            first_status[key] = str(status.get("from"))
+
+    reverted = 0
+    items = (
+        await db.execute(
+            select(ConditionItem).where(
+                ConditionItem.condition_id == condition.id, ConditionItem.deleted_at.is_(None)
+            )
+        )
+    ).scalars()
+    for item in items:
+        if item.status in (ConditionItemStatus.REQUESTED, ConditionItemStatus.RECEIVED):
+            continue
+        touched = False
+        if item.key in first_option and first_option[item.key] != item.option.value:
+            item.option = PlanOption(first_option[item.key])
+            touched = True
+        if (
+            item.key in first_status
+            and item.status in _HER_MARKS
+            and first_status[item.key] != item.status.value
+        ):
+            item.status = ConditionItemStatus(first_status[item.key])
+            touched = True
+        if touched or item.plan_note:
+            item.plan_note = None
+        reverted += int(touched)
+    if first_step[0]:
+        suggested = PlanOption(first_step[1]) if first_step[1] else None
+        if suggested is not condition.next_step:
+            condition.next_step = suggested
+            reverted += 1
+    if reverted:
+        db.add(
+            _event(
+                condition,
+                ConditionEventKind.CONDITION_PLAN_CHANGED,
+                {"change": "reverted", "count": reverted},
+                round_id=condition.last_seen_round_id,
+                actor_user_id=actor_user_id,
+            )
+        )
+        await db.flush()
+        await apply_step_status(db, condition=condition, actor_user_id=actor_user_id)
+        await _resync_drafts(db, condition=condition, actor_user_id=actor_user_id)
+    return reverted
+
+
+async def _plan_drafted(db: AsyncSession, condition: Condition) -> bool:
+    """LP-968 — whether the condition's round has drafts: its plan is ready or confirmed."""
+    if condition.last_seen_round_id is None:
+        return False
+    round_ = await db.get(ConditionRound, condition.last_seen_round_id)
+    return round_ is not None and (
+        round_.plan_ready_at is not None or round_.plan_confirmed_at is not None
+    )
 
 
 async def _plan_in_force(db: AsyncSession, condition: Condition) -> bool:
@@ -941,18 +1064,47 @@ async def update_item(
     due_date: date | None,
     actor_user_id: UUID,
     status: ConditionItemStatus | None = None,
+    note: str | None = None,
 ) -> None:
-    """Her edit to one item. `status` is done/open on an "I'll do it" item only (LP-921): an ask's item
-    is done when its evidence passes (LP-923), never by hand here."""
+    """Her edit to one item.
+
+    STATUS (LP-921, widened by LP-968: "Already done", "Not needed", and undoing either):
+    - `done` on her own task ("I'll do it") as before; on ANY OTHER task only with proof, a note or a
+      linked document. An ask's task is otherwise done when its evidence passes (LP-923), and that stays
+      the default: she can say it is done, but not without saying how she knows.
+    - `not_needed` with a reason, always. The task leaves the plan (`ready_because` reads only live
+      tasks) and its draft (`sync_round_drafts` asks only for OPEN tasks).
+    - `open` only from her own marks (done or not needed); it clears the note. A task asked and answered
+      (requested, received) keeps that record.
+
+    `note` is her words, kept on the task (`plan_note`): the reason, the proof, or how she is doing it
+    herself when she moves an ask to "I'll do it". The event records THAT a note was given, never the
+    text: free text in an event's detail needs its own trace (`ConditionEventPublic`).
+    """
     changed: dict[str, Any] = {"change": "item", "item_key": item.key}
+    words = note.strip()[:300] if note and note.strip() else None
     if status is not None and status is not item.status:
-        if item.option is not PlanOption.I_WILL_DO_IT or status not in (
-            ConditionItemStatus.DONE,
-            ConditionItemStatus.OPEN,
-        ):
+        if status is ConditionItemStatus.DONE:
+            if (
+                item.option is not PlanOption.I_WILL_DO_IT
+                and not words
+                and not await _has_link(db, item)
+            ):
+                raise PlanRefused(DONE_NEEDS_PROOF)
+        elif status is ConditionItemStatus.NOT_NEEDED:
+            if not words:
+                raise PlanRefused(NOT_NEEDED_NEEDS_REASON)
+        elif status is ConditionItemStatus.OPEN:
+            if item.status not in (ConditionItemStatus.DONE, ConditionItemStatus.NOT_NEEDED):
+                raise PlanRefused(REOPEN_ONLY_HER_MARKS)
+            item.plan_note = None
+        else:
             raise PlanRefused(ITEM_DONE_ONLY_FOR_TASKS)
         changed["status"] = {"from": item.status.value, "to": status.value}
         item.status = status
+    if words is not None:
+        item.plan_note = words
+        changed["note"] = True
     if option is not None and option is not item.option:
         if option is PlanOption.ALREADY_IN_FILE and not await _has_link(db, item):
             raise PlanRefused(LINK_FIRST)
@@ -1457,6 +1609,7 @@ async def items_public_for_file(db: AsyncSession, *, loan_file_id: UUID) -> dict
                     else None,
                     draft=tails.get(item.draft_id) if item.draft_id else None,
                     part_of_item_id=item.part_of_item_id,
+                    plan_note=item.plan_note,
                 )
             )
         out[condition_id] = rows

@@ -401,6 +401,7 @@ export function ConditionsListView({
           conditions={allRows}
           onOpenCondition={setOpenConditionId}
           onConfirmReading={setConfirmReadingId}
+          onOpenDraft={setDraftId}
         />
       ) : null}
 
@@ -412,7 +413,10 @@ export function ConditionsListView({
       </div>
 
       {/* LP-922: the round's unsent drafts, once the plan panel is gone. */}
-      <RoundDrafts fileId={fileId} onOpenDraft={setDraftId} />
+      {/* LP-968 — NOT WHILE THE PLAN HOLDS THE PAGE. Drafts now exist from the moment the plan is ready,
+          and each one opens from its step in the plan ("Review draft"); listing them here as well, under
+          a plan that is not confirmed, would show the same emails twice. */}
+      {listHeldBack ? null : <RoundDrafts fileId={fileId} onOpenDraft={setDraftId} />}
 
       {/* LP-964 — THE LIST WAITS FOR THE PLAN, AND NOTHING STANDS IN FOR IT (the owner, 2026-10-06/07).
           While the page loads or the AI reads: the loading state alone ("why we still display '6

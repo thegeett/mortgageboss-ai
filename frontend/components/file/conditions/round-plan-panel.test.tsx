@@ -15,12 +15,17 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const plan = vi.hoisted(() => ({ data: undefined as RoundPlan | undefined }));
-const calls = vi.hoisted(() => ({ items: [] as unknown[], steps: [] as unknown[] }));
+const calls = vi.hoisted(() => ({
+  items: [] as unknown[],
+  steps: [] as unknown[],
+  reverts: [] as unknown[],
+}));
 vi.mock("@/lib/api/conditions", () => ({
   useRoundPlan: () => ({ data: plan.data }),
   useConfirmPlan: () => ({ mutate: vi.fn(), isPending: false }),
   useSetNextStep: () => ({ mutate: (body: unknown) => calls.steps.push(body) }),
   useUpdateItem: () => ({ mutate: (body: unknown) => calls.items.push(body) }),
+  useRevertPlan: () => ({ mutate: (id: unknown) => calls.reverts.push(id), isPending: false }),
 }));
 
 import { RoundPlanPanel } from "./round-plan-panel";
@@ -29,6 +34,7 @@ afterEach(() => {
   cleanup();
   calls.items = [];
   calls.steps = [];
+  calls.reverts = [];
 });
 
 const basePlan: RoundPlan = {
@@ -147,8 +153,8 @@ describe("RoundPlanPanel", () => {
     ).toBeTruthy();
     // LP-967 — "Your first moves" replaces the pills: the plan's three drafts are the first thing to do.
     expect(screen.getByText("Your first moves")).toBeTruthy();
-    expect(screen.getByText("Review and send 3 emails.")).toBeTruthy();
-    const confirm = screen.getByRole("button", { name: "Confirm plan and draft 3 emails" });
+    expect(screen.getByText("Review the 3 drafted emails.")).toBeTruthy();
+    const confirm = screen.getByRole("button", { name: "Confirm the plan" });
     expect((confirm as HTMLButtonElement).disabled).toBe(true);
     expect(
       screen.getByText("Confirm 0132’s reading first — one condition still needs you."),
@@ -365,7 +371,9 @@ describe("RoundPlanPanel", () => {
     expect(
       screen.getByText("We draft the email to Title / escrow when you confirm the plan"),
     ).toBeTruthy();
-    expect(screen.getByText("Review the email and send it")).toBeTruthy();
+    expect(
+      screen.getByText("Review the email, and send it once the plan is confirmed"),
+    ).toBeTruthy();
     expect(screen.getByText("Title / escrow sends it back")).toBeTruthy();
     expect(screen.getByText("Link it to this task")).toBeTruthy();
     expect(
@@ -385,7 +393,9 @@ describe("RoundPlanPanel", () => {
     show([condition({ lender_code: "1947", items: [mine] })], unblocked());
     fireEvent.click(screen.getByRole("button", { name: "What you need to do" }));
     expect(screen.getByText("Upload the CD")).toBeTruthy();
-    expect(screen.queryByText("Review the email and send it")).toBeNull();
+    expect(
+      screen.queryByText("Review the email, and send it once the plan is confirmed"),
+    ).toBeNull();
   });
 
   it("first moves: emails, tasks now, tasks waiting, who we wait on, what is in the file", () => {
@@ -412,11 +422,107 @@ describe("RoundPlanPanel", () => {
     );
     expect(
       screen.getByText(
-        "Review and send 1 email, then do 1 task yourself. 1 more task waits on another condition.",
+        "Review the 1 drafted email, then do 1 task yourself. 1 more task waits on another condition.",
       ),
     ).toBeTruthy();
     expect(screen.getByText("Title / escrow.")).toBeTruthy();
     expect(screen.getByText("1582.")).toBeTruthy();
+  });
+
+  // --- LP-968: drafts with the plan, and her edits ------------------------------------------- //
+
+  function open(conditions: Condition[], onOpenDraft = vi.fn()) {
+    plan.data = unblocked();
+    render(
+      <RoundPlanPanel
+        fileId="f1"
+        round={round}
+        conditions={conditions}
+        onOpenCondition={vi.fn()}
+        onConfirmReading={vi.fn()}
+        onOpenDraft={onOpenDraft}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "What you need to do" }));
+    return onOpenDraft;
+  }
+
+  it("a drafted ask opens its draft from the path (LP-968)", () => {
+    const drafted = {
+      ...TITLE_ITEM,
+      draft: { id: "d1", status: "draft", sent_on: null } as ConditionItem["draft"],
+    };
+    const onOpenDraft = open([condition({ lender_code: "1947", items: [drafted] })]);
+    expect(screen.getByText("We drafted the email to Title / escrow")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Review draft" }));
+    expect(onOpenDraft).toHaveBeenCalledWith("d1");
+  });
+
+  it("Not needed waits for a reason, then sends it", () => {
+    open([condition({ lender_code: "1947", items: [TITLE_ITEM] })]);
+    fireEvent.click(screen.getByRole("button", { name: "Not needed" }));
+    const mark = screen.getByRole("button", { name: "Mark not needed" }) as HTMLButtonElement;
+    expect(mark.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Why isn’t it needed?"), {
+      target: { value: "seller CD already in the package" },
+    });
+    expect(mark.disabled).toBe(false);
+    fireEvent.click(mark);
+    expect(calls.items).toEqual([
+      {
+        conditionId: "c1",
+        itemId: "i2",
+        status: "not_needed",
+        note: "seller CD already in the package",
+      },
+    ]);
+  });
+
+  it("Already done needs a note on someone else's task, not on her own", () => {
+    open([condition({ lender_code: "1947", items: [TITLE_ITEM] })]);
+    fireEvent.click(screen.getByRole("button", { name: "Already done" }));
+    expect((screen.getByRole("button", { name: "Mark done" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    cleanup();
+    open([condition({})]); // her own task: "I'll do it"
+    fireEvent.click(screen.getByRole("button", { name: "Already done" }));
+    const mark = screen.getByRole("button", { name: "Mark done" }) as HTMLButtonElement;
+    expect(mark.disabled).toBe(false);
+    fireEvent.click(mark);
+    expect(calls.items).toEqual([{ conditionId: "c1", itemId: "i1", status: "done" }]);
+  });
+
+  it("I'll do this myself is offered on an ask and turns it into her task, with how", () => {
+    open([condition({ lender_code: "1947", items: [TITLE_ITEM] })]);
+    fireEvent.click(screen.getByRole("button", { name: "I’ll do this myself" }));
+    fireEvent.change(screen.getByLabelText("How are you doing it? (optional)"), {
+      target: { value: "calling title" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "I’ll do it" }));
+    expect(calls.items).toEqual([
+      { conditionId: "c1", itemId: "i2", option: "i_will_do_it", note: "calling title" },
+    ]);
+    cleanup();
+    open([condition({})]); // already her task: nothing to take over
+    expect(screen.queryByRole("button", { name: "I’ll do this myself" })).toBeNull();
+  });
+
+  it("a task she dropped stays on the card, crossed out with her reason, and can be undone", () => {
+    const dropped = { ...TITLE_ITEM, status: "not_needed" as const, plan_note: "no fee charged" };
+    open([condition({ lender_code: "1947", items: [dropped] })]);
+    expect(screen.getByText(": no fee charged", { exact: false })).toBeTruthy();
+    expect(
+      screen.queryByText("Review the email, and send it once the plan is confirmed"),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(calls.items).toEqual([{ conditionId: "c1", itemId: "i2", status: "open" }]);
+  });
+
+  it("goes back to the suggested plan for that condition", () => {
+    open([condition({})]);
+    fireEvent.click(screen.getByRole("button", { name: "Go back to the suggested plan" }));
+    expect(calls.reverts).toEqual(["c1"]);
   });
 
   it("says what Confirm will do: the emails, the ready ones and her tasks", () => {
@@ -442,7 +548,9 @@ describe("RoundPlanPanel", () => {
       { ...basePlan, blocking_codes: [], drafts: [basePlan.drafts[1] as RoundPlan["drafts"][0]] },
     );
     expect(screen.getByText("When you confirm, we will:")).toBeTruthy();
-    expect(screen.getByText(/to Title\/attorney \(1947\)\. You review each one/)).toBeTruthy();
+    expect(
+      screen.getByText(/to Title\/attorney \(1947\)\. Until then nothing can be sent/),
+    ).toBeTruthy();
     expect(screen.getByText("Mark 1582 ready")).toBeTruthy();
     expect(
       screen.getByText(/upload the invoice \(0006\); upload the invoice \(0007, after 1228\)/),
