@@ -17,6 +17,7 @@ import {
   firstMoves,
   ownStepPath,
   taskPath,
+  willBeReady,
 } from "@/lib/conditions/plan-path";
 import { OPTION_LABEL } from "@/lib/conditions/plan-words";
 import {
@@ -687,28 +688,6 @@ function FirstMovesBox({ rows, drafts }: { rows: Condition[]; drafts: { codes: s
 
 function capitalise(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
-/**
- * A MIRROR OF `condition_plan.ready_because`, branch for branch (LP-966 review).
- *
- * This read "every live item's OPTION is already_in_file", and the server reads every live item's
- * STATUS, which is a different thing in both directions. A document she links by hand is RECEIVED and
- * only becomes DONE when `check_link` passes it (LP-953), so a condition whose items are all
- * "Already in the file" with one document still being read was promised "ready to send" and did not
- * become ready. And a condition whose tasks she had already marked done was left out of the promise
- * even though the server would move it, because no item's option was `already_in_file`.
- *
- * Keyed on status, so the sentence says what confirm will do. The server returns WHICH step made it
- * ready; the summary only needs whether, so this returns a boolean.
- */
-function willBeReady(condition: Condition, live: ConditionItem[]): boolean {
-  if (condition.next_step === "already_in_file") return true;
-  // A condition-level ask, question or push-back is owed until its send moves it; display-only never
-  // moves. Only "no step of its own" or "I'll do it" can be settled by the items.
-  if (condition.next_step !== null && condition.next_step !== "i_will_do_it") return false;
-  if (live.length === 0) return false;
-  return live.every((item) => item.status === "done");
 }
 
 /** "When you confirm, we will:", from the plan's own drafts and the rows' steps. */

@@ -403,7 +403,9 @@ describe("RoundPlanPanel", () => {
           id: "c4",
           lender_code: "1582",
           sequence: 4,
-          items: [item({ id: "i4", option: "already_in_file" })],
+          // LP-967 review: `status: "done"` beside the option, which is the pair `build_plan` writes
+          // and what `willBeReady` — shared now with the confirm summary — reads.
+          items: [item({ id: "i4", option: "already_in_file", status: "done" })],
         }),
       ],
       { ...basePlan, blocking_codes: [], drafts: [basePlan.drafts[1] as RoundPlan["drafts"][0]] },

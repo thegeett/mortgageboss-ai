@@ -36,6 +36,34 @@ export interface PathStep {
   detail?: string;
 }
 
+/**
+ * A MIRROR OF `condition_plan.ready_because`, branch for branch (LP-966 review).
+ *
+ * This read "every live item's OPTION is already_in_file", and the server reads every live item's
+ * STATUS, which is a different thing in both directions. A document she links by hand is RECEIVED and
+ * only becomes DONE when `check_link` passes it (LP-953), so a condition whose items are all
+ * "Already in the file" with one document still being read was promised "ready to send" and did not
+ * become ready. And a condition whose tasks she had already marked done was left out of the promise
+ * even though the server would move it, because no item's option was `already_in_file`.
+ *
+ * Keyed on status, so the sentence says what confirm will do. The server returns WHICH step made it
+ * ready; the screen only needs whether, so this returns a boolean.
+ *
+ * IT LIVES HERE, EXPORTED, BECAUSE ONE COPY WAS NOT ENOUGH (LP-967 review). The LP-966 review fixed
+ * the confirm summary and left this rule module-private in the panel, so LP-967 wrote a second copy
+ * keyed on the OPTION again for the "Already in the file" box — and the two boxes on one screen
+ * could then disagree about the same condition. Anything asking "will confirm make this ready?"
+ * asks here.
+ */
+export function willBeReady(condition: Condition, live: ConditionItem[]): boolean {
+  if (condition.next_step === "already_in_file") return true;
+  // A condition-level ask, question or push-back is owed until its send moves it; display-only never
+  // moves. Only "no step of its own" or "I'll do it" can be settled by the items.
+  if (condition.next_step !== null && condition.next_step !== "i_will_do_it") return false;
+  if (live.length === 0) return false;
+  return live.every((item) => item.status === "done");
+}
+
 /** The items still on the plan. */
 export function liveItems(condition: Condition): ConditionItem[] {
   return condition.items.filter((item) => item.status !== "not_needed");
@@ -78,8 +106,39 @@ function shouldBe(item: ConditionItem): string | undefined {
   return item.generic || !item.acceptable ? undefined : `It should be: ${item.acceptable}.`;
 }
 
-/** One task's steps, from its own next step. */
+/** A task with nothing left on it: the path from HERE is empty, and an empty card says nothing. */
+const FINISHED: PathStep = {
+  who: "we",
+  whoLabel: "Done",
+  text: "This task is done — nothing left on it",
+};
+
+/**
+ * How many of a task's own steps have ALREADY HAPPENED, from its status (LP-967 review).
+ *
+ * The path is "every step from now until the lender clears it", and it began at "We draft the email"
+ * however far along the task was — so a task whose ask had gone out, or whose document was already
+ * linked, described work that was behind her as though it were ahead. The statuses map onto the steps:
+ * `requested` means the ask went (`mark_sent`), `received` means a document is linked but has not
+ * passed its checks (a hand link is RECEIVED until `check_link`, LP-953), `done` means finished.
+ *
+ * "Already in the file" is NOT trimmed: `build_plan` sets that option and `DONE` together, so trimming
+ * on `done` would empty the one card she most wants to read ("We found X on the file").
+ */
+function alreadyBehind(item: ConditionItem): number {
+  if (item.option === "ask_borrower" || item.option === "ask_third_party") {
+    if (item.status === "requested") return 2; // the draft and the send
+    if (item.status === "received") return 4; // …and it came back, and it is linked
+  }
+  if (item.option === "i_will_do_it" && item.status === "received") return 2;
+  return 0;
+}
+
+const TRACKS_PROGRESS: readonly PlanOption[] = ["ask_borrower", "ask_third_party", "i_will_do_it"];
+
+/** One task's steps, from its own next step and how far it has got. */
 export function taskPath(item: ConditionItem): PathStep[] {
+  if (item.status === "done" && TRACKS_PROGRESS.includes(item.option)) return [FINISHED];
   const steps: PathStep[] = [];
   if (item.waits_on_code) {
     steps.push({
@@ -100,7 +159,12 @@ export function taskPath(item: ConditionItem): PathStep[] {
         ),
         YOU(
           "Review the email and send it",
-          `Once you mark it sent, the condition shows as waiting on ${who}.`,
+          // NOT ALWAYS THIS RECIPIENT (LP-967 review). `_wait_on_first_asked` is explicit that it is
+          // "NOT whoever was emailed first": the owner is the recipient of the condition's FIRST live
+          // ask whose email has gone, "whichever email she happened to mark sent first" — its own
+          // example is 0132, the LO's disclosure before title's wire instructions. So on a condition
+          // that asks two people this step cannot promise its own recipient.
+          `Once you mark it sent, the condition shows as waiting on ${who}. If it asks more than one person, it waits on whichever of them it asks first.`,
         ),
         {
           who: "them",
@@ -148,7 +212,13 @@ export function taskPath(item: ConditionItem): PathStep[] {
       );
       break;
   }
-  return steps;
+  const behind = alreadyBehind(item);
+  return behind === 0
+    ? steps
+    : [
+        ...steps.slice(0, item.waits_on_code ? 1 : 0),
+        ...steps.slice((item.waits_on_code ? 1 : 0) + behind),
+      ];
 }
 
 /** The condition's own step, when it has one. */
@@ -185,7 +255,17 @@ export function ownStepPath(option: PlanOption): PathStep[] {
 
 /** How every condition ends: ready, the package, the lender clears it. Nothing for information only. */
 export function endingPath(condition: Condition): PathStep[] {
-  if (condition.next_step === "information_only") return [];
+  const own = condition.next_step;
+  if (own === "information_only") return [];
+  // A STEP THE TASKS CANNOT SETTLE (LP-967 review). `ready_because` returns None for ANY
+  // condition-level step that is not "Already in the file" or "I'll do it" — so for "Lender is doing
+  // it", a condition-level ask, a push-back or a question to the underwriter, finishing the tasks does
+  // not make the condition Ready and it does not reach `_goes_in`'s package that way. Only
+  // `information_only` was excluded, so the other three promised a route the server denies. What stays
+  // true for them is the end: the lender answers, and she records it.
+  if (own !== null && own !== "already_in_file" && own !== "i_will_do_it") {
+    return [LENDER("The lender clears it", "You record the lender’s answer when it comes back.")];
+  }
   return [
     WE("When every task is done, the condition is ready and goes in the package for the lender"),
     LENDER("The lender clears it", "You record the lender’s answer when it comes back."),
@@ -215,9 +295,10 @@ export function firstMoves(rows: Condition[], drafts: { codes: string[] }[]): Fi
   };
   for (const condition of rows) {
     const items = liveItems(condition);
-    if (items.length > 0 && items.every((item) => item.option === "already_in_file")) {
-      out.handled.push(condition.lender_code ?? "—");
-    }
+    // THE SAME RULE THE CONFIRM SUMMARY USES (LP-967 review). This read every item's OPTION, so a
+    // condition whose hand-linked document was still RECEIVED appeared here as handled while
+    // "Mark … ready" left it out — two boxes on one screen disagreeing about one condition.
+    if (willBeReady(condition, items)) out.handled.push(condition.lender_code ?? "—");
     for (const item of items) {
       if (item.option === "i_will_do_it") {
         if (item.waits_on_code) out.tasksLater += 1;

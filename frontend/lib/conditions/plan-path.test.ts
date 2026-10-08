@@ -100,21 +100,120 @@ describe("plan path", () => {
     expect(endingPath({ next_step: "information_only" } as Condition)).toEqual([]);
   });
 
+  it("a task's path starts where the task is, not at the beginning (LP-967 review)", () => {
+    // The path is "every step from NOW", and it began at "We draft the email" however far along the
+    // task was — so a task whose ask had gone, or whose document was already linked, described work
+    // behind her as though it were ahead.
+    const open = taskPath(item({ status: "open" })).map((s) => s.text);
+    expect(open[0]).toBe("We draft the email to Title / escrow when you confirm the plan");
+
+    // `requested`: the draft and the send have happened (`mark_sent`).
+    const requested = taskPath(item({ status: "requested" })).map((s) => s.text);
+    expect(requested[0]).toBe("Title / escrow sends it back");
+    expect(requested).not.toContain("Review the email and send it");
+
+    // `received`: a document is linked but has not passed its checks — a hand link is RECEIVED until
+    // `check_link` (LP-953), so the check is the only step left.
+    expect(taskPath(item({ status: "received" })).map((s) => s.text)).toEqual([
+      "We check it against what was asked",
+    ]);
+
+    // `done`: nothing left, and an empty card would say nothing.
+    expect(taskPath(item({ status: "done" })).map((s) => s.text)).toEqual([
+      "This task is done — nothing left on it",
+    ]);
+    expect(
+      taskPath(item({ option: "i_will_do_it", status: "received" })).map((s) => s.text),
+    ).toEqual(["We check what you upload"]);
+
+    // A WAITS-ON PREFIX SURVIVES THE TRIM, because it is not one of the task's own steps.
+    const waiting = taskPath(item({ status: "requested", waits_on_code: "1228" }));
+    expect(waiting[0]?.text).toBe("Starts once 1228 is done");
+    expect(waiting[1]?.text).toBe("Title / escrow sends it back");
+
+    // THE CONTROL: "Already in the file" is DONE by construction (`build_plan` sets both together),
+    // so trimming it on `done` would empty the one card she most wants to read.
+    expect(
+      taskPath(item({ option: "already_in_file", status: "done" })).map((s) => s.text),
+    ).toEqual(["We found it on the file", "Check it’s the right document"]);
+  });
+
+  it("does not promise this recipient when the condition asks two people (LP-967 review)", () => {
+    // `_wait_on_first_asked` says it outright: "NOT whoever was emailed first" — the owner is the
+    // recipient of the condition's FIRST live ask whose email has gone, "whichever email she happened
+    // to mark sent first", its own example being 0132's LO disclosure before title's wire
+    // instructions. So this step cannot promise its own recipient.
+    const detail = taskPath(item({}))[1]?.detail ?? "";
+    expect(detail).toContain("waiting on Title / escrow");
+    expect(detail).toContain("whichever of them it asks first");
+  });
+
+  it("the ending only promises the package where the tasks can settle it (LP-967 review)", () => {
+    // `ready_because` returns None for ANY condition-level step that is not "Already in the file" or
+    // "I'll do it", so finishing the tasks does not make such a condition Ready and it never reaches
+    // `_goes_in`'s package that way. Only `information_only` was excluded.
+    for (const own of [
+      "lender_doing_it",
+      "ask_underwriter",
+      "push_back",
+      "ask_borrower",
+    ] as const) {
+      const steps = endingPath({ next_step: own } as Condition);
+      expect(steps.map((s) => s.who)).toEqual(["lender"]);
+      expect(steps[0]?.text).toBe("The lender clears it");
+    }
+    // THE CONTROL: the three the tasks CAN settle still promise the package.
+    for (const own of [null, "i_will_do_it", "already_in_file"] as const) {
+      expect(endingPath({ next_step: own } as Condition).map((s) => s.who)).toEqual([
+        "we",
+        "lender",
+      ]);
+    }
+    expect(endingPath({ next_step: "information_only" } as Condition)).toEqual([]);
+  });
+
   it("first moves count what she does now, what waits, who we wait on, and what is handled", () => {
+    // LP-967 REVIEW: `next_step: null` and, beside `already_in_file`, `status: "done"` — that is the
+    // pair `build_plan` writes. The fixture said option-only with the default `open` status, which no
+    // writer on the server produces, and `handled` was keyed on the option to match it.
     const rows = [
-      { lender_code: "0006", items: [item({ option: "i_will_do_it" })] },
-      { lender_code: "0007", items: [item({ option: "i_will_do_it", waits_on_code: "1228" })] },
-      { lender_code: "1947", items: [item({}), item({ id: "i2" })] },
-      { lender_code: "1582", items: [item({ option: "already_in_file" })] },
+      { lender_code: "0006", next_step: null, items: [item({ option: "i_will_do_it" })] },
+      {
+        lender_code: "0007",
+        next_step: null,
+        items: [item({ option: "i_will_do_it", waits_on_code: "1228" })],
+      },
+      { lender_code: "1947", next_step: null, items: [item({}), item({ id: "i2" })] },
+      {
+        lender_code: "1582",
+        next_step: null,
+        items: [item({ option: "already_in_file", status: "done" })],
+      },
       // Half in the file, half still asked: not handled.
       {
         lender_code: "6637",
+        next_step: null,
         items: [
-          item({ option: "already_in_file" }),
+          item({ option: "already_in_file", status: "done" }),
           item({ id: "i9", performer: "borrower", performers: ["borrower"] }),
         ],
       },
-      { lender_code: "9999", items: [item({ option: "i_will_do_it", status: "not_needed" })] },
+      // ALL in the file but one document still being read: a hand link is RECEIVED until `check_link`
+      // passes it (LP-953), so confirm will NOT mark this ready — and the box must not say it is
+      // handled while the confirm summary leaves it out. Both read `willBeReady` now.
+      {
+        lender_code: "7086",
+        next_step: null,
+        items: [
+          item({ option: "already_in_file", status: "done" }),
+          item({ id: "i7", option: "already_in_file", status: "received" }),
+        ],
+      },
+      {
+        lender_code: "9999",
+        next_step: null,
+        items: [item({ option: "i_will_do_it", status: "not_needed" })],
+      },
     ] as Condition[];
     expect(firstMoves(rows, [{ codes: ["1947"] }])).toEqual({
       emails: 1,
