@@ -220,22 +220,31 @@ async def test_every_row_carries_updated_at_so_lp912s_stale_guard_is_reachable(
 # --------------------------------------------------------------------------- #
 
 
-async def test_open_and_waiting_on_borrower_returns_exactly_the_four_borrower_conditions(
+async def test_open_and_waiting_on_borrower_returns_exactly_the_three_asset_conditions(
     client: AsyncClient, imported: tuple[LoanFile, dict[str, str], str]
 ) -> None:
     """THE ASSERTION THIS TICKET IS NAMED FOR (spec §LP-911 Done-when), re-derived for LP-965.
 
-    The owners are DERIVED, not typed: each is its reading's first item's performer (ADR-419), and
-    nothing on the sheet says so. `7086`, `6132` and `6637` are the three asset conditions, as before.
-    `0132` JOINED THEM: its first item is the borrower re-signing the disclosure, where the retired code
-    map said `broker`. `6178` is `insurance` and `1947`/`6378` are `title` from the lender's own `TC:`
-    prefix, which outranks the reading — so this list is wrong the moment any of those mechanisms breaks.
+    The owners are DERIVED, not typed: each comes from its reading's first item (ADR-419), and nothing
+    on the sheet says so. `7086`, `6132` and `6637` are the three asset conditions. `6178` is
+    `insurance` and `1947`/`6378` are `title` from the lender's own `TC:` prefix, which outranks the
+    reading — so this list is wrong the moment any of those mechanisms breaks.
+
+    `0132` IS NOT ONE OF THEM, AND THE LP-965 REVIEW IS WHY. It briefly was: its first item names the
+    borrower AND the LO, and taking the first performer blindly made it `borrower`. But its ask goes
+    into the LO's email (`condition_plan.recipient_for` relays a borrower+LO item through the LO) and
+    `WAITING_ON` makes it "Waiting on LO" once sent, so calling it the borrower's put the Owner column
+    at odds with both. `owner_from_reading` now applies the same relay, which is also what the retired
+    code map said here.
     """
     loan_file, auth, _round_id = imported
 
     rows = await _list(client, auth, loan_file, lender_status="open", owner="borrower")
 
-    assert sorted(_codes(rows)) == sorted(["7086", "6132", "6637", "0132"])
+    assert sorted(_codes(rows)) == sorted(["7086", "6132", "6637"])
+    # AND IT IS THE BROKER'S, not merely absent above — the half that makes this a relay and not a drop.
+    broker = await _list(client, auth, loan_file, lender_status="open", owner="broker")
+    assert "0132" in _codes(broker)
 
 
 async def test_an_owner_the_reading_cannot_name_is_unknown_with_no_source(
@@ -489,7 +498,9 @@ async def test_the_summary_is_s2_01s_seven_numbers(
     assert summary["open_prior_to_docs"] == 6
     assert summary["open_prior_to_funding"] == 5
     assert summary["by_prep_status"] == {"to_do": 11}
-    assert summary["by_owner"]["borrower"] == 4  # LP-965: 0132 joins the three asset conditions
+    # LP-965 review: the three asset conditions. 0132 is the BROKER's, because its ask is relayed
+    # through the LO (`recipient_for`), which is what "Waiting on LO" says once it is sent.
+    assert summary["by_owner"]["borrower"] == 3
     #: 0 until LP-915 produces one — asserted so the field cannot start reading as measured.
     assert summary["pending_suggestions"] == 0
     assert summary["latest_round"]["round_number"] == 1

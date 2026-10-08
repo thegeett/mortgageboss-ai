@@ -428,3 +428,38 @@ async def test_a_hand_typed_condition_does_not_invent_a_lender_heading(
     assert body["bucket_kind"] == BucketKind.UNKNOWN.value
     assert body["owner_hint"] == OwnerHint.UNKNOWN.value
     assert body["owner_hint_source"] == OwnerHintSource.NONE.value
+
+
+async def test_adding_a_condition_by_hand_asks_for_a_reading(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LP-965 REVIEW — a reading is the only thing that types a condition now, and nothing asked for
+    one here, so a hand-added condition kept no library type at all: no library items, no checks, no
+    LP-955 route, no type question, and the plan fell to its generic path.
+
+    `create_manual_condition`'s own docstring makes the promise this pins — "NOTHING IS LOOKED UP BY
+    ITS CODE (LP-965, ADR-419). Its reading types it, fresh, like any other" — and until this fix
+    nothing delivered it. The broker is pinned because `queue_round_reading` marks the round FAILED
+    ("not_queued") when the task cannot be sent, which would hide the property under test.
+    """
+    import app.api.conditions as conditions_api
+
+    monkeypatch.setattr(conditions_api, "_enqueue_reading", lambda _round_id: True)
+    company, token = await _user(db_session, slug="manual-reading")
+    loan_file = await create_loan_file(db_session, company_id=company.id)
+
+    response = await client.post(
+        f"/api/v1/loan-files/{loan_file.id}/conditions",
+        headers=_auth(token),
+        json={"verbatim_text": "Provide the processing invoice.", "lender_code": "9001"},
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["canonical_type_id"] is None, "untyped until its reading says otherwise"
+
+    round_ = await db_session.scalar(
+        select(ConditionRound).where(ConditionRound.loan_file_id == loan_file.id)
+    )
+    assert round_ is not None
+    await db_session.refresh(round_)
+    assert round_.reading_run is not None, "no reading was asked for, so nothing will ever type it"
+    assert round_.reading_run["state"] == "queued"

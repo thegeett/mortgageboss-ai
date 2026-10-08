@@ -1457,8 +1457,14 @@ async def set_file_lender_route(
     db: DbSession,
     current_user: CurrentUser,
 ) -> FileLenderPublic:
-    """She confirms the file's lender (LP-949). Untyped conditions take its code map; unread ones are
-    read. A key her company has no lender for adds that lender, with its shipped code map."""
+    """She confirms the file's lender (LP-949). Unread conditions are then read; a key her company has
+    no lender for adds that lender.
+
+    IT TYPES NOTHING ITSELF (LP-965 review). This said "untyped conditions take its code map … with its
+    shipped code map", which ADR-419 removed: a type comes only from a reading now, and
+    `set_file_lender`'s own docstring already said so. The lender still decides how a condition gets
+    done there (LP-955 routes) and scopes matching across rounds.
+    """
     from app.services.condition_lender import LenderRefused, set_file_lender
 
     previous_lender_id = loan_file.lender_id
@@ -1533,6 +1539,13 @@ async def add_condition_by_hand(
             db, loan_file=loan_file, payload=payload, actor_user_id=current_user.id
         )
         await db.commit()
+
+    # LP-965 REVIEW — A HAND-ADDED CONDITION HAS TO BE READ, OR IT IS NEVER TYPED. Until LP-965 the
+    # code map typed it as it was created; a type now comes only from a reading, and nothing used to
+    # ask for one here, so it kept no library type at all — no library items, no checks, no LP-955
+    # route, no type question, and the plan fell to its generic path. `queue_unread_reading` reads
+    # only what nobody has read, so this types the new row and touches no other.
+    await queue_unread_reading(db, loan_file_id=loan_file.id)
 
     await db.refresh(condition)
     numbers, _ = await appearances_for_file(db, loan_file_id=loan_file.id)

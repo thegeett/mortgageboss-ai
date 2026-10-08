@@ -125,15 +125,30 @@ _REPLACEABLE_SOURCES = frozenset(
 
 def owner_from_reading(reading: dict[str, Any]) -> OwnerHint | None:
     """LP-965 — the owner a reading implies: the lender when it does the work, else whoever the FIRST
-    item names. The code map used to supply this (ADR-419)."""
+    item names. The code map used to supply this (ADR-419).
+
+    THE LO RELAYS TO THE BORROWER, the same rule `condition_plan.recipient_for` applies to decide which
+    email an ask goes into (LP-965 review). Taking the first performer blindly made 0132 — whose first
+    item names the borrower AND the LO — owned by the BORROWER, while its ask goes into the LO's email
+    and `WAITING_ON` makes it "Waiting on LO" once sent. Two server-derived facts about one condition
+    disagreed, and the retired code map's answer (broker) was the one that matched where the work
+    actually goes. The rule is mirrored rather than imported because `recipient_for` takes an item ROW
+    and this takes the reading's dict.
+    """
     if reading.get("lender_doing_it"):
         return OwnerHint.LENDER
     for item in reading.get("items") or []:
+        performers: list[Performer] = []
         for value in item.get("performers") or []:
             try:
-                return _PERFORMER_TO_OWNER.get(Performer(str(value)))
+                performers.append(Performer(str(value)))
             except ValueError:
                 return None
+        if not performers:
+            continue
+        if Performer.LO in performers:
+            return OwnerHint.BROKER
+        return _PERFORMER_TO_OWNER.get(performers[0])
     return None
 
 

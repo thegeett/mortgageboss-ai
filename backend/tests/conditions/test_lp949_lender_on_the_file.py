@@ -16,7 +16,12 @@ import pytest
 from app.ai.client import AICompletion
 from app.conditions.lender_detect import detect_lender
 from app.models import Company
-from app.models.condition import Condition, ConditionReadingStatus
+from app.models.condition import (
+    Condition,
+    ConditionReadingStatus,
+    OwnerHint,
+    OwnerHintSource,
+)
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_item import ConditionItem
 from app.models.condition_round import ConditionRound, ConditionSheetFormat, ConditionSourceKind
@@ -349,6 +354,60 @@ async def test_a_fresh_reading_replaces_an_earlier_type(
 
     await read_round(db_session, round_id=round_.id)
     assert conditions["1228"].canonical_type_id == "PA-03"
+
+
+async def test_a_reading_that_chooses_no_type_clears_an_earlier_one(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LP-965 review — the OTHER HALF of `test_a_fresh_reading_replaces_an_earlier_type` above.
+
+    That one pins type → type. This pins type → NONE, which is the direction a stale value survives
+    in: measured, leaving `canonical_type_id` alone when the model chooses nothing passed every test
+    in this file and in `test_condition_reading.py`. It is reachable through "Read again" (LP-952) on
+    a condition an earlier reading typed, and a stale type is worse than none — it brings library
+    items, checks and an LP-955 route that the current reading does not support.
+    """
+    calls: list[str] = []
+    monkeypatch.setattr(condition_reading, "complete", _no_type_model(calls))
+    loan_file, round_ = await _file_without_lender(db_session)
+    conditions = await _by_code(db_session, loan_file)
+    conditions["1228"].canonical_type_id = "PA-03"
+    await db_session.flush()
+
+    await read_round(db_session, round_id=round_.id)
+
+    assert calls, "the model was asked, so the clearing is the reading's answer and not a no-op"
+    assert conditions["1228"].canonical_type_id is None
+
+
+async def test_a_reading_never_overwrites_her_owner_or_the_lenders_own_marker(
+    db_session: AsyncSession, model: list[str]
+) -> None:
+    """LP-965 review — `_REPLACEABLE_SOURCES` says in a comment that "the lender's own marker (prefix,
+    heading) and her choice (manual) are never replaced", and nothing enforced it: widening the set to
+    every `OwnerHintSource` passed all 30 tests in this file and `test_condition_reading.py`.
+
+    Her choice outranking every inference is ADR A2 (LP-912) — the reason the hint and her override are
+    separate fields at all — so a reading silently rewriting it would undo that design rather than a
+    detail.
+    """
+    loan_file, round_ = await _file_without_lender(db_session)
+    conditions = await _by_code(db_session, loan_file)
+    hers, marked = conditions["1228"], conditions["0006"]
+    hers.owner_hint, hers.owner_hint_source = OwnerHint.TITLE, OwnerHintSource.MANUAL
+    marked.owner_hint, marked.owner_hint_source = OwnerHint.BROKER, OwnerHintSource.PREFIX
+    await db_session.flush()
+
+    await read_round(db_session, round_id=round_.id)
+
+    assert (hers.owner_hint, hers.owner_hint_source) == (OwnerHint.TITLE, OwnerHintSource.MANUAL)
+    assert (marked.owner_hint, marked.owner_hint_source) == (
+        OwnerHint.BROKER,
+        OwnerHintSource.PREFIX,
+    )
+    # THE POSITIVE CONTROL: the reading DOES fill a hint where the sheet named nobody, so the two
+    # assertions above cannot pass because the mechanism never ran.
+    assert any(c.owner_hint_source is OwnerHintSource.READING for c in conditions.values())
 
 
 async def test_nothing_is_remembered_per_lender_code(
