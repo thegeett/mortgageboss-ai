@@ -154,7 +154,7 @@ export function ConditionsListView({
   // because she closed the previous one.
   const [hiddenPanelRoundId, setHiddenPanelRoundId] = useState<string | null>(null);
   const [panelRefusal, setPanelRefusal] = useState<string | null>(null);
-  // LP-964 — the round whose held-back list she opened early ("Show them now", or Hide on the plan).
+  // LP-964 — the round whose held-back list she opened early ("Show them now" after a failed reading).
   // BY ROUND ID, like `hiddenPanelRoundId`: the next sheet's plan holds its list back again.
   const [listOpenRoundId, setListOpenRoundId] = useState<string | null>(null);
 
@@ -180,7 +180,7 @@ export function ConditionsListView({
   const readingRunning =
     readingQuery.data?.state === "queued" || readingQuery.data?.state === "reading";
   // Only for a reading that FAILED. With the plan on screen there is no second list, not even a link to
-  // one (the owner: "once plan confirm then show it"); Hide on the plan is the way past it.
+  // one (the owner: "once plan confirm then show it"). LP-966 removed the plan's Hide.
   const showHeldBackLine = gatePhase === "reading" && !readingRunning;
   const openRound = rounds.find((round) => round.id === openRoundId) ?? null;
   const rows = filtered.data?.rows ?? [];
@@ -401,7 +401,6 @@ export function ConditionsListView({
           conditions={allRows}
           onOpenCondition={setOpenConditionId}
           onConfirmReading={setConfirmReadingId}
-          onHide={() => setListOpenRoundId(newestImported.id)}
         />
       ) : null}
 
@@ -419,8 +418,8 @@ export function ConditionsListView({
           While the page loads or the AI reads: the loading state alone ("why we still display '6
           conditions are on the file…' while loading plan?"). While the plan waits: the plan alone, with
           no line or link to a second copy of the same conditions ("showing condition again makes
-          confusing… once plan confirm then show it"). The list appears when the plan is confirmed,
-          or when she hides the plan.
+          confusing… once plan confirm then show it"). The list appears when the plan is confirmed
+          (the plan has no Hide since LP-966).
 
           ONE EXCEPTION, A READING THAT FAILED. There is no plan then, so nothing is duplicated, and the
           reading card's Read again may fail too; "Show them now" is how she still reaches the list.

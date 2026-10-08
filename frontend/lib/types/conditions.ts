@@ -1057,6 +1057,8 @@ export interface LibraryType {
   /** `Fannie Mae B3-4.3-09`, or "Lender requirement". */
   rule_label: string;
   rule_note: string | null;
+  /** LP-966 — how this kind of condition is usually handled; the plan's "Good to know". */
+  playbook: string;
 }
 
 // --- Stage 3: the plan (LP-920) ---------------------------------------------------------------- //

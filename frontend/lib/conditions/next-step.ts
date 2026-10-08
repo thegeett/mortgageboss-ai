@@ -49,7 +49,7 @@ export function isDisplayOnly(condition: Condition): boolean {
 }
 
 /** One email per recipient, as the server groups them (`recipient_for`): an LO item goes in the LO email. */
-function recipient(item: ConditionItem): Performer {
+export function recipient(item: ConditionItem): Performer {
   const performers = item.performers.length > 0 ? item.performers : [item.performer];
   if (performers.includes("lo")) return "lo";
   return performers[0] ?? item.performer;

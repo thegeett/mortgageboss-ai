@@ -793,6 +793,9 @@ class LibraryTypePublic(BaseModel):
     label: str
     rule_label: str
     rule_note: str | None
+    #: LP-966 — the library's note on how this kind of condition is usually handled ("Usually already in
+    #: the file from when credit was pulled; point to it."), shown as the plan's "Good to know".
+    playbook: str
 
     @classmethod
     def for_id(cls, type_id: str | None) -> "LibraryTypePublic | None":
@@ -805,6 +808,7 @@ class LibraryTypePublic(BaseModel):
             label=condition_type.label,
             rule_label=condition_type.rule.label,
             rule_note=condition_type.rule.note,
+            playbook=condition_type.playbook,
         )
 
 

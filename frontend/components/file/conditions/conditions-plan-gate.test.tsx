@@ -229,7 +229,7 @@ describe("LP-964 — one step at a time after Import", () => {
     expect(screen.getByLabelText("Loading the plan")).toBeTruthy();
     expect(screen.queryByText(LENDERS_WORDS)).toBeNull();
     // Nothing about the conditions while loading, not even the one-line count (the owner).
-    expect(screen.queryByText(/on the file/)).toBeNull();
+    expect(screen.queryByText(/conditions? (is|are) on the file/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Show them now" })).toBeNull();
   });
 
@@ -240,7 +240,7 @@ describe("LP-964 — one step at a time after Import", () => {
     show();
 
     expect(screen.getByText(/Reading 1 condition…/)).toBeTruthy();
-    expect(screen.queryByText(/on the file/)).toBeNull();
+    expect(screen.queryByText(/conditions? (is|are) on the file/)).toBeNull();
     expect(screen.queryByText(LENDERS_WORDS)).toBeNull();
   });
 
@@ -266,22 +266,19 @@ describe("LP-964 — one step at a time after Import", () => {
     expect(screen.queryByText(LENDERS_WORDS)).toBeNull();
     expect(screen.queryByPlaceholderText(/Search/)).toBeNull();
     // No second copy and no link to one: the plan alone (the owner, 2026-10-07).
-    expect(screen.queryByText(/on the file/)).toBeNull();
+    expect(screen.queryByText(/conditions? (is|are) on the file/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Show them now" })).toBeNull();
   });
 
-  it("opens the list when she hides the plan", () => {
+  it("the plan has no Hide, so the list waits for Confirm (LP-966)", () => {
     state.rows = [condition(read)];
     state.reading = { data: done, isPending: false };
     state.plan = { data: plan(), isPending: false };
     show();
 
-    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
-
-    expect(screen.queryByText("Plan for round 1")).toBeNull();
-    expect(screen.getByText(LENDERS_WORDS)).toBeTruthy();
-    // The proposals were never confirmed, so the list does not draw them as decided.
-    expect(screen.getByText("Plan not confirmed yet")).toBeTruthy();
+    expect(screen.getByText("Plan for round 1")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Hide" })).toBeNull();
+    expect(screen.queryByText(LENDERS_WORDS)).toBeNull();
   });
 
   it("on round 2, a failed reading's line names the earlier rounds' conditions", () => {
@@ -307,11 +304,12 @@ describe("LP-964 — one step at a time after Import", () => {
         last_seen_round_id: "r2",
       }),
     ];
-    state.reading = { data: done, isPending: false };
-    state.plan = { data: plan({ round_id: "r2", round_number: 2 }), isPending: false };
+    // Reached through the one way left to open the list early: a failed reading's "Show them now".
+    state.reading = { data: { state: "failed", unread: 1, error: "stalled" }, isPending: false };
+    state.plan = { data: plan({ round_id: "r2", round_number: 2, planned: 0 }), isPending: false };
     show([round({ id: "r2", round_number: 2 }), round()]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show them now" }));
 
     expect(screen.getAllByText("Plan not confirmed yet")).toHaveLength(1);
   });

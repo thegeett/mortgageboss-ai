@@ -435,3 +435,9 @@ async def test_the_library_default_confirms_the_types_items(
     assert (
         body["library_type"]["label"] == "DI-01 State attorney and insurance preference disclosure"
     )
+    # LP-966 — the library's note, the plan's "Good to know", travels with the type.
+    from app.conditions.library import load_library
+
+    di01 = load_library().get("DI-01")
+    assert di01 is not None and di01.playbook
+    assert body["library_type"]["playbook"] == di01.playbook
