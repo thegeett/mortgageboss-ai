@@ -26,7 +26,12 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.condition import Condition, ConditionLenderStatus, ConditionReadingStatus
+from app.models.condition import (
+    Condition,
+    ConditionLenderStatus,
+    ConditionReadingSource,
+    ConditionReadingStatus,
+)
 from app.models.condition_round import ConditionRound
 from app.models.helpers import only_active
 
@@ -69,6 +74,115 @@ async def unread_count(db: AsyncSession, *, loan_file_id: Any) -> int:
     return int(count or 0)
 
 
+#: LP-973 — conditions read without the AI, and untouched since: offered "Read again".
+WITHOUT_AI = "without_ai"
+
+
+async def read_without_ai(db: AsyncSession, *, loan_file_id: Any) -> list[Condition]:
+    """LP-973 — the file's conditions the AI did NOT read, that a fresh reading can safely replace.
+
+    WHY THESE ARE NOT "UNREAD". When the model call fails (an expired AWS login, a timeout), `read_round`
+    still reads every condition, from the library alone: `reading_source` LIBRARY, `NEEDS_CONFIRMATION`
+    (`compose_reading` never passes the bar without the AI), and since LP-965 no type, so at most one
+    generic task from the sheet's owner hint. The round is recorded as read, nothing is unread, and
+    LP-952's Read again (which reads only `unread`) had nothing to offer.
+
+    SAFE MEANS NOTHING OF HERS IS LOST. A condition qualifies only while it is exactly what the fallback
+    left: not confirmed (her answer wins over any reading), every task OPEN and from the reading (none
+    she added, none asked, answered or marked), and no plan change of hers (`condition_plan_changed`,
+    other than an earlier Read again's own). Anything else she has worked on, and keeps.
+    """
+    from app.models.condition_event import ConditionEvent, ConditionEventKind
+    from app.models.condition_item import ConditionItem
+    from app.models.condition_vocabulary import ConditionItemOrigin, ConditionItemStatus
+
+    candidates = list(
+        await db.scalars(
+            only_active(
+                select(Condition).where(
+                    Condition.loan_file_id == loan_file_id,
+                    Condition.reading_source == ConditionReadingSource.LIBRARY,
+                    Condition.reading_status == ConditionReadingStatus.NEEDS_CONFIRMATION,
+                    Condition.lender_status != ConditionLenderStatus.SUPERSEDED,
+                ),
+                Condition,
+            ).order_by(Condition.sequence, Condition.created_at)
+        )
+    )
+    if not candidates:
+        return []
+    ids = [condition.id for condition in candidates]
+    worked: set[Any] = set()
+    for item in await db.scalars(
+        select(ConditionItem).where(
+            ConditionItem.condition_id.in_(ids), ConditionItem.deleted_at.is_(None)
+        )
+    ):
+        if (
+            item.status is not ConditionItemStatus.OPEN
+            or item.origin is not ConditionItemOrigin.READING
+        ):
+            worked.add(item.condition_id)
+    for event in await db.scalars(
+        select(ConditionEvent).where(
+            ConditionEvent.condition_id.in_(ids),
+            ConditionEvent.kind == ConditionEventKind.CONDITION_PLAN_CHANGED,
+        )
+    ):
+        if (event.detail or {}).get("change") != READ_AGAIN_CHANGE:
+            worked.add(event.condition_id)
+    return [condition for condition in candidates if condition.id not in worked]
+
+
+#: The plan-change a Read again records; the one plan change that does not make a condition "worked".
+READ_AGAIN_CHANGE = "read_again"
+
+
+async def clear_for_reading(
+    db: AsyncSession, *, conditions: list[Condition], actor_user_id: Any
+) -> None:
+    """LP-973 — put conditions read without the AI back to UNREAD, so `read_round` reads them again.
+
+    Their reading and its plan go: the reading is replaced, and the fallback's generic task is soft-
+    deleted, because `build_plan` plans only a condition with no task and no step (`_is_planned`) and
+    would otherwise keep the guess. The drafts follow (`follow_drafts`), so a removed task leaves the
+    email it was in. Each condition records a `condition_plan_changed` `read_again`. Flushes; the caller
+    commits.
+    """
+    from app.models.condition_event import ConditionEvent, ConditionEventKind
+    from app.models.condition_item import ConditionItem
+    from app.services.condition_plan import follow_drafts
+
+    now = _now()
+    for condition in conditions:
+        removed = 0
+        for item in await db.scalars(
+            select(ConditionItem).where(
+                ConditionItem.condition_id == condition.id, ConditionItem.deleted_at.is_(None)
+            )
+        ):
+            item.deleted_at = now
+            removed += 1
+        condition.next_step = None
+        condition.reading = None
+        condition.reading_source = None
+        condition.reading_confidence = None
+        condition.reading_status = ConditionReadingStatus.UNREAD
+        db.add(
+            ConditionEvent(
+                company_id=condition.company_id,
+                loan_file_id=condition.loan_file_id,
+                condition_id=condition.id,
+                round_id=condition.last_seen_round_id,
+                kind=ConditionEventKind.CONDITION_PLAN_CHANGED,
+                actor_user_id=actor_user_id,
+                detail={"change": READ_AGAIN_CHANGE, "items_removed": removed},
+            )
+        )
+        await db.flush()
+        await follow_drafts(db, condition=condition, actor_user_id=actor_user_id)
+
+
 def _state_of(run: dict[str, Any] | None, *, now: datetime) -> tuple[str | None, str | None]:
     """The recorded state and error, with a stale queued/running one reported as failed."""
     if not run:
@@ -98,6 +212,7 @@ async def reading_state(db: AsyncSession, *, round_: ConditionRound) -> dict[str
     second one.
     """
     unread = await unread_count(db, loan_file_id=round_.loan_file_id)
+    without_ai = len(await read_without_ai(db, loan_file_id=round_.loan_file_id))
     source = (
         await running_round(db, loan_file_id=round_.loan_file_id)
         or await newest_imported_round(db, loan_file_id=round_.loan_file_id)
@@ -113,7 +228,15 @@ async def reading_state(db: AsyncSession, *, round_: ConditionRound) -> dict[str
         state = DONE
     if state is None:
         state = DONE
-    return {"state": state, "unread": unread, "error": error if state == FAILED else None}
+    if state == DONE and without_ai:
+        # LP-973 — read, but some of it without the AI: offer to read those again.
+        state = WITHOUT_AI
+    return {
+        "state": state,
+        "unread": unread,
+        "without_ai": without_ai,
+        "error": error if state == FAILED else None,
+    }
 
 
 def is_running(round_: ConditionRound) -> bool:

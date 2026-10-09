@@ -115,6 +115,7 @@ function condition(overrides: Partial<Condition>): Condition {
     bucket_kind: "prior_to_funding",
     verbatim_text: "Provide copy of invoice for credit report.",
     sequence: 1,
+    first_round_id: "r1",
     last_seen_round_id: "r1",
     reading_status: "ready",
     reading: {
@@ -166,15 +167,15 @@ function unblocked(): RoundPlan {
 
 describe("RoundPlanPanel", () => {
   it("says what to do on the screen and holds Confirm while 0132's reading needs her", () => {
-    show([]);
+    show([condition({}), condition({ id: "c2", lender_code: "0132", sequence: 2 })]);
     // LP-974 — the mockup's heading and sentence; the three numbered how-to steps are gone.
-    expect(screen.getByText(/Here’s how we’ll get\s+these 0 conditions\s+cleared/)).toBeTruthy();
+    expect(screen.getByText("Here’s how we’ll get these 2 conditions cleared")).toBeTruthy();
     expect(screen.getByText("Plan for round 1")).toBeTruthy();
     expect(screen.getByText(/then confirm\. Nothing is sent until you do\./)).toBeTruthy();
     expect(screen.queryByText(/Open each condition/)).toBeNull();
     // LP-967 — "Your first moves" replaces the pills: the plan's three drafts are the first thing to do.
     expect(screen.getByText("Your first moves")).toBeTruthy();
-    expect(screen.getByText("Review the 3 drafted emails.")).toBeTruthy();
+    expect(screen.getByText(/^Review the 3 drafted emails/)).toBeTruthy();
     const confirm = screen.getByRole("button", { name: "Confirm the plan" });
     expect((confirm as HTMLButtonElement).disabled).toBe(true);
     expect(
@@ -869,6 +870,43 @@ describe("RoundPlanPanel", () => {
       opened([condition({ items: [item({}), { ...TITLE_ITEM }] })]);
       const path = within(screen.getByRole("list", { name: "The plan, step by step" }));
       expect(path.getAllByRole("button", { name: /Add document/ })).toHaveLength(1);
+    });
+  });
+
+  describe("LP-973 — round 2's plan is what is new on its sheet", () => {
+    const seenAgain = (id: string, code: string) =>
+      condition({ id, lender_code: code, sequence: 9, first_round_id: "r0" });
+
+    it("lists only new conditions, and counts the ones that keep their plan", () => {
+      show([condition({}), seenAgain("c8", "1947"), seenAgain("c9", "6378")], unblocked());
+      expect(screen.getByRole("button", { name: "0006" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "1947" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "6378" })).toBeNull();
+      expect(screen.getByText("2 conditions from earlier rounds keep their plan.")).toBeTruthy();
+      expect(screen.getByText("Here’s how we’ll get this condition cleared")).toBeTruthy();
+      expect(screen.getByText(/^1 new condition/)).toBeTruthy();
+    });
+
+    it("keeps a carried condition that blocks Confirm, so the refusal names a row on screen", () => {
+      show([condition({}), seenAgain("c8", "0132")]); // basePlan blocks on 0132
+      expect(screen.getByRole("button", { name: "0132" })).toBeTruthy();
+      expect(
+        screen.getByText("Confirm 0132’s reading first — one condition still needs you."),
+      ).toBeTruthy();
+      expect(screen.queryByText(/from earlier rounds/)).toBeNull();
+    });
+
+    it("says so when nothing on the sheet is new", () => {
+      show([seenAgain("c8", "1947")], unblocked());
+      expect(screen.getByText("Nothing new to plan on this sheet")).toBeTruthy();
+      expect(screen.getByText("1 condition from earlier rounds keeps its plan.")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Confirm the plan" })).toBeTruthy();
+    });
+
+    it("round 1 has nothing carried, and says nothing about it (the control)", () => {
+      show([condition({}), condition({ id: "c2", lender_code: "1947", sequence: 2 })], unblocked());
+      expect(screen.queryByText(/from earlier rounds/)).toBeNull();
+      expect(screen.getByText("Here’s how we’ll get these 2 conditions cleared")).toBeTruthy();
     });
   });
 });

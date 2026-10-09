@@ -2193,10 +2193,14 @@ class ReadingStatePublic(BaseModel):
     `state`: `queued`, `reading`, `done`, `failed` (a queued or running reading too old to be alive is
     failed, error `stalled`), or `not_queued` (conditions unread and nothing queued: offer to read them).
     `unread` counts the FILE's unread conditions, since a reading reads them all.
+
+    LP-973: `without_ai` (state and count) — read, but from the library alone because the AI call
+    failed, and untouched since (`read_without_ai`): offer Read again.
     """
 
-    state: Literal["queued", "reading", "done", "failed", "not_queued"]
+    state: Literal["queued", "reading", "done", "failed", "not_queued", "without_ai"]
     unread: int
+    without_ai: int = 0
     #: A closed-ish reason: `stalled`, `not_queued`, or an exception's TYPE name. Never message text.
     error: str | None = None
 

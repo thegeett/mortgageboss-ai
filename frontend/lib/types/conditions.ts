@@ -1374,8 +1374,13 @@ export interface WrongFile {
 
 /** LP-952 — where the reading of a round's file stands. `unread` counts the FILE's unread conditions. */
 export interface ReadingState {
-  state: "queued" | "reading" | "done" | "failed" | "not_queued";
+  state: "queued" | "reading" | "done" | "failed" | "not_queued" | "without_ai";
   unread: number;
+  /**
+   * LP-973 — conditions read from the library alone because the AI call failed, and untouched since:
+   * what Read again reads when nothing is unread.
+   */
+  without_ai?: number;
   /** `stalled`, `not_queued`, or an error type name. Never message text. */
   error: string | null;
 }

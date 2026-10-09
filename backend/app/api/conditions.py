@@ -1009,15 +1009,23 @@ async def get_reading_state(round_: ScopedRound, db: DbSession) -> ReadingStateP
 
 
 @rounds_router.post("/{round_id}/read", response_model=ReadingStatePublic)
-async def read_round_again(round_: ScopedRound, db: DbSession) -> ReadingStatePublic:
+async def read_round_again(
+    round_: ScopedRound, db: DbSession, current_user: CurrentUser
+) -> ReadingStatePublic:
     """LP-952 — "Read conditions" / "Read again": read the file's UNREAD conditions now.
 
     Refused (409) while a reading is queued or running, and when nothing is unread. It never re-reads a
     read or confirmed condition: the task reads only `unread` ones (`read_round`). The reading runs on the
     file's newest imported round, which is the one `read_round` and the plan are built around.
+
+    LP-973 — WITH NOTHING UNREAD, IT READS AGAIN WHAT THE AI DID NOT READ: conditions the fallback read
+    from the library and nobody has touched since (`read_without_ai`) are put back to unread
+    (`clear_for_reading`) and read with the rest. Still never a confirmed or worked-on condition.
     """
     from app.services.condition_reading_state import (
+        clear_for_reading,
         newest_imported_round,
+        read_without_ai,
         reading_state,
         running_round,
         unread_count,
@@ -1036,7 +1044,11 @@ async def read_round_again(round_: ScopedRound, db: DbSession) -> ReadingStatePu
             status.HTTP_409_CONFLICT,
             detail={"message": "These conditions are being read now.", "code": "reading_running"},
         )
-    if not await unread_count(db, loan_file_id=round_.loan_file_id):
+    unread = await unread_count(db, loan_file_id=round_.loan_file_id)
+    again = [] if unread else await read_without_ai(db, loan_file_id=round_.loan_file_id)
+    if again:
+        await clear_for_reading(db, conditions=again, actor_user_id=current_user.id)
+    elif not unread:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             detail={

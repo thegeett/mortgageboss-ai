@@ -17,6 +17,11 @@ function conditions(count: number): string {
  * round 1, imported before the reading existed) looked the same as one running. This says which, polls
  * while it runs, and offers Read conditions / Read again when nothing is running and conditions are
  * unread. Nothing renders once every condition is read.
+ *
+ * LP-973 — AND WHEN THE AI COULD NOT READ THEM. A failed model call does not leave conditions unread:
+ * `read_round` reads each from the library alone, so the run ends "done" and nothing above offered a
+ * way back (an expired AWS login, the owner's case). The server now reports those as `without_ai`
+ * (only the ones nobody has worked on since), and Read again reads them with the AI.
  */
 export function ReadingStatus({ fileId, roundId }: { fileId: string; roundId: string }) {
   // The hook polls while it runs, and refetches the plan and the conditions when it ends.
@@ -37,7 +42,7 @@ export function ReadingStatus({ fileId, roundId }: { fileId: string; roundId: st
         readAgain.mutate(roundId, { onError: (err) => setError(getErrorMessage(err)) });
       }}
     >
-      {data.state === "failed" ? "Read again" : "Read conditions"}
+      {data.state === "failed" || data.state === "without_ai" ? "Read again" : "Read conditions"}
     </Button>
   );
 
@@ -60,6 +65,22 @@ export function ReadingStatus({ fileId, roundId }: { fileId: string; roundId: st
               ? "The reading could not be started."
               : "The reading failed."}{" "}
           {conditions(data.unread)} still unread.
+        </p>
+        {read}
+      </div>
+    );
+  } else if (data.state === "without_ai") {
+    const count = data.without_ai ?? 0;
+    body = (
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p>
+          <span className="font-medium text-foreground">
+            {conditions(count)} {count === 1 ? "was" : "were"} read without the AI.
+          </span>{" "}
+          The AI’s reading failed, so{" "}
+          {count === 1 ? "its plan is a guess" : "their plans are guesses"} from the sheet. Read
+          again to have the AI read {count === 1 ? "it" : "them"}; anything you have already worked
+          on is kept.
         </p>
         {read}
       </div>

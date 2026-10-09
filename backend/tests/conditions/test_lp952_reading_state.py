@@ -73,7 +73,7 @@ async def test_lf_dh8v_round_one_reads_as_not_queued(db_session: AsyncSession) -
     loan_file, round_ = await _file_without_lender(db_session)
     state = await reading_state(db_session, round_=round_)
     conditions = await _by_code(db_session, loan_file)
-    assert state == {"state": NOT_QUEUED, "unread": len(conditions), "error": None}
+    assert state == {"state": NOT_QUEUED, "unread": len(conditions), "without_ai": 0, "error": None}
 
 
 async def test_a_reading_goes_queued_reading_done(
@@ -87,7 +87,7 @@ async def test_a_reading_goes_queued_reading_done(
     assert (await reading_state(db_session, round_=round_))["state"] == READING
     await read_round(db_session, round_id=round_.id)
     state = await reading_state(db_session, round_=round_)
-    assert state == {"state": DONE, "unread": 0, "error": None}
+    assert state == {"state": DONE, "unread": 0, "without_ai": 0, "error": None}
     assert round_.reading_run is not None and round_.reading_run["state"] == DONE
     assert not is_running(round_)
 
@@ -380,6 +380,7 @@ async def test_a_failure_with_nothing_left_unread_offers_nothing(
     assert await reading_state(db_session, round_=round_) == {
         "state": DONE,
         "unread": 0,
+        "without_ai": 0,
         "error": None,
     }
 

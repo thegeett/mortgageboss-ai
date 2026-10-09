@@ -107,9 +107,19 @@ export function RoundPlanPanel({
   // EVERY CONDITION ON THE ROUND (the owner, 2026-10-08: "show every condition in the plan"). Rows with
   // no task and no step used to be filtered out, so a failed reading left the table short of its own
   // count, and "Confirm 1947's reading first" named a condition that was not on the screen to click.
-  const rows = conditions
-    .filter((condition) => condition.last_seen_round_id === round.id)
-    .sort((a, b) => a.sequence - b.sequence);
+  //
+  // LP-973 — ONLY WHAT IS NEW ON THIS SHEET (the owner, 2026-10-09: "new only"). A condition seen again
+  // keeps the plan it already had (`build_plan`'s carry-over), confirmed on its own round and often
+  // with its email already out, so listing it here asked her to check and confirm last week's work
+  // beside what is new. It is counted in one line instead, and is in the list once she confirms.
+  // A CARRIED CONDITION THAT BLOCKS CONFIRM STAYS: "Confirm 0132's reading first" must name a row she
+  // can click, the same reason every condition is shown above.
+  const blocking = new Set(data.blocking_codes);
+  const onRound = conditions.filter((condition) => condition.last_seen_round_id === round.id);
+  const shown = (condition: Condition) =>
+    condition.first_round_id === round.id || blocking.has(condition.lender_code ?? "");
+  const rows = onRound.filter(shown).sort((a, b) => a.sequence - b.sequence);
+  const carried = onRound.filter((condition) => !shown(condition)).length;
   const blocked = data.blocking_codes.length > 0;
   const emails = data.drafts.length;
 
@@ -172,20 +182,33 @@ export function RoundPlanPanel({
             <span>Plan for round {data.round_number ?? ""}</span>
             <span aria-hidden>·</span>
             <span>
-              {data.planned} {data.planned === 1 ? "condition" : "conditions"} · sheet dated{" "}
+              {rows.length} {carried > 0 ? "new " : ""}
+              {rows.length === 1 ? "condition" : "conditions"} · sheet dated{" "}
               {usDate(data.round_date)} ·{" "}
               {data.nothing_sent ? "nothing sent yet" : "some emails were sent"}
             </span>
           </p>
           <h2 className="text-xl font-semibold text-foreground">
-            Here’s how we’ll get{" "}
-            {rows.length === 1 ? "this condition" : `these ${rows.length} conditions`} cleared
+            {rows.length === 0
+              ? "Nothing new to plan on this sheet"
+              : `Here’s how we’ll get ${rows.length === 1 ? "this condition" : `these ${rows.length} ${carried > 0 ? "new " : ""}conditions`} cleared`}
           </h2>
-          <p className="max-w-prose text-sm text-foreground-2">
-            For each condition we worked out what it needs, prepared the emails we could, and laid
-            out every step until the lender clears it. Check the plan, change a step if it’s wrong,
-            then confirm. Nothing is sent until you do.
-          </p>
+          {rows.length > 0 ? (
+            <p className="max-w-prose text-sm text-foreground-2">
+              For each condition we worked out what it needs, prepared the emails we could, and laid
+              out every step until the lender clears it. Check the plan, change a step if it’s
+              wrong, then confirm. Nothing is sent until you do.
+            </p>
+          ) : null}
+          {carried > 0 ? (
+            <p className="max-w-prose text-sm text-foreground-2">
+              <strong className="font-semibold text-foreground">
+                {carried} {carried === 1 ? "condition" : "conditions"} from earlier rounds{" "}
+                {carried === 1 ? "keeps its" : "keep their"} plan.
+              </strong>{" "}
+              You’ll see {carried === 1 ? "it" : "them"} in the list after you confirm.
+            </p>
+          ) : null}
         </div>
       </div>
 

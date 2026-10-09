@@ -53,4 +53,21 @@ describe("ReadingStatus", () => {
     const { container } = show({ state: "done", unread: 0, error: null });
     expect(container.innerHTML).toBe("");
   });
+
+  it("LP-973: read without the AI, it says so and offers Read again", () => {
+    // The state the server reports when the model call failed and the library read them: nothing is
+    // unread, so LP-952's own branches offered nothing.
+    show({ state: "without_ai", unread: 0, without_ai: 6, error: null });
+    expect(screen.getByText("6 conditions were read without the AI.")).toBeTruthy();
+    expect(screen.getByText(/their plans are guesses from the sheet/)).toBeTruthy();
+    expect(screen.getByText(/anything you have already worked on is kept/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Read again" }));
+    expect(state.read).toEqual(["r2"]);
+  });
+
+  it("LP-973: one condition reads in the singular", () => {
+    show({ state: "without_ai", unread: 0, without_ai: 1, error: null });
+    expect(screen.getByText("1 condition was read without the AI.")).toBeTruthy();
+    expect(screen.getByText(/its plan is a guess/)).toBeTruthy();
+  });
 });
