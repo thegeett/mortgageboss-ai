@@ -182,7 +182,9 @@ describe("plan path", () => {
     // instructions. So this step cannot promise its own recipient.
     const detail = taskPath(item({}))[1]?.detail ?? "";
     expect(detail).toContain("waiting on Title / escrow");
-    expect(detail).toContain("whichever of them it asks first");
+    // LP-973 review: "first" is the first whose email has GONE — `first_asked_owner` skips an ask
+    // whose email has not been sent — not the first on the list.
+    expect(detail).toContain("the first of them whose email you have sent");
   });
 
   it("the ending only promises the package where the tasks can settle it (LP-967 review)", () => {

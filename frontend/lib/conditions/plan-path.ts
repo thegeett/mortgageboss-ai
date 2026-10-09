@@ -180,12 +180,17 @@ export function taskPath(item: ConditionItem, context: PathContext = {}): PathSt
             ),
         YOU(
           "Review the email, and send it once the plan is confirmed",
+          // AND "FIRST" MEANS THE FIRST ONE SENT (LP-973 review, from a6's mutation pass).
+          // `first_asked_owner` walks the items in order but SKIPS any ask whose email has not gone
+          // (`gone(item) is None`), so a condition asking Title first and the borrower second, with
+          // only the borrower's email sent, waits on the BORROWER. This said "whichever of them it
+          // asks first", which names the item order alone and would have her expect Title.
           // NOT ALWAYS THIS RECIPIENT (LP-967 review). `_wait_on_first_asked` is explicit that it is
           // "NOT whoever was emailed first": the owner is the recipient of the condition's FIRST live
           // ask whose email has gone, "whichever email she happened to mark sent first" — its own
           // example is 0132, the LO's disclosure before title's wire instructions. So on a condition
           // that asks two people this step cannot promise its own recipient.
-          `Once you mark it sent, the condition shows as waiting on ${who}. If it asks more than one person, it waits on whichever of them it asks first.`,
+          `Once you mark it sent, the condition shows as waiting on ${who}. If it asks more than one person, it waits on the first of them whose email you have sent.`,
         ),
         {
           who: "them",

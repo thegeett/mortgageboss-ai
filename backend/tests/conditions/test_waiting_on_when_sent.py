@@ -122,6 +122,35 @@ def test_the_prediction_is_the_moves_rule_one_send_ahead() -> None:
     assert waiting_on_when_sent(None, items) is OwnerHint.TITLE
 
 
+def test_the_first_ask_WHOSE_EMAIL_WENT_decides_not_the_first_on_the_list() -> None:
+    """LP-973 review, from a6's targeted mutation pass: `first_asked_owner`'s `gone` filter was not
+    pinned, and this is the case that pins it.
+
+    The DB test above cannot tell the two rules apart — its LO ask is first in item order, so "the
+    first open ask" and "the first ask whose email went" name the same item, and removing the filter
+    stayed green. Here they disagree: title is first and its email has NOT gone, the borrower's has,
+    so the owner is the BORROWER. The move's docstring claims exactly this ("NOT whoever was emailed
+    first" is about which item, not which send), and the LP-967 review quoted it as authority for a
+    finding, so it had better be true.
+    """
+    from app.models.condition_draft import DraftRecipient
+    from app.services.condition_drafts import first_asked_owner
+
+    title, borrower = _ask(["title"]), _ask(["borrower"])
+
+    def only_the_borrowers(item: Any) -> Any:
+        return DraftRecipient.BORROWER if item is borrower else None
+
+    assert first_asked_owner([title, borrower], only_the_borrowers) is OwnerHint.BORROWER
+
+    # THE CONTROL: once the FIRST one's email has gone too, the first in order decides again — so this
+    # is the filter and not a rule that simply prefers the last ask.
+    def both(item: Any) -> Any:
+        return DraftRecipient.TITLE_ATTORNEY if item is title else DraftRecipient.BORROWER
+
+    assert first_asked_owner([title, borrower], both) is OwnerHint.TITLE
+
+
 def test_a_dropped_ask_decides_nothing_even_if_its_email_went() -> None:
     """The move reads live items only (`_condition_items` leaves out NOT_NEEDED), so the rule does."""
     items = [_ask(["title"], "not_needed", sent=True), _ask(["borrower"])]
