@@ -1122,6 +1122,25 @@ run `alembic upgrade head` there before clicking these features through on dev; 
 
 ## Batch 4 follow-ups (the owner, 2026-10-03)
 
+**READ THE SUITE FIGURES IN THESE ROWS AGAINST THEIR SHA, NOT AGAINST EACH OTHER.** The backend test
+count moved twice on 2026-10-09, in opposite directions, so two figures quoted here can differ by
+several tests without anything having broken:
+
+- `7909e797` **+1**: a test the LP-967 review was missing, for `first_asked_owner`'s "whose email has
+  gone" filter (found by a targeted mutation pass in another session).
+- `322470f4` **−7**: tests that could not fail or only repeated another test — six removed functions
+  and one fewer parametrised case, counted from the diff rather than taken on trust. Four were
+  always-skip placeholders, which is why the skip count in these rows drops from 8 to 4.
+
+So every backend figure in the rows above was measured BEFORE `322470f4` and includes those seven
+outcomes; LP-973's 9186 is the last of them. **The post-cutoff absolute figure is not recorded here
+because it is not measured:** four attempts at a full run were killed by host memory pressure while
+another session's mutation work was running, and publishing the arithmetic as though it were a
+measurement is the thing this file should not do. Measure it when the machine is quiet, against
+`322470f4` or later, and compare only like with like. Frontend counts are unaffected — `322470f4`
+touches no frontend file.
+
+
 | Ticket | Status | Build SHA | Review SHA | Notes |
 |---|---|---|---|---|
 | [LP-957](../tickets/LP-957.md) The lender-package panel follows the conditions | REVIEWED | `f1ce70d4` | the commit titled `LP-957 review: …` | reviewer: `mortgageboss-ai-cf`; **no defects**. Verified rather than accepted: all seven prefix invalidations are non-exact (no `exact: true` anywhere in the frontend); no collision (list keys end in a params object, never the string `"package"`); nothing walks the cache prefix-wide (no `getQueriesData`/`setQueriesData` at all, and both `getQueryCache` subscribers bail on `key[0]`); the panel is mounted on the same screen as the status select so the query is active and refetches at once, while staying a no-op cost on screens where it is not; and the broken reader was `ready_count` from the package response, not the list, so refreshing the list could never have fixed it. "Every door" measured as a transitive closure over all 45 mutations in `conditions.ts`: 40 reach the prefix, and the five that do not are each correct (three package-own, one draft wording, and `decline` which touches no condition — confirmed on the server). Mutation: the old key fails both tests. Frontend 2192/2192 in 184 files re-measured, tsc and biome clean; their commit touches no `backend/` file, so no pytest was needed. Recorded against myself: a first pass reported 14 doors missing the prefix, which was a broken one-level search missing `invalidateDrafts`/`invalidateWithdrawal` delegating to `invalidatePlan` — three of those would have been false findings |
