@@ -365,3 +365,58 @@ async def test_a_task_she_cancelled_leaves_an_earlier_rounds_draft(
     assert item.id not in left, "the task she cancelled is out of the email that asked for it"
     # THE CONTROL: the sync did not empty the draft — the tasks still asked are still in it.
     assert [i for i in others if i in left] == others
+
+
+def _backfill_sql() -> str:
+    """The migration's own backfill statement, captured from its `upgrade()` rather than copied, so this
+    test cannot pass against a second spelling of the SQL."""
+    import importlib.util
+    from pathlib import Path
+
+    path = next((Path(__file__).parents[2] / "alembic" / "versions").glob("*_40f6b9efb93c_*.py"))
+    spec = importlib.util.spec_from_file_location("lp975_migration", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    captured: list[str] = []
+
+    class _Op:
+        def add_column(self, *_: Any, **__: Any) -> None:  # the column exists: create_all made it
+            return None
+
+        def execute(self, sql: str) -> None:
+            captured.append(sql)
+
+    setattr(module, "op", _Op())  # noqa: B010 — the module's own `op` name, replaced for the capture
+    module.upgrade()
+    (sql,) = captured
+    return sql
+
+
+async def test_the_backfill_stamps_the_first_confirm_as_the_code_does(
+    db_session: AsyncSession,
+) -> None:
+    """LP-975 REVIEW — the backfill took `max`, the LATEST confirm, while `confirm_round_plan` keeps the
+    EARLIEST. Run the migration's statement on two confirmed rounds and compare it with what the code
+    wrote: they must agree, for the carried conditions and for the new ones."""
+    from sqlalchemy import text
+
+    loan_file, round_1 = await _planned_round_one(db_session)
+    actor = await _actor(db_session, loan_file)
+    await _confirm(db_session, round_1, loan_file, actor)
+    round_2 = await _round_two(db_session, loan_file)
+    await _confirm(db_session, round_2, loan_file, actor)
+    conditions = list((await _conditions(db_session, loan_file)).values())
+    written = {c.id: c.plan_confirmed_at for c in conditions}
+    carried = await _seen_again(db_session, loan_file, round_2)
+    assert written[carried[0].id] == round_1.plan_confirmed_at  # THE PREMISE: two different dates
+    assert round_1.plan_confirmed_at != round_2.plan_confirmed_at
+
+    for condition in conditions:
+        condition.plan_confirmed_at = None
+    await db_session.flush()
+    await db_session.execute(text(_backfill_sql()))
+    for condition in conditions:
+        await db_session.refresh(condition)
+
+    assert {c.id: c.plan_confirmed_at for c in conditions} == written

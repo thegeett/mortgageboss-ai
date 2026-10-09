@@ -4,10 +4,15 @@ Whether a condition's plan is in force was asked of its `last_seen_round_id`'s r
 again moves to the new round, so that forgot a plan confirmed on round 1 as soon as round 2 was imported,
 and put an earlier plan she never confirmed in force when she confirmed round 2.
 
-BACKFILL: a condition is stamped with the latest confirm of any round it appeared on (a
+BACKFILL: a condition is stamped with the EARLIEST confirm of any round it appeared on (a
 `condition_created` or `condition_seen_again` event on that round), or of its last-seen round. The second
 half is today's rule, so nothing that is in force today stops being in force; the first is what a
 condition seen again after a confirmed round should always have had.
+
+EARLIEST, AS THE CODE WRITES IT (LP-975 review): `confirm_round_plan` stamps only a condition with no stamp
+yet, so a live stamp is the first confirm of a plan the condition was on. The backfill took `max` and so
+disagreed with the code about what the timestamp means; only whether it is set is read today, but a later
+reader of the date would have got two meanings.
 
 NOT IN THE READONLY VIEW. `readonly.conditions` lists its columns explicitly (LP-956), so a new column
 stays out of it until a ticket adds it.
@@ -38,7 +43,7 @@ def upgrade() -> None:
         UPDATE conditions AS c
         SET plan_confirmed_at = stamped.at
         FROM (
-            SELECT condition_id, max(at) AS at
+            SELECT condition_id, min(at) AS at
             FROM (
                 SELECT e.condition_id, r.plan_confirmed_at AS at
                 FROM condition_events AS e
