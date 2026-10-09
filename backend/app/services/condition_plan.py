@@ -937,6 +937,68 @@ async def revert_to_suggested(
     return reverted
 
 
+#: LP-969 — the reason "my own way" records on each task it takes off the plan (`plan_note`).
+OWN_WAY_NOTE = "You chose to handle this condition your own way."
+
+
+async def handle_own_way(db: AsyncSession, *, condition: Condition, actor_user_id: UUID) -> int:
+    """LP-969 — "I'll handle it my own way": the suggested path is cleared so she can build her own with
+    "Add a step". Returns how many tasks it took off the plan.
+
+    NOTHING IS DELETED, AND IT GOES BACK. Each OPEN task is marked not needed THROUGH `update_item`, with
+    `OWN_WAY_NOTE` as the reason the server requires of every not-needed, and the condition's own step
+    is cleared through `set_next_step`. Both write the `condition_plan_changed` events
+    `revert_to_suggested` replays, so "Go back to the suggested plan" restores the suggestion exactly.
+
+    WHAT IT LEAVES ALONE: a task asked or answered (REQUESTED, RECEIVED) or done keeps its record, as
+    every other edit does (`REOPEN_ONLY_HER_MARKS`'s doctrine), and a task she already dropped.
+    """
+    items = (
+        await db.execute(
+            select(ConditionItem)
+            .where(
+                ConditionItem.condition_id == condition.id,
+                ConditionItem.deleted_at.is_(None),
+                ConditionItem.status == ConditionItemStatus.OPEN,
+            )
+            # SPLIT PARTS FIRST (LP-946). An edit to a parent re-splits it, soft-deleting and re-making
+            # every OPEN part, so dropping the parent first would replace its parts with fresh OPEN
+            # ones — still in their drafts — and leave the stale rows to be marked. A part no longer
+            # OPEN is kept by that re-split, and each part's own event carries its own key, which is
+            # what the revert replay matches on.
+            .order_by(ConditionItem.part_of_item_id.is_(None), ConditionItem.sequence)
+        )
+    ).scalars()
+    dropped = 0
+    for item in list(items):
+        await update_item(
+            db,
+            condition=condition,
+            item=item,
+            option=None,
+            name=None,
+            performers=None,
+            due_date=None,
+            actor_user_id=actor_user_id,
+            status=ConditionItemStatus.NOT_NEEDED,
+            note=OWN_WAY_NOTE,
+        )
+        dropped += 1
+    if condition.next_step is not None:
+        await set_next_step(db, condition=condition, next_step=None, actor_user_id=actor_user_id)
+    db.add(
+        _event(
+            condition,
+            ConditionEventKind.CONDITION_PLAN_CHANGED,
+            {"change": "own_way", "count": dropped},
+            round_id=condition.last_seen_round_id,
+            actor_user_id=actor_user_id,
+        )
+    )
+    await db.flush()
+    return dropped
+
+
 async def _plan_drafted(db: AsyncSession, condition: Condition) -> bool:
     """LP-968 — whether the condition's round has drafts: its plan is ready or confirmed."""
     if condition.last_seen_round_id is None:

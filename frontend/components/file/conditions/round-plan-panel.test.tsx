@@ -19,6 +19,11 @@ const calls = vi.hoisted(() => ({
   items: [] as unknown[],
   steps: [] as unknown[],
   reverts: [] as unknown[],
+  added: [] as unknown[],
+  ownWay: [] as unknown[],
+  removed: [] as unknown[],
+  /** LP-969 — what the add call answers with, so "Check a document" can find the new task. */
+  addResponse: null as Condition | null,
 }));
 vi.mock("@/lib/api/conditions", () => ({
   useRoundPlan: () => ({ data: plan.data }),
@@ -26,6 +31,18 @@ vi.mock("@/lib/api/conditions", () => ({
   useSetNextStep: () => ({ mutate: (body: unknown) => calls.steps.push(body) }),
   useUpdateItem: () => ({ mutate: (body: unknown) => calls.items.push(body) }),
   useRevertPlan: () => ({ mutate: (id: unknown) => calls.reverts.push(id), isPending: false }),
+  useAddItem: () => ({
+    mutate: (body: unknown, options?: { onSuccess?: (data: Condition) => void }) => {
+      calls.added.push(body);
+      if (calls.addResponse) options?.onSuccess?.(calls.addResponse);
+    },
+    isPending: false,
+  }),
+  useOwnWay: () => ({ mutate: (id: unknown) => calls.ownWay.push(id), isPending: false }),
+  useRemoveItem: () => ({ mutate: (body: unknown) => calls.removed.push(body), isPending: false }),
+  useUploadToItem: () => ({ mutate: vi.fn(), isPending: false }),
+  useLinkCandidates: () => ({ data: undefined, isLoading: false }),
+  useLinkItemDocument: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 import { RoundPlanPanel } from "./round-plan-panel";
@@ -35,6 +52,10 @@ afterEach(() => {
   calls.items = [];
   calls.steps = [];
   calls.reverts = [];
+  calls.added = [];
+  calls.ownWay = [];
+  calls.removed = [];
+  calls.addResponse = null;
 });
 
 const basePlan: RoundPlan = {
@@ -667,5 +688,187 @@ describe("RoundPlanPanel", () => {
     const path = within(screen.getByRole("list", { name: "The plan, step by step" }));
     expect(path.getAllByRole("listitem")).toHaveLength(1);
     expect(path.queryByText("The lender clears it")).toBeNull();
+  });
+
+  describe("LP-969 — add a step, and my own way", () => {
+    function opened(conditions: Condition[]) {
+      show(conditions, unblocked());
+      fireEvent.click(screen.getByRole("button", { name: "See the plan" }));
+    }
+
+    it("offers every building block", () => {
+      opened([condition({})]);
+      fireEvent.click(screen.getByRole("button", { name: "Add a step" }));
+      for (const label of [
+        "Email someone",
+        "Ask the borrower to upload",
+        "Upload it myself",
+        "Check a document on the file",
+        "Ask the underwriter",
+        "Push back to the underwriter",
+        "Something else",
+      ]) {
+        expect(screen.getByRole("button", { name: new RegExp(`^${label}`) })).toBeTruthy();
+      }
+    });
+
+    it("an email step is an ask to the person she picks, in her words", () => {
+      opened([condition({})]);
+      fireEvent.click(screen.getByRole("button", { name: "Add a step" }));
+      fireEvent.click(screen.getByRole("button", { name: /^Email someone/ }));
+      const add = screen.getByRole("button", { name: "Add the step" }) as HTMLButtonElement;
+      expect(add.disabled).toBe(true); // her words first
+      fireEvent.change(screen.getByLabelText("To"), { target: { value: "title" } });
+      fireEvent.change(screen.getByLabelText("What should they send or do?"), {
+        target: { value: "The final seller CD" },
+      });
+      fireEvent.click(add);
+      expect(calls.added).toEqual([
+        {
+          conditionId: "c1",
+          name: "The final seller CD",
+          performers: ["title"],
+          option: "ask_third_party",
+        },
+      ]);
+    });
+
+    it("the To list is every performer but her and the appraiser, whose asks go to the lender", () => {
+      opened([condition({})]);
+      fireEvent.click(screen.getByRole("button", { name: "Add a step" }));
+      fireEvent.click(screen.getByRole("button", { name: /^Email someone/ }));
+      const to = Array.from(
+        (screen.getByLabelText("To") as HTMLSelectElement).options,
+        (option) => option.text,
+      );
+      expect(to).toContain("Lender");
+      expect(to).toContain("Title / escrow");
+      expect(to).not.toContain("You");
+      expect(to).not.toContain("Appraiser");
+    });
+
+    it("email to the borrower, and ask the borrower to upload, are asks to the borrower", () => {
+      opened([condition({})]);
+      fireEvent.click(screen.getByRole("button", { name: "Add a step" }));
+      fireEvent.click(screen.getByRole("button", { name: /^Email someone/ }));
+      fireEvent.change(screen.getByLabelText("To"), { target: { value: "borrower" } });
+      fireEvent.change(screen.getByLabelText("What should they send or do?"), {
+        target: { value: "Two months of statements" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Add the step" }));
+      expect(calls.added).toEqual([
+        {
+          conditionId: "c1",
+          name: "Two months of statements",
+          performers: ["borrower"],
+          option: "ask_borrower",
+        },
+      ]);
+      calls.added = [];
+
+      fireEvent.click(screen.getByRole("button", { name: "Add a step" }));
+      fireEvent.click(screen.getByRole("button", { name: /^Ask the borrower to upload/ }));
+      fireEvent.change(screen.getByLabelText("What should the borrower upload?"), {
+        target: { value: "The signed LOE" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Add the step" }));
+      expect(calls.added).toEqual([
+        {
+          conditionId: "c1",
+          name: "The signed LOE",
+          performers: ["borrower"],
+          option: "ask_borrower",
+        },
+      ]);
+    });
+
+    it("something else is her own task", () => {
+      opened([condition({})]);
+      fireEvent.click(screen.getByRole("button", { name: "Add a step" }));
+      fireEvent.click(screen.getByRole("button", { name: /^Something else/ }));
+      fireEvent.change(screen.getByLabelText("What will you do?"), {
+        target: { value: "Call the LO about the fee" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Add the step" }));
+      expect(calls.added).toEqual([
+        {
+          conditionId: "c1",
+          name: "Call the LO about the fee",
+          performers: ["processor"],
+          option: "i_will_do_it",
+        },
+      ]);
+    });
+
+    it("check a document adds her task and opens the link dialog on it", () => {
+      const added = item({ id: "new", name: "Check the HOA certificate", origin: "manual" });
+      calls.addResponse = condition({ items: [item({}), added] });
+      opened([condition({})]);
+      expect(screen.queryByRole("dialog")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Add a step" }));
+      fireEvent.click(screen.getByRole("button", { name: /^Check a document on the file/ }));
+      fireEvent.change(screen.getByLabelText("What is the document?"), {
+        target: { value: "the HOA certificate" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Add the step" }));
+      expect(calls.added).toEqual([
+        {
+          conditionId: "c1",
+          name: "Check the HOA certificate",
+          performers: ["processor"],
+          option: "i_will_do_it",
+        },
+      ]);
+      expect(screen.getByRole("dialog")).toBeTruthy();
+    });
+
+    it("the underwriter questions set the condition's own step, which a task cannot carry", () => {
+      opened([condition({})]);
+      fireEvent.click(screen.getByRole("button", { name: "Add a step" }));
+      fireEvent.click(screen.getByRole("button", { name: /^Push back to the underwriter/ }));
+      expect(calls.steps).toEqual([{ conditionId: "c1", next_step: "push_back" }]);
+      expect(calls.added).toEqual([]);
+    });
+
+    it("my own way is offered while there is a suggestion, and sends the condition", () => {
+      opened([condition({})]);
+      fireEvent.click(screen.getByRole("button", { name: "I’ll handle it my own way" }));
+      expect(calls.ownWay).toEqual(["c1"]);
+    });
+
+    it("with nothing left, my own way is gone and the path invites her own steps", () => {
+      const dropped = item({
+        status: "not_needed",
+        plan_note: "You chose to handle this condition your own way.",
+      });
+      opened([condition({ items: [dropped] })]);
+      expect(screen.queryByRole("button", { name: "I’ll handle it my own way" })).toBeNull();
+      expect(screen.getByText("Build your own path")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Add a step" })).toBeTruthy();
+    });
+
+    it("a condition never read can still be given steps", () => {
+      opened([condition({ reading: null, items: [] })]);
+      // Said on the row and again in the opened plan, where "Add a step" is the way forward.
+      expect(
+        screen.getAllByText("We haven’t read this one yet, so there is nothing to plan for it."),
+      ).toHaveLength(2);
+      expect(screen.getByRole("button", { name: "Add a step" })).toBeTruthy();
+    });
+
+    it("a step she added can be removed; one the reading suggested cannot", () => {
+      const mine = item({ id: "m1", name: "Call the LO", origin: "manual" });
+      opened([condition({ items: [item({}), mine] })]);
+      const removes = screen.getAllByRole("button", { name: "Remove step" });
+      expect(removes).toHaveLength(1);
+      fireEvent.click(removes[0] as HTMLElement);
+      expect(calls.removed).toEqual([{ conditionId: "c1", itemId: "m1" }]);
+    });
+
+    it("her own open task offers Add document on its step; an ask does not", () => {
+      opened([condition({ items: [item({}), { ...TITLE_ITEM }] })]);
+      const path = within(screen.getByRole("list", { name: "The plan, step by step" }));
+      expect(path.getAllByRole("button", { name: /Add document/ })).toHaveLength(1);
+    });
   });
 });

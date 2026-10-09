@@ -142,6 +142,7 @@ from app.services.condition_plan import (
     add_item,
     confirm_round_plan,
     follow_drafts,
+    handle_own_way,
     items_public_for_file,
     remove_item,
     revert_to_suggested,
@@ -1855,6 +1856,18 @@ async def revert_condition_plan(
 ) -> ConditionPublic:
     """LP-968 — "Go back to the suggested plan": undo her changes to this condition's steps."""
     await revert_to_suggested(db, condition=condition, actor_user_id=current_user.id)
+    return await _condition_response(db, condition)
+
+
+@conditions_by_id_router.post("/{condition_id}/plan/own-way", response_model=ConditionPublic)
+async def own_way_condition_plan(
+    condition: ScopedCondition,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionPublic:
+    """LP-969 — "I'll handle it my own way": the suggested path is cleared, to be built with "Add a
+    step"; "Go back to the suggested plan" undoes it."""
+    await handle_own_way(db, condition=condition, actor_user_id=current_user.id)
     return await _condition_response(db, condition)
 
 

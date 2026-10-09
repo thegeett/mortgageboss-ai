@@ -242,21 +242,34 @@ export function taskPath(item: ConditionItem, context: PathContext = {}): PathSt
       ];
 }
 
+/**
+ * WHEN A QUESTION IS DRAFTED (LP-969). These steps said "when you confirm", which LP-968 made false:
+ * `sync_round_drafts` makes the underwriter draft in the same pass as every other draft, once the plan
+ * is ready, unless the condition's reading still needs her (`_needs_her`). Sending still waits for
+ * confirm (`unconfirmed_rounds_for`).
+ */
+const QUESTION_DRAFTED =
+  "It is drafted once the plan is ready, or once you confirm how we read this condition if we asked you to.";
+
 /** The condition's own step, when it has one. */
 export function ownStepPath(option: PlanOption): PathStep[] {
   switch (option) {
     case "push_back":
       return [
-        WE(
-          "We draft a note to the underwriter explaining why it should not apply, when you confirm",
+        // LP-969: THE DRAFT ARGUES ONE CASE ITSELF (`render_question`: the HOI policy's start against
+        // Must Not Close Before). Every other push back is drafted as the general question, so this
+        // step cannot promise the argument is written.
+        WE("We draft a note to the underwriter on this condition", QUESTION_DRAFTED),
+        YOU(
+          "Review the note, say why it shouldn’t apply, and send it once the plan is confirmed",
+          "If we found the reason on the sheet, the note already says it.",
         ),
-        YOU("Review the note and send it"),
         LENDER("The underwriter answers"),
       ];
     case "ask_underwriter":
       return [
-        WE("We draft a question to the underwriter when you confirm"),
-        YOU("Review the question and send it"),
+        WE("We draft a question to the underwriter on this condition", QUESTION_DRAFTED),
+        YOU("Review the question, and send it once the plan is confirmed"),
         LENDER("The underwriter answers"),
       ];
     case "lender_doing_it":

@@ -111,6 +111,19 @@ describe("plan path", () => {
     expect(texts("push_back")).toEqual(["This step does nothing on a single task"]);
   });
 
+  it("a question is drafted when the plan is ready, and sent after confirm (LP-969)", () => {
+    // `sync_round_drafts` makes the underwriter draft in the same pass as the others since LP-968;
+    // "when you confirm" was left behind. Only the SEND waits for confirm.
+    for (const own of ["ask_underwriter", "push_back"] as const) {
+      const [drafted, send] = ownStepPath(own);
+      expect(drafted?.text).not.toMatch(/when you confirm/);
+      expect(drafted?.detail).toMatch(/^It is drafted once the plan is ready/);
+      expect(send?.text).toMatch(/send it once the plan is confirmed$/);
+    }
+    // The push back cannot promise the argument: `render_question` writes only the HOI-date case.
+    expect(ownStepPath("push_back")[1]?.text).toContain("say why it shouldn’t apply");
+  });
+
   it("the condition's own question drafts to the underwriter; its own ask emails nothing itself", () => {
     expect(ownStepPath("push_back").map((s) => s.who)).toEqual(["we", "you", "lender"]);
     expect(ownStepPath("ask_borrower")[0]?.detail).toBe(

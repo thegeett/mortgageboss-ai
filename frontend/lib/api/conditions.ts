@@ -704,6 +704,29 @@ export function useRevertPlan(fileId: string) {
   });
 }
 
+/**
+ * LP-969 — "I'll handle it my own way": the server takes every open task off the plan (not needed, with
+ * its own reason) and clears the condition's step; "Go back to the suggested plan" undoes it.
+ */
+export function useOwnWay(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (conditionId: string) =>
+      (await apiClient.post<Condition>(`${conditionPath(conditionId)}/plan/own-way`)).data,
+    onSuccess: () => invalidatePlan(queryClient, fileId),
+  });
+}
+
+/** LP-969 — "Remove step" on a step she added herself (S3-01's remove; the server soft-deletes). */
+export function useRemoveItem(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ conditionId, itemId }: { conditionId: string; itemId: string }) =>
+      (await apiClient.delete<Condition>(`${conditionPath(conditionId)}/items/${itemId}`)).data,
+    onSuccess: () => invalidatePlan(queryClient, fileId),
+  });
+}
+
 /** S3-01's "Add an item". */
 export function useAddItem(fileId: string) {
   const queryClient = useQueryClient();

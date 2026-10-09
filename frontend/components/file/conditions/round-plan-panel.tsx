@@ -1,5 +1,8 @@
 "use client";
 
+import { ItemLinkActions } from "@/components/file/conditions/item-links";
+import { LinkDocumentDialog } from "@/components/file/conditions/link-document-dialog";
+import { AddStep, type AddedStep } from "@/components/file/conditions/plan-add-step";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,7 +13,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  useAddItem,
   useConfirmPlan,
+  useOwnWay,
+  useRemoveItem,
   useRevertPlan,
   useRoundPlan,
   useSetNextStep,
@@ -84,6 +90,13 @@ export function RoundPlanPanel({
   const setNextStep = useSetNextStep(fileId);
   const updateItem = useUpdateItem(fileId);
   const revert = useRevertPlan(fileId);
+  const addItem = useAddItem(fileId);
+  const ownWay = useOwnWay(fileId);
+  const removeItem = useRemoveItem(fileId);
+  // LP-969 — "Check a document on the file" opens the link dialog on the task it just added.
+  const [linking, setLinking] = useState<{ condition: Condition; item: ConditionItem } | null>(
+    null,
+  );
   const [refusal, setRefusal] = useState<string | null>(null);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [help, setHelp] = useState<{ title: string; current: PlanOption } | null>(null);
@@ -117,6 +130,31 @@ export function RoundPlanPanel({
   const changeStep = (condition: Condition, to: PlanOption) => {
     setRefusal(null);
     setNextStep.mutate({ conditionId: condition.id, next_step: to }, { onError });
+  };
+  // LP-969 — a step she adds: a task (`add_item`) or the condition's own question (`set_next_step`).
+  const addStep = (condition: Condition, step: AddedStep) => {
+    setRefusal(null);
+    if (step.kind === "own_step") {
+      changeStep(condition, step.option);
+      return;
+    }
+    const before = new Set(condition.items.map((each) => each.id));
+    addItem.mutate(
+      {
+        conditionId: condition.id,
+        name: step.name,
+        performers: step.performers,
+        option: step.option,
+      },
+      {
+        onError,
+        onSuccess: (updated) => {
+          if (!step.link) return;
+          const added = updated.items.find((each) => !before.has(each.id));
+          if (added) setLinking({ condition: updated, item: added });
+        },
+      },
+    );
   };
   const toggle = (id: string) =>
     setOpen((current) => {
@@ -186,6 +224,17 @@ export function RoundPlanPanel({
               revert.mutate(condition.id, { onError });
             }}
             onOpenDraft={onOpenDraft}
+            fileId={fileId}
+            adding={addItem.isPending || setNextStep.isPending}
+            onAddStep={(step) => addStep(condition, step)}
+            onOwnWay={() => {
+              setRefusal(null);
+              ownWay.mutate(condition.id, { onError });
+            }}
+            onRemoveItem={(item) => {
+              setRefusal(null);
+              removeItem.mutate({ conditionId: condition.id, itemId: item.id }, { onError });
+            }}
             onChangeStep={(to) => changeStep(condition, to)}
             onHelp={(title, current) => setHelp({ title, current })}
           />
@@ -231,6 +280,18 @@ export function RoundPlanPanel({
       </div>
 
       <StepGuide help={help} onClose={() => setHelp(null)} />
+      {linking ? (
+        <LinkDocumentDialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setLinking(null);
+          }}
+          fileId={fileId}
+          condition={linking.condition}
+          item={linking.item}
+          onDone={() => setLinking(null)}
+        />
+      ) : null}
     </section>
   );
 }
@@ -280,6 +341,11 @@ function PlanRow({
   onMarkItem,
   onRevert,
   onOpenDraft,
+  fileId,
+  adding,
+  onAddStep,
+  onOwnWay,
+  onRemoveItem,
   onChangeStep,
   onHelp,
 }: {
@@ -292,6 +358,11 @@ function PlanRow({
   onMarkItem: (item: ConditionItem, change: ItemMark) => void;
   onRevert: () => void;
   onOpenDraft?: (draftId: string) => void;
+  fileId: string;
+  adding: boolean;
+  onAddStep: (step: AddedStep) => void;
+  onOwnWay: () => void;
+  onRemoveItem: (item: ConditionItem) => void;
   onChangeStep: (to: PlanOption) => void;
   onHelp: (title: string, current: PlanOption) => void;
 }) {
@@ -414,6 +485,23 @@ function PlanRow({
                     {condition.plan_reason}
                   </p>
                 ) : null}
+                {/* LP-969 — the last route on every condition, until LP-970 brings the others. Only
+                    while there is a suggestion left to clear: an OPEN task or a step of its own. */}
+                {ownStep !== null || condition.items.some((each) => each.status === "open") ? (
+                  <div className="flex flex-col gap-1 rounded-[var(--radius-container)] border border-dashed border-border px-3 py-2.5">
+                    <button
+                      type="button"
+                      onClick={onOwnWay}
+                      className="self-start text-sm font-semibold text-primary underline-offset-2 hover:underline"
+                    >
+                      I’ll handle it my own way
+                    </button>
+                    <span className="text-xs text-foreground-2">
+                      We take the suggested steps off, and you add your own. “Go back to the
+                      suggested plan” puts them back.
+                    </span>
+                  </div>
+                ) : null}
               </div>
             )}
             <Detail heading="The lender’s exact words">
@@ -445,18 +533,34 @@ function PlanRow({
               </button>
             </div>
             {unworked ? (
-              <Unworked
-                canCheckReading={condition.reading !== null}
-                onConfirmReading={onConfirmReading}
-              />
-            ) : (
+              <div className="mb-3">
+                <Unworked
+                  canCheckReading={condition.reading !== null}
+                  onConfirmReading={onConfirmReading}
+                />
+              </div>
+            ) : null}
+            {ownStep === null && items.length === 0 ? (
+              <div className="mb-3 flex flex-col gap-1 rounded-[var(--radius-container)] border border-dashed border-primary/40 px-3.5 py-3">
+                <span className="text-sm font-semibold text-foreground">Build your own path</span>
+                <span className="text-sm text-foreground-2">
+                  Add the steps you’ll take with “Add a step”. We still put each ask in that
+                  person’s email, and check the documents you upload or link.
+                </span>
+              </div>
+            ) : null}
+            {entries.length > 0 ? (
               <Timeline
+                fileId={fileId}
+                condition={condition}
                 entries={entries}
                 named={named}
                 onOpenDraft={onOpenDraft}
                 onMarkItem={onMarkItem}
+                onRemoveItem={onRemoveItem}
               />
-            )}
+            ) : null}
+            <AddStep ownStep={ownStep} pending={adding} onAdd={onAddStep} />
           </div>
         </div>
       ) : null}
@@ -750,15 +854,21 @@ function badgeFor(entry: PlanEntry, named: boolean): string | null {
  * same task offers nothing a different button could do.
  */
 function Timeline({
+  fileId,
+  condition,
   entries,
   named,
   onOpenDraft,
   onMarkItem,
+  onRemoveItem,
 }: {
+  fileId: string;
+  condition: Condition;
   entries: PlanEntry[];
   named: boolean;
   onOpenDraft?: (draftId: string) => void;
   onMarkItem: (item: ConditionItem, change: ItemMark) => void;
+  onRemoveItem: (item: ConditionItem) => void;
 }) {
   return (
     <ol aria-label="The plan, step by step" className="flex flex-col">
@@ -828,8 +938,28 @@ function Timeline({
                   {item.plan_note}
                 </span>
               ) : null}
+              {/* LP-969 — HER OWN TASK, OPEN: upload to it or link a document here, which is what
+                  its "Upload what you get to this task" step asks; the checks run on either. */}
+              {item && entry.leads && item.option === "i_will_do_it" && item.status === "open" ? (
+                <div className="mt-1">
+                  <ItemLinkActions fileId={fileId} condition={condition} item={item} />
+                </div>
+              ) : null}
               {item && entry.leads ? (
-                <TaskEdits item={item} onMark={(change) => onMarkItem(item, change)} />
+                <div className="flex flex-wrap items-start gap-x-4 gap-y-1">
+                  <TaskEdits item={item} onMark={(change) => onMarkItem(item, change)} />
+                  {/* A STEP SHE ADDED CAN GO (S3-01's remove, a soft delete). One the reading
+                      suggested cannot: Not needed keeps it, with her reason (LP-968). */}
+                  {item.origin === "manual" && item.status === "open" ? (
+                    <button
+                      type="button"
+                      onClick={() => onRemoveItem(item)}
+                      className="text-xs font-medium text-destructive underline-offset-2 hover:underline"
+                    >
+                      Remove step
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
             </div>
           </li>

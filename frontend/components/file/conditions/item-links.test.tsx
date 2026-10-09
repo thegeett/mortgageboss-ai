@@ -18,6 +18,9 @@ vi.mock("@/lib/api/conditions", () => ({
   useUploadToItem: () => ({ isPending: false, mutate: (b: unknown) => calls.upload.push(b) }),
   useUpdateItem: () => ({ isPending: false, mutate: (b: unknown) => calls.update.push(b) }),
   useRevertPlan: () => ({ mutate: vi.fn(), isPending: false }),
+  useAddItem: () => ({ mutate: vi.fn(), isPending: false }),
+  useOwnWay: () => ({ mutate: vi.fn(), isPending: false }),
+  useRemoveItem: () => ({ mutate: vi.fn(), isPending: false }),
   useLinkCandidates: () => ({ isPending: false, isError: false, data: candidates.data }),
 }));
 
