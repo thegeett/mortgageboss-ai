@@ -1132,11 +1132,26 @@ several tests without anything having broken:
   and one fewer parametrised case, counted from the diff rather than taken on trust. Four were
   always-skip placeholders, which is why the skip count in these rows drops from 8 to 4.
 
-So every backend figure in the rows above was measured BEFORE `322470f4` and includes those seven
-outcomes; LP-973's 9186 is the last of them. **The post-cutoff absolute figure is not recorded here
-because it is not measured:** four attempts at a full run were killed by host memory pressure while
-another session's mutation work was running, and publishing the arithmetic as though it were a
-measurement is the thing this file should not do.
+**AND THE CUTOFF IS NOT WHERE THE COMMIT IS — THIS NOTE HAD IT WRONG.** The seven outcomes were deleted
+from the shared working tree hours before `322470f4` committed them, so a run during that window was
+already net of them. LP-973's row is the proof rather than the exception: its `1 failed, 9186 passed, 4
+skipped, 1 xfailed` has the **4** skips, not the 8 that LP-968's row recorded, and those four
+always-skip placeholders are part of the seven. So LP-973's figure is the FIRST one already short of
+them, and subtracting the seven from it again — which the earlier wording invited — undercounts by
+seven. Read a row's figure against its SKIP COUNT, which travelled with the measurement, rather than
+against the commit date.
+
+**Collected at `8fd8e8d6` (LP-975 and its review): 9200 tests** — `pytest --collect-only -q`, which
+needs no database and 2.5s, so it survives the memory pressure a full run does not. It reconciles
+exactly: LP-973's 9192 outcomes, already net of the seven, plus the eight test functions `git diff
+322470f4..8fd8e8d6 -- backend/tests` adds (LP-975's six and the review's two) and none removed.
+
+**A PASS COUNT AT THIS SHA IS STILL NOT RECORDED, because it is still not measured:** five attempts at a
+full run were killed by host memory pressure on 2026-10-09 (swap sat at 26.1 of 26.6 GB with no other
+pytest running). Collected is a count of the file set, not of outcomes — it says nothing about whether
+they pass — and `tests/conditions` + `tests/api` (1371 passed, 2 skipped) is the largest green slice
+measured here. Publishing arithmetic as though it were a measurement is the thing this file should not
+do.
 
 **Measuring it has two preconditions, and the second one bit on the first attempt after the machine
 freed up.** The tree must be QUIET (no other pytest: one test DB, one pytest) and it must be CLEAN at
