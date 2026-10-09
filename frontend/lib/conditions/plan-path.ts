@@ -293,6 +293,69 @@ export function endingPath(condition: Condition): PathStep[] {
   ];
 }
 
+/** LP-974 — one step on a condition's timeline, and the task it belongs to (null: the condition's). */
+export interface PlanEntry {
+  step: PathStep;
+  item: ConditionItem | null;
+  /** The task's first step here: where its badge and her edits sit. */
+  leads: boolean;
+}
+
+/**
+ * LP-974 — THE CONDITION'S PLAN AS ONE NUMBERED TIMELINE, as the agreed mockup draws it: the
+ * condition's own step, then each task's steps, then the shared ending. LP-967 built a card per task
+ * with the path inside it, which is not the design the owner approved ("current design and mock
+ * design is different").
+ *
+ * A task she took off the plan keeps one entry, so it stays on the screen crossed out with her reason
+ * and Undo (LP-968) rather than vanishing. A condition with no live task and no step of its own has no
+ * ending: there is nothing left for it to finish.
+ */
+export function conditionPath(condition: Condition, context: PathContext = {}): PlanEntry[] {
+  const entries: PlanEntry[] = [];
+  const own = condition.next_step;
+  if (own) {
+    ownStepPath(own).forEach((step, index) => {
+      entries.push({ step, item: null, leads: index === 0 });
+    });
+  }
+  for (const item of condition.items) {
+    if (item.status === "not_needed") {
+      entries.push({
+        step: {
+          who: "you",
+          whoLabel: "Not needed",
+          text: item.name,
+          detail: item.plan_note ?? undefined,
+        },
+        item,
+        leads: true,
+      });
+      continue;
+    }
+    taskPath(item, context).forEach((step, index) => {
+      entries.push({ step, item, leads: index === 0 });
+    });
+  }
+  // NO ENDING WHEN EVERY TASK IS DROPPED and the condition has no step of its own: nothing is left to
+  // finish, so "when every task is done, the condition is ready" would promise what `ready_because`
+  // refuses (it needs a live task).
+  if (own === null && liveItems(condition).length === 0) return entries;
+  for (const step of endingPath(condition)) entries.push({ step, item: null, leads: false });
+  return entries;
+}
+
+/**
+ * LP-974 — the collapsed row's "Next:": the first step still ahead. A dropped task and a finished one
+ * are not ahead of her, so they are skipped; when nothing is left, the ending is what comes next.
+ */
+export function nextOf(entries: PlanEntry[]): PathStep | null {
+  const ahead = entries.find(
+    (entry) => entry.item?.status !== "not_needed" && entry.step !== FINISHED,
+  );
+  return ahead?.step ?? null;
+}
+
 /** "Your first moves" across the round: derived from the plan's drafts and the rows' tasks. */
 export interface FirstMoves {
   emails: number;

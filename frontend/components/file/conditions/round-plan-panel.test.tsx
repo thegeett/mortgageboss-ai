@@ -146,11 +146,11 @@ function unblocked(): RoundPlan {
 describe("RoundPlanPanel", () => {
   it("says what to do on the screen and holds Confirm while 0132's reading needs her", () => {
     show([]);
-    expect(screen.getByText("Check the plan, then confirm it")).toBeTruthy();
+    // LP-974 — the mockup's heading and sentence; the three numbered how-to steps are gone.
+    expect(screen.getByText(/Here’s how we’ll get\s+these 0 conditions\s+cleared/)).toBeTruthy();
     expect(screen.getByText("Plan for round 1")).toBeTruthy();
-    expect(
-      screen.getByText(/Nothing is emailed or changed on the file until you do\./),
-    ).toBeTruthy();
+    expect(screen.getByText(/then confirm\. Nothing is sent until you do\./)).toBeTruthy();
+    expect(screen.queryByText(/Open each condition/)).toBeNull();
     // LP-967 — "Your first moves" replaces the pills: the plan's three drafts are the first thing to do.
     expect(screen.getByText("Your first moves")).toBeTruthy();
     expect(screen.getByText("Review the 3 drafted emails.")).toBeTruthy();
@@ -175,7 +175,7 @@ describe("RoundPlanPanel", () => {
     expect(container.innerHTML).toBe("");
   });
 
-  it("collapsed, says who does each task and in which email", () => {
+  it("collapsed, says the route and the next step (LP-974)", () => {
     show([
       condition({}),
       condition({ id: "c2", lender_code: "1947", sequence: 2, items: [TITLE_ITEM] }),
@@ -200,17 +200,27 @@ describe("RoundPlanPanel", () => {
         ],
       }),
     ]);
+    // "Route:" is what the tasks' steps say (until LP-970's routes); "Next:" is the first step ahead.
+    expect(screen.getAllByText("Route:")).toHaveLength(4);
     expect(screen.getAllByText("You upload the invoice")).toHaveLength(2);
     expect(screen.getByText("Ask Title / escrow — in the title email")).toBeTruthy();
-    expect(screen.getByText("Waits on 1228")).toBeTruthy();
-    expect(screen.getByText("Found: HR Loan Processing invoice, page 1")).toBeTruthy();
+    expect(screen.getByText("Upload the invoice")).toBeTruthy();
+    expect(screen.getByText("Starts once 1228 is done")).toBeTruthy();
+    expect(
+      screen.getByText("We found HR Loan Processing invoice, page 1 on the file"),
+    ).toBeTruthy();
+    // 1947's ask: the draft does not exist yet, so its next step says when it will.
+    expect(
+      screen.getByText("We draft the email to Title / escrow when you confirm the plan"),
+    ).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "See the plan" })).toHaveLength(4);
     // Nothing of the detail until she opens it.
     expect(screen.queryByText("What the lender wants")).toBeNull();
   });
 
   it("opens a condition to what the lender wants, when, the words, done-when and good to know", () => {
     show([condition({})], unblocked());
-    fireEvent.click(screen.getByRole("button", { name: "What you need to do" }));
+    fireEvent.click(screen.getByRole("button", { name: "See the plan" }));
 
     expect(screen.getByText("The lender needs a copy of the credit report invoice.")).toBeTruthy();
     expect(
@@ -224,20 +234,20 @@ describe("RoundPlanPanel", () => {
     // The meaning of the chosen step, under its select.
     expect(screen.getByText(/You do this yourself\. It goes on your task list/)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Hide details" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide the plan" }));
     expect(screen.queryByText("What the lender wants")).toBeNull();
   });
 
   it("an ask's meaning names who it goes to", () => {
     show([condition({ lender_code: "1947", items: [TITLE_ITEM] })], unblocked());
-    fireEvent.click(screen.getByRole("button", { name: "What you need to do" }));
+    fireEvent.click(screen.getByRole("button", { name: "See the plan" }));
     expect(screen.getByText(/We put this request in the email to Title \/ escrow\./)).toBeTruthy();
   });
 
   it("changes ONE task's step, and the condition's own step through its own call", () => {
     const second = item({ id: "i9", name: "Second task", option: "i_will_do_it" });
     show([condition({ next_step: "push_back", items: [item({}), second] })], unblocked());
-    fireEvent.click(screen.getByRole("button", { name: "What you need to do" }));
+    fireEvent.click(screen.getByRole("button", { name: "See the plan" }));
     const selects = screen.getAllByLabelText("Next step");
     expect(selects).toHaveLength(3); // the whole condition, then each task
 
@@ -256,7 +266,7 @@ describe("RoundPlanPanel", () => {
     const stale = item({ id: "i8", name: "Already a question", option: "push_back" });
     const ordinary = item({ id: "i9", name: "Second task", option: "i_will_do_it" });
     show([condition({ next_step: "push_back", items: [stale, ordinary] })], unblocked());
-    fireEvent.click(screen.getByRole("button", { name: "What you need to do" }));
+    fireEvent.click(screen.getByRole("button", { name: "See the plan" }));
     const selects = screen.getAllByLabelText("Next step") as HTMLSelectElement[];
     const values = (select: HTMLSelectElement) => [...select.options].map((o) => o.value);
 
@@ -282,7 +292,7 @@ describe("RoundPlanPanel", () => {
 
   it("the ⓘ opens all eight steps with the current one marked, and Got it closes it", () => {
     show([condition({ lender_code: "1947", items: [TITLE_ITEM] })], unblocked());
-    fireEvent.click(screen.getByRole("button", { name: "What you need to do" }));
+    fireEvent.click(screen.getByRole("button", { name: "See the plan" }));
     fireEvent.click(screen.getByRole("button", { name: "What the next steps mean" }));
 
     const dialog = screen.getByRole("dialog");
@@ -366,10 +376,10 @@ describe("RoundPlanPanel", () => {
 
   it("opens a task to its path: who does each step, from now until it is checked (LP-967)", () => {
     show([condition({ lender_code: "1947", items: [TITLE_ITEM] })], unblocked());
-    fireEvent.click(screen.getByRole("button", { name: "What you need to do" }));
-    expect(screen.getByText("The plan, step by step")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "See the plan" }));
+    const path = within(screen.getByRole("list", { name: "The plan, step by step" }));
     expect(
-      screen.getByText("We draft the email to Title / escrow when you confirm the plan"),
+      path.getByText("We draft the email to Title / escrow when you confirm the plan"),
     ).toBeTruthy();
     expect(
       screen.getByText("Review the email, and send it once the plan is confirmed"),
@@ -391,8 +401,9 @@ describe("RoundPlanPanel", () => {
   it("the path follows the task's step: the same task as her own job reads as her steps", () => {
     const mine = { ...TITLE_ITEM, option: "i_will_do_it" as PlanOption, task: "upload the CD" };
     show([condition({ lender_code: "1947", items: [mine] })], unblocked());
-    fireEvent.click(screen.getByRole("button", { name: "What you need to do" }));
-    expect(screen.getByText("Upload the CD")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "See the plan" }));
+    // Once in the timeline, once as the collapsed row's "Next:".
+    expect(screen.getAllByText("Upload the CD")).toHaveLength(2);
     expect(
       screen.queryByText("Review the email, and send it once the plan is confirmed"),
     ).toBeNull();
@@ -443,7 +454,7 @@ describe("RoundPlanPanel", () => {
         onOpenDraft={onOpenDraft}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "What you need to do" }));
+    fireEvent.click(screen.getByRole("button", { name: "See the plan" }));
     return onOpenDraft;
   }
 
@@ -453,7 +464,7 @@ describe("RoundPlanPanel", () => {
       draft: { id: "d1", status: "draft", sent_on: null } as ConditionItem["draft"],
     };
     const onOpenDraft = open([condition({ lender_code: "1947", items: [drafted] })]);
-    expect(screen.getByText("We drafted the email to Title / escrow")).toBeTruthy();
+    expect(screen.getAllByText("We drafted the email to Title / escrow")).toHaveLength(2);
     fireEvent.click(screen.getByRole("button", { name: "Review draft" }));
     expect(onOpenDraft).toHaveBeenCalledWith("d1");
   });
@@ -495,7 +506,7 @@ describe("RoundPlanPanel", () => {
 
   it("I'll do this myself is offered on an ask and turns it into her task, with how", () => {
     open([condition({ lender_code: "1947", items: [TITLE_ITEM] })]);
-    fireEvent.click(screen.getByRole("button", { name: "I’ll do this myself" }));
+    fireEvent.click(screen.getByRole("button", { name: "I’ll do this step myself" }));
     fireEvent.change(screen.getByLabelText("How are you doing it? (optional)"), {
       target: { value: "calling title" },
     });
@@ -505,13 +516,14 @@ describe("RoundPlanPanel", () => {
     ]);
     cleanup();
     open([condition({})]); // already her task: nothing to take over
-    expect(screen.queryByRole("button", { name: "I’ll do this myself" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "I’ll do this step myself" })).toBeNull();
   });
 
   it("a task she dropped stays on the card, crossed out with her reason, and can be undone", () => {
     const dropped = { ...TITLE_ITEM, status: "not_needed" as const, plan_note: "no fee charged" };
     open([condition({ lender_code: "1947", items: [dropped] })]);
-    expect(screen.getByText(": no fee charged", { exact: false })).toBeTruthy();
+    expect(screen.getByText("Why: no fee charged")).toBeTruthy();
+    expect(screen.getByText("Not needed")).toBeTruthy();
     expect(
       screen.queryByText("Review the email, and send it once the plan is confirmed"),
     ).toBeNull();
@@ -586,5 +598,55 @@ describe("RoundPlanPanel", () => {
     const ready = screen.getByText(/Mark .* ready/).textContent ?? "";
     expect(ready).toContain("7086");
     expect(ready).not.toContain("1582");
+  });
+
+  it("LP-974: the opened condition is ONE numbered timeline, edits on each task's first step", () => {
+    const second = { ...TITLE_ITEM, id: "i9" };
+    show([condition({ items: [item({}), second] })], unblocked());
+    fireEvent.click(screen.getByRole("button", { name: "See the plan" }));
+    const path = screen.getByRole("list", { name: "The plan, step by step" });
+    const steps = within(path).getAllByRole("listitem");
+    // 3 steps for her task, 5 for the ask, 2 for the ending, numbered 1…10 down one list.
+    expect(steps).toHaveLength(10);
+    expect(steps.map((li) => li.querySelector("[aria-hidden]")?.textContent)).toEqual([
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9",
+      "10",
+    ]);
+    // Two tasks: each one's name sits on its first step, so the steps can be told apart.
+    expect(within(steps[0] as HTMLElement).getByText("Credit report invoice")).toBeTruthy();
+    expect(
+      within(steps[3] as HTMLElement).getByText("Final seller Closing Disclosure"),
+    ).toBeTruthy();
+    // Her edits once per task, on its first step — not on every step, not on the ending.
+    expect(within(path).getAllByRole("button", { name: "Not needed" })).toHaveLength(2);
+    expect(
+      within(steps[0] as HTMLElement).getByRole("button", { name: "Not needed" }),
+    ).toBeTruthy();
+    expect(
+      within(steps[3] as HTMLElement).getByRole("button", { name: "Not needed" }),
+    ).toBeTruthy();
+    // The selects moved out of the timeline, to "How it gets done".
+    expect(within(path).queryByLabelText("Next step")).toBeNull();
+    expect(screen.getByText("How it gets done")).toBeTruthy();
+    expect(screen.getAllByLabelText("Next step")).toHaveLength(2);
+  });
+
+  it("LP-974: a condition whose only task she dropped is not called unread", () => {
+    const dropped = { ...TITLE_ITEM, status: "not_needed" as const, plan_note: "no fee charged" };
+    show([condition({ lender_code: "1947", items: [dropped] })], unblocked());
+    expect(screen.queryByText(/We haven’t read this one yet|We couldn’t work out/)).toBeNull();
+    expect(screen.getByText("Nothing left: you marked every task not needed")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "See the plan" }));
+    const path = within(screen.getByRole("list", { name: "The plan, step by step" }));
+    expect(path.getAllByRole("listitem")).toHaveLength(1);
+    expect(path.queryByText("The lender clears it")).toBeNull();
   });
 });

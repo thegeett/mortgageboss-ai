@@ -1,6 +1,14 @@
 import type { Condition, ConditionItem, PlanOption } from "@/lib/types/conditions";
 import { describe, expect, it } from "vitest";
-import { askedWho, endingPath, firstMoves, ownStepPath, taskPath } from "./plan-path";
+import {
+  askedWho,
+  conditionPath,
+  endingPath,
+  firstMoves,
+  nextOf,
+  ownStepPath,
+  taskPath,
+} from "./plan-path";
 
 function item(overrides: Partial<ConditionItem>): ConditionItem {
   return {
@@ -238,5 +246,71 @@ describe("plan path", () => {
       waitingOn: ["Title / escrow", "the borrower"],
       handled: ["1582"],
     });
+  });
+
+  it("LP-974: one timeline per condition — its own step, each task's steps, then the ending", () => {
+    const mine = item({ id: "m", option: "i_will_do_it", task: "upload the invoice" });
+    const asked = item({ id: "a" });
+    const entries = conditionPath({
+      next_step: "i_will_do_it",
+      items: [mine, asked],
+    } as Condition);
+    expect(entries.map((e) => [e.item?.id ?? null, e.leads, e.step.text])).toEqual([
+      [null, true, "Do it, then mark each task below done"],
+      ["m", true, "Upload the invoice"],
+      ["m", false, "Upload what you get to this task, or mark the task done"],
+      ["m", false, "We check what you upload"],
+      ["a", true, "We draft the email to Title / escrow when you confirm the plan"],
+      ["a", false, "Review the email, and send it once the plan is confirmed"],
+      ["a", false, "Title / escrow sends it back"],
+      ["a", false, "Link it to this task"],
+      ["a", false, "We check it against what was asked"],
+      [
+        null,
+        false,
+        "When every task is done, the condition is ready and goes in the package for the lender",
+      ],
+      [null, false, "The lender clears it"],
+    ]);
+  });
+
+  it("LP-974: a dropped task keeps one entry with her reason; with nothing live, no ending", () => {
+    const dropped = item({ status: "not_needed", plan_note: "no fee charged" });
+    const alone = conditionPath({ next_step: null, items: [dropped] } as Condition);
+    expect(alone).toEqual([
+      {
+        step: { who: "you", whoLabel: "Not needed", text: "Thing", detail: "no fee charged" },
+        item: dropped,
+        leads: true,
+      },
+    ]);
+    // THE CONTROL: beside a live task, the ending is back.
+    const beside = conditionPath({
+      next_step: null,
+      items: [dropped, item({ id: "i2" })],
+    } as Condition);
+    expect(beside.at(-1)?.step.text).toBe("The lender clears it");
+    // Nothing worked out at all: no entries.
+    expect(conditionPath({ next_step: null, items: [] } as unknown as Condition)).toEqual([]);
+  });
+
+  it("LP-974: Next is the first step still ahead, past a dropped or finished task", () => {
+    const entries = conditionPath({
+      next_step: null,
+      items: [
+        item({ id: "x", status: "not_needed" }),
+        item({ id: "y", option: "i_will_do_it", status: "done" }),
+        item({ id: "z", status: "requested" }),
+      ],
+    } as Condition);
+    expect(nextOf(entries)?.text).toBe("Title / escrow sends it back");
+    // Every task finished: the ending is what comes next.
+    const done = conditionPath({
+      next_step: null,
+      items: [item({ option: "i_will_do_it", status: "done" })],
+    } as Condition);
+    expect(nextOf(done)?.text).toBe(
+      "When every task is done, the condition is ready and goes in the package for the lender",
+    );
   });
 });

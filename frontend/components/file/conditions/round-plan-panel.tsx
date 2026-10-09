@@ -17,12 +17,11 @@ import {
   useUpdateItem,
 } from "@/lib/api/conditions";
 import {
-  type PathStep,
   type PathWho,
-  endingPath,
+  type PlanEntry,
+  conditionPath,
   firstMoves,
-  ownStepPath,
-  taskPath,
+  nextOf,
   willBeReady,
 } from "@/lib/conditions/plan-path";
 import { OPTION_LABEL } from "@/lib/conditions/plan-words";
@@ -45,21 +44,18 @@ import { useId, useState } from "react";
 /**
  * "Plan for round 1" (S3-02, LP-920): every step is a proposal until she confirms it.
  *
- * LP-966 — IT EXPLAINS ITSELF (the owner, 2026-10-08: "I dont understand what is going on after
- * import"; "we need better explaination, and some where detail explaination so the processor can
- * understand what they has to do"). The design was agreed as a mockup first (the "Plan screen
- * explained" artifact):
- * - a heading that says what to do on this screen, and three numbered steps;
- * - each condition collapsed to its tasks and who does each, and opened to "What you need to do": what
- *   the lender wants, when it is due, the lender's words, each task's step, what it is done with, and
- *   the library's "Good to know";
- * - a one-line meaning under every step select, and an ⓘ beside it opening all eight steps' meanings
- *   with the current one marked;
- * - "When you confirm, we will:" spelling out the emails, the ready conditions and her tasks.
+ * LP-974 — LAID OUT AS THE AGREED MOCKUP (the "Plan screen explained" artifact, board "The plan as a
+ * path"). The owner: "current design and mock design is different". LP-966 to LP-968 had layered the
+ * path onto LP-966's per-task cards; this puts the screen in the mockup's shape:
+ * - "Here's how we'll get these N conditions cleared", then first moves and the legend;
+ * - each condition collapsed to "Route:" and "Next:", opened with "See the plan";
+ * - opened: on the left what the lender wants, when, "How it gets done" and the lender's words; on the
+ *   right ONE numbered timeline for the whole condition, with her edits on each task's first step.
  *
- * ONE SELECT PER TASK. The panel used to show one select per DISTINCT step and change every task
- * sharing it; each task now has its own, through the same `useUpdateItem`, so a step sits beside the
- * task it belongs to. The condition's own step (push back, lender is doing it…) has a select of its own.
+ * WHAT IS NOT THE MOCKUP YET, on purpose: the route choices with a suggestion and a reason (LP-970),
+ * "Add a step" and "my own way" (LP-969), and "Describe it" (LP-971). Until LP-970, "How it gets done"
+ * holds each task's Next step select, with its ⓘ and meaning — the only way to change a task today —
+ * and "Route:" names what those selects say.
  *
  * NO HIDE (the owner, 2026-10-08: "there should not be hide button plan section"). The plan is the step
  * she is on until she confirms it; the list appears after (LP-964).
@@ -143,30 +139,17 @@ export function RoundPlanPanel({
               {data.nothing_sent ? "nothing sent yet" : "some emails were sent"}
             </span>
           </p>
-          <h2 className="text-xl font-semibold text-foreground">Check the plan, then confirm it</h2>
+          <h2 className="text-xl font-semibold text-foreground">
+            Here’s how we’ll get{" "}
+            {rows.length === 1 ? "this condition" : `these ${rows.length} conditions`} cleared
+          </h2>
           <p className="max-w-prose text-sm text-foreground-2">
-            We read each condition on the lender’s sheet and worked out what it asks for, who has to
-            do it, and what should happen next. Look it over before anything goes out.
+            For each condition we worked out what it needs, prepared the emails we could, and laid
+            out every step until the lender clears it. Check the plan, change a step if it’s wrong,
+            then confirm. Nothing is sent until you do.
           </p>
         </div>
       </div>
-
-      <ol className="grid gap-2 sm:grid-cols-3">
-        <HowStep n={1}>
-          <strong className="font-semibold text-foreground">Open each condition</strong> to see what
-          the lender wants, when it’s due, and exactly what you’ll need.
-        </HowStep>
-        <HowStep n={2}>
-          <strong className="font-semibold text-foreground">Change a next step</strong> if it’s
-          wrong. Not sure what one means? Click{" "}
-          <Info className="inline h-3.5 w-3.5 align-[-2px] text-primary" aria-label="the i icon" />{" "}
-          beside it.
-        </HowStep>
-        <HowStep n={3}>
-          <strong className="font-semibold text-foreground">Confirm the plan.</strong> Nothing is
-          emailed or changed on the file until you do.
-        </HowStep>
-      </ol>
 
       <FirstMovesBox rows={rows} drafts={data.drafts} />
 
@@ -252,20 +235,6 @@ export function RoundPlanPanel({
   );
 }
 
-function HowStep({ n, children }: { n: number; children: React.ReactNode }) {
-  return (
-    <li className="flex items-start gap-2.5 rounded-[var(--radius-container)] bg-muted/50 px-3 py-2.5 text-sm text-foreground-2">
-      <span
-        aria-hidden
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground"
-      >
-        {n}
-      </span>
-      <span>{children}</span>
-    </li>
-  );
-}
-
 function Pill({ children, tone }: { children: React.ReactNode; tone?: "warning" }) {
   return (
     <span
@@ -282,6 +251,23 @@ function Pill({ children, tone }: { children: React.ReactNode; tone?: "warning" 
 /** The items still on the plan. */
 function live(condition: Condition): ConditionItem[] {
   return condition.items.filter((item) => item.status !== "not_needed");
+}
+
+/**
+ * LP-974 — the collapsed row's "Route:", until LP-970 brings real routes: what the condition's own
+ * step, or else each live task's step, says will happen. Read through `actionFor`, the same phrase the
+ * select's change produces, so it cannot disagree with the selects below it.
+ */
+function routeOf(condition: Condition): string | null {
+  if (condition.next_step) return actionFor(condition.next_step, null);
+  const phrases: string[] = [];
+  for (const item of live(condition)) {
+    const phrase = actionFor(item.option, item);
+    if (!phrases.includes(phrase)) phrases.push(phrase);
+  }
+  if (phrases.length > 0) return phrases.join(" · ");
+  // Every task dropped: say so, or the collapsed row reads as though nothing was ever worked out.
+  return condition.items.length > 0 ? "Nothing left: you marked every task not needed" : null;
 }
 
 function PlanRow({
@@ -316,12 +302,20 @@ function PlanRow({
   const title = condition.reading?.summary ?? condition.verbatim_text;
   const ownStep = condition.next_step;
   // Nothing worked out: no task and no step of its own (the reading failed or found nothing to ask).
-  const unworked = items.length === 0 && ownStep === null;
+  // ANY task counts, a dropped one too (LP-974): a condition whose only task she marked not needed was
+  // worked out, and calling it unread hid the crossed-out task with her reason and its Undo.
+  const unworked = condition.items.length === 0 && ownStep === null;
+  const entries = conditionPath(condition, { needsConfirmation: needsHer });
+  const route = routeOf(condition);
+  const next = nextOf(entries);
+  // A task's name over its first step only when there is more than one thing on the timeline to tell
+  // apart; on a one-task condition the name would repeat the condition's title.
+  const named = condition.items.length + (ownStep ? 1 : 0) > 1;
 
   return (
     <div className={cn("border-b border-border last:border-b-0", needsHer && "bg-warning/5")}>
-      <div className="flex flex-wrap items-start gap-x-5 gap-y-3 px-4 py-3.5">
-        <div className="flex min-w-0 flex-[999_1_32rem] flex-col gap-2">
+      <div className="flex flex-wrap items-start gap-x-5 gap-y-3 px-4 py-4">
+        <div className="flex min-w-0 flex-[999_1_32rem] flex-col gap-1.5">
           <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
             <button
               type="button"
@@ -331,7 +325,7 @@ function PlanRow({
               {code}
             </button>
             <span className="text-base font-semibold text-foreground">{title}</span>
-            <span className="rounded-md border border-input px-1.5 py-0.5 text-xs text-foreground-2">
+            <span className="rounded-md border border-border px-1.5 py-0.5 text-xs text-foreground-2">
               {BUCKET_KIND_CHIP[condition.bucket_kind]}
             </span>
             {needsHer && !unworked ? (
@@ -345,17 +339,16 @@ function PlanRow({
               </button>
             ) : null}
           </div>
-          {ownStep ? (
-            <TaskLine name="The whole condition" action={actionFor(ownStep, null)} />
+          {route ? (
+            <p className="text-sm text-foreground-2">
+              <strong className="font-semibold text-primary">Route:</strong> {route}
+            </p>
           ) : null}
-          {items.map((item) => (
-            <TaskLine
-              key={item.id}
-              name={item.name}
-              action={actionFor(item.option, item)}
-              extra={extraFor(item)}
-            />
-          ))}
+          {next ? (
+            <p className="text-sm text-foreground-2">
+              <strong className="font-semibold text-foreground">Next:</strong> {next.text}
+            </p>
+          ) : null}
           {unworked ? (
             <Unworked
               canCheckReading={condition.reading !== null}
@@ -367,7 +360,6 @@ function PlanRow({
           <Button
             type="button"
             variant="outline"
-            size="sm"
             aria-expanded={open}
             aria-controls={detailsId}
             onClick={onToggle}
@@ -377,17 +369,14 @@ function PlanRow({
             ) : (
               <ChevronDown className="h-4 w-4" aria-hidden />
             )}
-            {open ? "Hide details" : "What you need to do"}
+            {open ? "Hide the plan" : "See the plan"}
           </Button>
         </div>
       </div>
 
       {open ? (
-        <div
-          id={detailsId}
-          className="mx-4 mb-4 grid gap-x-7 gap-y-5 rounded-[var(--radius-container)] border border-border bg-muted/40 p-4 md:grid-cols-2"
-        >
-          <div className="flex flex-col gap-4">
+        <div id={detailsId} className="mx-4 mb-4 grid items-start gap-x-6 gap-y-5 md:grid-cols-2">
+          <div className="flex flex-col gap-4 rounded-[var(--radius-container)] border border-border bg-muted/40 p-4">
             <Detail heading="What the lender wants">
               {condition.reading?.explanation ?? title}
             </Detail>
@@ -395,16 +384,54 @@ function PlanRow({
               <strong className="font-semibold">{BUCKET_KIND_CHIP[condition.bucket_kind]}</strong> —{" "}
               {BUCKET_KIND_MEANING[condition.bucket_kind]}
             </Detail>
-            {condition.plan_reason ? (
-              <Detail heading="Why we suggest this">{condition.plan_reason}</Detail>
-            ) : null}
+            {unworked ? null : (
+              <div className="flex flex-col gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-foreground-2">
+                  How it gets done
+                </p>
+                {ownStep ? (
+                  <HowRow
+                    name="The whole condition"
+                    option={ownStep}
+                    item={null}
+                    onChange={onChangeStep}
+                    onHelp={() => onHelp(`the whole condition (${code})`, ownStep)}
+                  />
+                ) : null}
+                {items.map((item) => (
+                  <HowRow
+                    key={item.id}
+                    name={item.name}
+                    option={item.option}
+                    item={item}
+                    onChange={(to) => onChangeItem(item, to)}
+                    onHelp={() => onHelp(`${item.name} (${code})`, item.option)}
+                  />
+                ))}
+                {condition.plan_reason ? (
+                  <p className="text-sm text-foreground-2">
+                    <strong className="font-semibold text-foreground">Why we suggest this:</strong>{" "}
+                    {condition.plan_reason}
+                  </p>
+                ) : null}
+              </div>
+            )}
             <Detail heading="The lender’s exact words">
               <span className="font-serif text-foreground-2">{condition.verbatim_text}</span>
             </Detail>
+            {condition.library_type?.playbook ? (
+              <p className="flex items-start gap-2 border-t border-dashed border-border pt-3 text-sm text-foreground-2">
+                <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+                <span>
+                  <strong className="font-semibold text-foreground">Good to know:</strong>{" "}
+                  {condition.library_type.playbook}
+                </span>
+              </p>
+            ) : null}
           </div>
 
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <div className="flex flex-col">
+            <div className="mb-2.5 flex flex-wrap items-baseline justify-between gap-2">
               <p className="text-xs font-semibold uppercase tracking-wide text-foreground-2">
                 The plan, step by step
               </p>
@@ -417,57 +444,19 @@ function PlanRow({
                 Go back to the suggested plan
               </button>
             </div>
-            {ownStep ? (
-              <StepCard
-                n={null}
-                name="The whole condition"
-                option={ownStep}
-                item={null}
-                path={ownStepPath(ownStep)}
-                onOpenDraft={onOpenDraft}
-                onChange={onChangeStep}
-                onHelp={() => onHelp(`the whole condition (${code})`, ownStep)}
-              />
-            ) : null}
             {unworked ? (
               <Unworked
                 canCheckReading={condition.reading !== null}
                 onConfirmReading={onConfirmReading}
               />
-            ) : null}
-            {/* EVERY TASK, ITS DROPPED ONES TOO (LP-968): "Not needed" leaves a task on the card, crossed
-                out with her reason and Undo, rather than letting it vanish. */}
-            {condition.items.map((item, index) => (
-              <StepCard
-                key={item.id}
-                n={index + 1}
-                name={item.name}
-                option={item.option}
-                item={item}
-                path={taskPath(item, { needsConfirmation: needsHer })}
+            ) : (
+              <Timeline
+                entries={entries}
+                named={named}
                 onOpenDraft={onOpenDraft}
-                onMark={(change) => onMarkItem(item, change)}
-                onChange={(to) => onChangeItem(item, to)}
-                onHelp={() => onHelp(`${item.name} (${code})`, item.option)}
+                onMarkItem={onMarkItem}
               />
-            ))}
-            {!unworked && endingPath(condition).length > 0 ? (
-              <div className="rounded-[var(--radius-container)] border border-dashed border-border px-3.5 py-3">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-foreground-2">
-                  Then
-                </p>
-                <PathList steps={endingPath(condition)} />
-              </div>
-            ) : null}
-            {condition.library_type?.playbook ? (
-              <p className="flex items-start gap-2 border-t border-dashed border-border pt-3 text-sm text-foreground-2">
-                <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
-                <span>
-                  <strong className="font-semibold text-foreground">Good to know:</strong>{" "}
-                  {condition.library_type.playbook}
-                </span>
-              </p>
-            ) : null}
+            )}
           </div>
         </div>
       ) : null}
@@ -475,7 +464,6 @@ function PlanRow({
   );
 }
 
-/** A condition with nothing worked out: say so, and offer the way to fix it. */
 /**
  * A row the reading worked nothing out for. LP-966 stopped filtering these away, which is right — a
  * condition nobody can see is worse than one that says it is stuck.
@@ -508,38 +496,6 @@ function Unworked({
   );
 }
 
-/** "Waits on 1228", "Found: HR Loan Processing invoice, page 1": what the step line also needs. */
-function extraFor(item: ConditionItem): string | null {
-  if (item.waits_on_code) return `Waits on ${item.waits_on_code}`;
-  if (item.option === "already_in_file" && item.document_name) {
-    return `Found: ${item.document_name}${item.document_page ? `, page ${item.document_page}` : ""}`;
-  }
-  return null;
-}
-
-function TaskLine({
-  name,
-  action,
-  extra,
-}: {
-  name: string;
-  action: string;
-  extra?: string | null;
-}) {
-  return (
-    <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm">
-      <span className="text-foreground">{name}</span>
-      <span aria-hidden className="text-muted-foreground">
-        →
-      </span>
-      <span className="rounded-md bg-primary/10 px-2 py-0.5 font-medium text-primary">
-        {action}
-      </span>
-      {extra ? <span className="text-xs text-muted-foreground">{extra}</span> : null}
-    </p>
-  );
-}
-
 function Detail({ heading, children }: { heading: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
@@ -549,127 +505,64 @@ function Detail({ heading, children }: { heading: string; children: React.ReactN
   );
 }
 
-function StepCard({
-  n,
+/**
+ * One line of "How it gets done": a task's Next step select, its ⓘ, and what the step means. Until
+ * LP-970's routes, this is how she changes how a task gets done, and the timeline follows at once.
+ */
+function HowRow({
   name,
-  extra,
   option,
   item,
-  path,
-  onOpenDraft,
-  onMark,
   onChange,
   onHelp,
 }: {
-  n: number | null;
   name: string;
-  extra?: string | null;
   option: PlanOption;
   item: ConditionItem | null;
-  /** LP-967 — this task's steps from now until it is done; changes with the select. */
-  path: PathStep[];
-  onOpenDraft?: (draftId: string) => void;
-  /** LP-968 — her edits to a task; absent on the whole condition's own step. */
-  onMark?: (change: ItemMark) => void;
   onChange: (to: PlanOption) => void;
   onHelp: () => void;
 }) {
   const selectId = useId();
-  if (item?.status === "not_needed") {
-    return (
-      <div className="flex items-start gap-3 rounded-[var(--radius-container)] border border-dashed border-border bg-muted/30 px-3.5 py-3">
-        {n !== null ? (
-          <span
-            aria-hidden
-            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border text-xs font-semibold text-muted-foreground"
-          >
-            {n}
-          </span>
-        ) : null}
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <p className="text-sm font-semibold text-muted-foreground line-through">{name}</p>
-          <p className="text-sm text-foreground-2">
-            <strong className="font-semibold text-foreground">Not needed</strong>
-            {item.plan_note ? `: ${item.plan_note}` : ""}
-          </p>
-          {onMark ? (
-            <button
-              type="button"
-              onClick={() => onMark({ status: "open" })}
-              className="self-start text-xs font-medium text-primary underline-offset-2 hover:underline"
-            >
-              Undo
-            </button>
-          ) : null}
-        </div>
-      </div>
-    );
-  }
   return (
-    <div className="flex items-start gap-3 rounded-[var(--radius-container)] border border-border bg-card px-3.5 py-3">
-      {n !== null ? (
-        <span
-          aria-hidden
-          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-primary text-xs font-semibold text-primary"
+    <div className="flex flex-col gap-1.5 rounded-[var(--radius-container)] border border-border bg-card px-3 py-2.5">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="text-sm font-semibold text-foreground">{name}</span>
+        <label htmlFor={selectId} className="text-xs text-foreground-2">
+          Next step
+        </label>
+        <select
+          id={selectId}
+          value={option}
+          onChange={(event) => onChange(event.target.value as PlanOption)}
+          className="h-8 w-auto rounded-md border border-primary/40 bg-card px-1.5 text-sm font-medium text-primary"
         >
-          {n}
-        </span>
-      ) : null}
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <p className="text-sm font-semibold text-foreground">{name}</p>
-        {extra ? <p className="text-xs text-muted-foreground">{extra}</p> : null}
-        <div className="flex flex-wrap items-center gap-2">
-          <label htmlFor={selectId} className="text-xs text-foreground-2">
-            Next step
-          </label>
-          <select
-            id={selectId}
-            value={option}
-            onChange={(event) => onChange(event.target.value as PlanOption)}
-            className="h-8 w-auto rounded-md border border-primary/40 bg-card px-1.5 text-sm font-medium text-primary"
-          >
-            {/* A TASK IS OFFERED FEWER (LP-966 review): the two questions are the whole
-                condition's, and an item set to one belongs to no email. See `ITEM_OPTION_ORDER`.
-                A TASK ALREADY HOLDING ONE STILL LISTS IT, or the select would render blank against a
-                value not in its options and hide what the item actually is — she can move it off,
-                but nothing new lands on it. */}
-            {(item === null
-              ? OPTION_ORDER
-              : ITEM_OPTION_ORDER.includes(option)
-                ? ITEM_OPTION_ORDER
-                : [option, ...ITEM_OPTION_ORDER]
-            ).map((each) => (
-              <option key={each} value={each}>
-                {OPTION_LABEL[each]}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={onHelp}
-            aria-label="What the next steps mean"
-            title="What the next steps mean"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-primary hover:bg-primary/10"
-          >
-            <Info className="h-4 w-4" aria-hidden />
-          </button>
-        </div>
-        <p className="rounded-md bg-muted/60 px-2.5 py-1.5 text-xs text-foreground-2">
-          <strong className="font-semibold text-primary">{OPTION_LABEL[option]}:</strong>{" "}
-          {meaningFor(option, item)}
-        </p>
-        {path.length > 0 ? (
-          <div className="mt-1">
-            <PathList steps={path} onOpenDraft={onOpenDraft} />
-          </div>
-        ) : null}
-        {item?.plan_note && item.status !== "done" ? (
-          <p className="text-xs text-foreground-2">
-            <strong className="font-semibold text-foreground">Your note:</strong> {item.plan_note}
-          </p>
-        ) : null}
-        {item && onMark ? <TaskEdits item={item} onMark={onMark} /> : null}
+          {/* A TASK IS OFFERED FEWER (LP-966 review): the two questions are the whole
+              condition's, and an item set to one belongs to no email. See `ITEM_OPTION_ORDER`.
+              A TASK ALREADY HOLDING ONE STILL LISTS IT, or the select would render blank against a
+              value not in its options and hide what the item actually is — she can move it off,
+              but nothing new lands on it. */}
+          {(item === null
+            ? OPTION_ORDER
+            : ITEM_OPTION_ORDER.includes(option)
+              ? ITEM_OPTION_ORDER
+              : [option, ...ITEM_OPTION_ORDER]
+          ).map((each) => (
+            <option key={each} value={each}>
+              {OPTION_LABEL[each]}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={onHelp}
+          aria-label="What the next steps mean"
+          title="What the next steps mean"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-primary hover:bg-primary/10"
+        >
+          <Info className="h-4 w-4" aria-hidden />
+        </button>
       </div>
+      <p className="text-xs text-foreground-2">{meaningFor(option, item)}</p>
     </div>
   );
 }
@@ -712,6 +605,17 @@ function TaskEdits({ item, onMark }: { item: ConditionItem; onMark: (change: Ite
       </div>
     );
   }
+  if (item.status === "not_needed") {
+    return (
+      <button
+        type="button"
+        onClick={() => onMark({ status: "open" })}
+        className="self-start text-xs font-medium text-primary underline-offset-2 hover:underline"
+      >
+        Undo
+      </button>
+    );
+  }
   if (item.status !== "open") return null; // asked or answered: its record stands
   const theirs = item.option !== "i_will_do_it";
   const required = mode === "not_needed" || (mode === "done" && theirs);
@@ -745,7 +649,7 @@ function TaskEdits({ item, onMark }: { item: ConditionItem; onMark: (change: Ite
             onClick={() => setMode("myself")}
             className="text-xs font-medium text-primary underline-offset-2 hover:underline"
           >
-            I’ll do this myself
+            I’ll do this step myself
           </button>
         ) : null}
         <button
@@ -801,10 +705,10 @@ function TaskEdits({ item, onMark }: { item: ConditionItem; onMark: (change: Ite
 
 /** LP-967 — the colour of each kind of step, and the legend that names them. */
 const WHO_DOT: Record<PathWho, string> = {
-  we: "bg-ai",
-  you: "bg-primary",
-  them: "bg-warning",
-  lender: "bg-muted-foreground",
+  we: "bg-ai text-ai-foreground",
+  you: "bg-primary text-primary-foreground",
+  them: "bg-warning text-warning-foreground",
+  lender: "bg-muted-foreground text-card",
 };
 const WHO_TEXT: Record<PathWho, string> = {
   we: "text-ai",
@@ -819,53 +723,108 @@ const LEGEND: [PathWho, string][] = [
   ["lender", "The lender"],
 ];
 
-/** A run of steps as a timeline: a dot per step, coloured by who does it, joined by a line. */
-function PathList({
-  steps,
+/** The badge beside a task's first step: what has happened to it, else its name (`named`). */
+function badgeFor(entry: PlanEntry, named: boolean): string | null {
+  const item = entry.item;
+  if (!item || !entry.leads) return null;
+  if (item.status === "not_needed") return "Not needed";
+  if (item.status === "done" && item.option !== "already_in_file") return "Done";
+  if (item.origin === "manual") return named ? `${item.name} · added by you` : "Added by you";
+  return named ? item.name : null;
+}
+
+/**
+ * LP-974 — the condition's plan as ONE numbered timeline (the mockup): a numbered dot per step,
+ * coloured by who does it, joined by a line; the who-label over each step, never the colour alone.
+ * Her edits sit on each task's first step — the server keeps them per task, so a step deeper in the
+ * same task offers nothing a different button could do.
+ */
+function Timeline({
+  entries,
+  named,
   onOpenDraft,
+  onMarkItem,
 }: {
-  steps: PathStep[];
+  entries: PlanEntry[];
+  named: boolean;
   onOpenDraft?: (draftId: string) => void;
+  onMarkItem: (item: ConditionItem, change: ItemMark) => void;
 }) {
   return (
-    <ol className="flex flex-col">
-      {steps.map((step, index) => (
-        <li key={`${index}-${step.text}`} className="flex gap-3">
-          <div className="flex w-3 shrink-0 flex-col items-center">
-            <span
-              aria-hidden
-              className={cn("mt-1.5 h-2.5 w-2.5 rounded-full", WHO_DOT[step.who])}
-            />
-            {index < steps.length - 1 ? (
-              <span aria-hidden className="w-px flex-1 bg-border" />
-            ) : null}
-          </div>
-          <div className="flex min-w-0 flex-col gap-0.5 pb-3">
-            <span
-              className={cn(
-                "text-[11px] font-semibold uppercase tracking-wide",
-                WHO_TEXT[step.who],
-              )}
-            >
-              {step.whoLabel}
-            </span>
-            <span className="text-sm text-foreground">{step.text}</span>
-            {step.detail ? (
-              <span className="text-xs text-muted-foreground">{step.detail}</span>
-            ) : null}
-            {step.draftId && onOpenDraft ? (
-              <Button
-                type="button"
-                size="sm"
-                className="mt-1 self-start"
-                onClick={() => onOpenDraft(step.draftId as string)}
+    <ol aria-label="The plan, step by step" className="flex flex-col">
+      {entries.map((entry, index) => {
+        const { step, item } = entry;
+        const dropped = item?.status === "not_needed";
+        const finished = item?.status === "done" && item.option !== "already_in_file";
+        const badge = badgeFor(entry, named);
+        return (
+          <li key={`${index}-${item?.id ?? "c"}-${step.text}`} className="flex gap-3">
+            <div className="flex w-7 shrink-0 flex-col items-center">
+              <span
+                aria-hidden
+                className={cn(
+                  "flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full text-xs font-semibold",
+                  dropped || finished ? "bg-muted-foreground/60 text-card" : WHO_DOT[step.who],
+                )}
               >
-                Review draft
-              </Button>
-            ) : null}
-          </div>
-        </li>
-      ))}
+                {index + 1}
+              </span>
+              {index < entries.length - 1 ? (
+                <span aria-hidden className="min-h-3.5 w-0.5 flex-1 bg-border" />
+              ) : null}
+            </div>
+            <div className="flex min-w-0 flex-1 flex-col gap-1 pb-3.5">
+              <div className="flex flex-wrap items-baseline gap-2">
+                <span
+                  className={cn(
+                    "text-xs font-semibold uppercase tracking-wide",
+                    dropped ? "text-muted-foreground" : WHO_TEXT[step.who],
+                  )}
+                >
+                  {dropped ? "You" : step.whoLabel}
+                </span>
+                {badge ? (
+                  <span className="rounded-md bg-muted px-1.5 py-px text-[11px] font-semibold text-foreground-2">
+                    {badge}
+                  </span>
+                ) : null}
+              </div>
+              <span
+                className={cn(
+                  "text-[15px] font-medium leading-snug",
+                  dropped ? "text-muted-foreground line-through" : "text-foreground",
+                )}
+              >
+                {step.text}
+              </span>
+              {step.detail ? (
+                <span className="text-[13px] leading-normal text-foreground-2">
+                  {dropped ? `Why: ${step.detail}` : step.detail}
+                </span>
+              ) : null}
+              {step.draftId && onOpenDraft ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="mt-1 self-start"
+                  onClick={() => onOpenDraft(step.draftId as string)}
+                >
+                  Review draft
+                </Button>
+              ) : null}
+              {item && entry.leads && item.plan_note && item.status !== "done" && !dropped ? (
+                <span className="text-xs text-foreground-2">
+                  <strong className="font-semibold text-foreground">Your note:</strong>{" "}
+                  {item.plan_note}
+                </span>
+              ) : null}
+              {item && entry.leads ? (
+                <TaskEdits item={item} onMark={(change) => onMarkItem(item, change)} />
+              ) : null}
+            </div>
+          </li>
+        );
+      })}
     </ol>
   );
 }
@@ -905,7 +864,7 @@ function FirstMovesBox({ rows, drafts }: { rows: Condition[]; drafts: { codes: s
       </div>
       <div className="flex flex-col gap-1 rounded-[var(--radius-container)] bg-muted/50 px-4 py-3">
         <span className="text-xs font-semibold uppercase tracking-wide text-foreground-2">
-          Already in the file
+          Already handled
         </span>
         <span className="text-sm text-foreground">
           {moves.handled.length > 0 ? `${moves.handled.join(", ")}.` : "Nothing yet."}
