@@ -874,8 +874,15 @@ describe("RoundPlanPanel", () => {
   });
 
   describe("LP-973 — round 2's plan is what is new on its sheet", () => {
+    // Seen again, with the plan she confirmed on round 0 (LP-975's stamp).
     const seenAgain = (id: string, code: string) =>
-      condition({ id, lender_code: code, sequence: 9, first_round_id: "r0" });
+      condition({
+        id,
+        lender_code: code,
+        sequence: 9,
+        first_round_id: "r0",
+        plan_confirmed_at: "2026-08-20T15:00:00Z",
+      });
 
     it("lists only new conditions, and counts the ones that keep their plan", () => {
       show([condition({}), seenAgain("c8", "1947"), seenAgain("c9", "6378")], unblocked());
@@ -925,6 +932,22 @@ describe("RoundPlanPanel", () => {
       expect(screen.getByText("Nothing new to plan on this sheet")).toBeTruthy();
       expect(screen.getByText("1 condition from earlier rounds keeps its plan.")).toBeTruthy();
       expect(screen.getByRole("button", { name: "Confirm the plan" })).toBeTruthy();
+    });
+
+    it("LP-975: one seen again whose plan she never confirmed is in the plan, and not counted", () => {
+      // Round 2 imported while round 1's plan waited: confirming round 2 puts this plan in force, so it
+      // is on the screen she confirms, and "keep their plan" would say she approved what she never saw.
+      const neverConfirmed = condition({
+        id: "c7",
+        lender_code: "1947",
+        sequence: 8,
+        first_round_id: "r0",
+        plan_confirmed_at: null,
+      });
+      show([condition({}), neverConfirmed, seenAgain("c9", "6378")], unblocked());
+      expect(screen.getByRole("button", { name: "1947" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "6378" })).toBeNull();
+      expect(screen.getByText("1 condition from earlier rounds keeps its plan.")).toBeTruthy();
     });
 
     it("round 1 has nothing carried, and says nothing about it (the control)", () => {

@@ -114,10 +114,16 @@ export function RoundPlanPanel({
   // beside what is new. It is counted in one line instead, and is in the list once she confirms.
   // A CARRIED CONDITION THAT BLOCKS CONFIRM STAYS: "Confirm 0132's reading first" must name a row she
   // can click, the same reason every condition is shown above.
+  // LP-975 — SO DOES ONE WHOSE PLAN SHE NEVER CONFIRMED (round 2 imported while round 1's plan waited).
+  // Confirming this round puts its plan in force (`confirm_round_plan` stamps every condition on the
+  // round), so it must be on the screen she confirms; and "keep their plan" would say she had approved
+  // a plan she never saw.
   const blocking = new Set(data.blocking_codes);
   const onRound = conditions.filter((condition) => condition.last_seen_round_id === round.id);
   const shown = (condition: Condition) =>
-    condition.first_round_id === round.id || blocking.has(condition.lender_code ?? "");
+    condition.first_round_id === round.id ||
+    !condition.plan_confirmed_at ||
+    blocking.has(condition.lender_code ?? "");
   const rows = onRound.filter(shown).sort((a, b) => a.sequence - b.sequence);
   const notShown = onRound.filter((condition) => !shown(condition));
   const carried = notShown.length;

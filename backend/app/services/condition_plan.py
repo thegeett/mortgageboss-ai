@@ -1017,7 +1017,23 @@ async def _plan_drafted(db: AsyncSession, condition: Condition) -> bool:
 
 
 async def _plan_in_force(db: AsyncSession, condition: Condition) -> bool:
-    """Whether the condition's round has a confirmed plan. Before that, every step is a proposal."""
+    """Whether she has confirmed a plan this condition is on. Before that, every step is a proposal.
+
+    LP-975 — THE CONDITION'S STAMP FIRST. This asked only whether the condition's LAST-SEEN round was
+    confirmed, and importing round 2 moves a condition seen again to round 2: a plan she confirmed on
+    round 1 stopped being in force until she confirmed round 2. `plan_confirmed_at` keeps it.
+
+    THE ROUND STAYS AS THE FALLBACK, for a condition that joined a round after its plan was confirmed (one
+    she adds by hand): no confirm will ever stamp it, and `confirm_round_plan` returns early on a
+    confirmed round, so a stamp-only rule would hold its steps, and its emails, for ever.
+    """
+    return await plan_confirmed(db, condition)
+
+
+async def plan_confirmed(db: AsyncSession, condition: Condition) -> bool:
+    """LP-975 — the rule `_plan_in_force` and the send guard share: stamped, or on a confirmed round."""
+    if condition.plan_confirmed_at is not None:
+        return True
     if condition.last_seen_round_id is None:
         return False
     round_ = await db.get(ConditionRound, condition.last_seen_round_id)
@@ -1436,6 +1452,10 @@ async def confirm_round_plan(
         )
     ).scalars()
     for condition in on_round:
+        # LP-975 — the plan she just confirmed is this condition's, wherever it goes next. An earlier
+        # stamp is kept: the plan was already hers.
+        if condition.plan_confirmed_at is None:
+            condition.plan_confirmed_at = round_.plan_confirmed_at
         await apply_step_status(
             db,
             condition=condition,

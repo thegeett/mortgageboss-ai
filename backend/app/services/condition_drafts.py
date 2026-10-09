@@ -1240,6 +1240,11 @@ async def unconfirmed_rounds_for(db: AsyncSession, *, communication_id: UUID) ->
         condition = await db.get(Condition, condition_id)
         if condition is None or condition.last_seen_round_id is None:
             continue
+        # LP-975 — A PLAN SHE CONFIRMED STAYS CONFIRMED when the condition is seen again. Asking only
+        # the last-seen round refused round 1's email for a condition round 2 listed again, until she
+        # confirmed round 2.
+        if condition.plan_confirmed_at is not None:
+            continue
         round_ = await db.get(ConditionRound, condition.last_seen_round_id)
         if round_ is not None and round_.plan_confirmed_at is None:
             number = round_.round_number or 0

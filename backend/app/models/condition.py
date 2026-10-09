@@ -247,6 +247,14 @@ class Condition(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     #: `lender_doing_it` or `information_only` the list shows Stage 2's neutral display (§4a change 12)
     #: and `prep_status` stays `to_do`.
     next_step: Mapped[PlanOption | None] = mapped_column(str_enum(PlanOption), nullable=True)
+    #: LP-975 — when she confirmed a plan this condition was on. THE CONDITION'S, NOT A ROUND'S: a
+    #: condition seen again moves `last_seen_round_id` to the new round, so asking "is that round
+    #: confirmed?" forgot a plan she confirmed on round 1 the moment round 2 was imported, and put an
+    #: earlier plan she never confirmed in force when she confirmed round 2. Stamped by
+    #: `confirm_round_plan` on every condition on the round; kept when it is seen again.
+    plan_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     #: Why the plan proposed what it did, in the screen's words ("Shortfall computed by code",
     #: "Waits on 1228"). Built by code; names no borrower.
     plan_reason: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)

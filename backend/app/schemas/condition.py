@@ -1113,6 +1113,8 @@ class ConditionPublic(BaseModel):
     sequence: int
     first_round_id: UUID
     last_seen_round_id: UUID
+    #: LP-975 — when she confirmed a plan this condition was on; null while it never has been.
+    plan_confirmed_at: datetime | None = None
     round_numbers: list[int] = Field(default_factory=list)
     created_at: datetime
 
@@ -1252,6 +1254,7 @@ class ConditionPublic(BaseModel):
             sequence=condition.sequence,
             first_round_id=condition.first_round_id,
             last_seen_round_id=condition.last_seen_round_id,
+            plan_confirmed_at=condition.plan_confirmed_at,
             round_numbers=round_numbers or [],
             created_at=condition.created_at,
             prep_status=condition.prep_status,

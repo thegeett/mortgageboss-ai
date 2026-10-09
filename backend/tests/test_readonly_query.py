@@ -477,6 +477,9 @@ EXCLUDED: dict[str, frozenset[str]] = {
             # would have carried it across under another name. It stays out of the view, and it is in
             # `NEVER_EXPOSED` below so re-adding it cannot be quiet.
             "plan_reason",
+            # LP-975 — when she confirmed a plan this condition was on. A timestamp that names nobody;
+            # excluded only because exposing it means rebuilding the view for a column no query uses yet.
+            "plan_confirmed_at",
         }
     ),
     # LP-919 — the items she confirmed for a code: names and performers, no specifics. Excluded rather

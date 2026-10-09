@@ -301,7 +301,13 @@ describe("LP-964 — one step at a time after Import", () => {
 
   it("marks only the new round's conditions as not confirmed: one seen again keeps its plan", () => {
     state.rows = [
-      condition({ id: "c-old", first_round_id: "r1", last_seen_round_id: "r2" }),
+      // Seen again with the plan she confirmed on round 1 (LP-975's stamp).
+      condition({
+        id: "c-old",
+        first_round_id: "r1",
+        last_seen_round_id: "r2",
+        plan_confirmed_at: "2026-08-20T15:00:00Z",
+      }),
       condition({
         id: "c-new",
         sequence: 2,
@@ -311,6 +317,35 @@ describe("LP-964 — one step at a time after Import", () => {
       }),
     ];
     // Reached through the one way left to open the list early: a failed reading's "Show them now".
+    state.reading = { data: { state: "failed", unread: 1, error: "stalled" }, isPending: false };
+    state.plan = { data: plan({ round_id: "r2", round_number: 2, planned: 0 }), isPending: false };
+    show([round({ id: "r2", round_number: 2 }), round()]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show them now" }));
+
+    expect(screen.getAllByText("Plan not confirmed yet")).toHaveLength(1);
+  });
+
+  it("LP-975: one seen again whose plan she never confirmed is marked too", () => {
+    state.rows = [
+      condition({ id: "c-old", first_round_id: "r1", last_seen_round_id: "r2" }),
+      condition({
+        id: "c-confirmed",
+        sequence: 2,
+        lender_code: "1947",
+        first_round_id: "r1",
+        last_seen_round_id: "r2",
+        plan_confirmed_at: "2026-08-20T15:00:00Z",
+      }),
+      // Not on round 2 at all: round 2's plan is not what puts it in force, so it is not marked.
+      condition({
+        id: "c-gone",
+        sequence: 3,
+        lender_code: "6378",
+        first_round_id: "r1",
+        last_seen_round_id: "r1",
+      }),
+    ];
     state.reading = { data: { state: "failed", unread: 1, error: "stalled" }, isPending: false };
     state.plan = { data: plan({ round_id: "r2", round_number: 2, planned: 0 }), isPending: false };
     show([round({ id: "r2", round_number: 2 }), round()]);

@@ -542,6 +542,11 @@ export interface Condition {
   sequence: number;
   first_round_id: string;
   last_seen_round_id: string;
+  /**
+   * LP-975 — when she confirmed a plan this condition was on; null while it never has been. A condition
+   * seen again keeps it, so round 2 can tell a plan she approved from one she never saw.
+   */
+  plan_confirmed_at?: string | null;
   /** Our preparation track. */
   prep_status: ConditionPrepStatus;
   /** The lender's answer. Nothing but a recorded verdict moves this off `open`/`not_cleared`. */

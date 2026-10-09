@@ -187,10 +187,18 @@ export function ConditionsListView({
   const allRows = everything.data?.rows ?? [];
   // LP-964 — the newest round's own conditions, while its plan is unconfirmed. "First seen on it", not
   // "last seen": a condition seen again keeps the plan it already had (condition_plan.py carry-over).
+  // LP-975 — AND ONE SEEN AGAIN WHOSE PLAN SHE NEVER CONFIRMED: it keeps a plan, but not one she
+  // approved, and confirming this round is what puts it in force.
   const unplannedIds =
     gatePhase !== "list" && newestImported
       ? new Set(
-          allRows.filter((row) => row.first_round_id === newestImported.id).map((row) => row.id),
+          allRows
+            .filter(
+              (row) =>
+                row.first_round_id === newestImported.id ||
+                (row.last_seen_round_id === newestImported.id && !row.plan_confirmed_at),
+            )
+            .map((row) => row.id),
         )
       : undefined;
   const roundNumbers = rounds
