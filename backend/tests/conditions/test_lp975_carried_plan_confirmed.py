@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 from app.models.condition import Condition
-from app.models.condition_draft import ConditionDraft
+from app.models.condition_draft import ConditionDraft, DraftRecipient
 from app.models.condition_round import ConditionRound, ConditionSourceKind
 from app.models.loan_file import LoanFile
 from app.schemas.condition import ConditionCreateRequest
@@ -210,3 +210,158 @@ async def test_the_payload_carries_the_stamp(db_session: AsyncSession) -> None:
     assert public().plan_confirmed_at is None
     await _confirm(db_session, round_1, loan_file, actor)
     assert public().plan_confirmed_at == round_1.plan_confirmed_at
+
+
+async def test_the_upload_link_follows_the_send_not_the_round(db_session: AsyncSession) -> None:
+    """LP-975 REVIEW — the send went condition-level and the borrower's upload link stayed round-level.
+
+    The gate on minting the link is justified, at its call site, by the send guard: "nothing is sent
+    before confirm (`unconfirmed_rounds_for`), so there is no reason for the link to exist before it
+    either". This ticket changed that guard, so the two stopped agreeing: round 1 confirmed and its
+    borrower email sent, round 2 imported, a new ask on a condition round 2 carried, and round 2's
+    borrower draft holds only conditions she has confirmed. The send is allowed — and the email asked
+    the borrower to upload with no link to upload to, because round 2 itself is not confirmed.
+    """
+    from app.models.communication import Communication
+    from app.models.condition_vocabulary import Performer, PlanOption
+    from app.schemas.condition import ConditionCreateRequest
+    from app.services.condition_drafts import (
+        _plan_confirmed_for,
+        mark_sent,
+        resync_file,
+    )
+    from app.services.condition_import import create_manual_condition
+    from app.services.condition_plan import add_item
+    from tests.conditions.test_condition_drafts import _people
+
+    loan_file, round_1 = await _planned_round_one(db_session)
+    actor = await _actor(db_session, loan_file)
+    await _people(db_session, loan_file)
+    await db_session.flush()
+    await _confirm(db_session, round_1, loan_file, actor)
+
+    sent_borrower = None
+    for draft in await db_session.scalars(
+        select(ConditionDraft).where(ConditionDraft.round_id == round_1.id)
+    ):
+        if draft.recipient is DraftRecipient.BORROWER:
+            sent_borrower = await db_session.get(Communication, draft.communication_id)
+            await mark_sent(db_session, loan_file=loan_file, draft=draft, actor_user_id=actor)
+    # THE POSITIVE CONTROL: the link mechanism works, and round 1's email carried one.
+    assert sent_borrower is not None and sent_borrower.upload_link_url
+
+    round_2 = await _round_two(db_session, loan_file)
+    # Round 2's plan is READY only if something on it was planned (`build_plan`: `if outcome.planned`),
+    # and its six conditions are all carried — so a condition she adds is what gives round 2 drafts.
+    await create_manual_condition(
+        db_session,
+        loan_file=loan_file,
+        payload=ConditionCreateRequest(verbatim_text="Provide the final HOA certificate."),
+        actor_user_id=actor,
+    )
+    await read_round(db_session, round_id=round_2.id)
+    await build_plan(db_session, round_id=round_2.id)
+    carried = (await _seen_again(db_session, loan_file, round_2))[0]
+    assert carried.plan_confirmed_at is not None
+    await add_item(
+        db_session,
+        condition=carried,
+        name="Provide the signed letter of explanation",
+        performers=[Performer.BORROWER],
+        option=PlanOption.ASK_BORROWER,
+        actor_user_id=actor,
+    )
+    await draft_ready_plan(db_session, round_id=round_2.id)
+    await resync_file(db_session, loan_file_id=loan_file.id, actor_user_id=actor)
+    await db_session.flush()
+
+    r2_draft = await db_session.scalar(
+        select(ConditionDraft).where(
+            ConditionDraft.round_id == round_2.id,
+            ConditionDraft.recipient == DraftRecipient.BORROWER,
+        )
+    )
+    assert r2_draft is not None, "the new ask on a carried condition makes round 2 a borrower draft"
+    await db_session.refresh(round_2)
+    assert round_2.plan_confirmed_at is None, "and round 2's own plan is not confirmed"
+    communication_id = r2_draft.communication_id
+    assert await unconfirmed_rounds_for(db_session, communication_id=communication_id) == [], (
+        "nothing holds this email back: every condition in it carries her stamp"
+    )
+    assert await _plan_confirmed_for(db_session, r2_draft), "so the link must exist too"
+    message = await db_session.get(Communication, communication_id)
+    assert message is not None and message.upload_link_url, (
+        "the email it asks uploads in has a link"
+    )
+
+    # THE NEGATIVE CONTROL, so the gate is not simply true now: take the stamp away and the send is
+    # held again — and the link is refused with it, by the same question.
+    carried.plan_confirmed_at = None
+    await db_session.flush()
+    assert await unconfirmed_rounds_for(db_session, communication_id=communication_id) == [2]
+    assert not await _plan_confirmed_for(db_session, r2_draft)
+
+
+async def test_a_task_she_cancelled_leaves_an_earlier_rounds_draft(
+    db_session: AsyncSession,
+) -> None:
+    """LP-975 REVIEW — the sync maintained only the items of the conditions ITS round lists.
+
+    A condition seen again moves to the newer round, and a re-listing that adds nothing new never has a
+    ready plan (`build_plan` sets `plan_ready_at` only `if outcome.planned`), so it gets no drafts of its
+    own. Its asks stay in the earlier round's unsent drafts, which that round's sync no longer iterates —
+    so "Not needed" left the task in the email (against `update_item`'s "the task leaves the plan and its
+    draft"), and this ticket's condition-level send then allows that email to go.
+    """
+    from app.models.condition_item import ConditionItem
+    from app.models.condition_vocabulary import ConditionItemStatus
+    from app.services.condition_drafts import _draft_items
+    from app.services.condition_plan import update_item
+    from tests.conditions.test_condition_drafts import _people
+
+    loan_file, round_1 = await _planned_round_one(db_session)
+    actor = await _actor(db_session, loan_file)
+    await _people(db_session, loan_file)
+    await db_session.flush()
+    await _confirm(db_session, round_1, loan_file, actor)
+    round_2 = await _round_two(db_session, loan_file)
+    carried = {c.id: c for c in await _seen_again(db_session, loan_file, round_2)}
+    await db_session.refresh(round_2)
+    # The state that strands them: round 2 lists these again and plans nothing new of its own.
+    assert round_2.plan_ready_at is None and round_2.plan_confirmed_at is None
+
+    found: tuple[ConditionDraft, ConditionItem] | None = None
+    for draft in await db_session.scalars(
+        select(ConditionDraft).where(ConditionDraft.round_id == round_1.id)
+    ):
+        for item in await _draft_items(db_session, draft):
+            if item.condition_id in carried and found is None:
+                found = (draft, item)
+    assert found is not None, "round 1's unsent drafts ask for a condition round 2 listed again"
+    draft, item = found
+    condition = carried[item.condition_id]
+    assert condition.plan_confirmed_at is not None, "she confirmed this plan on round 1"
+    others = [i.id for i in await _draft_items(db_session, draft) if i.id != item.id]
+    assert others, (
+        "the positive control for the control below: this email asks for more than one thing"
+    )
+
+    await update_item(
+        db_session,
+        condition=condition,
+        item=item,
+        option=None,
+        name=None,
+        performers=None,
+        due_date=None,
+        actor_user_id=actor,
+        status=ConditionItemStatus.NOT_NEEDED,
+        note="The lender waived it on the phone.",
+    )
+    await db_session.flush()
+
+    left = [i.id for i in await _draft_items(db_session, draft)]
+    assert item.status is ConditionItemStatus.NOT_NEEDED
+    assert item.id not in left, "the task she cancelled is out of the email that asked for it"
+    # THE CONTROL: the sync did not empty the draft — the tasks still asked are still in it.
+    assert [i for i in others if i in left] == others

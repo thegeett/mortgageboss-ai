@@ -36,7 +36,7 @@ from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.conditions import facts
@@ -1007,13 +1007,31 @@ async def handle_own_way(db: AsyncSession, *, condition: Condition, actor_user_i
 
 
 async def _plan_drafted(db: AsyncSession, condition: Condition) -> bool:
-    """LP-968 — whether the condition's round has drafts: its plan is ready or confirmed."""
+    """LP-968 — whether this FILE has drafts for a plan edit to follow.
+
+    LP-975 REVIEW — THE FILE'S ROUNDS, NOT THIS CONDITION'S OWN. What it gates is `resync_file`, which
+    is file-wide by design ("after a plan edit: re-sync every round of the file whose plan is READY or
+    confirmed"), so asking only the condition's last-seen round answered a narrower question than the
+    call makes. A condition seen again moves to the newer round, and a re-listing that adds nothing new
+    never has a ready plan — so an edit to a carried condition returned here and no draft followed it,
+    while its asks sat in the earlier round's unsent drafts.
+    """
     if condition.last_seen_round_id is None:
         return False
-    round_ = await db.get(ConditionRound, condition.last_seen_round_id)
-    return round_ is not None and (
-        round_.plan_ready_at is not None or round_.plan_confirmed_at is not None
-    )
+    return (
+        await db.scalar(
+            select(ConditionRound.id)
+            .where(
+                ConditionRound.loan_file_id == condition.loan_file_id,
+                ConditionRound.deleted_at.is_(None),
+                or_(
+                    ConditionRound.plan_ready_at.is_not(None),
+                    ConditionRound.plan_confirmed_at.is_not(None),
+                ),
+            )
+            .limit(1)
+        )
+    ) is not None
 
 
 async def _plan_in_force(db: AsyncSession, condition: Condition) -> bool:
@@ -1023,9 +1041,20 @@ async def _plan_in_force(db: AsyncSession, condition: Condition) -> bool:
     confirmed, and importing round 2 moves a condition seen again to round 2: a plan she confirmed on
     round 1 stopped being in force until she confirmed round 2. `plan_confirmed_at` keeps it.
 
-    THE ROUND STAYS AS THE FALLBACK, for a condition that joined a round after its plan was confirmed (one
-    she adds by hand): no confirm will ever stamp it, and `confirm_round_plan` returns early on a
-    confirmed round, so a stamp-only rule would hold its steps, and its emails, for ever.
+    THE ROUND STAYS AS THE FALLBACK, for a condition that joined a round after its plan was confirmed: no
+    confirm will ever stamp it, and `confirm_round_plan` returns early on a confirmed round, so a
+    stamp-only rule would hold its steps, and its emails, for ever.
+
+    THAT FALLBACK ADMITS MORE THAN THE CONDITION SHE ADDS BY HAND (LP-975 review, measured). The manual
+    door is the case it was written for, but `condition_enrich._merge_conditions` also creates conditions
+    on an IMPORTED round — `ENRICHABLE` keys on `status`, and confirming a plan does not change it — so a
+    lender PDF attached to a round whose plan she confirmed, or a letter forwarded into it by email
+    (`merge_attachment_into_round` is the second door onto that path), mints conditions that are in force
+    at once with the plan the reading proposed and no screen that can say otherwise: `RoundPlanPanel`
+    returns null once `confirmed_at` is set. That predates this ticket — the old rule answered the same
+    round and said the same thing — and it is not fixed here, because making those conditions wait would
+    need a way for her to confirm them, which is the panel she never sees. It has its own ticket; the
+    scope is written down here so the next reader does not take the fallback for the manual door alone.
     """
     return await plan_confirmed(db, condition)
 

@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
 import structlog
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.communications.sanitise import sanitise_html
@@ -1069,6 +1069,40 @@ async def sync_round_drafts(
             )
         ).scalars()
     )
+    # AND WHATEVER ALREADY SITS IN THIS ROUND'S DRAFTS (LP-975 review). The set above is "the items of
+    # the conditions this round lists", and a condition SEEN AGAIN moves to the newer round — whose plan
+    # is not ready until something on it is planned (`build_plan`: `if outcome.planned`), so a re-listing
+    # that adds nothing new never gets drafts of its own. Its asks stay in THIS round's unsent drafts
+    # with nothing maintaining them: a task she marked not needed stayed in the email, against
+    # `update_item`'s own "the task leaves the plan and its draft", and since LP-975 made sending a
+    # question about the CONDITION that email can be sent. Reached by `test_a_task_she_cancelled_leaves
+    # _an_earlier_rounds_draft`. They are only ever kept or dropped here: placement is unchanged, because
+    # `_open_draft` has always looked an open draft up by file and recipient rather than by round.
+    stranded = list(
+        (
+            await db.execute(
+                select(ConditionItem)
+                .join(ConditionDraft, ConditionDraft.id == ConditionItem.draft_id)
+                .where(
+                    ConditionDraft.round_id == round_.id,
+                    ConditionItem.condition_id.notin_(by_id) if by_id else true(),
+                    ConditionItem.deleted_at.is_(None),
+                )
+                .order_by(ConditionItem.sequence)
+            )
+        ).scalars()
+    )
+    if stranded:
+        for condition in (
+            await db.execute(
+                select(Condition).where(
+                    Condition.id.in_({item.condition_id for item in stranded}),
+                    Condition.deleted_at.is_(None),
+                )
+            )
+        ).scalars():
+            by_id[condition.id] = condition
+        items += [item for item in stranded if item.condition_id in by_id]
     touched: dict[UUID, ConditionDraft] = {}
     #: Drafts whose membership changed this sync. A POLISHED draft is re-rendered only if it is here
     #: (the polish is hers; an unrelated plan edit must not wipe it).
@@ -1268,16 +1302,26 @@ async def _discard(db: AsyncSession, *, loan_file: LoanFile, draft: ConditionDra
 
 
 async def _plan_confirmed_for(db: AsyncSession, draft: ConditionDraft) -> bool:
-    """Whether this draft's round has a confirmed plan (LP-968 review).
+    """Whether the plan this draft carries is confirmed — THE SAME QUESTION THE SEND ASKS (LP-968,
+    LP-975 review).
 
     A round-wide draft always names its round; a per-condition draft (a question or a push-back) may
     not, and those have no upload link, so an unnamed round keeps the old behaviour rather than
     risking a draft that never gets one.
+
+    IT ASKED THE DRAFT'S ROUND, AND SINCE LP-975 THE SEND ASKS EACH CONDITION. The call site's own
+    reason for this gate is "nothing is sent before confirm (`unconfirmed_rounds_for`), so there is no
+    reason for the link to exist before it either" — a justification that lives in another function,
+    which LP-975 then changed: a draft whose every condition carries a stamp is now sent on an
+    unconfirmed round. Asking the round here left the borrower an email that asks him to upload with no
+    link to upload to, and `render_borrower` omits the paragraph silently. Reproduced in
+    `test_the_upload_link_follows_the_send_not_the_round`: round 1 confirmed and its email sent, round 2
+    imported, a new ask on a condition round 2 carried. So this asks the send's own question rather than
+    keeping a second copy of the rule that has to be remembered twice.
     """
     if draft.round_id is None:
         return True
-    round_ = await db.get(ConditionRound, draft.round_id)
-    return round_ is not None and round_.plan_confirmed_at is not None
+    return not await unconfirmed_rounds_for(db, communication_id=draft.communication_id)
 
 
 async def render(
