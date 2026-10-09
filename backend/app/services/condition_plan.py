@@ -854,10 +854,17 @@ async def revert_to_suggested(
 
     WHAT IT LEAVES ALONE: a task whose ask went out or was answered (REQUESTED, RECEIVED); a task she
     added herself (no suggestion to go back to); wording, who acts and due dates (edits to the task, not
-    to its step); and A SPLIT PART (LP-968 review) — the replay matches on the LIVE item's key, and
-    LP-946 gives a part the key `<base>.<performer>`, so the `from` recorded against the base key finds
-    no part to restore. The split itself is not undone either. Her note IS cleared, on every item, and
-    counted, because the note is one of her changes.
+    to its step). Her note IS cleared, on every item, and counted, because the note is one of her
+    changes.
+
+    A SPLIT PART DEPENDS ON WHERE THE EDIT WAS RECORDED, which the LP-968 review stated too broadly and
+    LP-969's probe corrected. The replay matches on the LIVE item's key, and LP-946 gives a part the key
+    `<base>.<performer>`:
+    - an edit recorded against the BASE key finds no part to restore, so the parts are left alone;
+    - an edit recorded against a PART's own key is restored, because that is the key the part carries.
+      `handle_own_way` edits each part itself, so its parts DO come back — measured on 1947 split to
+      title and insurance, then own way, then revert: both rows returned to OPEN with their draft.
+    The split itself is never undone either way.
     """
     events = (
         await db.execute(

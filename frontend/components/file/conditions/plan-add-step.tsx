@@ -58,7 +58,12 @@ const BLOCKS: Block[] = [
   {
     key: "upload_ask",
     label: "Ask the borrower to upload",
-    hint: "It goes in the borrower’s email, with a secure upload link once you confirm the plan.",
+    // SAYS NOTHING ABOUT WHEN (LP-969 review). This read "…once you confirm the plan", which tells her
+    // to do something she may have done an hour ago: adding a step to an ALREADY-confirmed round is a
+    // normal flow since LP-968, and the link then exists at once. The path's own send step already
+    // carries the confirm nuance ("Review the email, and send it once the plan is confirmed"), so the
+    // hint does not need to, and a hint that describes one state is wrong in the other.
+    hint: "It goes in the borrower’s email, with a secure upload link.",
     prompt: "What should the borrower upload?",
     placeholder: "e.g. the signed letter of explanation",
   },
@@ -100,12 +105,23 @@ const BLOCKS: Block[] = [
 ];
 
 /**
- * Who she can email. DERIVED FROM THE PERFORMERS, minus two named exclusions, so a performer added to
+ * Who she can email. DERIVED FROM THE PERFORMERS, minus three named exclusions, so a performer added to
  * the vocabulary is offered here without anyone remembering this list: herself (an email to herself is
- * a to-do) and the appraiser (appraisal requests go through the lender — `_RECIPIENT` sends the
- * appraiser's asks to the lender, which is already listed).
+ * a to-do), the appraiser (appraisal requests go through the lender — `_RECIPIENT` sends the appraiser's
+ * asks to the lender, which is already listed), and the ATTORNEY.
+ *
+ * THE ATTORNEY IS NOT A SECOND DESTINATION (LP-969 review). `condition_plan._RECIPIENT` maps both
+ * `title` and `attorney` to the one `title_attorney` email ("Title and attorney share one email",
+ * S3-05), so offering both put two labels on one draft: picking Attorney and picking Title produce the
+ * same email, and nothing on the screen said so. `item-links.tsx`'s `ASK_WHO` excludes it for this
+ * reason already (LP-955 review), and two lists answering "who can I ask?" differently is the thing
+ * that invites the next divergence.
+ *
+ * The LENDER stays, and that IS a deliberate difference from `ASK_WHO`: a free email to the lender is
+ * something she does, while delegating a TASK to the lender is not — LP-942 routes an appraiser's or
+ * lender's ask into the lender's own draft rather than making it hers.
  */
-const NOT_EMAILED: readonly Performer[] = ["processor", "appraiser"];
+const NOT_EMAILED: readonly Performer[] = ["processor", "appraiser", "attorney"];
 export const EMAIL_WHO: Performer[] = (Object.keys(PERFORMER_LABEL) as Performer[]).filter(
   (who) => !NOT_EMAILED.includes(who),
 );
