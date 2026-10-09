@@ -119,7 +119,16 @@ export function RoundPlanPanel({
   const shown = (condition: Condition) =>
     condition.first_round_id === round.id || blocking.has(condition.lender_code ?? "");
   const rows = onRound.filter(shown).sort((a, b) => a.sequence - b.sequence);
-  const carried = onRound.filter((condition) => !shown(condition)).length;
+  const notShown = onRound.filter((condition) => !shown(condition));
+  const carried = notShown.length;
+  // LP-973 REVIEW — the codes the drafts may name that have NO row on this screen. "Unlock the 2
+  // drafted emails: to Title/attorney (1947, 0132)" is true of the server, which is what the ticket
+  // judged, but 0132 is carried and not listed above, so she cannot click it or see what it asks. The
+  // LP-966 review already settled that a code in a sentence should name a row she can reach, which is
+  // why a BLOCKING carried condition stays; the drafts case was left, so it says so instead.
+  const carriedCodes = new Set(
+    notShown.map((condition) => condition.lender_code).filter((code): code is string => !!code),
+  );
   const blocked = data.blocking_codes.length > 0;
   const emails = data.drafts.length;
 
@@ -267,7 +276,7 @@ export function RoundPlanPanel({
       {refusal ? <p className="text-sm text-destructive">{refusal}</p> : null}
 
       <div className="flex flex-col gap-3 rounded-[var(--radius-container)] bg-muted/50 p-4">
-        <ConfirmSummary rows={rows} drafts={data.drafts} />
+        <ConfirmSummary rows={rows} drafts={data.drafts} carriedCodes={carriedCodes} />
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
@@ -1045,9 +1054,12 @@ function capitalise(text: string): string {
 function ConfirmSummary({
   rows,
   drafts,
+  carriedCodes,
 }: {
   rows: Condition[];
   drafts: { label: string; codes: string[] }[];
+  /** Codes on this round that have no row above: named in a draft, they would be unfindable. */
+  carriedCodes?: Set<string>;
 }) {
   const ready: string[] = [];
   const tasks: string[] = [];
@@ -1069,6 +1081,9 @@ function ConfirmSummary({
   }
   const lines: React.ReactNode[] = [];
   if (drafts.length > 0) {
+    const named = [...new Set(drafts.flatMap((draft) => draft.codes))].filter((code) =>
+      carriedCodes?.has(code),
+    );
     lines.push(
       <li key="emails">
         <strong className="font-semibold">
@@ -1076,6 +1091,9 @@ function ConfirmSummary({
         </strong>
         : {drafts.map((draft) => `to ${draft.label} (${draft.codes.join(", ")})`).join("; ")}. Until
         then nothing can be sent; you can review and edit each one now.
+        {named.length > 0
+          ? ` ${named.join(", ")} ${named.length === 1 ? "is" : "are"} from an earlier round, so ${named.length === 1 ? "it is" : "they are"} not listed above.`
+          : ""}
       </li>,
     );
   }

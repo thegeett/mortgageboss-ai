@@ -89,10 +89,20 @@ async def read_without_ai(db: AsyncSession, *, loan_file_id: Any) -> list[Condit
 
     SAFE MEANS NOTHING OF HERS IS LOST. A condition qualifies only while it is exactly what the fallback
     left: not confirmed (her answer wins over any reading), every task OPEN and from the reading (none
-    she added, none asked, answered or marked), and no plan change of hers (`condition_plan_changed`,
-    other than an earlier Read again's own). Anything else she has worked on, and keeps.
+    she added, none asked, answered or marked), no plan change of hers (`condition_plan_changed`, other
+    than an earlier Read again's own), and NO DOCUMENT SHE HAS UNLINKED.
+
+    THE UNLINK RULE IS THE ONE THE OTHER THREE DO NOT CATCH (LP-973 review). `condition_item_unlinks` is
+    keyed `(item_id, document_id)`, and `clear_for_reading` soft-deletes the items, so a refusal of hers
+    would be stranded on an id nothing reads while the fresh reading mints new ones — after which the
+    arrival door re-links the document she removed. That is the LP-953 finding reached through this door.
+    Nothing else here sees it: `unlink_document` deletes the evidence row, recomputes the task to OPEN
+    when nothing else answers it, and records `condition_evidence_unlinked` rather than a plan change —
+    so a condition she linked and then unlinked a document on satisfies every other rule. Her refusal is
+    work, so the condition keeps its plan.
     """
     from app.models.condition_event import ConditionEvent, ConditionEventKind
+    from app.models.condition_evidence import ConditionItemUnlink
     from app.models.condition_item import ConditionItem
     from app.models.condition_vocabulary import ConditionItemOrigin, ConditionItemStatus
 
@@ -131,6 +141,14 @@ async def read_without_ai(db: AsyncSession, *, loan_file_id: Any) -> list[Condit
     ):
         if (event.detail or {}).get("change") != READ_AGAIN_CHANGE:
             worked.add(event.condition_id)
+    # A DOCUMENT SHE UNLINKED (LP-973 review). Joined through the items because the row is keyed on the
+    # item, and soft-deleted items count: a refusal stranded by an earlier clear is still hers.
+    for condition_id in await db.scalars(
+        select(ConditionItem.condition_id)
+        .join(ConditionItemUnlink, ConditionItemUnlink.item_id == ConditionItem.id)
+        .where(ConditionItem.condition_id.in_(ids))
+    ):
+        worked.add(condition_id)
     return [condition for condition in candidates if condition.id not in worked]
 
 

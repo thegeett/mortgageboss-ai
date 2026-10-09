@@ -15,12 +15,18 @@ from app.ai.client import AIClientError
 from app.models.condition import ConditionReadingSource, ConditionReadingStatus
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_item import ConditionItem
-from app.models.condition_vocabulary import ConditionItemStatus, PlanOption
+from app.models.condition_vocabulary import (
+    ConditionItemOrigin,
+    ConditionItemStatus,
+    PlanOption,
+)
 from app.services import condition_reading
+from app.services.condition_links import link_document, unlink_document
 from app.services.condition_plan import build_plan, update_item
 from app.services.condition_reading import read_round
 from app.services.condition_reading_state import (
     DONE,
+    READ_AGAIN_CHANGE,
     WITHOUT_AI,
     clear_for_reading,
     read_without_ai,
@@ -101,6 +107,97 @@ async def test_an_ai_reading_is_not_offered(
     await read_round(db_session, round_id=round_.id)
     state = await reading_state(db_session, round_=round_)
     assert (state["state"], state["without_ai"]) == (DONE, 0)
+
+
+async def test_a_carried_task_keeps_its_plan(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LP-973 REVIEW — this pins the `origin is READING` clause, which the ticket records as
+    unpinnable because "a task she adds also writes a plan change".
+
+    A CARRIED task is the origin that makes the clause load-bearing rather than redundant:
+    `carry_plan` sets `origin=CARRIED` (`condition_plan.py:742`) and writes NO
+    `condition_plan_changed`, so the plan-change rule does not see it and this clause is the only
+    thing excluding the condition. The state is one the server produces — a reworded condition's
+    successor whose round-2 AI reading also failed is LIBRARY, NEEDS_CONFIRMATION and carries its
+    predecessor's tasks — and it is built here directly rather than through two rounds, because the
+    rule is what is under test, not the carry.
+    """
+    loan_file, _, conditions = await _read_without_the_ai(db_session, monkeypatch)
+    with_items = [c for c in conditions.values() if await _live_items(db_session, c)]
+    assert len(with_items) >= 2, "the fallback gives a condition with an owner hint a generic task"
+    inherited, untouched = with_items[0], with_items[1]
+
+    before = {c.id for c in await read_without_ai(db_session, loan_file_id=loan_file.id)}
+    assert {inherited.id, untouched.id} <= before, "THE PREMISE: both are offered first"
+
+    task = (await _live_items(db_session, inherited))[0]
+    task.origin = ConditionItemOrigin.CARRIED
+    await db_session.flush()
+
+    # No plan change was written, so the other rules still say "offer it".
+    changes = list(
+        await db_session.scalars(
+            select(ConditionEvent).where(
+                ConditionEvent.condition_id == inherited.id,
+                ConditionEvent.kind == ConditionEventKind.CONDITION_PLAN_CHANGED,
+            )
+        )
+    )
+    assert not [e for e in changes if (e.detail or {}).get("change") != READ_AGAIN_CHANGE]
+
+    after = {c.id for c in await read_without_ai(db_session, loan_file_id=loan_file.id)}
+    assert inherited.id not in after, "a carried plan is work from an earlier round, and is kept"
+    assert untouched.id in after, "THE CONTROL: the reading's own task is still offered"
+
+
+async def test_a_document_she_unlinked_is_never_read_again(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LP-973 REVIEW — the rule the other three cannot catch, and the LP-953 finding through this door.
+
+    `condition_item_unlinks` is keyed `(item_id, document_id)` and `clear_for_reading` soft-deletes the
+    items, so a refusal of hers would be stranded on an id nothing reads while the fresh reading mints
+    new ones — and the arrival door would then re-link the document she removed. Every other rule says
+    "offer it": `unlink_document` deletes the evidence row, recomputes the task to OPEN when nothing
+    else answers it, and records `condition_evidence_unlinked`, never a plan change.
+    """
+    from tests.conditions.test_lp953_linking import _doc
+
+    loan_file, _, conditions = await _read_without_the_ai(db_session, monkeypatch)
+    actor = await _actor(db_session, loan_file)
+    with_items = [c for c in conditions.values() if await _live_items(db_session, c)]
+    assert len(with_items) >= 2, "the fallback gives a condition with an owner hint a generic task"
+    refused, untouched = with_items[0], with_items[1]
+    task = (await _live_items(db_session, refused))[0]
+
+    # THE PREMISE: both are offered before she touches either.
+    before = {c.id for c in await read_without_ai(db_session, loan_file_id=loan_file.id)}
+    assert {refused.id, untouched.id} <= before
+
+    document = await _doc(
+        db_session, loan_file, document_type="bank_statement", name="Statement 08/28"
+    )
+    await link_document(
+        db_session,
+        condition=refused,
+        item=task,
+        document_id=document.id,
+        page=None,
+        actor_user_id=actor,
+    )
+    await unlink_document(
+        db_session, condition=refused, item=task, document_id=document.id, actor_user_id=actor
+    )
+    await db_session.flush()
+    # Her refusal leaves the task looking exactly like the fallback's: OPEN, from the reading.
+    assert task.status is ConditionItemStatus.OPEN
+
+    after = {c.id for c in await read_without_ai(db_session, loan_file_id=loan_file.id)}
+    assert refused.id not in after, "clearing it would strand her refusal on a deleted item id"
+    # THE CONTROL: the condition she never touched is still offered, so this is the unlink and not a
+    # rule that now refuses everything.
+    assert untouched.id in after
 
 
 async def test_what_she_worked_on_is_never_read_again(

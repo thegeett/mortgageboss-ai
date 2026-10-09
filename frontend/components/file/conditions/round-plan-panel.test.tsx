@@ -887,6 +887,30 @@ describe("RoundPlanPanel", () => {
       expect(screen.getByText(/^1 new condition/)).toBeTruthy();
     });
 
+    it("says which drafted codes are from an earlier round (LP-973 review)", () => {
+      // "Unlock the 2 drafted emails: to Title/attorney (1947)" is true of the server — the email is
+      // real and unsent — but 1947 is carried and has no row above, so she cannot click it or see what
+      // it asks. The LP-966 review already settled that a code in a sentence should name a row she can
+      // reach, which is why a BLOCKING carried condition stays in the plan; the drafts case was left.
+      show([condition({}), seenAgain("c8", "1947")], {
+        ...unblocked(),
+        drafts: [{ label: "Title/attorney", codes: ["1947"] }],
+      } as RoundPlan);
+      expect(screen.queryByRole("button", { name: "1947" })).toBeNull();
+      expect(
+        screen.getByText(/1947 is from an earlier round, so it is not listed above\./),
+      ).toBeTruthy();
+    });
+
+    it("says nothing extra when every drafted code has a row (the control)", () => {
+      show([condition({})], {
+        ...unblocked(),
+        drafts: [{ label: "Borrower", codes: ["0006"] }],
+      } as RoundPlan);
+      expect(screen.getByRole("button", { name: "0006" })).toBeTruthy();
+      expect(screen.queryByText(/from an earlier round, so/)).toBeNull();
+    });
+
     it("keeps a carried condition that blocks Confirm, so the refusal names a row on screen", () => {
       show([condition({}), seenAgain("c8", "0132")]); // basePlan blocks on 0132
       expect(screen.getByRole("button", { name: "0132" })).toBeTruthy();
