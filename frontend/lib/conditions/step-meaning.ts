@@ -105,13 +105,17 @@ export function actionFor(option: PlanOption, item: ConditionItem | null): strin
     // THE WHOLE CONDITION'S ASK NAMES NO EMAIL (LP-966 review). The drafts are built from ITEMS —
     // `condition_drafts` pairs each draft's items with their conditions — so a condition-level ask
     // whose tasks are not asks puts nothing in any email. Naming one here claimed otherwise.
+    //
+    // AND IT SAYS NOTHING ABOUT LAYOUT (LP-974 review). It read "the tasks below", written when this
+    // phrase appeared only in LP-967's expanded card; LP-974 reuses it in the COLLAPSED row's
+    // "Route:", where there is nothing below it. A phrase reused in two layouts cannot describe one.
     case "ask_borrower":
       return item === null
-        ? "Ask the borrower — the tasks below are what go in the email"
+        ? "Ask the borrower — its tasks are what go in the email"
         : "Ask the borrower — in the borrower email";
     case "ask_third_party":
       return item === null
-        ? "Ask someone else — the tasks below are what go in the email"
+        ? "Ask someone else — its tasks are what go in the email"
         : `Ask ${askedWho(item)} — in the ${emailWord(recipient(item))} email`;
     case "already_in_file":
       return "Already in the file";

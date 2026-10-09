@@ -244,6 +244,25 @@ describe("RoundPlanPanel", () => {
     expect(screen.getByText(/We put this request in the email to Title \/ escrow\./)).toBeTruthy();
   });
 
+  it("each Next step select is named by its own task (LP-974 review)", () => {
+    // The visible label is "Next step" on every row, with the task name in a span beside it that
+    // nothing tied to the control — so a screen reader announced three identical combo boxes and she
+    // could not tell which task she was changing. `aria-labelledby` over the name and the label makes
+    // each one's accessible name its own.
+    const second = item({ id: "i9", name: "Second task", option: "i_will_do_it" });
+    show([condition({ next_step: "push_back", items: [item({}), second] })], unblocked());
+    fireEvent.click(screen.getByRole("button", { name: "See the plan" }));
+
+    const named = screen.getAllByRole("combobox").map((el) => el.getAttribute("aria-labelledby"));
+    expect(named.every(Boolean)).toBe(true);
+    // Each name leads with its own row's heading, so the three are distinguishable.
+    expect(screen.getByRole("combobox", { name: /^Second task Next step$/ })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: /^The whole condition Next step$/ })).toBeTruthy();
+    // THE CONTROL: the visible label is still "Next step" and still tied by `htmlFor`, so the three
+    // remain findable that way too — this adds a name rather than replacing one.
+    expect(screen.getAllByLabelText("Next step")).toHaveLength(3);
+  });
+
   it("changes ONE task's step, and the condition's own step through its own call", () => {
     const second = item({ id: "i9", name: "Second task", option: "i_will_do_it" });
     show([condition({ next_step: "push_back", items: [item({}), second] })], unblocked());

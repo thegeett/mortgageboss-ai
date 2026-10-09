@@ -523,15 +523,25 @@ function HowRow({
   onHelp: () => void;
 }) {
   const selectId = useId();
+  const nameId = useId();
+  const labelId = useId();
   return (
     <div className="flex flex-col gap-1.5 rounded-[var(--radius-container)] border border-border bg-card px-3 py-2.5">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="text-sm font-semibold text-foreground">{name}</span>
-        <label htmlFor={selectId} className="text-xs text-foreground-2">
+        <span id={nameId} className="text-sm font-semibold text-foreground">
+          {name}
+        </span>
+        <label id={labelId} htmlFor={selectId} className="text-xs text-foreground-2">
           Next step
         </label>
+        {/* THE TASK'S NAME IS PART OF THE SELECT'S NAME (LP-974 review). The visible label is "Next
+            step" on every row, so a screen reader announced four identical combo boxes with the task
+            name in an unassociated span beside each — nothing tied them. `aria-labelledby` over both
+            makes the name "Credit report invoice Next step" while the visible label and its `htmlFor`
+            stay as they are. */}
         <select
           id={selectId}
+          aria-labelledby={`${nameId} ${labelId}`}
           value={option}
           onChange={(event) => onChange(event.target.value as PlanOption)}
           className="h-8 w-auto rounded-md border border-primary/40 bg-card px-1.5 text-sm font-medium text-primary"

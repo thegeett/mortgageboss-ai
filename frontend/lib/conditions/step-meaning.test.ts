@@ -108,12 +108,14 @@ describe("step meanings", () => {
     ).toBe("Ask the lender — in the lender email");
     // LP-966 REVIEW: the whole condition's ask names NO email. This asserted "by email", which is a
     // claim the server does not keep — drafts are built from ITEMS, so a condition-level ask whose
-    // tasks are not asks puts nothing in any email.
+    // tasks are not asks puts nothing in any email. LP-974 review: and it says "its tasks" rather
+    // than "the tasks below", because LP-974 reuses the phrase in the collapsed row, where nothing
+    // is below it.
     expect(actionFor("ask_third_party", null)).toBe(
-      "Ask someone else — the tasks below are what go in the email",
+      "Ask someone else — its tasks are what go in the email",
     );
     expect(actionFor("ask_borrower", null)).toBe(
-      "Ask the borrower — the tasks below are what go in the email",
+      "Ask the borrower — its tasks are what go in the email",
     );
     // A TASK still names its own email, which is the half that is true.
     expect(actionFor("ask_borrower", item({}))).toBe("Ask the borrower — in the borrower email");
