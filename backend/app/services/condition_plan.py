@@ -854,7 +854,10 @@ async def revert_to_suggested(
 
     WHAT IT LEAVES ALONE: a task whose ask went out or was answered (REQUESTED, RECEIVED); a task she
     added herself (no suggestion to go back to); wording, who acts and due dates (edits to the task, not
-    to its step).
+    to its step); and A SPLIT PART (LP-968 review) — the replay matches on the LIVE item's key, and
+    LP-946 gives a part the key `<base>.<performer>`, so the `from` recorded against the base key finds
+    no part to restore. The split itself is not undone either. Her note IS cleared, on every item, and
+    counted, because the note is one of her changes.
     """
     events = (
         await db.execute(
@@ -905,9 +908,14 @@ async def revert_to_suggested(
         ):
             item.status = ConditionItemStatus(first_status[item.key])
             touched = True
-        if touched or item.plan_note:
+        # HER NOTE IS ONE OF HER CHANGES, SO THE COUNT HAS TO SAY SO (LP-968 review). Clearing it was
+        # already right — the note is part of the plan she edited — but `reverted += int(touched)` left
+        # a note-only clear out of the total, so a revert that deleted what she had written reported
+        # that nothing changed, and the screen says "already the suggested plan".
+        cleared_note = item.plan_note is not None
+        if touched or cleared_note:
             item.plan_note = None
-        reverted += int(touched)
+        reverted += int(touched or cleared_note)
     if first_step[0]:
         suggested = PlanOption(first_step[1]) if first_step[1] else None
         if suggested is not condition.next_step:

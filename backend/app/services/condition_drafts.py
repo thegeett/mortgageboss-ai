@@ -1262,6 +1262,19 @@ async def _discard(db: AsyncSession, *, loan_file: LoanFile, draft: ConditionDra
     await db.flush()
 
 
+async def _plan_confirmed_for(db: AsyncSession, draft: ConditionDraft) -> bool:
+    """Whether this draft's round has a confirmed plan (LP-968 review).
+
+    A round-wide draft always names its round; a per-condition draft (a question or a push-back) may
+    not, and those have no upload link, so an unnamed round keeps the old behaviour rather than
+    risking a draft that never gets one.
+    """
+    if draft.round_id is None:
+        return True
+    round_ = await db.get(ConditionRound, draft.round_id)
+    return round_ is not None and round_.plan_confirmed_at is not None
+
+
 async def render(
     db: AsyncSession,
     *,
@@ -1308,7 +1321,15 @@ async def render(
     pairs = [(conditions[item.condition_id], item) for item in items]
     await _link_needs(db, message=message, items=items)
     if draft.recipient is DraftRecipient.BORROWER:
-        if not message.upload_link_url:
+        # THE BORROWER'S 72 HOURS START WHEN SHE SENDS, NOT WHEN THE PLAN BECAME READY (LP-968 review).
+        # `mint_upload_link` sets `expires_at = now + DEFAULT_TTL_HOURS` at MINT, and this mints only
+        # when there is no url yet — so once LP-968 moved the first render to plan-ready, the clock
+        # started there and confirm reused the same link. She confirms whenever she gets to the file:
+        # two days later the borrower has 24 hours, three days later the link in the email he receives
+        # is already dead. Nothing is sent before confirm (`unconfirmed_rounds_for`), so there is no
+        # reason for the link to exist before it either, and `render_borrower` already omits the
+        # paragraph when there is no url.
+        if not message.upload_link_url and await _plan_confirmed_for(db, draft):
             from app.services.upload_links import mint_upload_link
 
             minted = await mint_upload_link(

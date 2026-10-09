@@ -25,7 +25,7 @@ from app.services.condition_plan import (
 )
 from app.services.condition_reading import ConfirmedItem, confirm_reading
 from app.services.email_send import CannotSendError, send_draft
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.conditions.reading_fixture import fake_complete
 from tests.conditions.test_condition_plan import _actor, _conditions, _items, _planned_round_one
@@ -178,6 +178,66 @@ async def test_once_confirmed_the_same_draft_sends(db_session: AsyncSession) -> 
 # --------------------------------------------------------------------------------------------- #
 
 
+async def test_the_borrowers_upload_link_waits_for_confirm(db_session: AsyncSession) -> None:
+    """LP-968 REVIEW — the borrower's 72 hours must start when she sends, not when the plan was ready.
+
+    `mint_upload_link` stamps `expires_at = now + DEFAULT_TTL_HOURS` AT MINT, and the render mints only
+    when the message has no url yet. So drafting at plan-ready started the clock when the reading task
+    ran, and confirm reused that same link: she confirms when she next gets to the file, so two days
+    later he has 24 hours and three days later the link in the email he receives is already dead.
+    Nothing can be sent before confirm (`unconfirmed_rounds_for`), so the link has no reason to exist
+    before it either, and `render_borrower` already omits the paragraph when there is no url.
+    """
+    from app.models.communication import Communication
+    from app.models.condition_draft import DraftRecipient
+    from app.models.upload_link import UploadLink
+
+    loan_file, round_, conditions, actor = await _drafted(db_session)
+
+    async def borrower_message() -> Communication:
+        draft = await db_session.scalar(
+            select(ConditionDraft).where(
+                ConditionDraft.loan_file_id == loan_file.id,
+                ConditionDraft.recipient == DraftRecipient.BORROWER,
+            )
+        )
+        assert draft is not None, "the plan drafts a borrower email on this round"
+        message = await db_session.get(Communication, draft.communication_id)
+        assert message is not None
+        return message
+
+    async def links() -> int:
+        return (
+            await db_session.scalar(
+                select(func.count(UploadLink.id)).where(UploadLink.loan_file_id == loan_file.id)
+            )
+        ) or 0
+
+    # THE PREMISE: the draft exists and is unconfirmed, so this is the window the finding is about.
+    assert round_.plan_confirmed_at is None
+    before = await borrower_message()
+    assert before.upload_link_url is None, "no link, so no clock, until she confirms"
+    assert await links() == 0
+    assert "Upload them here" not in (before.body or ""), "and the email says nothing about one"
+
+    await confirm_reading(
+        db_session,
+        condition=conditions["0132"],
+        items=[
+            ConfirmedItem(name=i.name, performers=(i.performer,), key=i.key)
+            for i in await _items(db_session, conditions["0132"])
+        ],
+        actor_user_id=actor,
+    )
+    await confirm_round_plan(db_session, round_=round_, actor_user_id=actor)
+
+    # CONFIRM RE-RENDERS EVERY OPEN DRAFT, so the link is minted here and the clock starts here.
+    after = await borrower_message()
+    assert after.upload_link_url, "confirm mints it"
+    assert await links() == 1
+    assert "Upload them here" in (after.body or "")
+
+
 async def test_not_needed_needs_a_reason_and_keeps_it(db_session: AsyncSession) -> None:
     _, _, conditions, actor = await _drafted(db_session)
     condition = conditions["6378"]
@@ -283,6 +343,28 @@ async def test_going_back_never_unasks_a_sent_email(db_session: AsyncSession) ->
     await db_session.flush()
     assert await revert_to_suggested(db_session, condition=condition, actor_user_id=actor) == 0
     assert task.option is PlanOption.I_WILL_DO_IT and task.option is not before
+
+
+async def test_going_back_counts_clearing_her_note(db_session: AsyncSession) -> None:
+    """LP-968 REVIEW — a revert that deletes what she wrote must not report that nothing changed.
+
+    `update_item` writes `plan_note` outside the status block (`changed["note"] = True` on its own),
+    and the request's `note` is an independent field, so a note-only edit is reachable: it records no
+    option and no status `from`. The replay then found nothing to restore, `touched` stayed false, and
+    `reverted += int(touched)` returned 0 — while the note was cleared anyway. The count's one consumer
+    is the `if reverted:` guard around the `condition_plan_changed` event, so the history said nothing
+    about a revert that deleted what she wrote. Clearing it is right; not counting it was not.
+    """
+    _, _, conditions, actor = await _drafted(db_session)
+    condition = conditions["1947"]
+    task = (await _items(db_session, condition))[0]
+    await _edit(db_session, condition, task, actor, note="Title says Monday; chased twice.")
+    assert task.plan_note == "Title says Monday; chased twice."
+
+    assert await revert_to_suggested(db_session, condition=condition, actor_user_id=actor) == 1
+    assert task.plan_note is None
+    # THE CONTROL is the test below: the same condition with no note and no edit still reports 0, so
+    # this 1 is the note and not a revert that counts everything.
 
 
 async def test_going_back_with_nothing_changed_changes_nothing(db_session: AsyncSession) -> None:
