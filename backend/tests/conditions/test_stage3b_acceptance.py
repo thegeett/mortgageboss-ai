@@ -9,7 +9,8 @@ so the package's page counts and merges are measured, not assumed):
 3. S3-08 — the $4,000.00 deposit on 08/21 is flagged against the $2,870.66 threshold;
 4. S3-09 — accepting the evidence proposes the figures and changes nothing until they are applied;
    applying goes through the stated-financials edits;
-5. the DTI 44% to 46% change is flagged "re-run DU", and 46% to 48% is not;
+5. the DTI 44% to 46% change is flagged "re-run DU", and 46% to 48% is not (those two
+   rows of `test_figures_check.py::test_the_guides_table`, not repeated here);
 6. S3-10 — the package has one named PDF and one note per ready condition;
 7. Mark submitted moves exactly those to Sent to lender, and the lender's track never moves.
 
@@ -41,7 +42,6 @@ from app.services.condition_evidence import check_document
 from app.services.condition_plan import remove_item
 from app.services.condition_status import move_prep_status
 from app.services.dti import build_dti_calculation
-from app.services.figures_check import du_rerun_reasons
 from app.storage import get_storage_backend
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -102,13 +102,6 @@ async def _prep_moves(db: AsyncSession, loan_file_id: Any) -> int:
         )
         or 0
     )
-
-
-def test_the_du_tolerance_examples() -> None:
-    """Step 5: Fannie Mae B3-2-10's own examples (STOP AND ASK 2 records the crossing reading)."""
-    flagged, _ = du_rerun_reasons(old_dti=Decimal("44"), new_dti=Decimal("46"))
-    assert flagged == ["the DTI rises above 45% (44% → 46%)"]
-    assert du_rerun_reasons(old_dti=Decimal("46"), new_dti=Decimal("48")) == ([], [])
 
 
 async def test_stage_3b_from_statements_to_the_package(

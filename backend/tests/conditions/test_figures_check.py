@@ -46,12 +46,6 @@ OTHER_DEBTS = Decimal("450.70")
 DASH = "\u2013"
 
 
-def test_the_guides_own_examples() -> None:
-    reasons, _ = du_rerun_reasons(old_dti=Decimal("44"), new_dti=Decimal("46"))
-    assert reasons == ["the DTI rises above 45% (44% → 46%)"]
-    assert du_rerun_reasons(old_dti=Decimal("46"), new_dti=Decimal("48")) == ([], [])
-
-
 @pytest.mark.parametrize(
     ("old", "new", "reasons"),
     [

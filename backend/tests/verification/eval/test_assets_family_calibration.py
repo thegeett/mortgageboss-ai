@@ -14,12 +14,12 @@ KEYLESS by default (labels replayed → trivially-perfect baseline, a plumbing c
 is NOT inert, deliberate abstentions + a deliberate wrong answer make the flags fire — and, since
 ``over_abstaining`` gates on ``_ABSTAINING_DIMENSIONS`` membership, that also proves each AS tag IS
 registered. LIVE mode (the real materialization reasoner over raw statements/gift-letters/retirement docs,
-scored vs golden) is the meaningful measure and is SKIPPED without a key (never fabricated).
+scored vs golden) is the meaningful measure and is NOT built yet:
+wiring it is a follow-on (LP-323-AS-C doc), so no test here pretends to run it.
 """
 
 from __future__ import annotations
 
-import os
 from collections.abc import Sequence
 
 import pytest
@@ -106,18 +106,3 @@ def test_all_assets_ai_tags_are_covered() -> None:
     # free-text tag (accounted for explicitly, not dropped).
     assert len(_ASSETS_AI_TAGS) == 5 and "as.borrowed_funds" in _ASSETS_AI_TAGS
     assert set(_ASSETS_AI_TAGS).isdisjoint(_DEFERRED_FREE_TEXT_TAGS)
-
-
-# --------------------------------------------------------------------------- #
-# LIVE — the meaningful measure (skipped without a key; never fabricated)
-# --------------------------------------------------------------------------- #
-@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="live calibration needs an API key")
-def test_live_calibration_placeholder() -> None:
-    # LIVE calibration runs the REAL materialization reasoners (stmt_facts / asset_facts / the AS-12
-    # judgment) over raw statement / gift-letter / retirement-account content and scores each produced
-    # ENUM/number tag vs a golden label — the only measure that can detect a live model's over/under-
-    # abstention. Wiring the assets reasoners into a scored live harness (and a fuzzy scorer for the
-    # deferred free-text counterparty) is its own follow-on seam (see the LP-323-AS-C doc). Keyless above runs.
-    pytest.skip(
-        "live assets-tag calibration harness is a documented follow-on seam (LP-323-AS-C doc)"
-    )

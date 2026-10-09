@@ -108,7 +108,8 @@ def test_the_header_and_its_date_survive_the_pdf_path(fixture: str) -> None:
     assert from_pdf.expiry_dates == from_text.expiry_dates
 
 
-@pytest.mark.parametrize("fixture", ALL_FIXTURES)
+# Round 2 carries no underwriter notes, so on it this compared `[] == []` whatever either path did.
+@pytest.mark.parametrize("fixture", [UWM_ROUND_1, UWM_PAGEBREAK])
 def test_the_underwriter_notes_resolve_identically_from_both_inputs(fixture: str) -> None:
     """Notes carry a resolved DATE, and the date comes from the header — so this fails the moment
     the header stops being read on either path."""
@@ -120,7 +121,9 @@ def test_the_underwriter_notes_resolve_identically_from_both_inputs(fixture: str
             for note in row.underwriter_notes
         ]
 
-    assert notes(_from_pdf(fixture)) == notes(_from_text(fixture))
+    from_text = notes(_from_text(fixture))
+    assert from_text, "the positive control: with no notes this compares two empty lists"
+    assert notes(_from_pdf(fixture)) == from_text
 
 
 def test_a_block_of_one_line_rows_still_parses_from_a_pdf() -> None:

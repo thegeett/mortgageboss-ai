@@ -250,10 +250,3 @@ async def test_free_text_and_stage_b_not_percent_scored() -> None:
 def test_generation_is_keyless_and_deterministic() -> None:
     assert not os.getenv("ANTHROPIC_API_KEY") or True  # generator never reads a key
     assert render_csv(build_worksheet(_snap())) == render_csv(build_worksheet(_snap()))
-
-
-@pytest.mark.skipif(
-    os.getenv("LP334_LIVE") != "1", reason="live LF-6T3N scoring is opt-in (LP334_LIVE=1)"
-)
-async def test_live_scoring_seam() -> None:
-    pytest.skip("live LF-6T3N scoring awaits the human-filled worksheet (docs/tickets/LP-338.md)")

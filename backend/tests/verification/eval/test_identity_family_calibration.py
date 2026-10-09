@@ -15,12 +15,11 @@ KEYLESS by default: calibration.py's own docstring is explicit that keyless obse
 labels, so concrete accuracy reads as a trivially-perfect baseline (a plumbing check). To prove the
 metric is NOT inert, this suite feeds deliberate abstentions + a deliberate wrong answer and asserts the
 flags fire. LIVE mode — the real materialization reasoner producing these tags from raw content, scored
-vs golden labels — is the MEANINGFUL measure and is SKIPPED without an API key (never fabricated).
+vs golden labels — is the MEANINGFUL measure and is NOT built yet:
+wiring it is a follow-on (LP-323-ID-C doc), so no test here pretends to run it.
 """
 
 from __future__ import annotations
-
-import os
 
 import pytest
 from app.verification.eval.calibration import DimensionCalibration, format_calibration
@@ -103,16 +102,3 @@ def test_all_five_id_ai_tags_are_covered() -> None:
         "id.residency_eligible",
         "id.poa_acceptable",
     }
-
-
-# --------------------------------------------------------------------------- #
-# LIVE — the meaningful measure (skipped without a key; never fabricated)
-# --------------------------------------------------------------------------- #
-@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="live calibration needs an API key")
-def test_live_calibration_placeholder() -> None:
-    # LIVE calibration runs the REAL materialization reasoner (LP-326) over raw name/address/POA/
-    # citizenship content and scores the produced tag vs a golden label — the only measure that can
-    # detect a live model's over/under-abstention. It is intentionally a documented SEAM here: wiring
-    # the ID materialization reasoners into a scored live harness is its own ticket (see LP-323-ID-C
-    # doc, "calibration" — the live seam). Without a key this is skipped; keyless scoring above still runs.
-    pytest.skip("live ID-tag calibration harness is a documented follow-on seam (LP-323-ID-C doc)")
