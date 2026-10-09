@@ -1136,9 +1136,16 @@ So every backend figure in the rows above was measured BEFORE `322470f4` and inc
 outcomes; LP-973's 9186 is the last of them. **The post-cutoff absolute figure is not recorded here
 because it is not measured:** four attempts at a full run were killed by host memory pressure while
 another session's mutation work was running, and publishing the arithmetic as though it were a
-measurement is the thing this file should not do. Measure it when the machine is quiet, against
-`322470f4` or later, and compare only like with like. Frontend counts are unaffected — `322470f4`
-touches no frontend file.
+measurement is the thing this file should not do.
+
+**Measuring it has two preconditions, and the second one bit on the first attempt after the machine
+freed up.** The tree must be QUIET (no other pytest: one test DB, one pytest) and it must be CLEAN at
+`322470f4` or later. A shared worktree normally is not: at the time of writing it carried another
+session's in-flight LP-975 work, including an untracked `backend/tests/conditions/test_lp975_carried_plan_confirmed.py`
+with six test functions. A figure measured there is a figure for a different file set, and nothing in
+`git diff` says so — **a diff cannot see an untracked file**, so the check is `git status --porcelain`
+over the test directories, not a diffstat. Compare only like with like. Frontend counts are unaffected
+— `322470f4` touches no frontend file.
 
 
 | Ticket | Status | Build SHA | Review SHA | Notes |
