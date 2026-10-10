@@ -112,6 +112,12 @@ export function RoundPlanPanel({
     null,
   );
   const [refusal, setRefusal] = useState<string | null>(null);
+  // LP-978 REVIEW — A REFUSED CONFIRM BELONGS BESIDE THE BUTTON, and the button moved. There is one
+  // refusal line and it is under the conditions, which was right while Confirm was down there too; now
+  // a 409 from `confirm_round_plan` (the blocking codes this screen holds can be stale) renders below
+  // every row, off the screen on a file with more than a handful. Two slots rather than one moved
+  // line, because a step edit's refusal belongs beside the row it came from, which is still down there.
+  const [confirmRefusal, setConfirmRefusal] = useState<string | null>(null);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [help, setHelp] = useState<{ title: string; current: PlanOption } | null>(null);
 
@@ -332,9 +338,13 @@ export function RoundPlanPanel({
             disabled={blocked || confirm.isPending}
             onClick={() => {
               setRefusal(null);
+              setConfirmRefusal(null);
               // LP-976 — a confirm on a confirmed round confirms the plan of what was added to it.
               for (const roundId of late ? lateRoundIds : [round.id]) {
-                confirm.mutate({ roundId }, { onError });
+                confirm.mutate(
+                  { roundId },
+                  { onError: (error) => setConfirmRefusal(getErrorMessage(error)) },
+                );
               }
             }}
           >
@@ -366,6 +376,7 @@ export function RoundPlanPanel({
             </p>
           )}
         </div>
+        {confirmRefusal ? <p className="text-sm text-destructive">{confirmRefusal}</p> : null}
       </div>
 
       <FirstMovesBox rows={rows} drafts={drafts} />

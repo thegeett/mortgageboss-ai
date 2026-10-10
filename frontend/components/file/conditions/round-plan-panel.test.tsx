@@ -36,11 +36,19 @@ const calls = vi.hoisted(() => ({
   addResponses: [] as Condition[],
   /** LP-971 — what "Turn it into steps" comes back with. */
   describeResult: null as DescribeResult | null,
+  /** LP-978 review — what the confirm call refuses with: axios-shaped, as the real one is. */
+  confirmError: null as unknown,
 }));
 vi.mock("@/lib/api/conditions", () => ({
   useRoundPlan: () => ({ data: plan.data }),
   useConfirmPlan: () => ({
-    mutate: (body: unknown) => calls.confirms.push(body),
+    mutate: (body: unknown, options?: { onError?: (error: unknown) => void }) => {
+      calls.confirms.push(body);
+      // LP-978 REVIEW — the server CAN refuse a confirm (a 409 from `confirm_round_plan` when the
+      // blocking codes this screen holds are stale), and a mock that never calls `onError` cannot
+      // show where that refusal lands.
+      if (calls.confirmError) options?.onError?.(calls.confirmError);
+    },
     isPending: false,
   }),
   useSetNextStep: () => ({ mutate: (body: unknown) => calls.steps.push(body) }),
@@ -98,6 +106,7 @@ afterEach(() => {
   calls.describeResult = null;
   calls.described = [];
   calls.logged = [];
+  calls.confirmError = null;
 });
 
 const basePlan: RoundPlan = {
@@ -256,6 +265,30 @@ describe("RoundPlanPanel", () => {
     expect(
       confirm.compareDocumentPosition(firstRow) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  it("shows a refused Confirm where the button is, not under the conditions (LP-978 review)", () => {
+    // The confirm block moved to the top; the refusal line did not. A 409 from `confirm_round_plan`
+    // — "Confirm 0132's reading first" when the screen's blocking codes are stale — then rendered
+    // below every condition row, which is off the screen on a file with more than a handful.
+    // AXIOS-SHAPED, BECAUSE THAT IS WHAT REACHES `onError`. `normalizeError` returns the generic
+    // sentence for any non-axios throw, so a bare `Error` here rendered "Something went wrong" and the
+    // test was about its own fixture rather than the screen — which is how the first version of it
+    // misled me into reading an absence as a position.
+    calls.confirmError = {
+      isAxiosError: true,
+      response: {
+        status: 409,
+        data: { detail: "Confirm 0132\u2019s reading first — one condition still needs you." },
+      },
+    };
+    show([condition({}), condition({ id: "c2", lender_code: "1947", sequence: 2 })], unblocked());
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
+
+    const shown = screen.getByText(/reading first/);
+    const firstRow = screen.getByRole("button", { name: "0006" });
+    expect(shown.compareDocumentPosition(firstRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("is gone once the plan is confirmed", () => {
