@@ -1061,13 +1061,16 @@ async def _plan_in_force(db: AsyncSession, condition: Condition) -> bool:
 
 
 async def plan_confirmed(db: AsyncSession, condition: Condition) -> bool:
-    """LP-975 — the rule `_plan_in_force` and the send guard share: stamped, or on a confirmed round."""
-    if condition.plan_confirmed_at is not None:
-        return True
-    if condition.last_seen_round_id is None:
-        return False
-    round_ = await db.get(ConditionRound, condition.last_seen_round_id)
-    return round_ is not None and round_.plan_confirmed_at is not None
+    """The rule `_plan_in_force` and the send guard share: she has confirmed a plan it was on.
+
+    LP-976 — THE STAMP ALONE. LP-975 kept "or its round's plan is confirmed" as a fallback, for a
+    condition that joins a round after confirm and that no confirm would ever stamp. The LP-975 review
+    measured who that let through: conditions merged in from a PDF (`condition_enrich`), forwarded into
+    a round from the inbox, or typed in by hand, all in force at once with a plan the reading proposed
+    and no screen showed. Now a second confirm on a confirmed round stamps them (`confirm_round_plan`),
+    and the plan panel shows them until she does, so the fallback can go.
+    """
+    return condition.plan_confirmed_at is not None
 
 
 async def apply_step_status(
@@ -1448,6 +1451,7 @@ async def confirm_round_plan(
             )
         )
     if round_.plan_confirmed_at is not None:
+        await _confirm_added_after(db, round_=round_, actor_user_id=actor_user_id)
         return
     round_.plan_confirmed_at = datetime.now(UTC)
     round_.plan_confirmed_by_user_id = actor_user_id
@@ -1497,6 +1501,60 @@ async def confirm_round_plan(
     from app.services.condition_drafts import sync_round_drafts
 
     await sync_round_drafts(db, round_=round_, actor_user_id=actor_user_id)
+
+
+async def _confirm_added_after(
+    db: AsyncSession, *, round_: ConditionRound, actor_user_id: UUID
+) -> int:
+    """LP-976 — confirm the plan of conditions added to a round after its plan was confirmed. Returns how
+    many it confirmed.
+
+    The round's own record stands: its `plan_confirmed_at`, `plan_confirmed_by_user_id` and its one
+    `ROUND_PLAN_CONFIRMED` event belong to the first confirm. Each added condition is stamped with NOW,
+    the confirm that covers it (the LP-975 review's note 3): claiming she confirmed it at the first
+    confirm would date a decision before the condition existed. Then the same as a first confirm: the
+    steps come into force and the drafts follow. One activity row says what happened, in its own words.
+    """
+    now = datetime.now(UTC)
+    added = list(
+        (
+            await db.execute(
+                select(Condition).where(
+                    Condition.last_seen_round_id == round_.id,
+                    Condition.deleted_at.is_(None),
+                    Condition.plan_confirmed_at.is_(None),
+                )
+            )
+        ).scalars()
+    )
+    if not added:
+        return 0
+    by_condition = await _items_by_condition(db, round_.loan_file_id)
+    for condition in added:
+        condition.plan_confirmed_at = now
+        await apply_step_status(
+            db,
+            condition=condition,
+            items=by_condition.get(condition.id, []),
+            actor_user_id=actor_user_id,
+            in_force=True,
+        )
+    await log_activity(
+        db,
+        loan_file_id=round_.loan_file_id,
+        activity_type=ActivityType.CONDITION_PLAN_CONFIRMED,
+        summary=(
+            f"Plan confirmed for {len(added)} "
+            f"{'condition' if len(added) == 1 else 'conditions'} added to round {round_.round_number}"
+        ),
+        actor_user_id=actor_user_id,
+        detail={"round_id": str(round_.id), "added": len(added)},
+    )
+    await db.flush()
+    from app.services.condition_drafts import sync_round_drafts
+
+    await sync_round_drafts(db, round_=round_, actor_user_id=actor_user_id)
+    return len(added)
 
 
 # --------------------------------------------------------------------------------------------- #

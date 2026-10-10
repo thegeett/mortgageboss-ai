@@ -76,6 +76,7 @@ export function RoundPlanPanel({
   onOpenCondition,
   onConfirmReading,
   onOpenDraft,
+  confirmedRoundIds,
 }: {
   fileId: string;
   round: ConditionRound;
@@ -84,6 +85,16 @@ export function RoundPlanPanel({
   onConfirmReading: (conditionId: string) => void;
   /** LP-968 — open a prepared draft from its step ("Review draft"). */
   onOpenDraft?: (draftId: string) => void;
+  /**
+   * LP-976 — the file's rounds whose plan is confirmed. A condition with no stamp on one of them was
+   * added after confirm (a PDF merged in, an attachment forwarded into the round, one typed in by hand),
+   * and its plan waits for her here.
+   *
+   * REQUIRED, NOT OPTIONAL (LP-976 review): with a `?? false` default, a call site that forgot it would
+   * hide every late condition, and with the round fallback gone their emails would wait for ever, all
+   * with the suite green. Required, the compiler holds the link.
+   */
+  confirmedRoundIds: ReadonlySet<string>;
 }) {
   const plan = useRoundPlan(round.id);
   const confirm = useConfirmPlan(fileId);
@@ -102,7 +113,14 @@ export function RoundPlanPanel({
   const [help, setHelp] = useState<{ title: string; current: PlanOption } | null>(null);
 
   const data = plan.data;
-  if (!data || data.confirmed_at !== null || data.planned === 0) return null;
+  if (!data) return null;
+  // LP-976 — ONCE THE ROUND IS CONFIRMED, THE PANEL STAYS FOR WHAT WAS ADDED SINCE. A condition added
+  // after confirm used to be in force at once, with a plan the reading proposed and no screen showed
+  // (the LP-975 review's finding 3). Now its plan waits for her, so it must be on a screen she can
+  // confirm it on: this one, showing only those conditions. A late one on an OLDER round appears here
+  // once the newest round is confirmed; until then it waits, and so do its emails.
+  const late = data.confirmed_at !== null;
+  if (!late && data.planned === 0) return null;
 
   // EVERY CONDITION ON THE ROUND (the owner, 2026-10-08: "show every condition in the plan"). Rows with
   // no task and no step used to be filtered out, so a failed reading left the table short of its own
@@ -119,12 +137,21 @@ export function RoundPlanPanel({
   // round), so it must be on the screen she confirms; and "keep their plan" would say she had approved
   // a plan she never saw.
   const blocking = new Set(data.blocking_codes);
-  const onRound = conditions.filter((condition) => condition.last_seen_round_id === round.id);
+  const onRound = late
+    ? conditions.filter(
+        (condition) =>
+          !condition.plan_confirmed_at && confirmedRoundIds.has(condition.last_seen_round_id),
+      )
+    : conditions.filter((condition) => condition.last_seen_round_id === round.id);
   const shown = (condition: Condition) =>
+    late ||
     condition.first_round_id === round.id ||
     !condition.plan_confirmed_at ||
     blocking.has(condition.lender_code ?? "");
   const rows = onRound.filter(shown).sort((a, b) => a.sequence - b.sequence);
+  if (late && rows.length === 0) return null;
+  // The rounds a late condition is on: confirming its plan is a confirm of each.
+  const lateRoundIds = late ? [...new Set(rows.map((row) => row.last_seen_round_id))] : [];
   const notShown = onRound.filter((condition) => !shown(condition));
   const carried = notShown.length;
   // LP-973 REVIEW — the codes the drafts may name that have NO row on this screen. "Unlock the 2
@@ -136,7 +163,13 @@ export function RoundPlanPanel({
     notShown.map((condition) => condition.lender_code).filter((code): code is string => !!code),
   );
   const blocked = data.blocking_codes.length > 0;
-  const emails = data.drafts.length;
+  // LP-976 — after confirm, only the emails the added conditions are in: the round's other drafts were
+  // unlocked by the first confirm.
+  const rowCodes = new Set(rows.map((row) => row.lender_code).filter((code) => !!code));
+  const drafts = late
+    ? data.drafts.filter((draft) => draft.codes.some((code) => rowCodes.has(code)))
+    : data.drafts;
+  const emails = drafts.length;
 
   const onError = (error: unknown) => setRefusal(getErrorMessage(error));
   const changeItem = (condition: Condition, item: ConditionItem, to: PlanOption) => {
@@ -194,21 +227,33 @@ export function RoundPlanPanel({
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
           <p className="flex flex-wrap gap-x-1.5 text-xs font-semibold uppercase tracking-wide text-primary">
-            <span>Plan for round {data.round_number ?? ""}</span>
+            <span>
+              {late ? "Added after you confirmed" : `Plan for round ${data.round_number ?? ""}`}
+            </span>
             <span aria-hidden>·</span>
             <span>
               {rows.length} {carried > 0 ? "new " : ""}
-              {rows.length === 1 ? "condition" : "conditions"} · sheet dated{" "}
-              {usDate(data.round_date)} ·{" "}
-              {data.nothing_sent ? "nothing sent yet" : "some emails were sent"}
+              {rows.length === 1 ? "condition" : "conditions"}
+              {late
+                ? ""
+                : ` · sheet dated ${usDate(data.round_date)} · ${data.nothing_sent ? "nothing sent yet" : "some emails were sent"}`}
             </span>
           </p>
           <h2 className="text-xl font-semibold text-foreground">
-            {rows.length === 0
-              ? "Nothing new to plan on this sheet"
-              : `Here’s how we’ll get ${rows.length === 1 ? "this condition" : `these ${rows.length} ${carried > 0 ? "new " : ""}conditions`} cleared`}
+            {late
+              ? `${rows.length} ${rows.length === 1 ? "condition was" : "conditions were"} added after you confirmed the plan`
+              : rows.length === 0
+                ? "Nothing new to plan on this sheet"
+                : `Here’s how we’ll get ${rows.length === 1 ? "this condition" : `these ${rows.length} ${carried > 0 ? "new " : ""}conditions`} cleared`}
           </h2>
-          {rows.length > 0 ? (
+          {late ? (
+            <p className="max-w-prose text-sm text-foreground-2">
+              From a PDF you attached, an email you filed into the round, or one you added by hand.
+              Check {rows.length === 1 ? "its" : "their"} plan, then confirm it. Until you do,{" "}
+              {rows.length === 1 ? "its" : "their"} steps wait, and an email that includes{" "}
+              {rows.length === 1 ? "it" : "them"} is not sent.
+            </p>
+          ) : rows.length > 0 ? (
             <p className="max-w-prose text-sm text-foreground-2">
               For each condition we worked out what it needs, prepared the emails we could, and laid
               out every step until the lender clears it. Check the plan, change a step if it’s
@@ -227,7 +272,7 @@ export function RoundPlanPanel({
         </div>
       </div>
 
-      <FirstMovesBox rows={rows} drafts={data.drafts} />
+      <FirstMovesBox rows={rows} drafts={drafts} />
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-foreground-2">
         <span className="font-semibold text-foreground">Who does each step:</span>
@@ -282,15 +327,21 @@ export function RoundPlanPanel({
       {refusal ? <p className="text-sm text-destructive">{refusal}</p> : null}
 
       <div className="flex flex-col gap-3 rounded-[var(--radius-container)] bg-muted/50 p-4">
-        <ConfirmSummary rows={rows} drafts={data.drafts} carriedCodes={carriedCodes} />
+        <ConfirmSummary rows={rows} drafts={drafts} carriedCodes={carriedCodes} />
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
             disabled={blocked || confirm.isPending}
-            onClick={() => confirm.mutate({ roundId: round.id }, { onError })}
+            onClick={() => {
+              setRefusal(null);
+              // LP-976 — a confirm on a confirmed round confirms the plan of what was added to it.
+              for (const roundId of late ? lateRoundIds : [round.id]) {
+                confirm.mutate({ roundId }, { onError });
+              }
+            }}
           >
             <Check className="h-4 w-4" aria-hidden />
-            Confirm the plan
+            {late ? `Confirm ${rows.length === 1 ? "its" : "their"} plan` : "Confirm the plan"}
           </Button>
           <Button
             type="button"

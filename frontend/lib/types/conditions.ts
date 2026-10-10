@@ -695,6 +695,8 @@ export interface ConditionRound {
   date_printed: string | null;
   round_date: string;
   expiry_dates: Record<string, string | null> | null;
+  /** LP-976 — when she confirmed this round's plan; null until she has. */
+  plan_confirmed_at?: string | null;
   /**
    * PRESENT DOES NOT MEAN REVIEWABLE. A `parsing` round awaiting the AI split carries the
    * rules-read rows too, and S1-02 renders skeletons and polls rather than showing them. Read

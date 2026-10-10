@@ -1475,6 +1475,9 @@ class ConditionRoundPublic(BaseModel):
     date_printed: date_type | None
     round_date: date_type
     expiry_dates: dict[str, Any] | None = None
+    #: LP-976 — when she confirmed this round's plan; null until she has. The screen needs it to tell a
+    #: condition added after confirm (no stamp, on a confirmed round) from one on a plan still waiting.
+    plan_confirmed_at: datetime | None = None
     #: PRESENT DOES NOT MEAN REVIEWABLE, and an earlier version of this comment said "Present on a
     #: DRAFT and cleared on import", which is true of one state and populated in two. `from_model`
     #: fills this whenever the round HAS rows, and `create_round_from_paste` writes them
@@ -1546,6 +1549,7 @@ class ConditionRoundPublic(BaseModel):
             date_printed=round_.date_printed,
             round_date=round_.round_date,
             expiry_dates=round_.expiry_dates,
+            plan_confirmed_at=round_.plan_confirmed_at,
             draft_rows=(
                 [DraftRowPublic.model_validate(r) for r in round_.draft_rows]
                 if round_.draft_rows is not None

@@ -226,6 +226,17 @@ describe("LP-964 — one step at a time after Import", () => {
     expect(screen.queryByText(/The list opens when you confirm/)).toBeNull();
   });
 
+  it("LP-976: a condition added after confirm shows its plan above the list, which stays", () => {
+    // The round's own confirm state, from the round payload, is what tells "added after" apart.
+    state.rows = [condition({ plan_confirmed_at: null })];
+    state.reading = { data: done, isPending: false };
+    state.plan = { data: plan({ confirmed_at: "2026-10-06T12:05:00Z" }), isPending: false };
+    show([round({ plan_confirmed_at: "2026-10-06T12:05:00Z" })]);
+
+    expect(screen.getByText("1 condition was added after you confirmed the plan")).toBeTruthy();
+    expect(screen.getAllByText(LENDERS_WORDS).length).toBeGreaterThan(0);
+  });
+
   it("shows a placeholder, not the list, while the reading and plan are still loading", () => {
     state.rows = [condition()];
     state.reading = { data: undefined, isPending: true };

@@ -169,25 +169,9 @@ async def test_an_earlier_stamp_is_kept_when_a_later_round_is_confirmed(
     assert all(c.plan_confirmed_at == round_1.plan_confirmed_at for c in carried)
 
 
-async def test_a_condition_added_after_confirm_is_in_force_without_a_stamp(
-    db_session: AsyncSession,
-) -> None:
-    """THE FALLBACK. No confirm will ever stamp a condition added to a confirmed round (confirm returns
-    early on one), so a stamp-only rule would hold its steps and its emails for ever."""
-    loan_file, round_1 = await _planned_round_one(db_session)
-    actor = await _actor(db_session, loan_file)
-    await _confirm(db_session, round_1, loan_file, actor)
-
-    added = await create_manual_condition(
-        db_session,
-        loan_file=loan_file,
-        payload=ConditionCreateRequest(verbatim_text="Provide the final HOA certificate."),
-        actor_user_id=actor,
-    )
-
-    assert added.plan_confirmed_at is None
-    assert added.last_seen_round_id == round_1.id
-    assert await plan_confirmed(db_session, added)
+# LP-976 — `test_a_condition_added_after_confirm_is_in_force_without_a_stamp` lived here. It pinned LP-975's
+# round fallback, which LP-976 removes on purpose: a condition added after confirm now waits for her to
+# confirm its plan. Its replacement, asserting the opposite, is in `test_lp976_added_after_confirm.py`.
 
 
 async def test_the_payload_carries_the_stamp(db_session: AsyncSession) -> None:
@@ -224,13 +208,11 @@ async def test_the_upload_link_follows_the_send_not_the_round(db_session: AsyncS
     """
     from app.models.communication import Communication
     from app.models.condition_vocabulary import Performer, PlanOption
-    from app.schemas.condition import ConditionCreateRequest
     from app.services.condition_drafts import (
         _plan_confirmed_for,
         mark_sent,
         resync_file,
     )
-    from app.services.condition_import import create_manual_condition
     from app.services.condition_plan import add_item
     from tests.conditions.test_condition_drafts import _people
 

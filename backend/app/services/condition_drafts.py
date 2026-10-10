@@ -1279,11 +1279,14 @@ async def unconfirmed_rounds_for(db: AsyncSession, *, communication_id: UUID) ->
         # confirmed round 2.
         if condition.plan_confirmed_at is not None:
             continue
+        # LP-976 — THE STAMP ALONE. A condition added to a round after its plan was confirmed waits
+        # here too, until she confirms its plan (`confirm_round_plan`'s second pass); the round's own
+        # confirm used to let its email go with a plan she never saw. Named by its round, which is the
+        # plan she confirms it on.
         round_ = await db.get(ConditionRound, condition.last_seen_round_id)
-        if round_ is not None and round_.plan_confirmed_at is None:
-            number = round_.round_number or 0
-            if number not in numbers:
-                numbers.append(number)
+        number = (round_.round_number if round_ is not None else None) or 0
+        if number not in numbers:
+            numbers.append(number)
     return sorted(numbers)
 
 

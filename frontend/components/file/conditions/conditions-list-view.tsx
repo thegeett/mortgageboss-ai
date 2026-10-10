@@ -201,6 +201,10 @@ export function ConditionsListView({
             .map((row) => row.id),
         )
       : undefined;
+  // LP-976 — the rounds whose plan is confirmed, so the plan panel can find conditions added since.
+  const confirmedRoundIds = new Set(
+    rounds.filter((round) => round.plan_confirmed_at).map((round) => round.id),
+  );
   const roundNumbers = rounds
     .filter((round) => round.round_number !== null && round.status === "imported")
     .map((round) => round.round_number as number);
@@ -410,6 +414,7 @@ export function ConditionsListView({
           onOpenCondition={setOpenConditionId}
           onConfirmReading={setConfirmReadingId}
           onOpenDraft={setDraftId}
+          confirmedRoundIds={confirmedRoundIds}
         />
       ) : null}
 

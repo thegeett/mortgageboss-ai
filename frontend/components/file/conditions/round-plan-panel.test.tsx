@@ -20,6 +20,7 @@ const calls = vi.hoisted(() => ({
   steps: [] as unknown[],
   reverts: [] as unknown[],
   added: [] as unknown[],
+  confirms: [] as unknown[],
   ownWay: [] as unknown[],
   removed: [] as unknown[],
   /** LP-969 — what the add call answers with, so "Check a document" can find the new task. */
@@ -27,7 +28,10 @@ const calls = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/api/conditions", () => ({
   useRoundPlan: () => ({ data: plan.data }),
-  useConfirmPlan: () => ({ mutate: vi.fn(), isPending: false }),
+  useConfirmPlan: () => ({
+    mutate: (body: unknown) => calls.confirms.push(body),
+    isPending: false,
+  }),
   useSetNextStep: () => ({ mutate: (body: unknown) => calls.steps.push(body) }),
   useUpdateItem: () => ({ mutate: (body: unknown) => calls.items.push(body) }),
   useRevertPlan: () => ({ mutate: (id: unknown) => calls.reverts.push(id), isPending: false }),
@@ -53,6 +57,7 @@ afterEach(() => {
   calls.steps = [];
   calls.reverts = [];
   calls.added = [];
+  calls.confirms = [];
   calls.ownWay = [];
   calls.removed = [];
   calls.addResponse = null;
@@ -148,7 +153,11 @@ const TITLE_ITEM = item({
   task: null,
 });
 
-function show(conditions: Condition[], data: RoundPlan = basePlan) {
+function show(
+  conditions: Condition[],
+  data: RoundPlan = basePlan,
+  confirmedRoundIds?: ReadonlySet<string>,
+) {
   plan.data = data;
   render(
     <RoundPlanPanel
@@ -157,6 +166,7 @@ function show(conditions: Condition[], data: RoundPlan = basePlan) {
       conditions={conditions}
       onOpenCondition={vi.fn()}
       onConfirmReading={vi.fn()}
+      confirmedRoundIds={confirmedRoundIds ?? new Set()}
     />,
   );
 }
@@ -187,6 +197,7 @@ describe("RoundPlanPanel", () => {
     plan.data = { ...basePlan, confirmed_at: "2026-08-28T20:40:00Z", blocking_codes: [] };
     const { container } = render(
       <RoundPlanPanel
+        confirmedRoundIds={new Set()}
         fileId="f1"
         round={round}
         conditions={[]}
@@ -357,6 +368,7 @@ describe("RoundPlanPanel", () => {
     plan.data = basePlan;
     render(
       <RoundPlanPanel
+        confirmedRoundIds={new Set()}
         fileId="f1"
         round={round}
         conditions={[
@@ -390,6 +402,7 @@ describe("RoundPlanPanel", () => {
     plan.data = basePlan;
     render(
       <RoundPlanPanel
+        confirmedRoundIds={new Set()}
         fileId="f1"
         round={round}
         conditions={[
@@ -487,6 +500,7 @@ describe("RoundPlanPanel", () => {
     plan.data = unblocked();
     render(
       <RoundPlanPanel
+        confirmedRoundIds={new Set()}
         fileId="f1"
         round={round}
         conditions={conditions}
@@ -954,6 +968,119 @@ describe("RoundPlanPanel", () => {
       show([condition({}), condition({ id: "c2", lender_code: "1947", sequence: 2 })], unblocked());
       expect(screen.queryByText(/from earlier rounds/)).toBeNull();
       expect(screen.getByText("Here’s how we’ll get these 2 conditions cleared")).toBeTruthy();
+    });
+  });
+
+  describe("LP-976 — conditions added after the plan was confirmed", () => {
+    const confirmedPlan = (): RoundPlan => ({
+      ...unblocked(),
+      confirmed_at: "2026-08-28T20:40:00Z",
+    });
+    const stamped = (id: string, code: string) =>
+      condition({ id, lender_code: code, plan_confirmed_at: "2026-08-28T20:40:00Z" });
+
+    it("stays for an added condition, shows only it, and confirms its plan on its round", () => {
+      show(
+        [stamped("c1", "0006"), condition({ id: "c9", lender_code: "4410", sequence: 9 })],
+        confirmedPlan(),
+        new Set(["r1"]),
+      );
+      expect(screen.getByText("1 condition was added after you confirmed the plan")).toBeTruthy();
+      expect(screen.getByText(/an email that includes\s+it\s+is not sent/)).toBeTruthy();
+      expect(screen.getByRole("button", { name: "4410" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "0006" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Confirm its plan" }));
+      expect(calls.confirms).toEqual([{ roundId: "r1" }]);
+    });
+
+    it("confirms each round an added condition is on", () => {
+      show(
+        [
+          condition({ id: "c8", lender_code: "4410", sequence: 8 }),
+          condition({
+            id: "c9",
+            lender_code: "4411",
+            sequence: 9,
+            first_round_id: "r0",
+            last_seen_round_id: "r0",
+          }),
+        ],
+        confirmedPlan(),
+        new Set(["r0", "r1"]),
+      );
+      expect(screen.getByText("2 conditions were added after you confirmed the plan")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Confirm their plan" }));
+      expect(calls.confirms).toEqual([{ roundId: "r1" }, { roundId: "r0" }]);
+    });
+
+    it("an unstamped condition on a round still waiting is not 'added after' (the control)", () => {
+      // r0 is not confirmed: its plan is a proposal, not a late arrival on a confirmed plan.
+      show(
+        [
+          stamped("c1", "0006"),
+          condition({
+            id: "c9",
+            lender_code: "4411",
+            first_round_id: "r0",
+            last_seen_round_id: "r0",
+          }),
+        ],
+        confirmedPlan(),
+        new Set(["r1"]),
+      );
+      expect(screen.queryByText(/added after you confirmed/)).toBeNull();
+      expect(screen.queryByRole("button", { name: /Confirm/ })).toBeNull();
+    });
+
+    it("names only the emails the added condition is in", () => {
+      // The first confirm already unlocked round 1's other emails; this confirm unlocks only its own.
+      show(
+        [stamped("c1", "0006"), condition({ id: "c9", lender_code: "4410", sequence: 9 })],
+        {
+          ...confirmedPlan(),
+          drafts: [
+            { recipient: "borrower", label: "Borrower", codes: ["0006"] },
+            { recipient: "hoa", label: "HOA", codes: ["4410"] },
+          ],
+        },
+        new Set(["r1"]),
+      );
+      expect(screen.getByText(/to HOA \(4410\)/)).toBeTruthy();
+      expect(screen.queryByText(/to Borrower \(0006\)/)).toBeNull();
+    });
+
+    it("shows a late condition with no task even when the server counts nothing planned", () => {
+      // The LP-976 review's hazard: `planned` counts conditions with a task or a step, and a late one
+      // whose reading fell back can have neither. Hidden, nothing would ever stamp it, and with the
+      // fallback gone its emails would wait for ever.
+      show(
+        [
+          stamped("c1", "0006"),
+          condition({ id: "c9", lender_code: "4410", sequence: 9, items: [] }),
+        ],
+        { ...confirmedPlan(), planned: 0 },
+        new Set(["r1"]),
+      );
+      expect(screen.getByText("1 condition was added after you confirmed the plan")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Confirm its plan" }));
+      expect(calls.confirms).toEqual([{ roundId: "r1" }]);
+    });
+
+    it("on a round still waiting with nothing planned, shows nothing (deliberate, LP-976)", () => {
+      // A task-less condition on an UNCONFIRMED round is out of force under either rule, has nothing to
+      // apply or send, and draws the panel the moment it gets a task. The `planned === 0` guard stays
+      // for this case on purpose; widening it would put an empty plan on screen.
+      show([condition({ id: "c9", lender_code: "4410", items: [] })], {
+        ...unblocked(),
+        planned: 0,
+      });
+      expect(screen.queryByText(/Here’s how|added after you confirmed|Nothing new/)).toBeNull();
+      expect(screen.queryByRole("button", { name: /Confirm/ })).toBeNull();
+    });
+
+    it("is gone when nothing was added since", () => {
+      show([stamped("c1", "0006")], confirmedPlan(), new Set(["r1"]));
+      expect(screen.queryByRole("button", { name: /Confirm/ })).toBeNull();
     });
   });
 });
