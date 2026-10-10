@@ -170,16 +170,23 @@ export function conditionHistoryLine(
       // "Moved to Waiting on Borrower" (S2-03) names the owner. `unknown` keeps the generic label:
       // "Waiting on Owner not known" would read worse than "Waiting on someone".
       // THE SEND MOVED IT (LP-922): "Moved to Waiting on Borrower (borrower email marked sent)".
+      // LP-977 — OR A WAIT MOVED IT: "Moved to Waiting on Title (a wait step)".
       const sent = event.draft_recipient
         ? ` (${EMAIL_NAME[event.draft_recipient]} marked sent)`
-        : "";
+        : event.moved_by_wait
+          ? " (a wait step)"
+          : "";
       if (to === "waiting" && event.waiting_on && event.waiting_on !== "unknown") {
         // "Waiting on LO", as the status select says it (LP-934 M5).
         return `Moved to Waiting on ${waitingLabel(event.waiting_on)}${sent}${by(event)}`;
       }
       // THE PLAN MOVED IT (LP-921), SO THE LINE SAYS WHICH STEP: "Moved to Ready to send (Already in
       // the file)". Without it the line reads as though she picked the status herself.
-      const step = event.plan_option ? ` (${OPTION_LABEL[event.plan_option]})` : "";
+      const step = event.plan_option
+        ? ` (${OPTION_LABEL[event.plan_option]})`
+        : event.moved_by_wait
+          ? " (a wait step)"
+          : "";
       return to
         ? `Moved to ${CONDITION_PREP_STATUS[to].label}${step}${by(event)}`
         : `Moved${by(event)}`;

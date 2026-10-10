@@ -298,6 +298,9 @@ async def test_only_the_named_scalars_are_exposed(
         "call_with",
         "call_on",
         "call_agreed",
+        # LP-977: a boolean on a `CONDITION_PREP_MOVED` a "Wait for something" step made (`by: "wait"`),
+        # so the line can say "(a wait step)". Rule 7 permits it.
+        "moved_by_wait",
     }
     # THREE FIELDS CAME OFF THIS LIST AND THAT IS THE POINT. `reader_version`,
     # `duplicates_dropped` and `filled_from` were projected and read by no sentence — three open

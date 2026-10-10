@@ -462,6 +462,9 @@ class ConditionEventPublic(BaseModel):
     #: LP-922 — which email: on `CONDITION_DRAFTED`, and on a `CONDITION_PREP_MOVED` the send of that
     #: email made (`by: "email"`). A CLOSED enum (`DraftRecipient`).
     draft_recipient: DraftRecipient | None = None
+    #: LP-977 — on a `CONDITION_PREP_MOVED` a "Wait for something" step made (`by: "wait"`): the history
+    #: can say "(a wait step)". A boolean, so rule 7 permits it.
+    moved_by_wait: bool | None = None
     #: The lender's track's move, on the three events that state one. CLOSED enums.
     lender_status_from: ConditionLenderStatus | None = None
     lender_status_to: ConditionLenderStatus | None = None
@@ -563,6 +566,9 @@ class ConditionEventPublic(BaseModel):
             if kind
             in (ConditionEventKind.CONDITION_DRAFTED, ConditionEventKind.CONDITION_DRAFT_POLISHED)
             or (kind is ConditionEventKind.CONDITION_PREP_MOVED and detail.get("by") == "email")
+            else None,
+            moved_by_wait=True
+            if kind is ConditionEventKind.CONDITION_PREP_MOVED and detail.get("by") == "wait"
             else None,
             lender_status_from=_as_vocab(
                 detail.get("lender_status_from"), lender_values, ConditionLenderStatus

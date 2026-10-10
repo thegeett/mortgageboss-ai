@@ -112,6 +112,34 @@ describe("every event kind has a sentence", () => {
   });
 });
 
+describe("LP-977 — a move a wait made says so", () => {
+  it("names the person and the wait", () => {
+    expect(
+      conditionHistoryLine(
+        makeEvent({
+          kind: "condition_prep_moved",
+          prep_status_to: "waiting",
+          waiting_on: "title",
+          moved_by_wait: true,
+        }),
+      ),
+    ).toBe("Moved to Waiting on Title (a wait step)");
+  });
+
+  it("a wait on someone the status cannot name still says it was a wait", () => {
+    expect(
+      conditionHistoryLine(
+        makeEvent({
+          kind: "condition_prep_moved",
+          prep_status_to: "waiting",
+          waiting_on: "unknown",
+          moved_by_wait: true,
+        }),
+      ),
+    ).toMatch(/ \(a wait step\)$/);
+  });
+});
+
 describe("LP-972 — a call is a line in the history, with her words", () => {
   it("names who, the day and what was agreed", () => {
     expect(

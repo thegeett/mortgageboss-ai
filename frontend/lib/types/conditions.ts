@@ -377,6 +377,8 @@ export interface ConditionEvent {
   plan_option: PlanOption | null;
   /** LP-922 — which email: on `condition_drafted`, and on a move that email's send made. */
   draft_recipient: DraftRecipient | null;
+  /** LP-977 — on a `condition_prep_moved` a "Wait for something" step made. */
+  moved_by_wait?: boolean | null;
   /** LP-941 — her reason, on `condition_withdrawn` only (the one free-text field, by the owner's decision). */
   withdrawal_reason?: string | null;
   /** LP-972 — for `condition_call_logged` only: who, the day, and what was agreed (her words). */

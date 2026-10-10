@@ -49,6 +49,7 @@ from app.models.condition import (
     ConditionLenderStatus,
     ConditionPrepStatus,
     ConditionReadingStatus,
+    OwnerHint,
 )
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_item import ConditionItem
@@ -1077,6 +1078,22 @@ async def plan_confirmed(db: AsyncSession, condition: Condition) -> bool:
     return condition.plan_confirmed_at is not None
 
 
+async def _waiting_by_wait(db: AsyncSession, condition: Condition) -> bool:
+    """LP-977 — whether the condition's latest status move was the one a wait step made."""
+    last = (
+        await db.execute(
+            select(ConditionEvent.detail)
+            .where(
+                ConditionEvent.condition_id == condition.id,
+                ConditionEvent.kind == ConditionEventKind.CONDITION_PREP_MOVED,
+            )
+            .order_by(ConditionEvent.occurred_at.desc(), ConditionEvent.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return bool(last and last.get("by") == "wait")
+
+
 async def apply_step_status(
     db: AsyncSession,
     *,
@@ -1090,9 +1107,19 @@ async def apply_step_status(
     FORWARD ONLY, AND ONLY FROM TO DO. The plan never moves a condition backwards and never overrides a
     move she made herself: a condition she already has at Waiting or Sent to lender is hers. The move
     writes `condition_prep_moved` with `by: "plan"` and the option, so the history says why it moved.
+
+    LP-977 — OR FROM A WAITING THE WAIT ITSELF MADE. A "Wait for something" step moves To do to Waiting
+    (`_wait_moves_status`). That Waiting is the plan's, not hers, so when every task is done it moves on
+    exactly as To do would have. Without this, marking the wait done left the condition at Waiting with
+    nothing left to wait on, a regression on the To do → Ready it had before the wait moved it. A
+    Waiting she picked, or one a sent email made, is still left alone.
     """
-    if condition.prep_status is not ConditionPrepStatus.TO_DO:
+    if condition.prep_status is ConditionPrepStatus.WAITING:
+        if not await _waiting_by_wait(db, condition):
+            return False
+    elif condition.prep_status is not ConditionPrepStatus.TO_DO:
         return False
+    before = condition.prep_status
     if condition.info_only or condition.lender_status not in (
         ConditionLenderStatus.OPEN,
         ConditionLenderStatus.NOT_CLEARED,
@@ -1115,7 +1142,7 @@ async def apply_step_status(
             condition,
             ConditionEventKind.CONDITION_PREP_MOVED,
             {
-                "prep_status_from": ConditionPrepStatus.TO_DO.value,
+                "prep_status_from": before.value,
                 "prep_status_to": ConditionPrepStatus.READY.value,
                 "by": "plan",
                 "option": because.value,
@@ -1405,8 +1432,51 @@ async def add_item(
         )
     )
     await db.flush()
+    if waiting:
+        await _wait_moves_status(db, condition=condition, item=item, actor_user_id=actor_user_id)
     await _resync_drafts(db, condition=condition, actor_user_id=actor_user_id)
     return item
+
+
+async def _wait_moves_status(
+    db: AsyncSession, *, condition: Condition, item: ConditionItem, actor_user_id: UUID
+) -> bool:
+    """LP-977 — a "Wait for something" step moves the condition from To do to Waiting on its performer,
+    as marking an email sent does (`condition_drafts._wait_on_first_asked`). Returns whether it moved.
+
+    FORWARD ONLY, FROM TO DO: a status she picked, or one already past To do, is left alone, so a second
+    wait does not move it again and the first one names who.
+
+    WHO IT NAMES IS THE EMAIL'S RULE, NOT A SECOND COPY: the performer's email recipient
+    (`_RECIPIENT`), then `condition_drafts.WAITING_ON`. Title and the attorney share one email, so both
+    read Title; the LO reads Broker (M5); the HOA, an employer or another party reads "someone".
+    """
+    from app.services.condition_drafts import _RECIPIENT_KEY, WAITING_ON
+    from app.services.condition_status import _event as status_event
+
+    if condition.prep_status is not ConditionPrepStatus.TO_DO:
+        return False
+    key = _RECIPIENT.get(item.performer, (None, ""))[0]
+    recipient = _RECIPIENT_KEY.get(key) if key else None
+    owner = WAITING_ON[recipient] if recipient is not None else OwnerHint.UNKNOWN
+    condition.prep_status = ConditionPrepStatus.WAITING
+    condition.prep_status_changed_at = datetime.now(UTC)
+    condition.waiting_on = owner
+    db.add(
+        status_event(
+            condition,
+            ConditionEventKind.CONDITION_PREP_MOVED,
+            {
+                "prep_status_from": ConditionPrepStatus.TO_DO.value,
+                "prep_status_to": ConditionPrepStatus.WAITING.value,
+                "waiting_on": owner.value,
+                "by": "wait",
+            },
+            actor_user_id=actor_user_id,
+        )
+    )
+    await db.flush()
+    return True
 
 
 async def log_call(
