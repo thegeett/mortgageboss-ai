@@ -329,7 +329,9 @@ export type ConditionEventKind =
   | "round_lender_declined"
   | "round_wrong_file_confirmed"
   | "condition_evidence_linked"
-  | "condition_evidence_unlinked";
+  | "condition_evidence_unlinked"
+  /** LP-972 — she called or talked to someone: a record in the history, not a task. */
+  | "condition_call_logged";
 
 /**
  * One line of a round's history (S1-09).
@@ -377,6 +379,10 @@ export interface ConditionEvent {
   draft_recipient: DraftRecipient | null;
   /** LP-941 — her reason, on `condition_withdrawn` only (the one free-text field, by the owner's decision). */
   withdrawal_reason?: string | null;
+  /** LP-972 — for `condition_call_logged` only: who, the day, and what was agreed (her words). */
+  call_with?: Performer | null;
+  call_on?: string | null;
+  call_agreed?: string | null;
   /** LP-949 — on `condition_typed` only: the library type's label the condition was given. */
   typed_as?: string | null;
   /** The lender's track's move. */
@@ -1110,6 +1116,8 @@ export interface ConditionItem {
   generic?: boolean;
   /** LP-968 — her reason, proof or method for a change she made to this task. */
   plan_note?: string | null;
+  /** LP-972 — a "Wait for something" step: waiting on its performer by `due_date`, no email. */
+  waiting?: boolean;
 }
 
 /** LP-958 — one document of the file, as the Link dialog offers it. */

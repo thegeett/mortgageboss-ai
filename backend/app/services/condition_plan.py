@@ -112,6 +112,10 @@ DONE_NEEDS_PROOF = (
 )
 #: LP-968 — "Not needed" needs its reason, so the file says why nothing was asked.
 NOT_NEEDED_NEEDS_REASON = "Say why it isn't needed, so the file records the reason."
+#: LP-972 — what "Wait for something" needs, in the screen's words.
+WAIT_NEEDS_A_DATE = "Say by when, so we can remind you if it hasn't come."
+WAIT_NEEDS_SOMEONE = "Say who you are waiting on."
+CALL_NEEDS_WORDS = "Say what was agreed, so the file records it."
 #: LP-968 — only her own marks can be undone here; a task asked and answered keeps its record.
 REOPEN_ONLY_HER_MARKS = "Only a task you marked done or not needed can be set back to open here."
 
@@ -1309,11 +1313,25 @@ async def add_item(
     performers: list[Performer],
     option: PlanOption | None,
     actor_user_id: UUID,
+    waiting: bool = False,
+    due_date: date | None = None,
 ) -> ConditionItem:
+    """S3-01's "Add an item", and LP-969's "Add a step".
+
+    LP-972 — `waiting=True` is "Wait for something": a step that waits on its performer, by `due_date`,
+    with a reminder on that date (`reminders`, `CONDITION_WAIT_DUE`). No email goes, because she asked
+    some other way, so its option is her own (`i_will_do_it`); the flag is what makes it a wait.
+    """
     from app.services.condition_reading import option_for
 
     if not name.strip():
         raise PlanRefused("An item needs a few words saying what it is.")
+    if waiting:
+        if due_date is None:
+            raise PlanRefused(WAIT_NEEDS_A_DATE)
+        if not performers or performers[0] is Performer.PROCESSOR:
+            raise PlanRefused(WAIT_NEEDS_SOMEONE)
+        option = PlanOption.I_WILL_DO_IT
     if not performers:
         raise PlanRefused("An item needs someone to act on it.")
     count = await db.scalar(
@@ -1339,9 +1357,12 @@ async def add_item(
         checks=[],
         specifics={},
         sequence=(count or 0) + 1,
-        due_date=facts.business_days_after(_today_et(), ASK_DUE_BUSINESS_DAYS)
+        due_date=due_date
+        if waiting
+        else facts.business_days_after(_today_et(), ASK_DUE_BUSINESS_DAYS)
         if chosen in _ASKS
         else None,
+        waiting=waiting,
     )
     parts = split_item(item)
     route_ask(item)
@@ -1354,7 +1375,11 @@ async def add_item(
         _event(
             condition,
             ConditionEventKind.CONDITION_PLAN_CHANGED,
-            {"change": "item_added", "option": chosen.value},
+            {
+                "change": "item_added",
+                "option": chosen.value,
+                **({"waiting": True} if waiting else {}),
+            },
             round_id=condition.last_seen_round_id,
             actor_user_id=actor_user_id,
         )
@@ -1362,6 +1387,41 @@ async def add_item(
     await db.flush()
     await _resync_drafts(db, condition=condition, actor_user_id=actor_user_id)
     return item
+
+
+async def log_call(
+    db: AsyncSession,
+    *,
+    condition: Condition,
+    with_whom: Performer,
+    on: date,
+    agreed: str,
+    actor_user_id: UUID,
+) -> ConditionEvent:
+    """LP-972 — "Call or talk to someone": who, on which day, and what was agreed, on the condition.
+
+    A RECORD, NOT A TASK. A task she marks done counts toward the condition being ready
+    (`ready_because`), and a call that ended "he'll send it next week" finishes nothing. So the call is
+    a `CONDITION_CALL_LOGGED` event in the condition's history, and the plan's tasks are untouched.
+
+    HER WORDS ARE THE ONE FREE-TEXT FIELD, held in `detail`, which the readonly view drops. The
+    history projects them for this kind only (`ConditionEventPublic.call_agreed`).
+    """
+    words = " ".join((agreed or "").split())[:300]
+    if not words:
+        raise PlanRefused(CALL_NEEDS_WORDS)
+    event = ConditionEvent(
+        company_id=condition.company_id,
+        loan_file_id=condition.loan_file_id,
+        condition_id=condition.id,
+        round_id=condition.last_seen_round_id,
+        kind=ConditionEventKind.CONDITION_CALL_LOGGED,
+        actor_user_id=actor_user_id,
+        detail={"with": with_whom.value, "on": on.isoformat(), "agreed": words},
+    )
+    db.add(event)
+    await db.flush()
+    return event
 
 
 async def remove_item(
@@ -1845,6 +1905,7 @@ async def items_public_for_file(db: AsyncSession, *, loan_file_id: UUID) -> dict
                     draft=tails.get(item.draft_id) if item.draft_id else None,
                     part_of_item_id=item.part_of_item_id,
                     plan_note=item.plan_note,
+                    waiting=item.waiting,
                 )
             )
         out[condition_id] = rows

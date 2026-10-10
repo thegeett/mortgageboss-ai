@@ -328,4 +328,32 @@ describe("plan path", () => {
       "When every task is done, the condition is ready and goes in the package for the lender",
     );
   });
+
+  it("LP-972: a wait is someone else's next move, with the reminder date, then her upload and our check", () => {
+    const wait = item({
+      option: "i_will_do_it",
+      performer: "title",
+      performers: ["title"],
+      name: "the payoff letter",
+      waiting: true,
+      due_date: "2026-10-15",
+    });
+    const steps = taskPath(wait);
+    expect(steps.map((s) => [s.who, s.text])).toEqual([
+      ["them", "Title / escrow sends the payoff letter"],
+      ["you", "When it comes, upload or link it here, or mark the task done"],
+      ["we", "We check what you upload"],
+    ]);
+    expect(steps[0]?.detail).toBe("If it hasn’t come by 10/15, it shows on your Reminders page.");
+    // Received: it came and is being checked; only the check is left.
+    expect(taskPath({ ...wait, status: "received" }).map((s) => s.text)).toEqual([
+      "We check what you upload",
+    ]);
+    // In first moves it is someone to wait on, not a task she does now.
+    const moves = firstMoves(
+      [{ lender_code: "1947", next_step: null, items: [wait] } as Condition],
+      [],
+    );
+    expect(moves).toMatchObject({ tasksNow: 0, waitingOn: ["Title / escrow"] });
+  });
 });

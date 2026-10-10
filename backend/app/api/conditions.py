@@ -61,6 +61,7 @@ from app.schemas.condition import (
     BulkRefusalPublic,
     BulkRequest,
     BulkResultPublic,
+    CallLogRequest,
     ConditionCreateRequest,
     ConditionDetailPublic,
     ConditionDraftPublic,
@@ -1775,6 +1776,34 @@ async def add_condition_item(
             name=payload.name,
             performers=payload.performers,
             option=payload.option,
+            actor_user_id=current_user.id,
+            waiting=payload.waiting,
+            due_date=payload.due_date,
+        )
+    except PlanRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
+    return await _condition_response(db, condition)
+
+
+@conditions_by_id_router.post("/{condition_id}/calls", response_model=ConditionPublic)
+async def log_condition_call(
+    condition: ScopedCondition,
+    payload: CallLogRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> ConditionPublic:
+    """LP-972 — "Call or talk to someone": recorded in the condition's history, not as a task."""
+    from app.services.condition_plan import log_call
+
+    if payload.with_whom is Performer.PROCESSOR:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="Say who you talked to.")
+    try:
+        await log_call(
+            db,
+            condition=condition,
+            with_whom=payload.with_whom,
+            on=payload.on,
+            agreed=payload.agreed,
             actor_user_id=current_user.id,
         )
     except PlanRefused as exc:

@@ -54,6 +54,7 @@ const ALL_KINDS = [
   "round_wrong_file_confirmed",
   "condition_evidence_linked",
   "condition_evidence_unlinked",
+  "condition_call_logged",
 ] as const satisfies readonly ConditionEventKind[];
 
 /**
@@ -107,7 +108,28 @@ describe("every event kind has a sentence", () => {
 
   it("is exhaustive over the union, checked by the compiler", () => {
     expect(_everyKindIsListed).toBe(true);
-    expect(ALL_KINDS).toHaveLength(36);
+    expect(ALL_KINDS).toHaveLength(37);
+  });
+});
+
+describe("LP-972 — a call is a line in the history, with her words", () => {
+  it("names who, the day and what was agreed", () => {
+    expect(
+      conditionHistoryLine(
+        makeEvent({
+          kind: "condition_call_logged",
+          call_with: "title",
+          call_on: "2026-10-09",
+          call_agreed: "They will send the final CD on Monday",
+        }),
+      ),
+    ).toBe("Talked to Title / escrow on 10/09: “They will send the final CD on Monday”");
+  });
+
+  it("still reads when a field is missing", () => {
+    expect(conditionHistoryLine(makeEvent({ kind: "condition_call_logged" }))).toBe(
+      "Talked to someone",
+    );
   });
 });
 

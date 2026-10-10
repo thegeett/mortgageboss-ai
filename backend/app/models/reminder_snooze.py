@@ -43,6 +43,8 @@ class ReminderKind(StrEnum):
     NO_REPLY = "no_reply"
     #: Nothing at all has happened on this file for seven days.
     FILE_UNTOUCHED = "file_untouched"
+    #: LP-972 — a "Wait for something" step reached its date and the thing has not arrived.
+    CONDITION_WAIT_DUE = "condition_wait_due"
 
 
 class ReminderSnooze(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):

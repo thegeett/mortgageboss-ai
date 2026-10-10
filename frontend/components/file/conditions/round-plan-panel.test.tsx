@@ -22,6 +22,7 @@ const calls = vi.hoisted(() => ({
   reverts: [] as unknown[],
   added: [] as unknown[],
   described: [] as unknown[],
+  logged: [] as unknown[],
   confirms: [] as unknown[],
   ownWay: [] as unknown[],
   removed: [] as unknown[],
@@ -45,6 +46,13 @@ vi.mock("@/lib/api/conditions", () => ({
   useSetNextStep: () => ({ mutate: (body: unknown) => calls.steps.push(body) }),
   useUpdateItem: () => ({ mutate: (body: unknown) => calls.items.push(body) }),
   useRevertPlan: () => ({ mutate: (id: unknown) => calls.reverts.push(id), isPending: false }),
+  useLogCall: () => ({
+    mutate: (body: unknown, options?: { onSuccess?: () => void }) => {
+      calls.logged.push(body);
+      options?.onSuccess?.();
+    },
+    isPending: false,
+  }),
   useDescribeSteps: () => ({
     mutate: (body: unknown, options?: { onSuccess?: (r: DescribeResult) => void }) => {
       calls.described.push(body);
@@ -89,6 +97,7 @@ afterEach(() => {
   calls.addResponses = [];
   calls.describeResult = null;
   calls.described = [];
+  calls.logged = [];
 });
 
 const basePlan: RoundPlan = {
@@ -771,6 +780,46 @@ describe("RoundPlanPanel", () => {
       ]) {
         expect(screen.getByRole("button", { name: new RegExp(`^${label}`) })).toBeTruthy();
       }
+    });
+
+    it("LP-972: a call goes to the history, not the plan; a wait is a task with its date", () => {
+      opened([condition({})]);
+      fireEvent.click(screen.getByRole("button", { name: "Add a step" }));
+      fireEvent.click(screen.getByRole("button", { name: /^Call or talk to someone/ }));
+      fireEvent.change(screen.getByLabelText("Who did you talk to?"), { target: { value: "lo" } });
+      fireEvent.change(screen.getByLabelText("When"), { target: { value: "2026-10-09" } });
+      fireEvent.change(screen.getByLabelText("What was agreed?"), {
+        target: { value: "He will re-disclose today" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Add the step" }));
+      expect(calls.logged).toEqual([
+        {
+          conditionId: "c1",
+          with_whom: "lo",
+          on: "2026-10-09",
+          agreed: "He will re-disclose today",
+        },
+      ]);
+      expect(calls.added).toEqual([]); // NOT A TASK
+
+      fireEvent.click(screen.getByRole("button", { name: "Add a step" }));
+      fireEvent.click(screen.getByRole("button", { name: /^Wait for something/ }));
+      fireEvent.change(screen.getByLabelText("From whom?"), { target: { value: "title" } });
+      fireEvent.change(screen.getByLabelText("What are you waiting for?"), {
+        target: { value: "the payoff letter" },
+      });
+      fireEvent.change(screen.getByLabelText("By when?"), { target: { value: "2026-10-15" } });
+      fireEvent.click(screen.getByRole("button", { name: "Add the step" }));
+      expect(calls.added).toEqual([
+        {
+          conditionId: "c1",
+          name: "the payoff letter",
+          performers: ["title"],
+          option: "i_will_do_it",
+          waiting: true,
+          due_date: "2026-10-15",
+        },
+      ]);
     });
 
     it("LP-971: the open menu offers Describe it beside the blocks", () => {

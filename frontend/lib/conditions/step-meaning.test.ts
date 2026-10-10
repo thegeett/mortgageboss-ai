@@ -134,4 +134,21 @@ describe("step meanings", () => {
     }
     expect(meaningFor("push_back", item({}))).toBe(OPTION_MEANING.push_back);
   });
+
+  it("LP-972: a wait reads as waiting on that person, and its meaning says no email goes", () => {
+    const wait = item({
+      option: "i_will_do_it",
+      performer: "lo",
+      performers: ["lo"],
+      waiting: true,
+    });
+    expect(actionFor("i_will_do_it", wait)).toBe("Wait for LO");
+    expect(meaningFor("i_will_do_it", wait)).toMatch(
+      /^No email goes: you asked LO some other way\./,
+    );
+    // THE CONTROL: her own task without the flag is still hers to do.
+    expect(actionFor("i_will_do_it", item({ option: "i_will_do_it", task: null }))).toBe(
+      "You do it",
+    );
+  });
 });

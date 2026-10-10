@@ -1,7 +1,12 @@
 /** Reminder suggestions (LP-814) — mirrors `app/api/reminders.py`. */
 
 /** Which rule produced a suggestion. Part of its identity: snoozing one does not snooze another. */
-export type ReminderKind = "needs_item_pending" | "no_reply" | "file_untouched";
+export type ReminderKind =
+  | "needs_item_pending"
+  | "no_reply"
+  | "file_untouched"
+  /** LP-972 — a "Wait for something" step reached its date and has not arrived. */
+  | "condition_wait_due";
 
 export interface Suggestion {
   loan_file_id: string;

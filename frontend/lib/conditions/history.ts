@@ -31,7 +31,7 @@
  * is how a history line ends up calling something by a name no control offers.
  */
 import { waitingLabel } from "@/lib/conditions/next-step";
-import { OPTION_LABEL } from "@/lib/conditions/plan-words";
+import { OPTION_LABEL, PERFORMER_LABEL } from "@/lib/conditions/plan-words";
 import { CONDITION_LENDER_STATUS, CONDITION_PREP_STATUS } from "@/lib/status";
 import type {
   ConditionEvent,
@@ -234,6 +234,14 @@ export function conditionHistoryLine(
       return `A document was linked by hand${by(event)}`;
     case "condition_evidence_unlinked":
       return `A document was unlinked; it will not be matched to that item again${by(event)}`;
+    // LP-972 — HER WORDS ARE SHOWN, as `withdrawal_reason` is: the agreed words are hers, about her own
+    // call, and the server projects them for this kind only.
+    case "condition_call_logged": {
+      const who = event.call_with ? PERFORMER_LABEL[event.call_with] : "someone";
+      const when = event.call_on ? ` on ${shortDate(event.call_on)}` : "";
+      const words = event.call_agreed ? `: “${event.call_agreed}”` : "";
+      return `Talked to ${who}${when}${words}${by(event)}`;
+    }
     // LP-949 — the file's lender was set, or a code was confirmed, and this untyped condition took its
     // type from the lender's code map. The label is the library's, from a closed vocabulary.
     case "condition_typed":

@@ -743,6 +743,22 @@ export function useRemoveItem(fileId: string) {
   });
 }
 
+/**
+ * LP-972 — "Call or talk to someone": recorded in the condition's history, not as a task. The history
+ * and the condition are refetched, so the line appears where she reads it.
+ */
+export function useLogCall(fileId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      conditionId,
+      ...body
+    }: { conditionId: string; with_whom: Performer; on: string; agreed: string }) =>
+      (await apiClient.post<Condition>(`${conditionPath(conditionId)}/calls`, body)).data,
+    onSuccess: () => invalidatePlan(queryClient, fileId),
+  });
+}
+
 /** S3-01's "Add an item". */
 export function useAddItem(fileId: string) {
   const queryClient = useQueryClient();
@@ -750,8 +766,15 @@ export function useAddItem(fileId: string) {
     mutationFn: async ({
       conditionId,
       ...body
-    }: { conditionId: string; name: string; performers: Performer[]; option?: PlanOption }) =>
-      (await apiClient.post<Condition>(`${conditionPath(conditionId)}/items`, body)).data,
+    }: {
+      conditionId: string;
+      name: string;
+      performers: Performer[];
+      option?: PlanOption;
+      /** LP-972 — "Wait for something": waits on `performers[0]` by `due_date`, with no email. */
+      waiting?: boolean;
+      due_date?: string;
+    }) => (await apiClient.post<Condition>(`${conditionPath(conditionId)}/items`, body)).data,
     onSuccess: () => invalidatePlan(queryClient, fileId),
   });
 }

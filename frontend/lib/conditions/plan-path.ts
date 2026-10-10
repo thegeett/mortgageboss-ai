@@ -80,6 +80,12 @@ export function askedWho(item: ConditionItem): string {
   return PERFORMER_LABEL[who];
 }
 
+/** `2026-10-15` → `10/15`. */
+function usShort(iso: string): string {
+  const [, month, day] = iso.slice(0, 10).split("-");
+  return month && day ? `${month}/${day}` : iso;
+}
+
 function capital(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
@@ -133,6 +139,7 @@ function alreadyBehind(item: ConditionItem): number {
     if (item.status === "received") return 4; // …and it came back, and it is linked
   }
   if (item.option === "i_will_do_it" && item.status === "received") return 2;
+  // (A wait's path is the same length — its wait and her upload — so `received` trims the same two.)
   return 0;
 }
 
@@ -205,6 +212,25 @@ export function taskPath(item: ConditionItem, context: PathContext = {}): PathSt
       break;
     }
     case "i_will_do_it":
+      // LP-972 — "WAIT FOR SOMETHING": she asked some other way, so no email goes; the steps are the
+      // wait, then the same upload-or-link and check as her own task. The reminder is the server's
+      // (`reminders._waits_due`): on the date, Eastern, on the Reminders page while it is still open.
+      if (item.waiting) {
+        const who = PERFORMER_LABEL[item.performer];
+        steps.push(
+          {
+            who: "them",
+            whoLabel: who,
+            text: `${who} sends ${item.name}`,
+            detail: item.due_date
+              ? `If it hasn’t come by ${usShort(item.due_date)}, it shows on your Reminders page.`
+              : undefined,
+          },
+          YOU("When it comes, upload or link it here, or mark the task done"),
+          WE("We check what you upload", shouldBe(item)),
+        );
+        break;
+      }
       steps.push(
         YOU(item.task ? capital(item.task) : `Do it: ${item.name}`),
         YOU("Upload what you get to this task, or mark the task done"),
@@ -402,7 +428,12 @@ export function firstMoves(rows: Condition[], drafts: { codes: string[] }[]): Fi
     // "Mark … ready" left it out — two boxes on one screen disagreeing about one condition.
     if (willBeReady(condition, items)) out.handled.push(condition.lender_code ?? "—");
     for (const item of items) {
-      if (item.option === "i_will_do_it") {
+      // LP-972 — A WAIT IS NOT A TASK SHE DOES NOW: the next move is someone else's.
+      if (item.option === "i_will_do_it" && item.waiting) {
+        // Named as an ask's person is ("the borrower", "Title / escrow"), so one list reads one way.
+        const who = askedWho(item);
+        if (!out.waitingOn.includes(who)) out.waitingOn.push(who);
+      } else if (item.option === "i_will_do_it") {
         if (item.waits_on_code) out.tasksLater += 1;
         else out.tasksNow += 1;
       }

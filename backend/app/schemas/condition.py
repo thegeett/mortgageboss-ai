@@ -494,6 +494,18 @@ class ConditionEventPublic(BaseModel):
     #: LP-949 — the library type an untyped condition was given (`CONDITION_TYPED`), as the LIBRARY'S
     #: label: drawn from a closed vocabulary (a type id the library knows), never stored text.
     typed_as: str | None = None
+    #: LP-972 — "Call or talk to someone", for `condition_call_logged` ONLY: who, the day, and what was
+    #: agreed. THE AGREED WORDS ARE A THIRD FREE-TEXT FIELD, AND THIS IS ITS TRACE.
+    #: - Who writes it: only she does, through `condition_plan.log_call`. No reading, no inbound mail and
+    #:   no lender sheet writes this key.
+    #: - What it can hold: anything she types, up to 300 characters. That can include a borrower's name
+    #:   or a figure, so it is treated as NPI-capable rather than assumed clean.
+    #: - How far it travels: the same two company-scoped event routes as `withdrawal_reason`. `detail`,
+    #:   where it is stored, is not in the readonly view, and logs never carry it.
+    #: - Its guard is the KIND: an `agreed` key on any other event does not travel.
+    call_with: Performer | None = None
+    call_on: date_type | None = None
+    call_agreed: str | None = None
 
     @classmethod
     def from_model(
@@ -575,6 +587,18 @@ class ConditionEventPublic(BaseModel):
             withdrawal_reason=str(detail["reason"])[:WITHDRAWAL_REASON_MAX]
             if kind is ConditionEventKind.CONDITION_WITHDRAWN
             and isinstance(detail.get("reason"), str)
+            else None,
+            call_with=_as_vocab(
+                detail.get("with"), frozenset(member.value for member in Performer), Performer
+            )
+            if kind is ConditionEventKind.CONDITION_CALL_LOGGED
+            else None,
+            call_on=_as_date(detail.get("on"), kind=kind, key="on")
+            if kind is ConditionEventKind.CONDITION_CALL_LOGGED
+            else None,
+            call_agreed=str(detail["agreed"])[:300]
+            if kind is ConditionEventKind.CONDITION_CALL_LOGGED
+            and isinstance(detail.get("agreed"), str)
             else None,
             # GUARDED BY KIND, NOT JUST BY KEY — see `_ROUND_SOURCE_KINDS`. Both source vocabularies
             # contain `email` and share this key, so without the guard a lender's emailed verdict
@@ -1006,6 +1030,8 @@ class ConditionItemPublic(BaseModel):
     draft: DraftTailPublic | None = None
     #: LP-968 — her reason, proof or method for a change she made to this task.
     plan_note: str | None = None
+    #: LP-972 — a "Wait for something" step: waiting on its performer by `due_date`.
+    waiting: bool = False
 
 
 class ConditionItemUpdate(BaseModel):
@@ -1022,11 +1048,21 @@ class ConditionItemUpdate(BaseModel):
 
 
 class ConditionItemCreate(BaseModel):
-    """S3-01's "Add an item"."""
+    """S3-01's "Add an item"; LP-972's "Wait for something" with `waiting` and its date."""
 
     name: str = Field(min_length=1, max_length=200)
     performers: list[Performer] = Field(min_length=1, max_length=3)
     option: PlanOption | None = None
+    waiting: bool = False
+    due_date: date_type | None = None
+
+
+class CallLogRequest(BaseModel):
+    """LP-972 — "Call or talk to someone": who, the day, and what was agreed."""
+
+    with_whom: Performer
+    on: date_type
+    agreed: str = Field(min_length=1, max_length=300)
 
 
 class NextStepRequest(BaseModel):

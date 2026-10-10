@@ -19,7 +19,7 @@ import { getErrorMessage } from "@/lib/errors/api-error";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import type { ReminderKind, Suggestion } from "@/lib/types/reminder";
 import { formatDistanceToNow } from "date-fns";
-import { Clock, MailQuestion, Moon } from "lucide-react";
+import { Clock, Hourglass, MailQuestion, Moon } from "lucide-react";
 import Link from "next/link";
 
 /**
@@ -32,6 +32,7 @@ const ICONS: Record<ReminderKind, typeof Clock> = {
   needs_item_pending: Clock,
   no_reply: MailQuestion,
   file_untouched: Moon,
+  condition_wait_due: Hourglass,
 };
 
 /** How long the suggestion has to run before it comes back. Days, because a processor thinks in

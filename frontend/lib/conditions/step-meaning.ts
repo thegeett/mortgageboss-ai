@@ -101,6 +101,8 @@ function askedWho(item: ConditionItem | null): string {
 export function actionFor(option: PlanOption, item: ConditionItem | null): string {
   switch (option) {
     case "i_will_do_it":
+      // LP-972 — a wait is hers to chase, but its next move is someone else's.
+      if (item?.waiting) return `Wait for ${PERFORMER_LABEL[item.performer]}`;
       return item?.task ? `You ${item.task}` : "You do it";
     // THE WHOLE CONDITION'S ASK NAMES NO EMAIL (LP-966 review). The drafts are built from ITEMS —
     // `condition_drafts` pairs each draft's items with their conditions — so a condition-level ask
@@ -132,6 +134,9 @@ export function actionFor(option: PlanOption, item: ConditionItem | null): strin
 
 /** The line under a task's select: the chosen step's meaning, naming the person for an ask. */
 export function meaningFor(option: PlanOption, item: ConditionItem | null): string {
+  if (item?.waiting) {
+    return `No email goes: you asked ${PERFORMER_LABEL[item.performer]} some other way. If it hasn’t come by its date, it shows on your Reminders page.`;
+  }
   if (option === "ask_third_party" && item) {
     return `We put this request in the email to ${askedWho(item)}. You review the email first; once sent, the condition waits on them.`;
   }

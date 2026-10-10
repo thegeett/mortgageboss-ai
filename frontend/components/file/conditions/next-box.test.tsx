@@ -11,6 +11,7 @@ vi.mock("@/lib/api/conditions", () => ({
   useConditionPackage: () => ({ data: { lender_short: "UWM", ready_count: 6 } }),
   useUpdateItem: () => ({ isPending: false, mutate: vi.fn() }),
   useRevertPlan: () => ({ mutate: vi.fn(), isPending: false }),
+  useLogCall: () => ({ mutate: vi.fn(), isPending: false }),
   useDescribeSteps: () => ({ mutate: vi.fn(), isPending: false }),
   useAddItem: () => ({ mutate: vi.fn(), isPending: false }),
   useOwnWay: () => ({ mutate: vi.fn(), isPending: false }),

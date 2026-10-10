@@ -27,10 +27,26 @@ import { useId, useState } from "react";
  *   LP-966 review). This is what closes that gap: any condition can now be given one.
  */
 export type AddedStep =
-  | { kind: "task"; name: string; performers: Performer[]; option: PlanOption; link?: boolean }
-  | { kind: "own_step"; option: "ask_underwriter" | "push_back" };
+  | {
+      kind: "task";
+      name: string;
+      performers: Performer[];
+      option: PlanOption;
+      link?: boolean;
+      /** LP-972 — "Wait for something": waits on `performers[0]` by `dueDate`, with no email. */
+      waiting?: boolean;
+      dueDate?: string;
+    }
+  | { kind: "own_step"; option: "ask_underwriter" | "push_back" }
+  /** LP-972 — "Call or talk to someone": a record in the history, not a task. */
+  | { kind: "call"; with: Performer; on: string; agreed: string };
 
-export type BlockKey = PlanBlock;
+/**
+ * The menu's blocks: LP-969's seven, which "Describe it" can also propose (`PlanBlock`), and LP-972's two,
+ * which it cannot. A call is a record with a date and a wait has a date she sets, and neither is a step
+ * a sentence should be turned into without her picking the day.
+ */
+export type BlockKey = PlanBlock | "call" | "wait";
 
 interface Block {
   key: BlockKey;
@@ -39,6 +55,10 @@ interface Block {
   /** What her words are for; null when the block takes none. */
   prompt: string | null;
   placeholder?: string;
+  /** Who it is with, and the label over the choice; for "email", "call" and "wait". */
+  who?: { label: string; options: () => Performer[] };
+  /** A date she picks: the day of a call (today unless she changes it), or a wait's "by when". */
+  date?: { label: string; today: boolean };
 }
 
 const BLOCKS: Block[] = [
@@ -48,6 +68,7 @@ const BLOCKS: Block[] = [
     hint: "We add it to the email to them this round. You review it before it’s sent.",
     prompt: "What should they send or do?",
     placeholder: "e.g. the final seller CD",
+    who: { label: "To", options: () => EMAIL_WHO },
   },
   {
     key: "upload_ask",
@@ -96,7 +117,39 @@ const BLOCKS: Block[] = [
     prompt: "What will you do?",
     placeholder: "e.g. call the LO about the fee",
   },
+  {
+    key: "call",
+    label: "Call or talk to someone",
+    // A RECORD, NOT A TASK (`condition_plan.log_call`): a call that ended "he'll send it next week"
+    // finishes nothing, so it must not count toward the condition being ready.
+    hint: "A note in the condition’s history: who, when, and what was agreed. It doesn’t finish anything on the plan.",
+    prompt: "What was agreed?",
+    placeholder: "e.g. Title will send the final CD on Monday",
+    who: { label: "Who did you talk to?", options: () => TALK_WHO },
+    date: { label: "When", today: true },
+  },
+  {
+    key: "wait",
+    label: "Wait for something",
+    hint: "A task waiting on someone you asked another way. No email goes, and if it hasn’t come by the date, it shows on your Reminders page.",
+    prompt: "What are you waiting for?",
+    placeholder: "e.g. the payoff letter",
+    who: { label: "From whom?", options: () => TALK_WHO },
+    date: { label: "By when?", today: false },
+  },
 ];
+
+/** LP-972 — who she can have talked to, or be waiting on: anyone but herself. */
+const TALK_WHO: Performer[] = (Object.keys(PERFORMER_LABEL) as Performer[]).filter(
+  (who) => who !== "processor",
+);
+
+/** Today as `yyyy-mm-dd` in her own time zone, for a date input. */
+function today(): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
 
 /**
  * Who she can email. DERIVED FROM THE PERFORMERS, minus three named exclusions, so a performer added to
@@ -125,8 +178,19 @@ export const EMAIL_WHO: Performer[] = (Object.keys(PERFORMER_LABEL) as Performer
  * "Describe it" (LP-971), so a block proposed by the AI is added through exactly the door the same
  * block chosen by hand uses. `who` is read only by "email".
  */
-export function addedStepFor(key: BlockKey, name: string, who: Performer): AddedStep {
+export function addedStepFor(key: BlockKey, name: string, who: Performer, date = ""): AddedStep {
   switch (key) {
+    case "call":
+      return { kind: "call", with: who, on: date, agreed: name };
+    case "wait":
+      return {
+        kind: "task",
+        name,
+        performers: [who],
+        option: "i_will_do_it",
+        waiting: true,
+        dueDate: date,
+      };
     case "email":
       return {
         kind: "task",
@@ -179,17 +243,27 @@ export function AddStep({
   const [chosen, setChosen] = useState<Block | null>(null);
   const [words, setWords] = useState("");
   const [who, setWho] = useState<Performer>("borrower");
+  const [date, setDate] = useState("");
+  const dateId = useId();
   const menuId = useId();
   const wordsId = useId();
   const whoId = useId();
 
+  // A block's own defaults when she picks it: today for a call, nothing for a wait (she says by when),
+  // and "who" kept if the new block offers it, else its first choice.
+  const choose = (block: Block) => {
+    setChosen(block);
+    setDate(block.date?.today ? today() : "");
+    const options = block.who?.options() ?? [];
+    if (options.length > 0 && !options.includes(who)) setWho(options[0] as Performer);
+  };
   const reset = () => {
     setChosen(null);
     setWords("");
     setOpen(false);
   };
   const add = (block: Block) => {
-    onAdd(addedStepFor(block.key, words.trim(), who));
+    onAdd(addedStepFor(block.key, words.trim(), who, date));
     reset();
   };
 
@@ -229,7 +303,7 @@ export function AddStep({
                 <li key={block.key}>
                   <button
                     type="button"
-                    onClick={() => (block.prompt === null ? add(block) : setChosen(block))}
+                    onClick={() => (block.prompt === null ? add(block) : choose(block))}
                     disabled={pending}
                     className="flex w-full flex-col gap-0.5 rounded-md border border-border px-3 py-2 text-left hover:border-primary/50 hover:bg-primary/5 disabled:opacity-50"
                   >
@@ -259,15 +333,15 @@ export function AddStep({
             className="flex flex-col gap-2 rounded-[var(--radius-container)] border border-border bg-card p-3"
             onSubmit={(event) => {
               event.preventDefault();
-              if (words.trim()) add(chosen);
+              if (words.trim() && (chosen.date === undefined || date)) add(chosen);
             }}
           >
             <p className="text-sm font-semibold text-foreground">{chosen.label}</p>
             <p className="text-xs text-foreground-2">{chosen.hint}</p>
-            {chosen.key === "email" ? (
+            {chosen.who ? (
               <div className="flex flex-col gap-1">
                 <label htmlFor={whoId} className="text-xs font-medium text-foreground-2">
-                  To
+                  {chosen.who.label}
                 </label>
                 <select
                   id={whoId}
@@ -275,12 +349,26 @@ export function AddStep({
                   onChange={(event) => setWho(event.target.value as Performer)}
                   className="h-8 w-auto self-start rounded-md border border-input bg-card px-1.5 text-sm"
                 >
-                  {EMAIL_WHO.map((each) => (
+                  {chosen.who.options().map((each) => (
                     <option key={each} value={each}>
                       {PERFORMER_LABEL[each]}
                     </option>
                   ))}
                 </select>
+              </div>
+            ) : null}
+            {chosen.date ? (
+              <div className="flex flex-col gap-1">
+                <label htmlFor={dateId} className="text-xs font-medium text-foreground-2">
+                  {chosen.date.label}
+                </label>
+                <input
+                  id={dateId}
+                  type="date"
+                  value={date}
+                  onChange={(event) => setDate(event.target.value)}
+                  className="h-8 w-auto self-start rounded-md border border-input bg-card px-2 text-sm text-foreground"
+                />
               </div>
             ) : null}
             <div className="flex flex-col gap-1">
@@ -298,7 +386,11 @@ export function AddStep({
               />
             </div>
             <div className="flex gap-2">
-              <Button type="submit" size="sm" disabled={pending || !words.trim()}>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={pending || !words.trim() || (chosen.date !== undefined && !date)}
+              >
                 Add the step
               </Button>
               <Button type="button" size="sm" variant="ghost" onClick={reset}>

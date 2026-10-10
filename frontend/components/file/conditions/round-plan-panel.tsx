@@ -15,6 +15,7 @@ import {
 import {
   useAddItem,
   useConfirmPlan,
+  useLogCall,
   useOwnWay,
   useRemoveItem,
   useRevertPlan,
@@ -41,6 +42,7 @@ import {
   meaningFor,
 } from "@/lib/conditions/step-meaning";
 import { getErrorMessage } from "@/lib/errors/api-error";
+import { notifySuccess } from "@/lib/toast";
 import { BUCKET_KIND_CHIP } from "@/lib/types/conditions";
 import type { Condition, ConditionItem, ConditionRound, PlanOption } from "@/lib/types/conditions";
 import { cn } from "@/lib/utils";
@@ -102,6 +104,7 @@ export function RoundPlanPanel({
   const updateItem = useUpdateItem(fileId);
   const revert = useRevertPlan(fileId);
   const addItem = useAddItem(fileId);
+  const logCall = useLogCall(fileId);
   const ownWay = useOwnWay(fileId);
   const removeItem = useRemoveItem(fileId);
   // LP-969 — "Check a document on the file" opens the link dialog on the task it just added.
@@ -221,12 +224,31 @@ export function RoundPlanPanel({
         run(tail, known);
         return;
       }
+      // LP-972 — A CALL IS A RECORD, NOT A TASK: it goes to the condition's history and adds nothing to
+      // the plan, so she is told where it went rather than seeing nothing change.
+      if (step.kind === "call") {
+        logCall.mutate(
+          { conditionId: condition.id, with_whom: step.with, on: step.on, agreed: step.agreed },
+          {
+            onError,
+            onSuccess: () => {
+              notifySuccess({
+                title: "Call logged",
+                consequence: `It’s in ${condition.lender_code ?? "the condition"}’s history.`,
+              });
+              run(tail, known);
+            },
+          },
+        );
+        return;
+      }
       addItem.mutate(
         {
           conditionId: condition.id,
           name: step.name,
           performers: step.performers,
           option: step.option,
+          ...(step.waiting ? { waiting: true, due_date: step.dueDate } : {}),
         },
         {
           onError,

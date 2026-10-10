@@ -288,6 +288,16 @@ async def test_only_the_named_scalars_are_exposed(
         # LIBRARY'S label looked up from the stored id. A closed set: an id the library does not know
         # projects as None (`test_typed_as_is_the_librarys_label_or_nothing` in the LP-949 tests).
         "typed_as",
+        # LP-972 — "Call or talk to someone", on `CONDITION_CALL_LOGGED` only (guarded by KIND).
+        # `call_with` is a `Performer` member and `call_on` a date: rule 7 permits both. `call_agreed`
+        # is A SECOND FREE-TEXT STRING, ON THE SAME TERMS AS `withdrawal_reason` AND WITH ITS OWN TRACE
+        # (`ConditionEventPublic.call_agreed`). Only she writes it, about her own call. It can hold
+        # anything she types, a borrower's name included, which is why it is bounded by WHO WRITES IT
+        # and WHERE IT TRAVELS rather than by its shape. `test_lp972_call_log_and_waits.py` pins the
+        # kind guard.
+        "call_with",
+        "call_on",
+        "call_agreed",
     }
     # THREE FIELDS CAME OFF THIS LIST AND THAT IS THE POINT. `reader_version`,
     # `duplicates_dropped` and `filled_from` were projected and read by no sentence — three open

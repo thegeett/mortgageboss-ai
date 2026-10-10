@@ -14,7 +14,8 @@ from datetime import date
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import Date, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, Date, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import false as sa_false
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -85,6 +86,12 @@ class ConditionItem(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     #: already done, or how she is doing it herself. FREE TEXT, so it is kept out of the readonly views
     #: (their column lists are explicit; LP-956), like `name`. Cleared when the task goes back to open.
     plan_note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    #: LP-972 — a "Wait for something" step: she is waiting on its performer for it, by `due_date`, and
+    #: a reminder comes on that date if it has not arrived. Its option is `i_will_do_it` (no email goes:
+    #: she asked some other way); this flag is what tells the path and the reminder it is a wait.
+    waiting: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=sa_false(), nullable=False
+    )
     sequence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     #: LP-922 — the condition draft that asks for it, while one does.
     draft_id: Mapped[UUID | None] = mapped_column(

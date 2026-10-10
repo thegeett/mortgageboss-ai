@@ -161,6 +161,10 @@ class ConditionEventKind(StrEnum):
     #: LP-953 — she removed a link; the evidence row is deleted and `condition_item_unlinks` keeps her
     #: decision so no automatic match puts it back.
     CONDITION_EVIDENCE_UNLINKED = "condition_evidence_unlinked"
+    #: LP-972 — she called or talked to someone about the condition: who, on which day, and what was
+    #: agreed (her words). A RECORD, NOT A TASK: a call that ended "he'll send it next week" finishes
+    #: nothing, so it must not count toward the condition being ready.
+    CONDITION_CALL_LOGGED = "condition_call_logged"
 
 
 class ConditionEvent(Base, UUIDMixin):

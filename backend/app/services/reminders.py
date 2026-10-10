@@ -31,8 +31,9 @@ about a file nobody is opening, so a per-file endpoint could never surface it.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -232,6 +233,64 @@ async def _unanswered_sends(
     return result
 
 
+#: LP-972 — whose day a wait falls due on. Staging and its users run on US Eastern hours (the owner,
+#: confirmed); a UTC date would raise a wait's reminder the evening BEFORE its date there.
+_EASTERN = ZoneInfo("America/New_York")
+
+
+async def _waits_due(
+    db: AsyncSession, *, file_ids: list[UUID], now: datetime
+) -> list[tuple[UUID, UUID, str, str, datetime]]:
+    """LP-972 — `(loan_file_id, item_id, code, what, since)` for each "Wait for something" step whose
+    date has come while it is still open: the reminder its step promised.
+
+    ON THE DATE, NOT AFTER IT: "remind me on the 15th" means the 15th, in Eastern time. `since` is the
+    start of that day, so a snooze or dismissal is about THIS date: moving the step's date moves
+    `since`, and the reminder comes back for the new one (`_is_suppressed` keys on it).
+
+    ONLY AN OPEN WAIT ON AN OPEN CONDITION. A wait she marked done, or one whose document arrived and
+    was linked (RECEIVED, DONE), is not waiting for anything; nor is a wait on a withdrawn condition.
+    """
+    from app.models.condition import Condition, ConditionLenderStatus
+    from app.models.condition_item import ConditionItem
+    from app.models.condition_vocabulary import ConditionItemStatus
+    from app.services.condition_plan import _RECIPIENT
+
+    if not file_ids:
+        return []
+    today = now.astimezone(_EASTERN).date()
+    rows = (
+        await db.execute(
+            select(ConditionItem, Condition.lender_code)
+            .join(Condition, Condition.id == ConditionItem.condition_id)
+            .where(
+                ConditionItem.loan_file_id.in_(file_ids),
+                ConditionItem.waiting.is_(True),
+                ConditionItem.status == ConditionItemStatus.OPEN,
+                ConditionItem.deleted_at.is_(None),
+                ConditionItem.due_date.is_not(None),
+                ConditionItem.due_date <= today,
+                Condition.deleted_at.is_(None),
+                Condition.lender_status.in_(
+                    (ConditionLenderStatus.OPEN, ConditionLenderStatus.NOT_CLEARED)
+                ),
+            )
+        )
+    ).all()
+    out: list[tuple[UUID, UUID, str, str, datetime]] = []
+    for item, code in rows:
+        if item.due_date is None:
+            continue
+        since = datetime.combine(item.due_date, time.min, tzinfo=_EASTERN)
+        # Who, in the words the emails use ("Title/attorney", "LO"); a performer with no email of its
+        # own is named by its value.
+        who = _RECIPIENT.get(item.performer, (None, item.performer.value.replace("_", " ")))[1]
+        out.append(
+            (item.loan_file_id, item.id, code or "A condition", f"{item.name} from {who}", since)
+        )
+    return out
+
+
 async def _untouched(
     db: AsyncSession, *, files: list[LoanFile], now: datetime
 ) -> list[tuple[UUID, datetime]]:
@@ -332,6 +391,21 @@ async def build_suggestions(
                 summary=f"No reply since a message {_days(sent_at, moment)} days ago",
                 days=_days(sent_at, moment),
                 since=sent_at,
+            )
+        )
+
+    for file_id, item_id, code, name, due in await _waits_due(db, file_ids=file_ids, now=moment):
+        suggestions.append(
+            Suggestion(
+                loan_file_id=file_id,
+                display_id=display[file_id],
+                kind=ReminderKind.CONDITION_WAIT_DUE,
+                subject_id=item_id,
+                # HER WORDS FOR WHAT SHE IS WAITING ON (the step's name), never a borrower's or the
+                # lender's: she typed it on "Wait for something".
+                summary=f"{code}: still waiting on {name}",
+                days=max(_days(due, moment), 0),
+                since=due,
             )
         )
 

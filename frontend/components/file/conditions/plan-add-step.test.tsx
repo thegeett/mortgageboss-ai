@@ -110,4 +110,53 @@ describe("AddStep", () => {
       performers: ["title"],
     });
   });
+
+  describe("LP-972 — call or talk to someone, and wait for something", () => {
+    it("a call is a record: who, the day (today unless she changes it), and what was agreed", () => {
+      const onAdd = vi.fn();
+      open(onAdd);
+      fireEvent.click(screen.getByRole("button", { name: /^Call or talk to someone/ }));
+      const who = screen.getByLabelText("Who did you talk to?") as HTMLSelectElement;
+      const names = Array.from(who.options, (option) => option.value);
+      expect(names).not.toContain("processor");
+      expect(names).toContain("attorney"); // a person she can talk to, even if not a separate email
+      fireEvent.change(who, { target: { value: "title" } });
+      const when = screen.getByLabelText("When") as HTMLInputElement;
+      expect(when.value).toMatch(/^\d{4}-\d{2}-\d{2}$/); // defaults to today
+      fireEvent.change(when, { target: { value: "2026-10-09" } });
+      fireEvent.change(screen.getByLabelText("What was agreed?"), {
+        target: { value: "Title will send the final CD on Monday" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Add the step" }));
+      expect(onAdd).toHaveBeenCalledWith({
+        kind: "call",
+        with: "title",
+        on: "2026-10-09",
+        agreed: "Title will send the final CD on Monday",
+      });
+    });
+
+    it("a wait needs a date, then is her task waiting on someone, with no email", () => {
+      const onAdd = vi.fn();
+      open(onAdd);
+      fireEvent.click(screen.getByRole("button", { name: /^Wait for something/ }));
+      fireEvent.change(screen.getByLabelText("From whom?"), { target: { value: "lo" } });
+      fireEvent.change(screen.getByLabelText("What are you waiting for?"), {
+        target: { value: "the re-disclosure" },
+      });
+      const add = screen.getByRole("button", { name: "Add the step" }) as HTMLButtonElement;
+      expect((screen.getByLabelText("By when?") as HTMLInputElement).value).toBe("");
+      expect(add.disabled).toBe(true); // no date, no reminder: she says by when
+      fireEvent.change(screen.getByLabelText("By when?"), { target: { value: "2026-10-15" } });
+      fireEvent.click(add);
+      expect(onAdd).toHaveBeenCalledWith({
+        kind: "task",
+        name: "the re-disclosure",
+        performers: ["lo"],
+        option: "i_will_do_it",
+        waiting: true,
+        dueDate: "2026-10-15",
+      });
+    });
+  });
 });

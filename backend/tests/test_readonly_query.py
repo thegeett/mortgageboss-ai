@@ -458,7 +458,9 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # LP-956 — the new view drops the three columns that carry the lender's words: `name` (can restate
     # the condition), `acceptable` (likewise) and `specifics` (amounts, banks, account last fours).
     # LP-968 — `plan_note` is her free text (why a task is not needed, how she knows it is done).
-    "condition_items": frozenset({"name", "acceptable", "specifics", "plan_note"}),
+    # LP-972 — `waiting` names nobody; excluded only because exposing it means rebuilding the view for a
+    # column no query uses yet.
+    "condition_items": frozenset({"name", "acceptable", "specifics", "plan_note", "waiting"}),
     "conditions": frozenset(
         {
             "verbatim_text",
