@@ -248,6 +248,16 @@ describe("RoundPlanPanel", () => {
     ).toBeTruthy();
   });
 
+  it("puts Confirm and what it will do above the conditions (the owner, 2026-10-10)", () => {
+    show([condition({}), condition({ id: "c2", lender_code: "1947", sequence: 2 })], unblocked());
+    const confirm = screen.getByRole("button", { name: "Confirm the plan" });
+    const firstRow = screen.getByRole("button", { name: "0006" });
+    // DOCUMENT_POSITION_FOLLOWING: the first condition comes AFTER the button on the page.
+    expect(
+      confirm.compareDocumentPosition(firstRow) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("is gone once the plan is confirmed", () => {
     plan.data = { ...basePlan, confirmed_at: "2026-08-28T20:40:00Z", blocking_codes: [] };
     const { container } = render(

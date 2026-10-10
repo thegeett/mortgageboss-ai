@@ -321,6 +321,53 @@ export function RoundPlanPanel({
         </div>
       </div>
 
+      {/* THE CONFIRM BLOCK IS AT THE TOP (the owner, 2026-10-10: "put Plan confirmation button section on
+          top"). What Confirm will do and the button sit under the heading, so she does not scroll past
+          every condition to reach them; the conditions below are what she checks before pressing it. */}
+      <div className="flex flex-col gap-3 rounded-[var(--radius-container)] bg-muted/50 p-4">
+        <ConfirmSummary rows={rows} drafts={drafts} carriedCodes={carriedCodes} />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            disabled={blocked || confirm.isPending}
+            onClick={() => {
+              setRefusal(null);
+              // LP-976 — a confirm on a confirmed round confirms the plan of what was added to it.
+              for (const roundId of late ? lateRoundIds : [round.id]) {
+                confirm.mutate({ roundId }, { onError });
+              }
+            }}
+          >
+            <Check className="h-4 w-4" aria-hidden />
+            {late ? `Confirm ${rows.length === 1 ? "its" : "their"} plan` : "Confirm the plan"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              const first = rows[0];
+              if (first) onOpenCondition(first.id);
+            }}
+          >
+            Review one by one
+          </Button>
+          {blocked ? (
+            <p className="text-xs text-muted-foreground">
+              {namedBlocker !== null
+                ? `Confirm ${namedBlocker}’s reading first — `
+                : `Check how we read ${data.blocking_codes.length === 1 ? "it" : "them"} first — `}
+              {data.blocking_codes.length === 1
+                ? "one condition still needs you."
+                : `${data.blocking_codes.length} conditions still need you.`}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Nothing is sent until you press confirm, and every email waits for your review.
+            </p>
+          )}
+        </div>
+      </div>
+
       <FirstMovesBox rows={rows} drafts={drafts} />
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-foreground-2">
@@ -375,50 +422,6 @@ export function RoundPlanPanel({
       </div>
 
       {refusal ? <p className="text-sm text-destructive">{refusal}</p> : null}
-
-      <div className="flex flex-col gap-3 rounded-[var(--radius-container)] bg-muted/50 p-4">
-        <ConfirmSummary rows={rows} drafts={drafts} carriedCodes={carriedCodes} />
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            disabled={blocked || confirm.isPending}
-            onClick={() => {
-              setRefusal(null);
-              // LP-976 — a confirm on a confirmed round confirms the plan of what was added to it.
-              for (const roundId of late ? lateRoundIds : [round.id]) {
-                confirm.mutate({ roundId }, { onError });
-              }
-            }}
-          >
-            <Check className="h-4 w-4" aria-hidden />
-            {late ? `Confirm ${rows.length === 1 ? "its" : "their"} plan` : "Confirm the plan"}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              const first = rows[0];
-              if (first) onOpenCondition(first.id);
-            }}
-          >
-            Review one by one
-          </Button>
-          {blocked ? (
-            <p className="text-xs text-muted-foreground">
-              {namedBlocker !== null
-                ? `Confirm ${namedBlocker}’s reading first — `
-                : `Check how we read ${data.blocking_codes.length === 1 ? "it" : "them"} first — `}
-              {data.blocking_codes.length === 1
-                ? "one condition still needs you."
-                : `${data.blocking_codes.length} conditions still need you.`}
-            </p>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              Nothing is sent until you press confirm, and every email waits for your review.
-            </p>
-          )}
-        </div>
-      </div>
 
       <StepGuide help={help} onClose={() => setHelp(null)} />
       {linking ? (
