@@ -2022,6 +2022,31 @@ class DraftPolishPublic(BaseModel):
     refusal: str | None
 
 
+class DescribeRequest(BaseModel):
+    """LP-971 — "Describe it": what she wants to do about a condition, in her own words."""
+
+    text: str = Field(min_length=1, max_length=500)
+
+
+class DescribedStepPublic(BaseModel):
+    """One proposed step, in LP-969's building blocks. `to` is set for an email only."""
+
+    block: Literal[
+        "email", "upload_ask", "upload_mine", "check", "underwriter", "push_back", "todo"
+    ]
+    text: str
+    to: Performer | None = None
+
+
+class DescribePublic(BaseModel):
+    """Proposed steps, or why there are none. Nothing is stored until she adds them."""
+
+    steps: list[DescribedStepPublic]
+    #: One sentence for each step left out, saying why (not a real block, an invented fact, …).
+    left_out: list[str]
+    refusal: str | None
+
+
 class DraftUsePolishRequest(BaseModel):
     body_html: str = Field(min_length=1, max_length=50_000)
     #: How many fact warnings were on screen when she chose it — recorded on the event, as a count.

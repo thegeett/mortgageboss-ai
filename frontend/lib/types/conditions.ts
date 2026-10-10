@@ -1380,6 +1380,35 @@ export interface WrongFile {
 }
 
 /** LP-952 — where the reading of a round's file stands. `unread` counts the FILE's unread conditions. */
+/**
+ * LP-969's building blocks, by the names the server's `condition_describe.BLOCKS` and the "Add a step"
+ * menu share. ONE TYPE for the menu and for a proposed step, so a block the server can propose and the
+ * menu cannot add is a compile error rather than a cast.
+ */
+export type PlanBlock =
+  | "email"
+  | "upload_ask"
+  | "upload_mine"
+  | "check"
+  | "underwriter"
+  | "push_back"
+  | "todo";
+
+/** LP-971 — one step "Describe it" proposes, in LP-969's building blocks; `to` only for an email. */
+export interface DescribedStep {
+  block: PlanBlock;
+  text: string;
+  to: Performer | null;
+}
+
+/** LP-971 — the proposal, or why there is none. Nothing is stored until she adds the steps. */
+export interface DescribeResult {
+  steps: DescribedStep[];
+  /** One sentence for each step left out, saying why. */
+  left_out: string[];
+  refusal: string | null;
+}
+
 export interface ReadingState {
   state: "queued" | "reading" | "done" | "failed" | "not_queued" | "without_ai";
   unread: number;

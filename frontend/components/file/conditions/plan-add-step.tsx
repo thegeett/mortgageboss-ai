@@ -1,8 +1,9 @@
 "use client";
 
+import { DescribeSteps } from "@/components/file/conditions/plan-describe";
 import { Button } from "@/components/ui/button";
 import { PERFORMER_LABEL } from "@/lib/conditions/plan-words";
-import type { Performer, PlanOption } from "@/lib/types/conditions";
+import type { Performer, PlanBlock, PlanOption } from "@/lib/types/conditions";
 import { Plus } from "lucide-react";
 import { useId, useState } from "react";
 
@@ -29,14 +30,7 @@ export type AddedStep =
   | { kind: "task"; name: string; performers: Performer[]; option: PlanOption; link?: boolean }
   | { kind: "own_step"; option: "ask_underwriter" | "push_back" };
 
-type BlockKey =
-  | "email"
-  | "upload_ask"
-  | "upload_mine"
-  | "check"
-  | "underwriter"
-  | "push_back"
-  | "todo";
+export type BlockKey = PlanBlock;
 
 interface Block {
   key: BlockKey;
@@ -126,11 +120,53 @@ export const EMAIL_WHO: Performer[] = (Object.keys(PERFORMER_LABEL) as Performer
   (who) => !NOT_EMAILED.includes(who),
 );
 
+/**
+ * One block, in her words, as the step the server is asked to add. SHARED by the menu above and by
+ * "Describe it" (LP-971), so a block proposed by the AI is added through exactly the door the same
+ * block chosen by hand uses. `who` is read only by "email".
+ */
+export function addedStepFor(key: BlockKey, name: string, who: Performer): AddedStep {
+  switch (key) {
+    case "email":
+      return {
+        kind: "task",
+        name,
+        performers: [who],
+        option: who === "borrower" ? "ask_borrower" : "ask_third_party",
+      };
+    case "upload_ask":
+      return { kind: "task", name, performers: ["borrower"], option: "ask_borrower" };
+    case "upload_mine":
+    case "todo":
+      return { kind: "task", name, performers: ["processor"], option: "i_will_do_it" };
+    case "check":
+      return {
+        kind: "task",
+        name: `Check ${name}`,
+        performers: ["processor"],
+        option: "i_will_do_it",
+        link: true,
+      };
+    case "underwriter":
+      return { kind: "own_step", option: "ask_underwriter" };
+    case "push_back":
+      return { kind: "own_step", option: "push_back" };
+  }
+}
+
+/** What each block is called on screen, for the menu and for a proposed step. */
+export const BLOCK_LABEL: Record<BlockKey, string> = Object.fromEntries(
+  BLOCKS.map((block) => [block.key, block.label]),
+) as Record<BlockKey, string>;
+
 export function AddStep({
+  conditionId,
   ownStep,
   pending,
   onAdd,
 }: {
+  /** LP-971 — the condition "Describe it" proposes steps for. */
+  conditionId: string;
   /** The condition's own step, so a question block says what it replaces. */
   ownStep: PlanOption | null;
   pending: boolean;
@@ -150,39 +186,7 @@ export function AddStep({
     setOpen(false);
   };
   const add = (block: Block) => {
-    const name = words.trim();
-    switch (block.key) {
-      case "email":
-        onAdd({
-          kind: "task",
-          name,
-          performers: [who],
-          option: who === "borrower" ? "ask_borrower" : "ask_third_party",
-        });
-        break;
-      case "upload_ask":
-        onAdd({ kind: "task", name, performers: ["borrower"], option: "ask_borrower" });
-        break;
-      case "upload_mine":
-      case "todo":
-        onAdd({ kind: "task", name, performers: ["processor"], option: "i_will_do_it" });
-        break;
-      case "check":
-        onAdd({
-          kind: "task",
-          name: `Check ${name}`,
-          performers: ["processor"],
-          option: "i_will_do_it",
-          link: true,
-        });
-        break;
-      case "underwriter":
-        onAdd({ kind: "own_step", option: "ask_underwriter" });
-        break;
-      case "push_back":
-        onAdd({ kind: "own_step", option: "push_back" });
-        break;
-    }
+    onAdd(addedStepFor(block.key, words.trim(), who));
     reset();
   };
 
@@ -236,6 +240,15 @@ export function AddStep({
               );
             })}
           </ul>
+        ) : null}
+        {open && chosen === null ? (
+          <DescribeSteps
+            conditionId={conditionId}
+            ownStep={ownStep}
+            pending={pending}
+            onAdd={onAdd}
+            onDone={reset}
+          />
         ) : null}
         {open && chosen !== null ? (
           <form

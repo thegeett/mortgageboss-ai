@@ -47,6 +47,7 @@ vi.mock("@/lib/api/conditions", async (importOriginal) => ({
   useSetNextStep: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdateItem: () => ({ mutate: vi.fn(), isPending: false }),
   useRevertPlan: () => ({ mutate: vi.fn(), isPending: false }),
+  useDescribeSteps: () => ({ mutate: vi.fn(), isPending: false }),
   useOwnWay: () => ({ mutate: vi.fn(), isPending: false }),
   useRemoveItem: () => ({ mutate: vi.fn(), isPending: false }),
   useUploadToItem: () => ({ mutate: vi.fn(), isPending: false }),

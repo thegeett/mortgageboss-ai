@@ -54,7 +54,7 @@ from app.models.condition_round import (
     ConditionRoundStatus,
     ConditionSourceKind,
 )
-from app.models.condition_vocabulary import PlanOption
+from app.models.condition_vocabulary import Performer, PlanOption
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.schemas.condition import (
@@ -80,6 +80,9 @@ from app.schemas.condition import (
     ConditionSort,
     ConditionSummaryPublic,
     ConfirmClearedRequest,
+    DescribedStepPublic,
+    DescribePublic,
+    DescribeRequest,
     DraftAddressRequest,
     DraftDueDateRequest,
     DraftFactWarningPublic,
@@ -1869,6 +1872,33 @@ async def revert_condition_plan(
     """LP-968 — "Go back to the suggested plan": undo her changes to this condition's steps."""
     await revert_to_suggested(db, condition=condition, actor_user_id=current_user.id)
     return await _condition_response(db, condition)
+
+
+@conditions_by_id_router.post("/{condition_id}/plan/describe", response_model=DescribePublic)
+async def describe_condition_steps(
+    condition: ScopedCondition, payload: DescribeRequest
+) -> DescribePublic:
+    """LP-971 — "Describe it": her sentence as proposed steps. Stores nothing; she adds them herself
+    through the add-a-step doors, so each is drafted, checked and recorded as any other step."""
+    from app.ai.condition_describe import describe_steps
+
+    proposal = await describe_steps(
+        words=payload.text,
+        lender_words=condition.verbatim_text,
+        summary=(condition.reading or {}).get("summary"),
+    )
+    return DescribePublic(
+        steps=[
+            DescribedStepPublic(
+                block=step.block,  # type: ignore[arg-type]
+                text=step.text,
+                to=Performer(step.to) if step.to else None,
+            )
+            for step in proposal.steps
+        ],
+        left_out=proposal.left_out,
+        refusal=proposal.refusal,
+    )
 
 
 @conditions_by_id_router.post("/{condition_id}/plan/own-way", response_model=ConditionPublic)

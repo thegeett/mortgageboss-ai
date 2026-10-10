@@ -35,6 +35,7 @@ vi.mock("@/lib/api/conditions", () => ({
   useSetNextStep: () => ({ mutate: (body: unknown) => calls.steps.push(body) }),
   useUpdateItem: () => ({ mutate: (body: unknown) => calls.items.push(body) }),
   useRevertPlan: () => ({ mutate: (id: unknown) => calls.reverts.push(id), isPending: false }),
+  useDescribeSteps: () => ({ mutate: vi.fn(), isPending: false }),
   useAddItem: () => ({
     mutate: (body: unknown, options?: { onSuccess?: (data: Condition) => void }) => {
       calls.added.push(body);
@@ -743,6 +744,14 @@ describe("RoundPlanPanel", () => {
       ]) {
         expect(screen.getByRole("button", { name: new RegExp(`^${label}`) })).toBeTruthy();
       }
+    });
+
+    it("LP-971: the open menu offers Describe it beside the blocks", () => {
+      opened([condition({})]);
+      expect(screen.queryByLabelText("Or describe what you want to do")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Add a step" }));
+      expect(screen.getByLabelText("Or describe what you want to do")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Turn it into steps" })).toBeTruthy();
     });
 
     it("an email step is an ask to the person she picks, in her words", () => {

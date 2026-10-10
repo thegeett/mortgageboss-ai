@@ -659,7 +659,12 @@ function PlanRow({
                 onRemoveItem={onRemoveItem}
               />
             ) : null}
-            <AddStep ownStep={ownStep} pending={adding} onAdd={onAddStep} />
+            <AddStep
+              conditionId={condition.id}
+              ownStep={ownStep}
+              pending={adding}
+              onAdd={onAddStep}
+            />
           </div>
         </div>
       ) : null}

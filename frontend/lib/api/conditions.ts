@@ -34,6 +34,7 @@ import type {
   ConditionRoundCompleteness,
   ConditionSort,
   ConditionSummary,
+  DescribeResult,
   DraftPolish,
   DraftUpdateInput,
   FiguresCheck,
@@ -701,6 +702,21 @@ export function useRevertPlan(fileId: string) {
     mutationFn: async (conditionId: string) =>
       (await apiClient.post<Condition>(`${conditionPath(conditionId)}/plan/revert`)).data,
     onSuccess: () => invalidatePlan(queryClient, fileId),
+  });
+}
+
+/**
+ * LP-971 — "Describe it": her words as proposed steps. Stores nothing, so nothing is invalidated; the
+ * steps are added afterwards through the add-a-step hooks.
+ */
+export function useDescribeSteps() {
+  return useMutation({
+    mutationFn: async ({ conditionId, text }: { conditionId: string; text: string }) =>
+      (
+        await apiClient.post<DescribeResult>(`${conditionPath(conditionId)}/plan/describe`, {
+          text,
+        })
+      ).data,
   });
 }
 
