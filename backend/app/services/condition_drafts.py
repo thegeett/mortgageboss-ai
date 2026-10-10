@@ -113,6 +113,24 @@ WAITING_ON: dict[DraftRecipient, OwnerHint] = {
     DraftRecipient.OTHER_PARTY: OwnerHint.UNKNOWN,
 }
 
+
+def waiting_owner_for(performer: Performer) -> OwnerHint:
+    """Who we wait on when this PERFORMER is the one who owes it (LP-977 review).
+
+    THE SEND'S OWN RULE, REACHABLE WITHOUT THE PRIVATE NAMES. LP-977's wait moves a condition to
+    Waiting on its performer and composed this chain itself — `condition_plan._RECIPIENT`, then this
+    module's `_RECIPIENT_KEY`, then `WAITING_ON` — which meant importing a private name across
+    modules, the thing LP-972's review had just taken out of `reminders`. The chain lives here, where
+    `WAITING_ON` does: Title and the attorney share one email so both read Title, the LO reads Broker
+    (M5), and the HOA, an employer or another party read "someone".
+    """
+    from app.services.condition_plan import _RECIPIENT
+
+    mapped = _RECIPIENT.get(performer)
+    recipient = _RECIPIENT_KEY.get(mapped[0]) if mapped else None
+    return WAITING_ON[recipient] if recipient is not None else OwnerHint.UNKNOWN
+
+
 #: Where a missing address is remembered: a file participant of this role (Phase 4's
 #: `add_participant`). The LO's lives on the file itself.
 PARTICIPANT_ROLE: dict[DraftRecipient, ParticipantRole] = {
@@ -1568,7 +1586,7 @@ async def _wait_on_first_asked(
     elif (
         condition.prep_status is ConditionPrepStatus.WAITING
         and condition.waiting_on is not target_owner
-        and await _last_move_was_a_send(db, condition)
+        and await _last_move_was_not_hers(db, condition)
     ):
         detail = {
             "prep_status_from": ConditionPrepStatus.WAITING.value,
@@ -1604,7 +1622,21 @@ async def _condition_items(db: AsyncSession, condition: Condition) -> list[Condi
     )
 
 
-async def _last_move_was_a_send(db: AsyncSession, condition: Condition) -> bool:
+async def _last_move_was_not_hers(db: AsyncSession, condition: Condition) -> bool:
+    """Whether the condition's latest status move was made by code rather than chosen by her.
+
+    LP-977 REVIEW — IT ASKED "WAS IT A SEND?" AND MEANT "IS IT OURS TO RENAME?". A send is the most
+    authoritative statement of who we are waiting on — we have just emailed them — and the one thing it
+    must not overwrite is a status SHE picked. This read `by == "email"`, so once LP-977 let a WAIT move
+    a condition to Waiting, every later send was refused the rename: a wait on Title followed by the
+    borrower's email left the row saying "Waiting on Title" with the newest email sitting in the
+    borrower's inbox, for ever, because the event history never changes.
+
+    So the question is whether the move carries a `by` at all. Every code-made move has one — `email`,
+    `wait`, `plan`, `evidence` — and the move `condition_status` writes when she picks a status by hand
+    has none. A future `by` therefore behaves like the others instead of being silently excluded, which
+    is the trap the enumerated version just fell into.
+    """
     last = (
         await db.execute(
             select(ConditionEvent.detail)
@@ -1616,7 +1648,7 @@ async def _last_move_was_a_send(db: AsyncSession, condition: Condition) -> bool:
             .limit(1)
         )
     ).scalar_one_or_none()
-    return bool(last and last.get("by") == "email")
+    return last is not None and "by" in last
 
 
 async def _name_the_send(

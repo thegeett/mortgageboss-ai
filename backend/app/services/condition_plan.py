@@ -49,7 +49,6 @@ from app.models.condition import (
     ConditionLenderStatus,
     ConditionPrepStatus,
     ConditionReadingStatus,
-    OwnerHint,
 )
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_item import ConditionItem
@@ -1451,14 +1450,12 @@ async def _wait_moves_status(
     (`_RECIPIENT`), then `condition_drafts.WAITING_ON`. Title and the attorney share one email, so both
     read Title; the LO reads Broker (M5); the HOA, an employer or another party reads "someone".
     """
-    from app.services.condition_drafts import _RECIPIENT_KEY, WAITING_ON
+    from app.services.condition_drafts import waiting_owner_for
     from app.services.condition_status import _event as status_event
 
     if condition.prep_status is not ConditionPrepStatus.TO_DO:
         return False
-    key = _RECIPIENT.get(item.performer, (None, ""))[0]
-    recipient = _RECIPIENT_KEY.get(key) if key else None
-    owner = WAITING_ON[recipient] if recipient is not None else OwnerHint.UNKNOWN
+    owner = waiting_owner_for(item.performer)
     condition.prep_status = ConditionPrepStatus.WAITING
     condition.prep_status_changed_at = datetime.now(UTC)
     condition.waiting_on = owner

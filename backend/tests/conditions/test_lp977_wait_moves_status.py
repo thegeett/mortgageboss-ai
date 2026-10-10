@@ -329,3 +329,60 @@ async def test_a_waiting_an_email_made_is_not_moved_on_by_the_plan(
         status=ConditionItemStatus.DONE,
     )
     assert _status(condition) is ConditionPrepStatus.WAITING
+
+
+async def test_a_later_send_still_names_who_we_wait_on(db_session: AsyncSession) -> None:
+    """LP-977 REVIEW — a wait's move left every later send unable to say who we are waiting on.
+
+    The send renames `waiting_on` only when the condition is already Waiting on someone ELSE and
+    `condition_drafts`' guard allows it. That guard asked whether the last move was a SEND, which was
+    the same question as "is this ours to rename?" while only a send and her own hand could leave a
+    condition at Waiting. A wait makes a third kind, so: wait on Title, then the borrower's email goes,
+    and the row said "Waiting on Title" with the newest email in the borrower's inbox — permanently,
+    because the event history does not change.
+
+    The guard now asks whether the move carries a `by` at all: every code-made move has one and the
+    move she makes by hand has none, so her own choice is still protected.
+    """
+    from app.models.condition_draft import ConditionDraft, DraftRecipient
+    from app.models.condition_round import ConditionRound
+    from app.models.condition_vocabulary import PlanOption
+    from app.services.condition_drafts import mark_sent, resync_file
+    from tests.conditions.test_condition_drafts import _people
+    from tests.conditions.test_lp975_carried_plan_confirmed import _confirm
+
+    loan_file, condition, actor = await _setup(db_session)
+    await _people(db_session, loan_file)
+    await db_session.flush()
+
+    await _wait(db_session, condition, actor, Performer.TITLE)
+    await db_session.flush()
+    assert condition.waiting_on is OwnerHint.TITLE  # THE PREMISE: the wait named Title
+
+    await add_item(
+        db_session,
+        condition=condition,
+        name="the signed letter of explanation",
+        performers=[Performer.BORROWER],
+        option=PlanOption.ASK_BORROWER,
+        actor_user_id=actor,
+    )
+    await resync_file(db_session, loan_file_id=loan_file.id, actor_user_id=actor)
+    round_ = await db_session.get(ConditionRound, condition.last_seen_round_id)
+    assert round_ is not None
+    await _confirm(db_session, round_, loan_file, actor)
+    draft = await db_session.scalar(
+        select(ConditionDraft).where(
+            ConditionDraft.loan_file_id == loan_file.id,
+            ConditionDraft.recipient == DraftRecipient.BORROWER,
+        )
+    )
+    assert draft is not None
+
+    await mark_sent(db_session, loan_file=loan_file, draft=draft, actor_user_id=actor)
+    await db_session.flush()
+
+    assert condition.waiting_on is OwnerHint.BORROWER, (
+        "the newest email went to the borrower, so that is who the row must name"
+    )
+    assert _status(condition) is ConditionPrepStatus.WAITING
