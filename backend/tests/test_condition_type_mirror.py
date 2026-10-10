@@ -50,7 +50,13 @@ from app.models.condition_round import (
     ConditionSheetFormat,
     ConditionSourceKind,
 )
-from app.models.condition_vocabulary import EvidenceCheck, Performer, PlanOption
+from app.models.condition_vocabulary import (
+    ConditionItemOrigin,
+    ConditionItemStatus,
+    EvidenceCheck,
+    Performer,
+    PlanOption,
+)
 from app.schemas.condition import MAX_PASTE_CHARS, BulkAction, ConditionSort, VerdictSourceKind
 from app.services.condition_status import RefusalCode
 
@@ -121,6 +127,17 @@ _MIRRORED: dict[str, type[StrEnum]] = {
     #: The SENTENCES are pinned separately, against the tickets file's own bytes
     #: (`tests/conditions/test_refusal_sentences.py`), because the UI shows them as-is.
     "ConditionRefusalCode": RefusalCode,
+    #: LP-972 REVIEW — FOUND BY ASKING THE QUESTION THIS LIST'S DOCSTRING ASKS, rather than by a
+    #: failure. A census of `export type` against this dict found four unions nobody mirrored: these
+    #: two, `PlanBlock` (pinned a different way, against `condition_describe.BLOCKS`, in LP-971) and
+    #: `ManualVerdictSourceKind` (not an enum at all — it has its own test below). Every one of them
+    #: AGREED with its twin when measured, so this closes an unpinned risk and fixes no drift.
+    #:
+    #: Both of these are on the wire on every item (`ConditionItemPublic`) and both are branched on:
+    #: the plan path reads `status` to decide what a step says, and `origin` separates what the
+    #: reading proposed from what she added, which is what "Remove" is allowed on.
+    "ConditionItemStatus": ConditionItemStatus,
+    "ConditionItemOrigin": ConditionItemOrigin,
 }
 
 #: `export type Name = "a" | "b";` — on one line when short, wrapped across many when biome decides
@@ -247,3 +264,38 @@ def test_the_paste_ceiling_agrees() -> None:
     match = re.search(r"export const MAX_PASTE_CHARS\s*=\s*([0-9_]+)\s*;", source)
     assert match, "MAX_PASTE_CHARS is not declared in the frontend types"
     assert int(match.group(1).replace("_", "")) == MAX_PASTE_CHARS
+
+
+def test_the_screens_manual_verdict_sources_are_exactly_the_doors() -> None:
+    """LP-972 REVIEW — the one unmirrored union that is not an enum, and it is a derived pair.
+
+    `ManualVerdictSourceKind` is the screen's list of the sources SHE can record a verdict from:
+    `Extract<VerdictSourceKind, "portal" | "email" | "phone">`, hand-written. The server says the same
+    thing from the other end and never in one place: `VerdictRequest.source_kind` accepts the whole
+    enum, and `condition_status` refuses `_DERIVED_SOURCES` — `round_comparison` and
+    `underwriter_note` — unless an internal writer passes `derived_allowed`. So her door accepts the
+    enum MINUS the derived two, and that is what the screen must offer.
+
+    This is the `EMAIL_TO` / `EMAIL_WHO` shape of the LP-971 review: two statements of one rule, in two
+    languages, where neither side can import the other. They agree today (measured in the census that
+    found this); a sixth hand source would be accepted by the door and never offered by the screen, and
+    nothing would have said so.
+    """
+    from app.schemas.condition import VerdictSourceKind
+    from app.services.condition_status import _DERIVED_SOURCES
+
+    offered = _unions().get("ManualVerdictSourceKind")
+    # THE VACUITY GUARDS: widened to the bare enum, renamed, or rewritten with no string literals,
+    # this comparison would otherwise be between two empty sets.
+    assert offered, (
+        "`ManualVerdictSourceKind` is not a union of string literals in "
+        f"{_TYPES_FILE.name} any more — if it was widened to `VerdictSourceKind` or renamed, the "
+        "screen's manual sources are unpinned again"
+    )
+    accepted = {kind.value for kind in VerdictSourceKind} - {
+        kind.value for kind in _DERIVED_SOURCES
+    }
+    assert accepted, (
+        "every source kind is derived, which would leave her no way to record a verdict"
+    )
+    assert set(offered) == accepted
