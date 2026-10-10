@@ -116,6 +116,25 @@ describe("nextStepToken (S3-12)", () => {
     });
   });
 
+  // LP-972 REVIEW — a wait is stored as `i_will_do_it` with `waiting` set, so this line called it her
+  // task while the plan path for the same condition said the title company sends it.
+  it("a wait names who is waited on, not her", () => {
+    const items = [
+      item({
+        option: "i_will_do_it",
+        performer: "title",
+        performers: ["title"],
+        waiting: true,
+        task: "the payoff letter",
+      }),
+    ];
+    expect(nextStepToken(condition({ items }))).toEqual({
+      icon: "waits",
+      text: "Waiting on Title / escrow · the payoff letter",
+      tone: "quiet",
+    });
+  });
+
   it("0007: a task that waits says what on", () => {
     const items = [
       item({ option: "i_will_do_it", task: "upload the invoice", waits_on_code: "1228" }),

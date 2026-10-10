@@ -47,7 +47,7 @@ from enum import StrEnum
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, Select, case, func, or_, select
+from sqlalchemy import ColumnElement, Select, and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, aliased
 
@@ -381,6 +381,22 @@ def is_open(condition: Condition) -> bool:
     return condition.lender_status in OPEN_LENDER_STATUSES
 
 
+def is_open_sql() -> ColumnElement[bool]:
+    """:func:`is_open` for a query that cannot load the rows (LP-972 review).
+
+    THE SECOND SPELLING THIS FILE WARNS ABOUT, WRITTEN ONCE. `is_open` above says a dozen `count(*)`
+    queries would each be a chance to disagree with the row about what "open" means. LP-972's wait
+    reminder was the first SQL that needed the rule and spelled it inline as `lender_status in
+    (OPEN, NOT_CLEARED)` — the half without `info_only`, so a wait on an information line, a row that
+    asks for nothing, nudged her on its date while every count on the screen called that condition
+    closed. A caller with the rows in hand should still use `is_open`.
+    """
+    return and_(
+        Condition.info_only.is_(False),
+        Condition.lender_status.in_(OPEN_LENDER_STATUSES),
+    )
+
+
 def condition_days_open(condition: Condition, *, today: date | None = None) -> int:
     """Days since this file first recorded the condition.
 
@@ -460,6 +476,7 @@ def has_open_step(options: tuple[PlanOption, ...]) -> ColumnElement[bool]:
             ConditionItem.condition_id == Condition.id,
             ConditionItem.deleted_at.is_(None),
             ConditionItem.option.in_(options),
+            ConditionItem.waiting.is_(False),
             ConditionItem.status.not_in((ConditionItemStatus.DONE, ConditionItemStatus.NOT_NEEDED)),
         )
         .exists()

@@ -679,6 +679,35 @@ describe("RoundPlanPanel", () => {
     ).toBeTruthy();
   });
 
+  it("does not promise to add a WAIT to her list (LP-972 review)", () => {
+    // A wait is `i_will_do_it` with `waiting` set, so "Add 2 tasks to your list" counted one that is
+    // someone else's — the same misreading the ticket fixed in first moves and left here.
+    show(
+      [
+        condition({
+          id: "c9",
+          lender_code: "0006",
+          sequence: 9,
+          items: [
+            item({ id: "i9", option: "i_will_do_it", task: "upload the invoice" }),
+            item({
+              id: "i10",
+              option: "i_will_do_it",
+              waiting: true,
+              performer: "title",
+              performers: ["title"],
+              task: "the payoff letter",
+              name: "the payoff letter",
+            }),
+          ],
+        }),
+      ],
+      { ...basePlan, blocking_codes: [], drafts: [] },
+    );
+    expect(screen.getByText("Add 1 task to your list")).toBeTruthy();
+    expect(screen.queryByText(/payoff letter/)).toBeNull();
+  });
+
   it("promises ready for what confirm will really make ready (LP-966 review)", () => {
     // The summary is a MIRROR of `condition_plan.ready_because`, which keys on each live item's
     // STATUS. Keying on the option was wrong both ways: a document she linked by hand is RECEIVED

@@ -342,3 +342,275 @@ def test_the_screens_reminder_kinds_are_exactly_the_servers() -> None:
     kinds = set(re.findall(r'"([a-z_]+)"', match.group(1)))
     assert kinds, "parsed something"
     assert kinds == {kind.value for kind in ReminderKind}
+
+
+async def test_a_wait_is_not_one_of_her_tasks_in_any_count(db_session: AsyncSession) -> None:
+    """LP-972 REVIEW — the wait's option is `i_will_do_it`, and two counters read that as "hers to do".
+
+    The ticket's own reasoning is that a wait is "not a task now" — which is why first moves name who
+    is waited on instead. The same reading was left in the two places that COUNT her tasks:
+
+    - `conditions.has_open_step((I_WILL_DO_IT,))`, which is the dashboard's "Your tasks N" and, by its
+      own docstring, the filter behind its click: "ONE PREDICATE FOR THE FILTER AND THE COUNT".
+    - `condition_plan.round_plan_summary`'s `your_tasks` pill on the plan panel.
+
+    Measured before the fix: 7086 carries only borrower asks, so it is in neither count; adding one
+    wait on the title company took the file's `your_tasks` from 2 to 3 and the panel's from 2 to 3. She
+    is told she has a third thing to do, and the thing is "wait for the title company".
+    """
+    from app.models.condition_round import ConditionRound
+    from app.services.condition_plan import round_plan_summary
+    from app.services.conditions import condition_summary
+
+    loan_file, conditions, actor = await _file(db_session)
+    round_ = await db_session.scalar(
+        select(ConditionRound).where(ConditionRound.loan_file_id == loan_file.id)
+    )
+    assert round_ is not None
+    before_file = (await condition_summary(db_session, loan_file_id=loan_file.id)).your_tasks
+    before_panel = (await round_plan_summary(db_session, round_=round_)).your_tasks
+
+    waited_on = conditions["7086"]
+    assert all(
+        item.option is PlanOption.ASK_BORROWER for item in await _live_items(db_session, waited_on)
+    ), "the premise: this condition carries no task of hers, so a change in the counts is the wait"
+    await _wait(db_session, waited_on, actor, performers=[Performer.TITLE])
+    await db_session.flush()
+
+    assert (
+        await condition_summary(db_session, loan_file_id=loan_file.id)
+    ).your_tasks == before_file
+    assert (await round_plan_summary(db_session, round_=round_)).your_tasks == before_panel
+
+    # THE POSITIVE CONTROL: a real task of hers on the same condition does count, in both.
+    await add_item(
+        db_session,
+        condition=waited_on,
+        name="Call the LO about the fee",
+        performers=[Performer.PROCESSOR],
+        option=PlanOption.I_WILL_DO_IT,
+        actor_user_id=actor,
+    )
+    await db_session.flush()
+    assert (
+        await condition_summary(db_session, loan_file_id=loan_file.id)
+    ).your_tasks == before_file + 1
+    assert (await round_plan_summary(db_session, round_=round_)).your_tasks == before_panel + 1
+
+
+async def _live_items(db: AsyncSession, condition: Any) -> list[ConditionItem]:
+    return list(
+        await db.scalars(
+            select(ConditionItem).where(
+                ConditionItem.condition_id == condition.id, ConditionItem.deleted_at.is_(None)
+            )
+        )
+    )
+
+
+async def test_a_wait_that_becomes_an_ask_stops_being_a_wait(db_session: AsyncSession) -> None:
+    """LP-972 REVIEW — `waiting` only means anything on an `i_will_do_it` item.
+
+    `ItemLinkActions` offers "Ask someone" on every `i_will_do_it` item, and a wait is one, so a single
+    click moved a wait to `ask_borrower` while the flag stayed set: an item in a draft AND carrying a
+    wait reminder, which is neither of the two things it could be. The invariant is on the server
+    rather than in the menu, because deciding to email after all is a real thing to do and the API can
+    reach it either way.
+    """
+    from app.services.condition_plan import update_item
+    from app.services.reminders import build_suggestions
+
+    loan_file, conditions, actor = await _file(db_session)
+    condition = conditions["1947"]
+    item = await _wait(db_session, condition, actor, performers=[Performer.TITLE])
+    await db_session.flush()
+    assert item.waiting is True
+    assert item.option is PlanOption.I_WILL_DO_IT
+
+    await update_item(
+        db_session,
+        condition=condition,
+        item=item,
+        option=PlanOption.ASK_THIRD_PARTY,
+        name=None,
+        performers=None,
+        due_date=None,
+        actor_user_id=actor,
+    )
+    await db_session.flush()
+
+    assert item.option is PlanOption.ASK_THIRD_PARTY
+    assert item.waiting is False, (
+        "the wait is over: it is an ask now, and the ask is what is drafted"
+    )
+    # AND ITS REMINDER IS GONE WITH IT, which is the harm the stale flag would have left behind.
+    on_the_day = datetime(2026, 10, 15, 9, 0, tzinfo=_ET)
+    kinds = [
+        s.kind
+        for s in await build_suggestions(
+            db_session, company_id=loan_file.company_id, now=on_the_day
+        )
+    ]
+    assert ReminderKind.CONDITION_WAIT_DUE not in kinds
+
+
+async def test_a_wait_on_an_information_line_raises_no_reminder(db_session: AsyncSession) -> None:
+    """LP-972 REVIEW — the builder's third question: two spellings of "an open condition".
+
+    `conditions.is_open` is `not info_only and lender_status in OPEN_LENDER_STATUSES`, and its own
+    docstring says why it is one function: "a dozen `count(*)` queries would each be a chance to
+    disagree with the row about what open means". The reminder's SQL spelled the second half and
+    dropped the first, so a wait on an INFORMATION LINE — a row that asks for nothing — would nudge
+    her on its date while every count on the screen says that condition is not open.
+    """
+    from app.services.reminders import build_suggestions
+
+    loan_file, conditions, actor = await _file(db_session)
+    condition = conditions["1947"]
+    condition.info_only = True
+    await db_session.flush()
+    await _wait(db_session, condition, actor, performers=[Performer.TITLE])
+    await db_session.flush()
+
+    on_the_day = datetime(2026, 10, 15, 9, 0, tzinfo=_ET)
+    kinds = [
+        s.kind
+        for s in await build_suggestions(
+            db_session, company_id=loan_file.company_id, now=on_the_day
+        )
+    ]
+    assert ReminderKind.CONDITION_WAIT_DUE not in kinds
+
+    # THE POSITIVE CONTROL: the same wait on the same condition, once it asks for something again.
+    condition.info_only = False
+    await db_session.flush()
+    kinds = [
+        s.kind
+        for s in await build_suggestions(
+            db_session, company_id=loan_file.company_id, now=on_the_day
+        )
+    ]
+    assert ReminderKind.CONDITION_WAIT_DUE in kinds
+
+
+def _migration() -> Any:
+    """The LP-972 migration module, loaded from its file (the LP-975 test's own trick)."""
+    import importlib.util
+    from pathlib import Path
+
+    path = next((Path(__file__).parents[2] / "alembic" / "versions").glob("*_169e48fff378_*.py"))
+    spec = importlib.util.spec_from_file_location("lp972_migration", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class _FakeOp:
+    """Enough of alembic's `op` to run `downgrade()` and see what it would do."""
+
+    def __init__(self, logged: int) -> None:
+        self.logged = logged
+        self.statements: list[str] = []
+        self.dropped: list[tuple[str, str]] = []
+
+    def get_bind(self) -> Any:
+        return self
+
+    def execute(self, sql: Any) -> Any:
+        text = str(getattr(sql, "text", sql))
+        self.statements.append(text)
+        return self
+
+    def scalar(self) -> int:
+        return self.logged
+
+    def drop_column(self, table: str, column: str) -> None:
+        self.dropped.append((table, column))
+
+
+def test_a_rollback_refuses_to_delete_her_logged_calls() -> None:
+    """LP-972 REVIEW — the builder's fifth question, and my answer is that it should refuse.
+
+    Narrowing `condition_events.kind` means no row may hold the new value, so the rows must go first.
+    But a `condition_call_logged` event is the record of a conversation — who, when, and up to 300
+    characters of her own words about what was agreed — and nothing else holds it. A schema rollback
+    deleting that quietly is the kind of data loss nobody discovers until they look for the call.
+
+    So the downgrade counts them and refuses, naming the SQL that accepts the loss. A database where
+    no call has been logged — which is most rollbacks, since they follow a deploy — still rolls back
+    on its own. The SNOOZES still go: a snooze is derived state about a date, and its reminder returns.
+    """
+    module = _migration()
+
+    with_calls = _FakeOp(logged=2)
+    module.op = with_calls
+    with pytest.raises(RuntimeError) as refused:
+        module.downgrade()
+    assert "2 logged call(s)" in str(refused.value)
+    assert "DELETE FROM condition_events WHERE kind = 'condition_call_logged'" in str(refused.value)
+    assert with_calls.dropped == [], "and nothing was changed before it refused"
+    assert not any("DELETE FROM reminder_snoozes" in s for s in with_calls.statements)
+
+    # THE CONTROL: with no call logged, the rollback runs — and deletes the snoozes, not the events.
+    clean = _FakeOp(logged=0)
+    module.op = clean
+    module.downgrade()
+    assert clean.dropped == [("condition_items", "waiting")]
+    assert any("DELETE FROM reminder_snoozes" in s for s in clean.statements)
+    assert not any("DELETE FROM condition_events" in s for s in clean.statements)
+
+
+async def test_read_again_leaves_a_logged_call_alone(db_session: AsyncSession) -> None:
+    """LP-972 REVIEW — the builder's first question: should a call make a condition "worked"?
+
+    LP-973's `read_without_ai` offers a condition for re-reading only while it is exactly what the
+    no-AI fallback left — no task of hers, no plan change of hers, no document she unlinked — because
+    its rule is that NOTHING OF HERS IS LOST. A call is none of those, so a condition she has talked
+    about is still offered. Measured here, and the answer to the question is that this is right rather
+    than an omission: `clear_for_reading` replaces the reading, the items and the step, and it does
+    not touch events — so the call survives the re-read with its day and her words, which is what a
+    record in the history is for. If a call made a condition ineligible, one phone call would take
+    "Read again" away from a condition whose reading has no type and one generic task.
+    """
+    from app.models.condition import ConditionReadingSource, ConditionReadingStatus
+    from app.services.condition_reading_state import clear_for_reading, read_without_ai
+
+    loan_file, conditions, actor = await _file(db_session)
+    condition = conditions["1947"]
+    # The state the fallback leaves: read from the library alone, still needing her.
+    condition.reading_source = ConditionReadingSource.LIBRARY
+    condition.reading_status = ConditionReadingStatus.NEEDS_CONFIRMATION
+    for item in await _live_items(db_session, condition):
+        item.deleted_at = datetime.now(UTC)
+    await db_session.flush()
+    offered = await read_without_ai(db_session, loan_file_id=loan_file.id)
+    assert condition.id in {c.id for c in offered}, "the premise: it is offered before the call"
+
+    await log_call(
+        db_session,
+        condition=condition,
+        with_whom=Performer.TITLE,
+        on=date(2026, 10, 9),
+        agreed="He will send the payoff letter next week.",
+        actor_user_id=actor,
+    )
+    await db_session.flush()
+
+    offered = await read_without_ai(db_session, loan_file_id=loan_file.id)
+    assert condition.id in {c.id for c in offered}, (
+        "a call is not work that a re-read would destroy"
+    )
+
+    # AND THE CALL IS STILL THERE AFTERWARDS, which is why that is safe.
+    await clear_for_reading(db_session, conditions=[condition], actor_user_id=actor)
+    await db_session.flush()
+    calls = await db_session.scalar(
+        select(func.count())
+        .select_from(ConditionEvent)
+        .where(
+            ConditionEvent.condition_id == condition.id,
+            ConditionEvent.kind == ConditionEventKind.CONDITION_CALL_LOGGED,
+        )
+    )
+    assert calls == 1

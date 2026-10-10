@@ -9,6 +9,7 @@
  * happen, as the "Becomes Waiting on Borrower when the borrower email is marked sent." line does.
  */
 import { OWNER_LABEL } from "@/lib/conditions/owners";
+import { askedWho } from "@/lib/conditions/plan-path";
 import type {
   Condition,
   ConditionItem,
@@ -285,6 +286,15 @@ export function nextStepToken(condition: Condition): NextStepToken | null {
   );
   if (task?.waits_on_code)
     return { icon: "waits", text: `Waits on ${task.waits_on_code}`, tone: "quiet" };
+  // LP-972 REVIEW — A WAIT IS NOT HER TASK, AND THIS LINE IS WHERE THE ROW SAYS WHAT IS NEXT. A wait
+  // is stored as `i_will_do_it` with `waiting` set (no email goes, she asked some other way), so the
+  // row read "Your task · the payoff letter" for something the title company owes her. The plan path
+  // for the same condition says "Title / escrow sends the payoff letter", so the two disagreed on one
+  // screen. Same `askedWho` wording as the path, so one condition reads one way everywhere.
+  if (task?.waiting) {
+    const what = task.task ?? task.name.toLowerCase();
+    return { icon: "waits", text: `Waiting on ${askedWho(task)} · ${what}`, tone: "quiet" };
+  }
   if (task || step === "i_will_do_it") {
     const what = task ? (task.task ?? task.name.toLowerCase()) : "your task";
     return { icon: "task", text: `Your task · ${what}`, tone: "quiet" };

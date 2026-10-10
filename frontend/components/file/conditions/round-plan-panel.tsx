@@ -1192,7 +1192,11 @@ function ConfirmSummary({
     }
     if (condition.next_step === "lender_doing_it") lenders.push(code);
     for (const item of items) {
-      if (item.option !== "i_will_do_it") continue;
+      // LP-972 REVIEW — AND NOT A WAIT. "Add 3 tasks to your list" counted a wait as one of them, so
+      // the sentence promised to give her work that is someone else's; the ticket's own first moves
+      // name who is waited on instead of counting a task. Excluded rather than re-worded here,
+      // because what this line says is what Confirm will do.
+      if (item.option !== "i_will_do_it" || item.waiting) continue;
       const what = item.task ?? item.name.toLowerCase();
       tasks.push(`${what} (${code}${item.waits_on_code ? `, after ${item.waits_on_code}` : ""})`);
     }

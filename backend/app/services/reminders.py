@@ -251,10 +251,11 @@ async def _waits_due(
     ONLY AN OPEN WAIT ON AN OPEN CONDITION. A wait she marked done, or one whose document arrived and
     was linked (RECEIVED, DONE), is not waiting for anything; nor is a wait on a withdrawn condition.
     """
-    from app.models.condition import Condition, ConditionLenderStatus
+    from app.models.condition import Condition
     from app.models.condition_item import ConditionItem
     from app.models.condition_vocabulary import ConditionItemStatus
-    from app.services.condition_plan import _RECIPIENT
+    from app.services.condition_plan import recipient_label
+    from app.services.conditions import is_open_sql
 
     if not file_ids:
         return []
@@ -271,9 +272,9 @@ async def _waits_due(
                 ConditionItem.due_date.is_not(None),
                 ConditionItem.due_date <= today,
                 Condition.deleted_at.is_(None),
-                Condition.lender_status.in_(
-                    (ConditionLenderStatus.OPEN, ConditionLenderStatus.NOT_CLEARED)
-                ),
+                # LP-972 REVIEW — `is_open`'s rule, not half of it: an information line asks for
+                # nothing, so a wait on one must not nudge her while every count calls it closed.
+                is_open_sql(),
             )
         )
     ).all()
@@ -284,7 +285,7 @@ async def _waits_due(
         since = datetime.combine(item.due_date, time.min, tzinfo=_EASTERN)
         # Who, in the words the emails use ("Title/attorney", "LO"); a performer with no email of its
         # own is named by its value.
-        who = _RECIPIENT.get(item.performer, (None, item.performer.value.replace("_", " ")))[1]
+        who = recipient_label(item.performer)
         out.append(
             (item.loan_file_id, item.id, code or "A condition", f"{item.name} from {who}", since)
         )

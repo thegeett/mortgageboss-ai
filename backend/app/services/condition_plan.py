@@ -1240,6 +1240,15 @@ async def update_item(
             raise PlanRefused(LINK_FIRST)
         changed["option"] = {"from": item.option.value, "to": option.value}
         item.option = option
+        # LP-972 REVIEW — A WAIT THAT BECOMES AN ASK STOPS BEING A WAIT. `waiting` only means anything
+        # on an `i_will_do_it` item: it is the flag that says "no email goes, she asked another way".
+        # `ItemLinkActions` offers "Ask someone" on every `i_will_do_it` item, so one click on a wait
+        # moved it to `ask_borrower` — and the flag stayed, leaving an item that was in a draft AND
+        # carried a wait reminder. Clearing it here is the invariant, rather than hiding the menu:
+        # deciding to email after all is a real thing to do, and the API can reach this either way.
+        if item.waiting and option is not PlanOption.I_WILL_DO_IT:
+            item.waiting = False
+            changed["waiting"] = False
     if name is not None and name.strip() and name.strip() != item.name:
         item.name = name.strip()[:200]
         changed["name"] = True
@@ -1303,6 +1312,17 @@ async def update_item(
     await db.flush()
     await apply_step_status(db, condition=condition, actor_user_id=actor_user_id)
     await _resync_drafts(db, condition=condition, actor_user_id=actor_user_id)
+
+
+def recipient_label(performer: Performer) -> str:
+    """What to call the person a step waits on or asks (LP-972 review).
+
+    PUBLIC, BECAUSE A SECOND MODULE NEEDED IT. The wait reminder reached into `_RECIPIENT` — a private
+    name in this module — for its "from {who}" line, with its own fallback for a performer the map
+    does not carry. One name, one fallback, and the private map stays private.
+    """
+    mapped = _RECIPIENT.get(performer)
+    return mapped[1] if mapped else performer.value.replace("_", " ")
 
 
 async def add_item(
@@ -1952,7 +1972,10 @@ async def round_plan_summary(db: AsyncSession, *, round_: ConditionRound) -> Any
             for i in items
         ):
             lender += 1
-        if any(i.option is PlanOption.I_WILL_DO_IT for i in items):
+        # LP-972 REVIEW — A WAIT IS NOT A TASK OF HERS. It is stored as `i_will_do_it` with `waiting`
+        # set so that no email goes, which read here as a task she owes; the ticket's own first moves
+        # name who is waited on instead. Same exclusion as `conditions.has_open_step`.
+        if any(i.option is PlanOption.I_WILL_DO_IT and not i.waiting for i in items):
             your_tasks += 1
         if items and all(i.option is PlanOption.ALREADY_IN_FILE for i in items):
             already += 1
