@@ -16,7 +16,9 @@ import { AddStep, EMAIL_WHO } from "./plan-add-step";
 afterEach(cleanup);
 
 function open(onAdd: (step: unknown) => void) {
-  render(<AddStep conditionId="c1" ownStep={null} pending={false} onAdd={onAdd} />);
+  render(
+    <AddStep conditionId="c1" ownStep={null} pending={false} onAdd={onAdd} onAddAll={vi.fn()} />,
+  );
   fireEvent.click(screen.getByRole("button", { name: "Add a step" }));
 }
 
@@ -48,7 +50,15 @@ describe("AddStep", () => {
     // adding a step to an ALREADY-confirmed round is a normal flow since LP-968 — the link then exists
     // at once. The path's own send step carries the confirm nuance; a hint that describes one state is
     // wrong in the other, so no hint should name confirming at all.
-    render(<AddStep conditionId="c1" ownStep={null} pending={false} onAdd={vi.fn()} />);
+    render(
+      <AddStep
+        conditionId="c1"
+        ownStep={null}
+        pending={false}
+        onAdd={vi.fn()}
+        onAddAll={vi.fn()}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: "Add a step" }));
     const hints = screen.getAllByRole("listitem").map((li) => li.textContent ?? "");
     expect(hints.length).toBeGreaterThan(4);

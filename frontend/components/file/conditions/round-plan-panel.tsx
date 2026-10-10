@@ -198,30 +198,49 @@ export function RoundPlanPanel({
     setNextStep.mutate({ conditionId: condition.id, next_step: to }, { onError });
   };
   // LP-969 — a step she adds: a task (`add_item`) or the condition's own question (`set_next_step`).
-  const addStep = (condition: Condition, step: AddedStep) => {
+  // LP-971 REVIEW — ONE AT A TIME, AND EACH KNOWS WHAT WAS THERE BEFORE IT.
+  // "Add these steps" presses this once per step. The dialog is opened by finding the item that was
+  // not there before, and `before` came from the prop — so every add in a batch compared against the
+  // SAME set and the first new item won, whichever step had asked for the dialog. A "Check a document"
+  // step that was not first opened the link dialog on another step's task, and the document she picked
+  // would have been linked to it (reproduced in "opens the link dialog on the step that asked for
+  // it"). Firing them together was also N concurrent `resync_file` calls on one file, which nothing
+  // serialises: two of them can each see no open draft for a recipient and make one.
+  //
+  // So the batch is a chain: the next add starts from the previous response, and the ids known after
+  // it are threaded in as the next comparison. Exactly one item in each response is new, and it is
+  // the one that step added. An error stops the chain — the refusal is shown and nothing after it is
+  // added blindly.
+  const addSteps = (condition: Condition, steps: AddedStep[]) => {
     setRefusal(null);
-    if (step.kind === "own_step") {
-      changeStep(condition, step.option);
-      return;
-    }
-    const before = new Set(condition.items.map((each) => each.id));
-    addItem.mutate(
-      {
-        conditionId: condition.id,
-        name: step.name,
-        performers: step.performers,
-        option: step.option,
-      },
-      {
-        onError,
-        onSuccess: (updated) => {
-          if (!step.link) return;
-          const added = updated.items.find((each) => !before.has(each.id));
-          if (added) setLinking({ condition: updated, item: added });
+    const run = (rest: AddedStep[], known: ReadonlySet<string>) => {
+      const [step, ...tail] = rest;
+      if (!step) return;
+      if (step.kind === "own_step") {
+        changeStep(condition, step.option);
+        run(tail, known);
+        return;
+      }
+      addItem.mutate(
+        {
+          conditionId: condition.id,
+          name: step.name,
+          performers: step.performers,
+          option: step.option,
         },
-      },
-    );
+        {
+          onError,
+          onSuccess: (updated) => {
+            const added = updated.items.find((each) => !known.has(each.id));
+            if (step.link && added) setLinking({ condition: updated, item: added });
+            run(tail, new Set(updated.items.map((each) => each.id)));
+          },
+        },
+      );
+    };
+    run(steps, new Set(condition.items.map((each) => each.id)));
   };
+  const addStep = (condition: Condition, step: AddedStep) => addSteps(condition, [step]);
   const toggle = (id: string) =>
     setOpen((current) => {
       const next = new Set(current);
@@ -318,6 +337,7 @@ export function RoundPlanPanel({
             fileId={fileId}
             adding={addItem.isPending || setNextStep.isPending}
             onAddStep={(step) => addStep(condition, step)}
+            onAddSteps={(steps) => addSteps(condition, steps)}
             onOwnWay={() => {
               setRefusal(null);
               ownWay.mutate(condition.id, { onError });
@@ -443,6 +463,7 @@ function PlanRow({
   fileId,
   adding,
   onAddStep,
+  onAddSteps,
   onOwnWay,
   onRemoveItem,
   onChangeStep,
@@ -460,6 +481,8 @@ function PlanRow({
   fileId: string;
   adding: boolean;
   onAddStep: (step: AddedStep) => void;
+  /** LP-971 review — a whole proposal, so the adds can be chained rather than fired together. */
+  onAddSteps: (steps: AddedStep[]) => void;
   onOwnWay: () => void;
   onRemoveItem: (item: ConditionItem) => void;
   onChangeStep: (to: PlanOption) => void;
@@ -664,6 +687,7 @@ function PlanRow({
               ownStep={ownStep}
               pending={adding}
               onAdd={onAddStep}
+              onAddAll={onAddSteps}
             />
           </div>
         </div>

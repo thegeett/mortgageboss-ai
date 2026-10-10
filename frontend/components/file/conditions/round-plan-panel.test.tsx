@@ -2,6 +2,7 @@ import type {
   Condition,
   ConditionItem,
   ConditionRound,
+  DescribeResult,
   PlanOption,
   RoundPlan,
 } from "@/lib/types/conditions";
@@ -20,11 +21,20 @@ const calls = vi.hoisted(() => ({
   steps: [] as unknown[],
   reverts: [] as unknown[],
   added: [] as unknown[],
+  described: [] as unknown[],
   confirms: [] as unknown[],
   ownWay: [] as unknown[],
   removed: [] as unknown[],
   /** LP-969 — what the add call answers with, so "Check a document" can find the new task. */
   addResponse: null as Condition | null,
+  /**
+   * LP-971 REVIEW — one answer PER CALL, in order, each the condition as it stands after that add.
+   * A single fixed `addResponse` cannot show what "Add these N steps" does, because the thing being
+   * tested is which item each response identifies as the new one.
+   */
+  addResponses: [] as Condition[],
+  /** LP-971 — what "Turn it into steps" comes back with. */
+  describeResult: null as DescribeResult | null,
 }));
 vi.mock("@/lib/api/conditions", () => ({
   useRoundPlan: () => ({ data: plan.data }),
@@ -35,11 +45,25 @@ vi.mock("@/lib/api/conditions", () => ({
   useSetNextStep: () => ({ mutate: (body: unknown) => calls.steps.push(body) }),
   useUpdateItem: () => ({ mutate: (body: unknown) => calls.items.push(body) }),
   useRevertPlan: () => ({ mutate: (id: unknown) => calls.reverts.push(id), isPending: false }),
-  useDescribeSteps: () => ({ mutate: vi.fn(), isPending: false }),
+  useDescribeSteps: () => ({
+    mutate: (body: unknown, options?: { onSuccess?: (r: DescribeResult) => void }) => {
+      calls.described.push(body);
+      if (calls.describeResult) options?.onSuccess?.(calls.describeResult);
+    },
+    isPending: false,
+  }),
   useAddItem: () => ({
-    mutate: (body: unknown, options?: { onSuccess?: (data: Condition) => void }) => {
+    // `onSettled` IS PART OF THE CONTRACT, and this mock did not call it. The panel serialises a batch
+    // of adds on it (LP-971 review), so a mock that only calls `onSuccess` would leave the queue
+    // stuck after the first step and the test would be measuring the mock.
+    mutate: (
+      body: unknown,
+      options?: { onSuccess?: (data: Condition) => void; onSettled?: () => void },
+    ) => {
       calls.added.push(body);
-      if (calls.addResponse) options?.onSuccess?.(calls.addResponse);
+      const next = calls.addResponses.shift() ?? calls.addResponse;
+      if (next) options?.onSuccess?.(next);
+      options?.onSettled?.();
     },
     isPending: false,
   }),
@@ -62,6 +86,9 @@ afterEach(() => {
   calls.ownWay = [];
   calls.removed = [];
   calls.addResponse = null;
+  calls.addResponses = [];
+  calls.describeResult = null;
+  calls.described = [];
 });
 
 const basePlan: RoundPlan = {
@@ -1109,5 +1136,57 @@ describe("RoundPlanPanel", () => {
       show([stamped("c1", "0006")], confirmedPlan(), new Set(["r1"]));
       expect(screen.queryByRole("button", { name: /Confirm/ })).toBeNull();
     });
+  });
+});
+
+describe("LP-971 review — Add these steps fires several adds from one press", () => {
+  /**
+   * The link dialog is opened from the add response, by finding the item that was not there before:
+   * `updated.items.find((each) => !before.has(each.id))`. `before` is captured once, from the prop,
+   * and every add in the batch captures the same one — so the FIRST new item wins, whichever step
+   * asked for the dialog. A "Check a document" step that is not the first in the batch opens the
+   * dialog on another step's task, and she links a document to the wrong one.
+   */
+  const described: DescribeResult = {
+    steps: [
+      { block: "todo", text: "Call the LO about the fee", to: null },
+      { block: "check", text: "the HOA certificate", to: null },
+    ],
+    left_out: [],
+    refusal: null,
+  };
+
+  function addTwo() {
+    const base = condition({ items: [] });
+    const todo = item({ id: "i-todo", name: "Call the LO about the fee" });
+    const check = item({ id: "i-check", name: "Check the HOA certificate" });
+    // One answer per add, each the condition as it stands after that add.
+    calls.addResponses = [
+      { ...base, items: [todo] },
+      { ...base, items: [todo, check] },
+    ];
+    calls.describeResult = described;
+    show([base], unblocked());
+    fireEvent.click(screen.getByRole("button", { name: "See the plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add a step" }));
+    fireEvent.change(screen.getByLabelText("Or describe what you want to do"), {
+      target: { value: "call the LO and check the HOA certificate" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Turn it into steps" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add these 2 steps" }));
+  }
+
+  it("sends both steps through the add door", () => {
+    addTwo();
+    expect(calls.added).toHaveLength(2);
+  });
+
+  it("opens the link dialog on the step that asked for it", () => {
+    addTwo();
+    const dialog = screen.getByRole("dialog");
+    console.log("DIALOGS:", screen.getAllByRole("dialog").length, "| TEXT:", dialog.textContent);
+    console.log("ADDED:", JSON.stringify(calls.added));
+    expect(within(dialog).getByText("Check the HOA certificate")).toBeTruthy();
+    expect(within(dialog).queryByText("Call the LO about the fee")).toBeNull();
   });
 });

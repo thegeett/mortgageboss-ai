@@ -35,13 +35,19 @@ export function DescribeSteps({
   conditionId,
   ownStep,
   pending,
-  onAdd,
+  onAddAll,
   onDone,
 }: {
   conditionId: string;
   ownStep: PlanOption | null;
   pending: boolean;
-  onAdd: (step: AddedStep) => void;
+  /**
+   * LP-971 REVIEW — THE WHOLE PROPOSAL IN ONE CALL, not one call per step. Calling an add handler in a
+   * loop fired every add at once: the link dialog then opened on whichever item came back first rather
+   * than the step that asked for it, and N concurrent `resync_file` calls raced on one file. The parent
+   * chains them, so this hands over the list and lets it.
+   */
+  onAddAll: (steps: AddedStep[]) => void;
   onDone: () => void;
 }) {
   const describe = useDescribeSteps();
@@ -59,10 +65,13 @@ export function DescribeSteps({
     );
   };
   const addAll = (steps: DescribedStep[]) => {
-    for (const step of steps) {
-      onAdd(addedStepFor(step.block, step.text, step.to ?? "borrower"));
-    }
-    setWords("");
+    onAddAll(steps.map((step) => addedStepFor(step.block, step.text, step.to ?? "borrower")));
+    // HER WORDS STAY WHEN A QUESTION TOOK THEM (LP-971 review). A question block sets the condition's
+    // own step and keeps no text — `render_question` writes the note from the condition — so the step
+    // says to put her words in the note before sending. Clearing the box in the same press took the
+    // words she was told to put there off the screen, and nothing else holds them. For every other
+    // block her words are the task's name, so they are safely in the plan and the box can clear.
+    if (!steps.some((step) => isQuestion(step.block))) setWords("");
     setResult(null);
     onDone();
   };
@@ -107,7 +116,7 @@ export function DescribeSteps({
               <li key={`${index}-${step.text}`} className="text-sm text-foreground">
                 <strong className="font-semibold">{BLOCK_LABEL[step.block]}</strong>
                 {step.to ? ` (${PERFORMER_LABEL[step.to]})` : ""}: {step.text}
-                {step.block === "underwriter" || step.block === "push_back" ? (
+                {isQuestion(step.block) ? (
                   <span className="block text-xs text-foreground-2">
                     We draft the note from the condition. Put this in it before you send.
                     {ownStep !== null && ownStep !== stepOption(step.block)
@@ -143,4 +152,8 @@ export function DescribeSteps({
 
 function stepOption(block: DescribedStep["block"]): PlanOption {
   return block === "underwriter" ? "ask_underwriter" : "push_back";
+}
+
+function isQuestion(block: DescribedStep["block"]): boolean {
+  return block === "underwriter" || block === "push_back";
 }

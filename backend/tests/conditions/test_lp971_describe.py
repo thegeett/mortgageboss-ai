@@ -322,3 +322,66 @@ def test_the_screens_block_type_is_exactly_the_servers_blocks() -> None:
     blocks = _quoted(match.group(1))
     assert blocks, "parsed something"
     assert blocks == set(BLOCKS)
+
+
+def test_a_day_word_she_wrote_is_hers_whatever_the_case() -> None:
+    """LP-971 REVIEW — the builder's first question, measured rather than reasoned.
+
+    A natural step repeats a day word she used: she writes "get the monday statement", the model
+    answers "Ask the borrower for the Monday statement". That must not be read as an invented date. It
+    is not, and the reason is in another module: `email_facts.fact_warnings` searches the BEFORE text
+    and the AFTER text for day words with `re.I` on both sides (its `_DATE_WORDS` block). This pins
+    that, because nothing here would notice if either flag were dropped, and the first thing to break
+    would be a step repeating her own words being refused as invented.
+    """
+    steps, left_out = checked_steps(
+        [{"block": "upload_ask", "text": "Ask the borrower for the Monday statement"}],
+        words="get the monday statement from the borrower",
+        lender_words="Provide a bank statement.",
+    )
+    assert [step.text for step in steps] == ["Ask the borrower for the Monday statement"]
+    assert left_out == []
+
+    # THE CONTROL: a day word in NEITHER her words nor the lender's is still an invention.
+    steps, left_out = checked_steps(
+        [{"block": "upload_ask", "text": "Ask the borrower for the Monday statement"}],
+        words="get the statement from the borrower",
+        lender_words="Provide a bank statement.",
+    )
+    assert steps == []
+    assert left_out == [
+        "Left out “Ask the borrower for the Monday statement”: it mentions Monday, which is not in "
+        "what you wrote or the lender's words."
+    ]
+
+
+def test_a_performer_sharing_an_email_with_another_is_not_offered_separately() -> None:
+    """LP-971 REVIEW — the REASON the attorney is excluded, which neither exclusion list carries.
+
+    The mirror test above pins that the server's `NOT_EMAILED` and the screen's agree. Both could drop
+    `attorney` together and stay green — and that is the LP-969 review's defect returning:
+    `condition_plan._RECIPIENT` maps `TITLE` and `ATTORNEY` to the same `title_attorney` email, so
+    offering both puts two labels on one draft and either choice produces the same email, with nothing
+    on the screen saying so.
+
+    So the rule is stated where it can be checked: when two performers share a recipient key, at most
+    one of them may be emailed. The builder left this one to the review; this is it.
+    """
+    from collections import defaultdict
+
+    from app.services.condition_plan import _RECIPIENT
+
+    by_key: dict[str, list[str]] = defaultdict(list)
+    for performer, (key, _label) in _RECIPIENT.items():
+        by_key[key].append(performer.value)
+    shared = {key: names for key, names in by_key.items() if len(names) > 1}
+    assert shared, (
+        "the premise: some recipient key is shared by two performers (today `title_attorney`), so "
+        "this test is comparing something"
+    )
+    for key, names in shared.items():
+        offered = [name for name in names if name in EMAIL_TO]
+        assert len(offered) <= 1, (
+            f"{sorted(names)} all send to the one “{key}” email, and {sorted(offered)} are offered "
+            "separately: picking either writes the same draft, and the screen cannot say which"
+        )

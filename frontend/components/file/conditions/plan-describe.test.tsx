@@ -37,18 +37,18 @@ afterEach(() => {
 });
 
 function show(ownStep: "push_back" | null = null) {
-  const onAdd = vi.fn();
+  const onAddAll = vi.fn();
   const onDone = vi.fn();
   render(
     <DescribeSteps
       conditionId="c1"
       ownStep={ownStep}
       pending={false}
-      onAdd={onAdd}
+      onAddAll={onAddAll}
       onDone={onDone}
     />,
   );
-  return { onAdd, onDone };
+  return { onAddAll, onDone };
 }
 
 function turn(words: string) {
@@ -68,7 +68,7 @@ describe("DescribeSteps", () => {
       left_out: [],
       refusal: null,
     };
-    const { onAdd, onDone } = show();
+    const { onAddAll, onDone } = show();
     expect(
       (screen.getByRole("button", { name: "Turn it into steps" }) as HTMLButtonElement).disabled,
     ).toBe(true); // her words first
@@ -82,7 +82,9 @@ describe("DescribeSteps", () => {
     expect(proposed.getByText(/Call the builder/)).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Add these 2 steps" }));
-    expect(onAdd.mock.calls.map(([step]) => step)).toEqual([
+    // LP-971 review — ONE call with the whole list, so the parent can chain the adds.
+    expect(onAddAll).toHaveBeenCalledTimes(1);
+    expect(onAddAll.mock.calls[0]?.[0]).toEqual([
       {
         kind: "task",
         name: "The final seller CD",
@@ -100,12 +102,12 @@ describe("DescribeSteps", () => {
       left_out: [],
       refusal: null,
     };
-    const { onAdd } = show("push_back");
+    const { onAddAll } = show("push_back");
     turn("Ask the underwriter to move 1228 to closing");
     expect(screen.getByText(/We draft the note from the condition\. Put this in it/)).toBeTruthy();
     expect(screen.getByText(/It replaces this condition’s own step\./)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Add this step" }));
-    expect(onAdd).toHaveBeenCalledWith({ kind: "own_step", option: "ask_underwriter" });
+    expect(onAddAll).toHaveBeenCalledWith([{ kind: "own_step", option: "ask_underwriter" }]);
   });
 
   it("the same question as the condition's own step replaces nothing (the control)", () => {
@@ -155,5 +157,38 @@ describe("DescribeSteps", () => {
     turn("Ask title for the CD");
     expect(screen.getByText(getErrorMessage(state.fail))).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Proposed steps" })).toBeNull();
+  });
+});
+
+describe("LP-971 review — her words and the question block", () => {
+  it("keeps her words on screen when a question took them, since the note does not", () => {
+    state.result = {
+      steps: [{ block: "underwriter", to: null, text: "Can 1228 move to closing?" }],
+      left_out: [],
+      refusal: null,
+    };
+    show();
+    turn("Ask the underwriter to move 1228 to closing, it's new construction");
+    fireEvent.click(screen.getByRole("button", { name: "Add this step" }));
+
+    // The step told her to put these words in the note; they are still here to copy.
+    expect(
+      (screen.getByLabelText("Or describe what you want to do") as HTMLTextAreaElement).value,
+    ).toBe("Ask the underwriter to move 1228 to closing, it's new construction");
+  });
+
+  it("clears them for a task, whose name carries them into the plan (the control)", () => {
+    state.result = {
+      steps: [{ block: "todo", to: null, text: "Call the builder" }],
+      left_out: [],
+      refusal: null,
+    };
+    show();
+    turn("call the builder about the final inspection");
+    fireEvent.click(screen.getByRole("button", { name: "Add this step" }));
+
+    expect(
+      (screen.getByLabelText("Or describe what you want to do") as HTMLTextAreaElement).value,
+    ).toBe("");
   });
 });

@@ -164,6 +164,7 @@ export function AddStep({
   ownStep,
   pending,
   onAdd,
+  onAddAll,
 }: {
   /** LP-971 — the condition "Describe it" proposes steps for. */
   conditionId: string;
@@ -171,6 +172,8 @@ export function AddStep({
   ownStep: PlanOption | null;
   pending: boolean;
   onAdd: (step: AddedStep) => void;
+  /** LP-971 review — a whole proposal at once, so its adds are chained and not raced. */
+  onAddAll: (steps: AddedStep[]) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [chosen, setChosen] = useState<Block | null>(null);
@@ -246,7 +249,7 @@ export function AddStep({
             conditionId={conditionId}
             ownStep={ownStep}
             pending={pending}
-            onAdd={onAdd}
+            onAddAll={onAddAll}
             onDone={reset}
           />
         ) : null}
