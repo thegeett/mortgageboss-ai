@@ -420,3 +420,109 @@ async def test_the_backfill_stamps_the_first_confirm_as_the_code_does(
         await db_session.refresh(condition)
 
     assert {c.id: c.plan_confirmed_at for c in conditions} == written
+
+
+async def test_the_backfill_is_never_later_than_the_code_in_either_confirm_order(
+    db_session: AsyncSession,
+) -> None:
+    """LP-975 FOLLOW-UP REVIEW — `min` makes the two agree in one order and not in the other.
+
+    The test above confirms round 1 BEFORE round 2 is imported, and there the backfill reproduces the
+    code exactly. Reverse it — round 2 imported first, so the conditions have already moved, then round 1
+    confirmed, then round 2 — and they differ: `confirm_round_plan` stamps a carried condition with ROUND
+    2's time, because round 1's confirm no longer matched it (`last_seen_round_id == round_.id`), while
+    the backfill sees an appearance event on round 1 and takes round 1's earlier time. Measured: all six
+    carried conditions, round 1's confirm 144ms before round 2's.
+
+    Which is right is a judgement — the code's stamp is "the first confirm that covered this condition",
+    the backfill's is "the earliest confirm of a round it appeared on" — and only whether the stamp is
+    SET is read today (`plan_confirmed`, and the frontend's `!row.plan_confirmed_at`), so neither answer
+    changes what she sees. What must hold either way is asserted here: the backfill never leaves a
+    condition the code stamped unstamped, and is never LATER than the code's stamp, so no condition can
+    lose force or gain it late through the backfill. The strict case is deliberately not asserted, so
+    making the two agree exactly stays an improvement rather than a failure.
+    """
+    from sqlalchemy import text
+
+    loan_file, round_1 = await _planned_round_one(db_session)
+    actor = await _actor(db_session, loan_file)
+    # ROUND 2 FIRST: the conditions move to it before she confirms anything.
+    round_2 = await _round_two(db_session, loan_file)
+    await _confirm(db_session, round_1, loan_file, actor)
+    await _confirm(db_session, round_2, loan_file, actor)
+    conditions = list((await _conditions(db_session, loan_file)).values())
+    written = {c.id: c.plan_confirmed_at for c in conditions}
+    stamped = [c for c in conditions if written[c.id] is not None]
+    assert stamped, "the control: the code stamped something, so the comparison has subjects"
+
+    for condition in conditions:
+        condition.plan_confirmed_at = None
+    await db_session.flush()
+    await db_session.execute(text(_backfill_sql()))
+    for condition in conditions:
+        await db_session.refresh(condition)
+
+    for condition in stamped:
+        code_stamp = written[condition.id]
+        assert code_stamp is not None
+        assert condition.plan_confirmed_at is not None, (
+            "the backfill stamps every condition the code stamped: none loses force"
+        )
+        assert condition.plan_confirmed_at <= code_stamp, (
+            "and never later than the code's own stamp"
+        )
+
+
+async def test_the_backfill_needs_its_seen_again_half_and_nothing_else_covers_it(
+    db_session: AsyncSession,
+) -> None:
+    """LP-975 FOLLOW-UP REVIEW — the branch the ticket is FOR was the one no test held.
+
+    The backfill's stamp is a UNION of three readings: a `condition_created` event on a confirmed round,
+    a `condition_seen_again` event on one, and the condition's last-seen round if that is confirmed. In
+    both of the tests above every condition was CREATED on a round that ends up confirmed, and the
+    last-seen half catches whatever is left — so dropping `'condition_seen_again'` from the `kind` filter
+    passes them both, which is exactly the "a different spelling of the SQL would pass" risk the capture
+    was meant to close. The capture closes it for a second statement, not for a narrower one.
+
+    THE SHAPE THAT ISOLATES IT needs three rounds, because the condition must have appeared on a
+    CONFIRMED round that is neither where it was created nor where it was last seen: created on round 1
+    (left unconfirmed), seen again on round 2 (confirmed — this is the stamp the code writes, since the
+    condition sat on round 2 at that moment), seen again on round 3 (left unconfirmed, so the last-seen
+    half contributes nothing). Only the seen-again branch can stamp it, and that branch is the one the
+    ticket exists for: "a condition seen again after a confirmed round".
+    """
+    from sqlalchemy import text
+
+    loan_file, round_1 = await _planned_round_one(db_session)
+    actor = await _actor(db_session, loan_file)
+    round_2 = await _round_two(db_session, loan_file)  # round 1 is deliberately left unconfirmed
+    await _confirm(db_session, round_2, loan_file, actor)
+    round_3 = await _round_two(
+        db_session, loan_file
+    )  # the same sheet again: every row is seen again
+
+    carried = [
+        c
+        for c in await _seen_again(db_session, loan_file, round_3)
+        if c.first_round_id == round_1.id
+    ]
+    assert carried, "round 3 lists conditions first seen on round 1 again"
+    assert round_1.plan_confirmed_at is None and round_3.plan_confirmed_at is None, (
+        "the premise: neither the created round nor the last-seen round is confirmed"
+    )
+    written = {c.id: c.plan_confirmed_at for c in carried}
+    assert all(at == round_2.plan_confirmed_at for at in written.values()), (
+        "the code stamped them at round 2's confirm, when they sat on round 2"
+    )
+
+    for condition in carried:
+        condition.plan_confirmed_at = None
+    await db_session.flush()
+    await db_session.execute(text(_backfill_sql()))
+    for condition in carried:
+        await db_session.refresh(condition)
+
+    assert {c.id: c.plan_confirmed_at for c in carried} == written, (
+        "the seen-again branch is what puts the stamp back"
+    )

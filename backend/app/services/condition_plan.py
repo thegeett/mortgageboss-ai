@@ -1048,8 +1048,9 @@ async def _plan_in_force(db: AsyncSession, condition: Condition) -> bool:
     THAT FALLBACK ADMITS MORE THAN THE CONDITION SHE ADDS BY HAND (LP-975 review, measured). The manual
     door is the case it was written for, but `condition_enrich._merge_conditions` also creates conditions
     on an IMPORTED round — `ENRICHABLE` keys on `status`, and confirming a plan does not change it — so a
-    lender PDF attached to a round whose plan she confirmed, or a letter forwarded into it by email
-    (`merge_attachment_into_round` is the second door onto that path), mints conditions that are in force
+    lender PDF attached to a round whose plan she confirmed, or an inbox attachment she forwards into one
+    (`merge_attachment_into_round` is the second door onto that path, and it is her POST that names the
+    round), mints conditions that are in force
     at once with the plan the reading proposed and no screen that can say otherwise: `RoundPlanPanel`
     returns null once `confirmed_at` is set. That predates this ticket — the old rule answered the same
     round and said the same thing — and it is not fixed here, because making those conditions wait would

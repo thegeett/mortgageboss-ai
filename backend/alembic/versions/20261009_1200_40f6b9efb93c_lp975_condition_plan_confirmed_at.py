@@ -9,10 +9,18 @@ BACKFILL: a condition is stamped with the EARLIEST confirm of any round it appea
 half is today's rule, so nothing that is in force today stops being in force; the first is what a
 condition seen again after a confirmed round should always have had.
 
-EARLIEST, AS THE CODE WRITES IT (LP-975 review): `confirm_round_plan` stamps only a condition with no stamp
-yet, so a live stamp is the first confirm of a plan the condition was on. The backfill took `max` and so
-disagreed with the code about what the timestamp means; only whether it is set is read today, but a later
-reader of the date would have got two meanings.
+EARLIEST, BECAUSE THE CODE KEEPS THE FIRST (LP-975 review): `confirm_round_plan` stamps only a condition
+with no stamp yet. The backfill took `max` and so disagreed with the code about what the timestamp means;
+only whether it is set is read today, but a later reader of the date would have got two meanings.
+
+IT IS NOT ALWAYS THE SAME DATE THE CODE WOULD HAVE WRITTEN, and the follow-up review measured where it
+differs: confirm round 1 AFTER round 2 has carried a condition away and the code stamps it at round 2's
+confirm (round 1's no longer matched `last_seen_round_id == round_.id`), while this takes round 1's
+earlier time from the appearance event. The code's stamp is "the first confirm that covered this
+condition"; this is "the earliest confirm of a round it appeared on". Reproducing the former from history
+would need a correlated `NOT EXISTS` over later appearance events, for a date nothing reads. What holds in
+both orders is asserted in `test_the_backfill_is_never_later_than_the_code_in_either_confirm_order`: never
+unstamped where the code stamped, and never later — so no condition loses force or gains it late.
 
 NOT IN THE READONLY VIEW. `readonly.conditions` lists its columns explicitly (LP-956), so a new column
 stays out of it until a ticket adds it.
