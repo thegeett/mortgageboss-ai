@@ -193,6 +193,24 @@ describe("RoundPlanPanel", () => {
     ).toBeTruthy();
   });
 
+  // LP-976 REVIEW — a blocker with no lender code arrives as an em dash, and the hand-added condition
+  // this ticket is about has no code. "Confirm —'s reading first" is not a sentence she can act on.
+  it("describes a code-less blocker instead of naming a dash", () => {
+    show([condition({})], { ...basePlan, blocking_codes: ["\u2014"] });
+    expect(
+      screen.getByText("Check how we read it first — one condition still needs you."),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Confirm —/)).toBeNull();
+  });
+
+  it("names the coded blocker when a file has both kinds, wherever it sits", () => {
+    // The list is unordered: the server's query has no `order_by`, so the dash can come first.
+    show([condition({})], { ...basePlan, blocking_codes: ["\u2014", "1947"] });
+    expect(
+      screen.getByText("Confirm 1947’s reading first — 2 conditions still need you."),
+    ).toBeTruthy();
+  });
+
   it("is gone once the plan is confirmed", () => {
     plan.data = { ...basePlan, confirmed_at: "2026-08-28T20:40:00Z", blocking_codes: [] };
     const { container } = render(

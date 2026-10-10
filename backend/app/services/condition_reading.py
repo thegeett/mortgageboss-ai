@@ -782,7 +782,14 @@ def _confirmed_items(
             item["option"] = option_for(confirmed.performers[0]).value
         out.append(item)
     if not out:
-        raise ReadingRefused("A condition needs at least one item. Remove the condition instead.")
+        # LP-976 REVIEW — "remove it" was the only way out this named, and it is not the usual one now.
+        # A condition typed in after a plan is confirmed can be read into no task at all (no library
+        # match, and no type since LP-965), and then its own reading is what holds its confirm: she
+        # arrives here with nothing to keep, and the thing to do is give it a task. Both ways out are
+        # named, and `test_the_item_less_refusal_names_both_ways_out` holds the sentence.
+        raise ReadingRefused(
+            "A condition needs at least one item. Add a task to it, or remove the condition."
+        )
     return out
 
 

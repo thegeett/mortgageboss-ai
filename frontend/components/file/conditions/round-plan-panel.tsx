@@ -163,6 +163,14 @@ export function RoundPlanPanel({
     notShown.map((condition) => condition.lender_code).filter((code): code is string => !!code),
   );
   const blocked = data.blocking_codes.length > 0;
+  // WHICH BLOCKER THE SENTENCE NAMES (LP-976 review). `blocking_codes` carries an em dash for a
+  // condition with no lender code, and "Confirm —'s reading first" is not a sentence she can act on —
+  // the hand-added condition LP-976 is about has no code, so this is now a normal case rather than a
+  // corner. A coded blocker is named wherever it sits in the list, which is unordered; only when none
+  // has a code is the condition described instead. This is deliberately the same rule as the server's
+  // `_refuse_for`, and the second copy of it: one is the refusal she gets if she presses confirm
+  // anyway, the other is this line, and they must not say different things.
+  const namedBlocker = data.blocking_codes.find((code) => code !== "—") ?? null;
   // LP-976 — after confirm, only the emails the added conditions are in: the round's other drafts were
   // unlocked by the first confirm.
   const rowCodes = new Set(rows.map((row) => row.lender_code).filter((code) => !!code));
@@ -355,7 +363,9 @@ export function RoundPlanPanel({
           </Button>
           {blocked ? (
             <p className="text-xs text-muted-foreground">
-              Confirm {data.blocking_codes[0]}’s reading first —{" "}
+              {namedBlocker !== null
+                ? `Confirm ${namedBlocker}’s reading first — `
+                : `Check how we read ${data.blocking_codes.length === 1 ? "it" : "them"} first — `}
               {data.blocking_codes.length === 1
                 ? "one condition still needs you."
                 : `${data.blocking_codes.length} conditions still need you.`}

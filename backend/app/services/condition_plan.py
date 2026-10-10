@@ -1419,8 +1419,21 @@ async def set_lender_processing(
     return moved
 
 
-async def round_plan_blockers(db: AsyncSession, *, round_: ConditionRound) -> list[str]:
-    """Codes on this round whose reading still needs her — the plan cannot be confirmed past them."""
+async def round_plan_blockers(
+    db: AsyncSession,
+    *,
+    round_: ConditionRound,
+    condition_ids: Sequence[UUID] | None = None,
+) -> list[str]:
+    """Codes whose reading still needs her — the plan cannot be confirmed past them.
+
+    FILE-WIDE DESPITE THE NAME, and that is the rule README rule 3 states: nothing is drafted or
+    confirmed past a reading that needs her. `condition_ids` narrows it to a named set, which is what
+    LP-976's second confirm uses — that pass stamps only the conditions added since, so holding it for a
+    reading on another round would make their emails wait on work that has nothing to do with them
+    (LP-976 review). The list is unordered, as the query is: which blocker a sentence names is
+    `_refuse_for`'s decision, not this row order's.
+    """
     rows = (
         await db.execute(
             select(Condition.lender_code).where(
@@ -1428,6 +1441,7 @@ async def round_plan_blockers(db: AsyncSession, *, round_: ConditionRound) -> li
                 Condition.deleted_at.is_(None),
                 Condition.reading_status == ConditionReadingStatus.NEEDS_CONFIRMATION,
                 Condition.lender_status != ConditionLenderStatus.SUPERSEDED,
+                *([Condition.id.in_(condition_ids)] if condition_ids is not None else []),
             )
         )
     ).all()
@@ -1437,22 +1451,24 @@ async def round_plan_blockers(db: AsyncSession, *, round_: ConditionRound) -> li
 async def confirm_round_plan(
     db: AsyncSession, *, round_: ConditionRound, actor_user_id: UUID
 ) -> None:
-    """S3-02's "Confirm plan…". Refused while any reading still needs her (README rule 3)."""
-    blockers = await round_plan_blockers(db, round_=round_)
-    if blockers:
-        first = blockers[0]
-        more = len(blockers) - 1
-        raise PlanRefused(
-            f"Confirm {first}'s reading first — "
-            + (
-                "one condition still needs you."
-                if more == 0
-                else f"{more + 1} conditions still need you."
+    """S3-02's "Confirm plan…". Refused while any reading still needs her (README rule 3).
+
+    LP-976 REVIEW — THE SECOND PASS IS GATED ON WHAT IT WOULD STAMP. `round_plan_blockers` is file-wide,
+    which is right for the first confirm: that one settles the whole file's plan. The second pass stamps
+    only the conditions added since this round was confirmed, and gating it file-wide left their emails
+    waiting on a reading somewhere else on the file — a coupling with nothing behind it, and invisible on
+    the panel, which shows exactly the late set.
+    """
+    if round_.plan_confirmed_at is not None:
+        added = await _added_after(db, round_=round_)
+        _refuse_for(
+            await round_plan_blockers(
+                db, round_=round_, condition_ids=[condition.id for condition in added]
             )
         )
-    if round_.plan_confirmed_at is not None:
-        await _confirm_added_after(db, round_=round_, actor_user_id=actor_user_id)
+        await _confirm_added_after(db, round_=round_, actor_user_id=actor_user_id, added=added)
         return
+    _refuse_for(await round_plan_blockers(db, round_=round_))
     round_.plan_confirmed_at = datetime.now(UTC)
     round_.plan_confirmed_by_user_id = actor_user_id
     db.add(
@@ -1503,8 +1519,53 @@ async def confirm_round_plan(
     await sync_round_drafts(db, round_=round_, actor_user_id=actor_user_id)
 
 
+def _refuse_for(blockers: list[str]) -> None:
+    """Refuse a confirm while a reading needs her, naming one condition (LP-976 review).
+
+    A CODE-LESS BLOCKER IS NOT A NAME. `round_plan_blockers` contributes an em dash for a condition with
+    no lender code, and "Confirm —'s reading first" is not a sentence she can act on — the hand-added
+    condition LP-976 exists for has no code, so this stopped being a corner.
+
+    SO THE CHOICE IS HERE, NOT IN THE QUERY'S ROW ORDER (LP-976 review). Naming `blockers[0]` and having
+    the query return coded rows first would split one rule across two functions, half of it resting on
+    the row order of a `select` with no `order_by`: mutating that ordering away changed nothing in the
+    fixture at hand, because the rows came back in insertion order anyway. This picks a coded blocker
+    wherever it sits and describes the condition only when none has a code — decidable from the list
+    alone, and so testable from it.
+    """
+    if not blockers:
+        return
+    more = len(blockers) - 1
+    tail = (
+        "one condition still needs you." if more == 0 else f"{more + 1} conditions still need you."
+    )
+    named = next((code for code in blockers if code != "—"), None)
+    if named is None:
+        # NOT "the condition you added": a code-less condition is just as likely to be a pasted sheet
+        # row, which often carries no code (`test_round_enrich`: "NO CODE, which is the realistic
+        # state"). So the sentence says what to do and leaves identity to the row on the screen.
+        one = "it" if more == 0 else "them"
+        raise PlanRefused(f"Check how we read {one} first — {tail}")
+    raise PlanRefused(f"Confirm {named}'s reading first — {tail}")
+
+
+async def _added_after(db: AsyncSession, *, round_: ConditionRound) -> list[Condition]:
+    """LP-976 — the round's conditions with no stamp: the ones added since its plan was confirmed."""
+    return list(
+        (
+            await db.execute(
+                select(Condition).where(
+                    Condition.last_seen_round_id == round_.id,
+                    Condition.deleted_at.is_(None),
+                    Condition.plan_confirmed_at.is_(None),
+                )
+            )
+        ).scalars()
+    )
+
+
 async def _confirm_added_after(
-    db: AsyncSession, *, round_: ConditionRound, actor_user_id: UUID
+    db: AsyncSession, *, round_: ConditionRound, actor_user_id: UUID, added: list[Condition]
 ) -> int:
     """LP-976 — confirm the plan of conditions added to a round after its plan was confirmed. Returns how
     many it confirmed.
@@ -1516,17 +1577,6 @@ async def _confirm_added_after(
     steps come into force and the drafts follow. One activity row says what happened, in its own words.
     """
     now = datetime.now(UTC)
-    added = list(
-        (
-            await db.execute(
-                select(Condition).where(
-                    Condition.last_seen_round_id == round_.id,
-                    Condition.deleted_at.is_(None),
-                    Condition.plan_confirmed_at.is_(None),
-                )
-            )
-        ).scalars()
-    )
     if not added:
         return 0
     by_condition = await _items_by_condition(db, round_.loan_file_id)

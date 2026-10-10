@@ -270,11 +270,18 @@ async def send_draft(
     # `/communications/draft/{id}/send` can send a condition draft too.
     from app.services.condition_drafts import unconfirmed_rounds_for
 
+    # LP-976 REVIEW — "CONFIRM THE PLAN FOR ROUND 1 FIRST" BECAME FALSE-SOUNDING, because since LP-976
+    # a condition added to an ALREADY-confirmed round waits here too. She had confirmed round 1, so
+    # being told to confirm it is an instruction she has already carried out; what waits is a condition
+    # on that round whose own plan she has not checked, and the panel that shows it says "added after you
+    # confirmed the plan". So the sentence names the round the email WAITS ON rather than asserting its
+    # plan was never confirmed — true in both cases, and it still names where to go.
     waiting = await unconfirmed_rounds_for(db, communication_id=draft.id)
     if waiting:
         rounds = " and ".join(f"round {number}" for number in waiting)
         raise CannotSendError(
-            f"Confirm the plan for {rounds} first: nothing is sent before you confirm it."
+            f"This email waits on the plan for {rounds}: confirm it there, "
+            "since nothing is sent before you do."
         )
     # LP-819 — a hard bounce means this mailbox does not exist. Sending again produces another
     # bounce, and enough of those damage a sending reputation shared by every borrower this system

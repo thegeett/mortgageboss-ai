@@ -128,7 +128,7 @@ async def test_no_door_sends_a_draft_before_the_plan_is_confirmed(db_session: As
     loan_file, _, _, actor = await _drafted(db_session)
     draft = await _a_draft(db_session, loan_file)
     # The general send door, which can reach a condition draft by its message id.
-    with pytest.raises(CannotSendError, match="Confirm the plan for round 1 first"):
+    with pytest.raises(CannotSendError, match="This email waits on the plan for round 1"):
         await send_draft(
             db_session,
             loan_file=loan_file,
@@ -144,7 +144,7 @@ async def test_no_door_sends_a_draft_before_the_plan_is_confirmed(db_session: As
     assert message is not None
     message.recipient = "title@example.com"
     await db_session.flush()
-    with pytest.raises((CannotSendError, DraftRefused), match="Confirm the plan"):
+    with pytest.raises((CannotSendError, DraftRefused), match="waits on the plan for round 1"):
         await mark_sent(db_session, loan_file=loan_file, draft=draft, actor_user_id=actor)
 
 
