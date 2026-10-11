@@ -16,6 +16,10 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const plan = vi.hoisted(() => ({ data: undefined as RoundPlan | undefined }));
+/** LP-979 — the file's lender, so the plan's ending can name who clears it. */
+const lender = vi.hoisted(() => ({
+  data: undefined as { lender: { id: string; name: string } | null } | undefined,
+}));
 const calls = vi.hoisted(() => ({
   items: [] as unknown[],
   steps: [] as unknown[],
@@ -54,6 +58,7 @@ vi.mock("@/lib/api/conditions", () => ({
   useSetNextStep: () => ({ mutate: (body: unknown) => calls.steps.push(body) }),
   useUpdateItem: () => ({ mutate: (body: unknown) => calls.items.push(body) }),
   useRevertPlan: () => ({ mutate: (id: unknown) => calls.reverts.push(id), isPending: false }),
+  useFileLender: () => ({ data: lender.data }),
   useLogCall: () => ({
     mutate: (body: unknown, options?: { onSuccess?: () => void }) => {
       calls.logged.push(body);
@@ -105,6 +110,7 @@ afterEach(() => {
   calls.addResponses = [];
   calls.describeResult = null;
   calls.described = [];
+  lender.data = undefined;
   calls.logged = [];
   calls.confirmError = null;
 });
@@ -331,19 +337,24 @@ describe("RoundPlanPanel", () => {
         ],
       }),
     ]);
-    // "Route:" is what the tasks' steps say (until LP-970's routes); "Next:" is the first step ahead.
+    // "Route:" is what the tasks' steps say (until LP-970's routes); "Next:" is the first step a PERSON
+    // takes (LP-979): the app's own steps ("We found…", "We draft…") are passed over.
     expect(screen.getAllByText("Route:")).toHaveLength(4);
     expect(screen.getAllByText("You upload the invoice")).toHaveLength(2);
     expect(screen.getByText("Ask Title / escrow — in the title email")).toBeTruthy();
     expect(screen.getByText("Upload the invoice")).toBeTruthy();
     expect(screen.getByText("Starts once 1228 is done")).toBeTruthy();
+    expect(screen.getByText("Check it’s the right document")).toBeTruthy();
     expect(
-      screen.getByText("We found HR Loan Processing invoice, page 1 on the file"),
-    ).toBeTruthy();
-    // 1947's ask: the draft does not exist yet, so its next step says when it will.
+      screen.queryByText("We found HR Loan Processing invoice, page 1 on the file"),
+    ).toBeNull();
+    // 1947's ask: her next move is to review and send the email, not the app's drafting of it.
     expect(
-      screen.getByText("We draft the email to Title / escrow when you confirm the plan"),
+      screen.getByText("Review the email, and send it once the plan is confirmed"),
     ).toBeTruthy();
+    expect(
+      screen.queryByText("We draft the email to Title / escrow when you confirm the plan"),
+    ).toBeNull();
     expect(screen.getAllByRole("button", { name: "See the plan" })).toHaveLength(4);
     // Nothing of the detail until she opens it.
     expect(screen.queryByText("What the lender wants")).toBeNull();
@@ -533,9 +544,10 @@ describe("RoundPlanPanel", () => {
     expect(
       path.getByText("We draft the email to Title / escrow when you confirm the plan"),
     ).toBeTruthy();
+    // Twice now: in the path, and as "Next:" (LP-979 — a person's step, not the app's).
     expect(
-      screen.getByText("Review the email, and send it once the plan is confirmed"),
-    ).toBeTruthy();
+      screen.getAllByText("Review the email, and send it once the plan is confirmed"),
+    ).toHaveLength(2);
     expect(screen.getByText("Title / escrow sends it back")).toBeTruthy();
     expect(screen.getByText("Link it to this task")).toBeTruthy();
     expect(
@@ -617,7 +629,8 @@ describe("RoundPlanPanel", () => {
       draft: { id: "d1", status: "draft", sent_on: null } as ConditionItem["draft"],
     };
     const onOpenDraft = open([condition({ lender_code: "1947", items: [drafted] })]);
-    expect(screen.getAllByText("We drafted the email to Title / escrow")).toHaveLength(2);
+    // Once: "Next:" is now her step, "Review the email, and send it…" (LP-979), not the app's draft.
+    expect(screen.getAllByText("We drafted the email to Title / escrow")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Review draft" }));
     expect(onOpenDraft).toHaveBeenCalledWith("d1");
   });
@@ -684,10 +697,23 @@ describe("RoundPlanPanel", () => {
     expect(calls.items).toEqual([{ conditionId: "c1", itemId: "i2", status: "open" }]);
   });
 
-  it("goes back to the suggested plan for that condition", () => {
-    open([condition({})]);
+  it("goes back to the suggested plan for that condition, once she has changed it (LP-979)", () => {
+    open([condition({ plan_changed: true })]);
+    expect(screen.getByText(/Changed by you ·/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Go back to the suggested plan" }));
     expect(calls.reverts).toEqual(["c1"]);
+  });
+
+  it("names the file's lender in the plan's ending (LP-979)", () => {
+    lender.data = { lender: { id: "l1", name: "UWM" } };
+    open([condition({ lender_code: "1947" })]);
+    expect(screen.getByText("UWM clears 1947")).toBeTruthy();
+  });
+
+  it("offers no way back on a plan as suggested (LP-979, the control)", () => {
+    open([condition({ plan_changed: false })]);
+    expect(screen.queryByRole("button", { name: "Go back to the suggested plan" })).toBeNull();
+    expect(screen.queryByText(/Changed by you/)).toBeNull();
   });
 
   it("says what Confirm will do: the emails, the ready ones and her tasks", () => {
@@ -896,7 +922,8 @@ describe("RoundPlanPanel", () => {
 
     it("LP-971: the open menu offers Describe it beside the blocks", () => {
       opened([condition({})]);
-      expect(screen.queryByLabelText("Or describe what you want to do")).toBeNull();
+      // LP-979 — always there under "Add a step", as in the mock; it hides only for a block's own form.
+      expect(screen.getByLabelText("Or describe what you want to do")).toBeTruthy();
       fireEvent.click(screen.getByRole("button", { name: "Add a step" }));
       expect(screen.getByLabelText("Or describe what you want to do")).toBeTruthy();
       expect(screen.getByRole("button", { name: "Turn it into steps" })).toBeTruthy();

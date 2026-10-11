@@ -6,14 +6,23 @@
  */
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-// LP-971 — the open menu now holds "Describe it", which calls the API; these tests do not.
+// LP-971 — "Describe it" calls the API. Most tests here do not; the LP-979 one answers with `described`.
+const described = vi.hoisted(() => ({ result: null as unknown }));
 vi.mock("@/lib/api/conditions", () => ({
-  useDescribeSteps: () => ({ mutate: vi.fn(), isPending: false }),
+  useDescribeSteps: () => ({
+    isPending: false,
+    mutate: (_body: unknown, options?: { onSuccess?: (r: unknown) => void }) => {
+      if (described.result) options?.onSuccess?.(described.result);
+    },
+  }),
 }));
 
 import { AddStep, EMAIL_WHO } from "./plan-add-step";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  described.result = null;
+});
 
 function open(onAdd: (step: unknown) => void) {
   render(
@@ -158,5 +167,37 @@ describe("AddStep", () => {
         dueDate: "2026-10-15",
       });
     });
+  });
+
+  it("LP-979: her words survive adding a question, through AddStep, not just Describe it alone", () => {
+    // THE LAYER THE BUG LIVED AT (the LP-979 peer). The LP-971 review kept her words when a question
+    // took them, since the note is written from the condition and holds them nowhere. But "Describe it"
+    // sat inside the opened menu, and adding closes it, so the component unmounted and the words went
+    // with its state. A test of `DescribeSteps` alone never unmounts, so it could not see that. This one
+    // goes through `AddStep`, and fails if the box is nested back inside the menu.
+    described.result = {
+      steps: [{ block: "underwriter", to: null, text: "Can 1228 move to closing?" }],
+      left_out: [],
+      refusal: null,
+    };
+    const onAddAll = vi.fn();
+    render(
+      <AddStep
+        conditionId="c1"
+        ownStep={null}
+        pending={false}
+        onAdd={vi.fn()}
+        onAddAll={onAddAll}
+      />,
+    );
+    // Through the opened menu, as she would, so both layouts start alike and only the adding differs.
+    fireEvent.click(screen.getByRole("button", { name: "Add a step" }));
+    const box = () =>
+      screen.getByLabelText("Or describe what you want to do") as HTMLTextAreaElement;
+    fireEvent.change(box(), { target: { value: "Ask the underwriter to move 1228 to closing" } });
+    fireEvent.click(screen.getByRole("button", { name: "Turn it into steps" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add this step" }));
+    expect(onAddAll).toHaveBeenCalledTimes(1);
+    expect(box().value).toBe("Ask the underwriter to move 1228 to closing");
   });
 });

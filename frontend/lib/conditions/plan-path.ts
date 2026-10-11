@@ -90,12 +90,30 @@ function capital(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+/**
+ * LP-979 — THE APP'S STEPS SAY WHAT KIND OF STEP THEY ARE, as the agreed mockup and the legend ("We
+ * prepare or check it") do: "We prepare it" for what it drafts or puts together, "We check it" for a
+ * check, "We found it" for what it found on the file. A bare "We" said who, not what.
+ */
 const WE = (text: string, detail?: string): PathStep => ({
   who: "we",
-  whoLabel: "We",
+  whoLabel: "We prepare it",
   text,
   detail,
 });
+const CHECK = (text: string, detail?: string): PathStep => ({
+  who: "we",
+  whoLabel: "We check it",
+  text,
+  detail,
+});
+const FOUND = (text: string, detail?: string): PathStep => ({
+  who: "we",
+  whoLabel: "We found it",
+  text,
+  detail,
+});
+const NOTHING = (text: string): PathStep => ({ who: "we", whoLabel: "Nothing to do", text });
 const YOU = (text: string, detail?: string): PathStep => ({
   who: "you",
   whoLabel: "You",
@@ -151,6 +169,11 @@ const TRACKS_PROGRESS: readonly PlanOption[] = ["ask_borrower", "ask_third_party
  */
 export interface PathContext {
   needsConfirmation?: boolean;
+  /**
+   * LP-979 — the file's lender by name ("UWM"), so the ending says who clears it, as the mockup does
+   * ("UWM clears 1228"). Absent while the file names no lender: the ending says "the lender".
+   */
+  lenderName?: string | null;
 }
 
 /** One task's steps, from its own next step and how far it has got. */
@@ -207,7 +230,7 @@ export function taskPath(item: ConditionItem, context: PathContext = {}): PathSt
             "If it comes by email to the file’s inbox, you accept the attachment onto the file.",
         },
         YOU("Link it to this task", "We suggest the document that matches."),
-        WE("We check it against what was asked", shouldBe(item)),
+        CHECK("We check it against what was asked", shouldBe(item)),
       );
       break;
     }
@@ -227,14 +250,14 @@ export function taskPath(item: ConditionItem, context: PathContext = {}): PathSt
               : undefined,
           },
           YOU("When it comes, upload or link it here, or mark the task done"),
-          WE("We check what you upload", shouldBe(item)),
+          CHECK("We check what you upload", shouldBe(item)),
         );
         break;
       }
       steps.push(
         YOU(item.task ? capital(item.task) : `Do it: ${item.name}`),
         YOU("Upload what you get to this task, or mark the task done"),
-        WE("We check what you upload", shouldBe(item)),
+        CHECK("We check what you upload", shouldBe(item)),
       );
       break;
     case "already_in_file": {
@@ -242,7 +265,7 @@ export function taskPath(item: ConditionItem, context: PathContext = {}): PathSt
         ? `We found ${item.document_name}${item.document_page ? `, page ${item.document_page}` : ""} on the file`
         : "We found it on the file";
       steps.push(
-        WE(found),
+        FOUND(found),
         YOU("Check it’s the right document", "If it isn’t, change this task’s next step."),
       );
       break;
@@ -251,7 +274,7 @@ export function taskPath(item: ConditionItem, context: PathContext = {}): PathSt
       steps.push(LENDER("The lender does this itself"), YOU("Watch for it to clear"));
       break;
     case "information_only":
-      steps.push(WE("Nothing to do: the lender is only telling you something"));
+      steps.push(NOTHING("Nothing to do: the lender is only telling you something"));
       break;
     case "ask_underwriter":
     case "push_back":
@@ -306,9 +329,9 @@ export function ownStepPath(option: PlanOption): PathStep[] {
     case "lender_doing_it":
       return [LENDER("The lender does this itself"), YOU("Watch for it to clear")];
     case "information_only":
-      return [WE("Nothing to do: the lender is only telling you something")];
+      return [NOTHING("Nothing to do: the lender is only telling you something")];
     case "already_in_file":
-      return [WE("We found it on the file"), YOU("Check it’s the right document")];
+      return [FOUND("We found it on the file"), YOU("Check it’s the right document")];
     case "i_will_do_it":
       return [YOU("Do it, then mark each task below done")];
     case "ask_borrower":
@@ -319,9 +342,15 @@ export function ownStepPath(option: PlanOption): PathStep[] {
 }
 
 /** How every condition ends: ready, the package, the lender clears it. Nothing for information only. */
-export function endingPath(condition: Condition): PathStep[] {
+export function endingPath(condition: Condition, context: PathContext = {}): PathStep[] {
   const own = condition.next_step;
   if (own === "information_only") return [];
+  // LP-979 — NAMED WHEN WE KNOW: "UWM clears 1228" and "…the package for UWM". Without a lender on the
+  // file, the words stay "the lender" and "it".
+  const lender = context.lenderName;
+  const clears = lender
+    ? { ...LENDER(`${lender} clears ${condition.lender_code ?? "it"}`, RECORD), whoLabel: lender }
+    : LENDER("The lender clears it", RECORD);
   // A STEP THE TASKS CANNOT SETTLE (LP-967 review). `ready_because` returns None for ANY
   // condition-level step that is not "Already in the file" or "I'll do it" — so for "Lender is doing
   // it", a condition-level ask, a push-back or a question to the underwriter, finishing the tasks does
@@ -329,13 +358,17 @@ export function endingPath(condition: Condition): PathStep[] {
   // `information_only` was excluded, so the other three promised a route the server denies. What stays
   // true for them is the end: the lender answers, and she records it.
   if (own !== null && own !== "already_in_file" && own !== "i_will_do_it") {
-    return [LENDER("The lender clears it", "You record the lender’s answer when it comes back.")];
+    return [clears];
   }
   return [
-    WE("When every task is done, the condition is ready and goes in the package for the lender"),
-    LENDER("The lender clears it", "You record the lender’s answer when it comes back."),
+    WE(
+      `When every task is done, the condition is ready and goes in the package for ${lender ?? "the lender"}`,
+    ),
+    clears,
   ];
 }
+
+const RECORD = "You record the lender’s answer when it comes back.";
 
 /** LP-974 — one step on a condition's timeline, and the task it belongs to (null: the condition's). */
 export interface PlanEntry {
@@ -385,19 +418,27 @@ export function conditionPath(condition: Condition, context: PathContext = {}): 
   // finish, so "when every task is done, the condition is ready" would promise what `ready_because`
   // refuses (it needs a live task).
   if (own === null && liveItems(condition).length === 0) return entries;
-  for (const step of endingPath(condition)) entries.push({ step, item: null, leads: false });
+  for (const step of endingPath(condition, context)) {
+    entries.push({ step, item: null, leads: false });
+  }
   return entries;
 }
 
 /**
  * LP-974 — the collapsed row's "Next:": the first step still ahead. A dropped task and a finished one
  * are not ahead of her, so they are skipped; when nothing is left, the ending is what comes next.
+ *
+ * LP-979 — A PERSON'S STEP, NOT THE APP'S, as the agreed mockup reads ("Next: Review and send the email
+ * to UWM"). "We check what you upload" or "We drafted the email" is the app's own work, and showing it
+ * as "Next" told her nothing she does. So the app's steps are passed over for the first step someone
+ * takes: hers, or the person or lender she is waiting on ("Title / escrow sends it back" is the honest
+ * next thing while an ask is out). Only when every step ahead is the app's does one show.
  */
 export function nextOf(entries: PlanEntry[]): PathStep | null {
-  const ahead = entries.find(
+  const ahead = entries.filter(
     (entry) => entry.item?.status !== "not_needed" && entry.step !== FINISHED,
   );
-  return ahead?.step ?? null;
+  return (ahead.find((entry) => entry.step.who !== "we") ?? ahead[0])?.step ?? null;
 }
 
 /** "Your first moves" across the round: derived from the plan's drafts and the rows' tasks. */

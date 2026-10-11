@@ -148,6 +148,7 @@ from app.services.condition_plan import (
     follow_drafts,
     handle_own_way,
     items_public_for_file,
+    plans_changed_for_file,
     remove_item,
     revert_to_suggested,
     round_plan_summary,
@@ -633,6 +634,7 @@ def _condition_public(
     question_draft: DraftTailPublic | None = None,
     evidence: list[ConditionEvidencePublic] | None = None,
     lender_keys: dict[UUID, str | None],
+    plans_changed: set[UUID],
 ) -> ConditionPublic:
     """One condition as the wire sees it, with the SERVICE's rules supplying the derived fields.
 
@@ -660,6 +662,9 @@ def _condition_public(
         # LP-955: how this condition can get done at its lender ("Pulled in UWM's system" / "Our
         # vendor"). REQUIRED of every caller (`lender_keys`), so no door leaves the choice off.
         routes=_routes_public(condition, lender_keys),
+        # LP-979: whether she has changed this condition's plan since it was suggested. REQUIRED of
+        # every caller (`plans_changed`), as `lender_keys` is, so no door answers "never".
+        plan_changed=condition.id in plans_changed,
     )
 
 
@@ -807,6 +812,7 @@ async def list_file_conditions(
     questions = await question_tails_for_file(db, loan_file_id=loan_file.id)
     evidence = await evidence_public_for_file(db, loan_file_id=loan_file.id)
     lender_keys = await _lender_keys(db, loan_file.id)
+    plans_changed = await plans_changed_for_file(db, loan_file_id=loan_file.id)
     return [
         _condition_public(
             condition,
@@ -816,6 +822,7 @@ async def list_file_conditions(
             question_draft=questions.get(condition.id),
             evidence=evidence.get(condition.id, []),
             lender_keys=lender_keys,
+            plans_changed=plans_changed,
         )
         for condition in conditions
     ]
@@ -1571,6 +1578,7 @@ async def add_condition_by_hand(
     return _condition_public(
         condition,
         lender_keys=await _lender_keys(db, condition.loan_file_id),
+        plans_changed=await plans_changed_for_file(db, loan_file_id=condition.loan_file_id),
         round_numbers=numbers.get(condition.id, []),
         today=datetime.now(UTC).date(),
         items=(await items_public_for_file(db, loan_file_id=condition.loan_file_id)).get(
@@ -1622,6 +1630,7 @@ async def _condition_response(
     return _condition_public(
         condition,
         lender_keys=await _lender_keys(db, condition.loan_file_id),
+        plans_changed=await plans_changed_for_file(db, loan_file_id=condition.loan_file_id),
         round_numbers=numbers.get(condition.id, []),
         today=datetime.now(UTC).date(),
         items=(await items_public_for_file(db, loan_file_id=condition.loan_file_id)).get(
@@ -2120,6 +2129,7 @@ async def get_condition(condition: ScopedCondition, db: DbSession) -> ConditionD
     public = _condition_public(
         condition,
         lender_keys=await _lender_keys(db, condition.loan_file_id),
+        plans_changed=await plans_changed_for_file(db, loan_file_id=condition.loan_file_id),
         round_numbers=sorted(seen_on),
         today=datetime.now(UTC).date(),
         items=(await items_public_for_file(db, loan_file_id=condition.loan_file_id)).get(

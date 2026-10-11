@@ -15,6 +15,7 @@ import {
 import {
   useAddItem,
   useConfirmPlan,
+  useFileLender,
   useLogCall,
   useOwnWay,
   useRemoveItem,
@@ -105,6 +106,8 @@ export function RoundPlanPanel({
   const revert = useRevertPlan(fileId);
   const addItem = useAddItem(fileId);
   const logCall = useLogCall(fileId);
+  // LP-979 — the file's lender, so each plan's ending names who clears it.
+  const fileLender = useFileLender(fileId);
   const ownWay = useOwnWay(fileId);
   const removeItem = useRemoveItem(fileId);
   // LP-969 — "Check a document on the file" opens the link dialog on the task it just added.
@@ -428,6 +431,7 @@ export function RoundPlanPanel({
             }}
             onChangeStep={(to) => changeStep(condition, to)}
             onHelp={(title, current) => setHelp({ title, current })}
+            lenderName={fileLender.data?.lender?.name ?? null}
           />
         ))}
       </div>
@@ -488,6 +492,7 @@ function routeOf(condition: Condition): string | null {
 
 function PlanRow({
   condition,
+  lenderName,
   open,
   onToggle,
   onOpenCondition,
@@ -523,6 +528,8 @@ function PlanRow({
   onRemoveItem: (item: ConditionItem) => void;
   onChangeStep: (to: PlanOption) => void;
   onHelp: (title: string, current: PlanOption) => void;
+  /** LP-979 — the file's lender by name, so the plan's ending says who clears it ("UWM clears 1228"). */
+  lenderName: string | null;
 }) {
   const detailsId = useId();
   const items = live(condition);
@@ -534,7 +541,7 @@ function PlanRow({
   // ANY task counts, a dropped one too (LP-974): a condition whose only task she marked not needed was
   // worked out, and calling it unread hid the crossed-out task with her reason and its Undo.
   const unworked = condition.items.length === 0 && ownStep === null;
-  const entries = conditionPath(condition, { needsConfirmation: needsHer });
+  const entries = conditionPath(condition, { needsConfirmation: needsHer, lenderName });
   const route = routeOf(condition);
   const next = nextOf(entries);
   // A task's name over its first step only when there is more than one thing on the timeline to tell
@@ -681,14 +688,21 @@ function PlanRow({
               <p className="text-xs font-semibold uppercase tracking-wide text-foreground-2">
                 The plan, step by step
               </p>
-              {/* LP-968 — her changes undone, replayed from the history (`revert_to_suggested`). */}
-              <button
-                type="button"
-                onClick={onRevert}
-                className="text-xs font-medium text-primary underline-offset-2 hover:underline"
-              >
-                Go back to the suggested plan
-              </button>
+              {/* LP-968 — her changes undone, replayed from the history (`revert_to_suggested`).
+                  LP-979 — ONLY ONCE SHE HAS CHANGED SOMETHING, as in the agreed mockup ("Changed by you ·
+                  Go back to the suggested plan"). On a plan as suggested the link had nothing to undo. */}
+              {condition.plan_changed ? (
+                <span className="text-xs text-foreground-2">
+                  Changed by you ·{" "}
+                  <button
+                    type="button"
+                    onClick={onRevert}
+                    className="font-medium text-primary underline-offset-2 hover:underline"
+                  >
+                    Go back to the suggested plan
+                  </button>
+                </span>
+              ) : null}
             </div>
             {unworked ? (
               <div className="mb-3">

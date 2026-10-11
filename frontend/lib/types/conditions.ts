@@ -555,6 +555,11 @@ export interface Condition {
    * seen again keeps it, so round 2 can tell a plan she approved from one she never saw.
    */
   plan_confirmed_at?: string | null;
+  /**
+   * LP-979 — whether she has changed this condition's plan since it was suggested (from the history).
+   * "Changed by you · Go back to the suggested plan" shows only then.
+   */
+  plan_changed?: boolean;
   /** Our preparation track. */
   prep_status: ConditionPrepStatus;
   /** The lender's answer. Nothing but a recorded verdict moves this off `open`/`not_cleared`. */

@@ -1157,6 +1157,10 @@ class ConditionPublic(BaseModel):
     last_seen_round_id: UUID
     #: LP-975 — when she confirmed a plan this condition was on; null while it never has been.
     plan_confirmed_at: datetime | None = None
+    #: LP-979 — whether she has changed this condition's plan since it was last suggested (the history;
+    #: `condition_plan.plans_changed_for_file`). The screen shows "Changed by you · Go back to the
+    #: suggested plan" only then.
+    plan_changed: bool = False
     round_numbers: list[int] = Field(default_factory=list)
     created_at: datetime
 
@@ -1250,6 +1254,7 @@ class ConditionPublic(BaseModel):
         evidence: list[ConditionEvidencePublic] | None = None,
         waiting_on_when_sent: OwnerHint | None = None,
         routes: tuple[list["RoutePublic"], str | None] = ([], None),
+        plan_changed: bool = False,
     ) -> "ConditionPublic":
         """Build the public view.
 
@@ -1304,6 +1309,7 @@ class ConditionPublic(BaseModel):
             waiting_on=condition.waiting_on,
             waiting_on_when_sent=waiting_on_when_sent,
             routes=routes[0],
+            plan_changed=plan_changed,
             chosen_route=routes[1],
             updated_at=condition.updated_at,
             effective_owner=effective_owner,

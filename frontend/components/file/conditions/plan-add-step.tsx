@@ -318,7 +318,10 @@ export function AddStep({
             })}
           </ul>
         ) : null}
-        {open && chosen === null ? (
+        {/* LP-979 — ALWAYS THERE, as in the agreed mockup: "Or describe what you want to do" sits under
+            "Add a step" without opening the menu first. It hides only while a block's own form is open,
+            so two ways to add are never half-filled at once. */}
+        {chosen === null ? (
           <DescribeSteps
             conditionId={conditionId}
             ownStep={ownStep}

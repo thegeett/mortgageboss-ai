@@ -319,14 +319,13 @@ describe("plan path", () => {
       ],
     } as Condition);
     expect(nextOf(entries)?.text).toBe("Title / escrow sends it back");
-    // Every task finished: the ending is what comes next.
+    // Every task finished: the ending is what comes next, and of the ending, the LENDER's step (LP-979:
+    // the app's packaging is its own work, not someone's next move).
     const done = conditionPath({
       next_step: null,
       items: [item({ option: "i_will_do_it", status: "done" })],
     } as Condition);
-    expect(nextOf(done)?.text).toBe(
-      "When every task is done, the condition is ready and goes in the package for the lender",
-    );
+    expect(nextOf(done)?.text).toBe("The lender clears it");
   });
 
   it("LP-972: a wait is someone else's next move, with the reminder date, then her upload and our check", () => {
@@ -355,5 +354,52 @@ describe("plan path", () => {
       [],
     );
     expect(moves).toMatchObject({ tasksNow: 0, waitingOn: ["Title / escrow"] });
+  });
+
+  it("LP-979: the app's steps say what kind of step they are, as the mock does", () => {
+    const ask = taskPath(item({}));
+    expect(ask[0]?.whoLabel).toBe("We prepare it"); // the draft
+    expect(ask[4]?.whoLabel).toBe("We check it"); // the check
+    expect(taskPath(item({ option: "already_in_file" }))[0]?.whoLabel).toBe("We found it");
+    expect(taskPath(item({ option: "information_only" }))[0]?.whoLabel).toBe("Nothing to do");
+    expect(endingPath({ next_step: null } as Condition)[0]?.whoLabel).toBe("We prepare it");
+  });
+
+  it("LP-979: with the file's lender, the ending names it and the condition", () => {
+    const steps = endingPath({ next_step: null, lender_code: "1228" } as Condition, {
+      lenderName: "UWM",
+    });
+    expect(steps.map((s) => [s.whoLabel, s.text])).toEqual([
+      [
+        "We prepare it",
+        "When every task is done, the condition is ready and goes in the package for UWM",
+      ],
+      ["UWM", "UWM clears 1228"],
+    ]);
+    // A condition-level step the tasks cannot settle ends at the lender too, named.
+    expect(
+      endingPath({ next_step: "lender_doing_it", lender_code: "1228" } as Condition, {
+        lenderName: "UWM",
+      }).map((s) => s.text),
+    ).toEqual(["UWM clears 1228"]);
+    // THE CONTROL: no lender on the file, the words stay general.
+    expect(endingPath({ next_step: null, lender_code: "1228" } as Condition).at(-1)?.text).toBe(
+      "The lender clears it",
+    );
+    // And it reaches the timeline through `conditionPath`'s context.
+    const entries = conditionPath(
+      { next_step: null, lender_code: "1228", items: [item({})] } as unknown as Condition,
+      { lenderName: "UWM" },
+    );
+    expect(entries.at(-1)?.step.text).toBe("UWM clears 1228");
+  });
+
+  it("LP-979: Next falls back to the app's step only when every step ahead is the app's", () => {
+    // A finished-and-received task leaves only "We check what you upload": nothing a person does yet.
+    const entries = conditionPath({
+      next_step: "information_only",
+      items: [item({ option: "i_will_do_it", status: "received" })],
+    } as Condition);
+    expect(nextOf(entries)?.text).toBe("Nothing to do: the lender is only telling you something");
   });
 });

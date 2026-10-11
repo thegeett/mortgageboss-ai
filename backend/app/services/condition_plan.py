@@ -845,6 +845,42 @@ async def follow_drafts(
 _HER_MARKS = (ConditionItemStatus.DONE, ConditionItemStatus.NOT_NEEDED)
 
 
+#: LP-979 — plan changes that RESET the baseline rather than depart from it: going back to the suggested
+#: plan, and Read again replacing the plan with a fresh one (LP-973).
+_BASELINE_CHANGES = frozenset({"reverted", "read_again"})
+
+
+async def plans_changed_for_file(db: AsyncSession, *, loan_file_id: UUID) -> set[UUID]:
+    """LP-979 — the file's conditions whose plan she has changed since it was last suggested, for the
+    mockup's "Changed by you · Go back to the suggested plan" (shown only then).
+
+    FROM THE HISTORY, one query for the file: a condition is changed when a `condition_plan_changed` of
+    hers comes after its latest reset. "Go back to the suggested plan" and Read again are the resets.
+    Her own steps survive a revert (`revert_to_suggested` leaves added steps alone), so after one the
+    link correctly hides: there is nothing more for it to put back.
+    """
+    rows = (
+        await db.execute(
+            select(ConditionEvent.condition_id, ConditionEvent.detail)
+            .where(
+                ConditionEvent.loan_file_id == loan_file_id,
+                ConditionEvent.kind == ConditionEventKind.CONDITION_PLAN_CHANGED,
+                ConditionEvent.condition_id.is_not(None),
+            )
+            .order_by(ConditionEvent.occurred_at, ConditionEvent.id)
+        )
+    ).all()
+    changed: set[UUID] = set()
+    for condition_id, detail in rows:
+        if condition_id is None:
+            continue
+        if (detail or {}).get("change") in _BASELINE_CHANGES:
+            changed.discard(condition_id)
+        else:
+            changed.add(condition_id)
+    return changed
+
+
 async def revert_to_suggested(
     db: AsyncSession, *, condition: Condition, actor_user_id: UUID
 ) -> int:
