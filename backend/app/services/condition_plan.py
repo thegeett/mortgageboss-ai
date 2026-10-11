@@ -846,8 +846,17 @@ _HER_MARKS = (ConditionItemStatus.DONE, ConditionItemStatus.NOT_NEEDED)
 
 
 #: LP-979 — plan changes that RESET the baseline rather than depart from it: going back to the suggested
-#: plan, and Read again replacing the plan with a fresh one (LP-973).
-_BASELINE_CHANGES = frozenset({"reverted", "read_again"})
+#: plan, Read again replacing the plan with a fresh one (LP-973), and a plan CARRIED to a reworded
+#: condition's successor.
+#:
+#: CARRIED IS NOT HERS (LP-979 review, measured). `carry_plan` copies a replaced condition's whole plan
+#: to the successor when she accepts a rewording (`condition_compare`), writing one
+#: `condition_plan_changed` with `change: "carried"` — so the successor, which she has never edited,
+#: read as "Changed by you · Go back to the suggested plan": a link offering to undo an edit that does
+#: not exist. The carried plan IS the suggestion she is being shown for that condition; its own
+#: `plan_reason` says so ("Carried from the condition it replaced"). So it sets the baseline, exactly as
+#: a fresh reading does.
+_BASELINE_CHANGES = frozenset({"reverted", "read_again", "carried"})
 
 
 async def plans_changed_for_file(db: AsyncSession, *, loan_file_id: UUID) -> set[UUID]:
