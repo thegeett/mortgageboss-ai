@@ -197,6 +197,17 @@ def test_a_sonnet_reasoning_id_cannot_survive_boot() -> None:
         Settings(
             **_settings_kwargs(
                 ai_provider="bedrock",
+                # THE PREMISE IS STATED HERE RATHER THAN INHERITED (found by a full-suite run,
+                # 2026-10-11). `_settings_kwargs` starts from the live `settings`, so these three
+                # values came from whatever is in the developer's `.env` — and on a machine
+                # configured the documented way, with Sonnet on the reasoning tier, they do NOT share
+                # one `ANTHROPIC_MODEL_*` value. The keys then do not collapse, there is no ambiguity
+                # for the validator to refuse, and this test failed with DID NOT RAISE while the
+                # validator it pins was working perfectly. The collapse IS the thing under test, so
+                # the fixture builds it instead of hoping the environment supplies it.
+                anthropic_model_classification="claude-haiku-4-5",
+                anthropic_model_extraction="claude-haiku-4-5",
+                anthropic_model_reasoning="claude-haiku-4-5",
                 bedrock_model_classification=HAIKU_PROFILE,
                 bedrock_model_extraction=HAIKU_PROFILE,
                 bedrock_model_reasoning=SONNET_PROFILE,

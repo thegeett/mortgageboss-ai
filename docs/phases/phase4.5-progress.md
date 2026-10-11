@@ -1146,12 +1146,47 @@ needs no database and 2.5s, so it survives the memory pressure a full run does n
 exactly: LP-973's 9192 outcomes, already net of the seven, plus the eight test functions `git diff
 322470f4..8fd8e8d6 -- backend/tests` adds (LP-975's six and the review's two) and none removed.
 
-**A PASS COUNT AT THIS SHA IS STILL NOT RECORDED, because it is still not measured:** five attempts at a
+**A PASS COUNT AT THAT SHA WAS NEVER RECORDED, because it was never measured:** five attempts at a
 full run were killed by host memory pressure on 2026-10-09 (swap sat at 26.1 of 26.6 GB with no other
 pytest running). Collected is a count of the file set, not of outcomes — it says nothing about whether
-they pass — and `tests/conditions` + `tests/api` (1371 passed, 2 skipped) is the largest green slice
-measured here. Publishing arithmetic as though it were a measurement is the thing this file should not
-do.
+they pass — and `tests/conditions` + `tests/api` (1371 passed, 2 skipped) was the largest green slice
+measured then. Publishing arithmetic as though it were a measurement is the thing this file should not do.
+
+### 2026-10-11: a full run finally completed, and what it bought
+
+**`1 failed, 9291 passed, 4 skipped, 1 xfailed` in 7m34s**, at `a711fcf9` PLUS another session's
+uncommitted LP-970 (17 modified paths and an untracked `test_lp970_routes.py` with 16 tests). That scope
+is part of the figure: it is not the clean baseline this note has been asking for, and the clean one still
+waits for LP-970 to land.
+
+**THE ONE FAILURE HAD BEEN RED FOR TWO DAYS AND NO SLICE COULD SEE IT.**
+`tests/ai/test_provider_selection_b1.py::test_a_sonnet_reasoning_id_cannot_survive_boot` also failed in
+the 2026-10-09 LP-968 and LP-973 runs — the same line is in both saved outputs — and every slice anyone
+runs (conditions + api + the readonly, migration, mirror and reminder guards) excludes `tests/ai`. That
+is the argument for a full figure in one sentence: the slices are green and the suite is not.
+
+Diagnosed before being touched, and the guard was fine: the test's fixture starts from
+`settings.model_dump()`, so its three `ANTHROPIC_MODEL_*` values come from the developer's `.env`. The
+validator refuses tiers that SHARE one Anthropic value but map to different Bedrock ids; on a machine
+with Sonnet on the reasoning tier — the documented configuration — they do not share one, so there was
+no ambiguity to refuse and the test failed with DID NOT RAISE against a validator doing its job. The
+fixture now states the collapse instead of inheriting it; `tests/ai` is 1681 passed, and putting the
+reasoning tier back on a different value reproduces the original failure exactly.
+
+**The absolute WITH that fixed is not recorded here, because the re-run was killed** — the seventh kill,
+minutes after the sixth-to-last completed, with nothing else running either time. So the honest
+statement about this machine is not "a full run can complete": it is that at roughly 700 MB of free swap
+a full run completes SOMETIMES and is killed SOMETIMES, with no other load to blame. Yesterday's note
+attributed the kills to another session's workers; that explanation was too kind to the machine.
+
+**The swap, measured rather than inferred.** 23.9 of 24.6 GB used with nothing running.
+`vmmap --summary` on `com.apple.Virtualization.VirtualMachine` (the process that maps the Colima guest's
+RAM, not the `limactl hostagent` that manages it — the first reading here was of the wrong pid) reports
+VIRTUAL 9.6G, RESIDENT 3.3G, **SWAPPED 2.0G**, with an 8.2G writable region matching the configured
+8 GiB. So the VM is the largest identified single holder and still accounts for about a twelfth of the
+total: it is a contributor, not the explanation. Where the rest lives is unmeasured; `vmmap` per process
+is the instrument, and `colima stop` with a reading either side is the decisive experiment, which belongs
+to whoever is willing to lose both container stacks for a minute.
 
 **Measuring it has two preconditions, and the second one bit on the first attempt after the machine
 freed up.** The tree must be QUIET (no other pytest: one test DB, one pytest) and it must be CLEAN at
