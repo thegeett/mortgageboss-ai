@@ -315,6 +315,44 @@ class _FileFacts:
     lender_processing: bool
 
 
+@dataclass(frozen=True)
+class _RawAsk:
+    """A reading's raw item in the shape `recipient_for` reads (LP-970 review)."""
+
+    option: PlanOption
+    performer: Performer
+    performers: list[str]
+
+
+def _ask_is_hers(option: PlanOption, raw: dict[str, Any]) -> bool:
+    """LP-970 REVIEW — `route_ask`'s rule CALLED, not restated: an ask with no email destination is her
+    own task (LP-942), and `route_ask` asks `recipient_for(item) is None`.
+
+    THE RESTATEMENT WAS "THE FIRST PERFORMER IS THE PROCESSOR", which is nearly the same set and not
+    the same one. `recipient_for` relays any list CONTAINING the LO to the LO's email wherever it sits
+    (0132's disclosure goes out in the LO's email), so `[processor, lo]` HAS a destination:
+    `route_ask` leaves it an ask, while the restated rule made it hers. The route's predicted plan and
+    the built one would then disagree on that task for ever, and `chosen_route` would never match, so
+    the route could not read as chosen. Nothing ships that shape today — the library's only
+    multi-performer item is 0132's `[borrower, lo]` — but a reading's performers come from the model,
+    and the next relay added to `recipient_for` would split the two rules again.
+
+    A performer the vocabulary does not know keeps the old literal answer rather than raising: these
+    are RAW reading dicts, not the validated items `route_ask` sees.
+    """
+    names = [str(each) for each in (raw.get("performers") or ["borrower"])]
+    try:
+        people = [Performer(name) for name in names]
+    except ValueError:
+        return names[0] == Performer.PROCESSOR.value
+    return (
+        recipient_for(
+            _RawAsk(option=option, performer=people[0], performers=[p.value for p in people])
+        )
+        is None
+    )
+
+
 def route_target(
     route: Route,
     condition: Condition,
@@ -352,8 +390,7 @@ def route_target(
     tasks: dict[str, PlanOption] = {}
     for raw in raws:
         option = _planned_option(raw, condition_type, step, forced, facts)
-        # `route_ask`'s rule (LP-942): an ask addressed to her is her own task.
-        if option in _ASKS and str((raw.get("performers") or ["borrower"])[0]) == "processor":
+        if option in _ASKS and _ask_is_hers(option, raw):
             option = PlanOption.I_WILL_DO_IT
         tasks[str(raw.get("key"))] = option
     return _settled_step(step, [(option, True) for option in tasks.values()]), tasks

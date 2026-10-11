@@ -1173,7 +1173,24 @@ no ambiguity to refuse and the test failed with DID NOT RAISE against a validato
 fixture now states the collapse instead of inheriting it; `tests/ai` is 1681 passed, and putting the
 reasoning tier back on a different value reproduces the original failure exactly.
 
-**The absolute WITH that fixed is not recorded here, because the re-run was killed** — the seventh kill,
+### 2026-10-11, later: THE BASELINE, measured on a clean tree
+
+**`9292 passed, 4 skipped, 1 xfailed, 0 failed` in 8m16s at `d2dcd55b`, with `git status --porcelain`
+empty.** This is the figure every row above was asking to be read against, and the first green full run
+in this file's records.
+
+It reconciles with the run before it, which is why both are trustworthy: that one measured the same file
+set — `a711fcf9` plus LP-970 uncommitted, which is what `d2dcd55b` then committed — and gave
+`1 failed, 9291 passed`. The one failure was the b1 fixture, fixed in `9bc0f258`, so the same set now
+reads `9292 passed`: the failure became a pass and nothing else moved. 9291 + 1 = 9292, with the file
+set held constant and each number measured rather than derived.
+
+**What this replaces.** Every figure above is a slice; the slices were green for two days while the suite
+was not, because none of them includes `tests/ai`. A row's slice figure still says what that slice did,
+but the absolute is the one that would have caught the red test, and it is now recorded.
+
+**The absolute with the b1 fix was not recorded at the time, because the re-run was killed** — the
+seventh kill,
 minutes after the sixth-to-last completed, with nothing else running either time. So the honest
 statement about this machine is not "a full run can complete": it is that at roughly 700 MB of free swap
 a full run completes SOMETIMES and is killed SOMETIMES, with no other load to blame. Yesterday's note

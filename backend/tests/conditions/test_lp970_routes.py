@@ -407,3 +407,133 @@ def test_a_lender_route_on_a_pushed_back_reading_is_still_the_lenders() -> None:
         LenderConditionSettings(),
         lender_processing=False,
     ) == (PlanOption.LENDER_DOING_IT, {"inspection": PlanOption.LENDER_DOING_IT})
+
+
+def test_no_two_routes_in_a_group_can_both_match_a_condition() -> None:
+    """LP-970 REVIEW — the builder's third question, over the WHOLE table rather than by example.
+
+    `chosen_route` answers with the FIRST route whose target the condition carries, so two routes that
+    can both match make the answer arbitrary and silent: she picks one and the panel shows the other.
+    Two guards exist already — `test_no_two_routes_in_a_pair_share_a_step` pins that no two ROWS
+    declare the same shape, and `test_the_three_pa03_targets_differ` pins that PA-03's computed targets
+    differ on a condition. Neither covers the shape the question is about: `chosen_route` compares only
+    LIVE tasks, and a key missing from them passes as `None`, so two routes that AGREE on one task and
+    DIFFER on another both match once the differing task is done.
+
+    This computes every group's target on a condition carrying its type's library tasks and asserts no
+    pair can collide that way. Measured when it was written: every routed type has one library task
+    except IN-02, whose two routes differ on BOTH of its tasks — so nothing collides today, and a row
+    that would collide fails here rather than in a drawer.
+    """
+    from itertools import combinations
+
+    from app.conditions.library.loader import load_library
+    from app.services.condition_plan import route_target
+
+    def collide(
+        first: tuple[Any, dict[str, PlanOption]], second: tuple[Any, dict[str, PlanOption]]
+    ) -> tuple[list[str], list[str]]:
+        """The keys two targets differ on and agree on, once their steps match. Both non-empty is the
+        collision: the ones they differ on can be done, and then both routes match."""
+        (step_a, tasks_a), (step_b, tasks_b) = first, second
+        if step_a is not step_b:
+            return [], []
+        differ = [
+            key for key in set(tasks_a) | set(tasks_b) if tasks_a.get(key) is not tasks_b.get(key)
+        ]
+        agree = [key for key in set(tasks_a) & set(tasks_b) if tasks_a[key] is tasks_b[key]]
+        return differ, agree
+
+    # THE POSITIVE CONTROL FOR THE CHECK ITSELF, because no row in the table collides today: a guard
+    # for a shape that does not exist yet passes whether or not it works, so the detector is shown to
+    # fire on a constructed pair that IS the shape.
+    assert collide(
+        (None, {"x": PlanOption.ASK_BORROWER, "y": PlanOption.I_WILL_DO_IT}),
+        (None, {"x": PlanOption.ASK_BORROWER, "y": PlanOption.LENDER_DOING_IT}),
+    ) == (["y"], ["x"])
+    assert collide(
+        (None, {"x": PlanOption.ASK_BORROWER}),
+        (PlanOption.LENDER_DOING_IT, {"x": PlanOption.ASK_BORROWER}),
+    ) == ([], []), "different steps are told apart before the tasks are compared"
+
+    library = load_library()
+    assert ROUTES, "the positive control: an empty table would pass this vacuously"
+    compared = 0
+    for (lender_key, type_id), routes in ROUTES.items():
+        condition_type = library.get(type_id)
+        assert condition_type is not None, f"{type_id} has routes but no library type"
+        condition = Condition(
+            canonical_type_id=type_id,
+            info_only=False,
+            reading={
+                "items": [
+                    {
+                        "key": each.key,
+                        "performers": list(each.performers) or [each.performer],
+                        "option": each.option.value,
+                    }
+                    for each in condition_type.items
+                ]
+            },
+        )
+        targets = {
+            route.key: route_target(
+                route, condition, LenderConditionSettings(), lender_processing=False
+            )
+            for route in routes
+        }
+        for first, second in combinations(targets, 2):
+            compared += 1
+            differ, agree = collide(targets[first], targets[second])
+            tasks_a, tasks_b = targets[first][1], targets[second][1]
+            if targets[first][0] is not targets[second][0]:
+                continue
+            assert not tasks_a or not tasks_b or differ, (
+                f"{lender_key}/{type_id}: {first} and {second} have identical targets"
+            )
+            assert not (differ and agree), (
+                f"{lender_key}/{type_id}: {first} and {second} share a step and agree on {agree} "
+                f"while differing on {differ} — with those done, both match and table order decides"
+            )
+    assert compared >= len(ROUTES), "the control: every group contributed at least one comparison"
+
+
+def test_a_route_asks_route_asks_own_rule_about_who_the_ask_goes_to() -> None:
+    """LP-970 REVIEW — the builder's second question: the two rules are NOT the same set.
+
+    `route_target` decided "an ask addressed to her is her own task" by looking at the first performer;
+    `route_ask`, the rule it is copying, asks `recipient_for(item) is None`. Those agree on every shape
+    but one: `recipient_for` relays any list CONTAINING the LO to the LO's email wherever it sits
+    (0132's disclosure goes out in the LO's), so `[processor, lo]` HAS a destination. `route_ask` leaves
+    it an ask; the copy made it hers. The route's predicted plan and the built one would then disagree
+    on that task for ever and the route could never read as chosen.
+
+    Nothing ships that shape — the library's only multi-performer item is 0132's `[borrower, lo]` — so
+    this is about the rule rather than about today's data, which is why it is asserted against
+    `recipient_for` itself rather than through a fixture that cannot currently exist.
+    """
+    from app.models.condition_vocabulary import Performer
+    from app.services.condition_plan import _ask_is_hers, _RawAsk, recipient_for
+
+    hers = {"key": "x", "performers": ["processor"], "option": "ask_third_party"}
+    lo_too = {"key": "x", "performers": ["processor", "lo"], "option": "ask_third_party"}
+
+    # THE PREMISE, from the rule being copied: one has no destination, the other goes to the LO.
+    assert (
+        recipient_for(_RawAsk(PlanOption.ASK_THIRD_PARTY, Performer.PROCESSOR, ["processor"]))
+        is None
+    )
+    assert recipient_for(
+        _RawAsk(PlanOption.ASK_THIRD_PARTY, Performer.PROCESSOR, ["processor", "lo"])
+    ) == ("lo", "LO")
+
+    assert _ask_is_hers(PlanOption.ASK_THIRD_PARTY, hers) is True
+    assert _ask_is_hers(PlanOption.ASK_THIRD_PARTY, lo_too) is False, (
+        "an ask the LO sends is not her own task, however the performers are ordered"
+    )
+    # A performer the vocabulary does not know keeps the old literal answer rather than raising:
+    # these are raw reading dicts, not the validated items `route_ask` sees.
+    assert _ask_is_hers(PlanOption.ASK_THIRD_PARTY, {"performers": ["nonsense"]}) is False
+    assert (
+        _ask_is_hers(PlanOption.ASK_THIRD_PARTY, {"performers": ["processor", "nonsense"]}) is True
+    )
