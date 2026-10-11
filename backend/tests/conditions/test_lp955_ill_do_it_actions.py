@@ -189,14 +189,23 @@ async def test_our_vendor_reads_as_chosen_and_a_step_no_route_sets_reads_as_neit
 
 def test_no_two_routes_in_a_pair_share_a_step() -> None:
     """The premise `chosen_route` rests on, over the whole table: it answers with the first route
-    whose step the condition carries, so two routes sharing one step (`None` counts) would make the
-    answer arbitrary. A new ROUTES row that breaks this fails here rather than in a drawer."""
+    whose target the condition carries, so two routes with one target would make the answer
+    arbitrary. A new ROUTES row that breaks this fails here rather than in a drawer.
+
+    LP-970 — a route is no longer only a step. A step-only route (LP-955's) is told apart by its step,
+    `None` included; a route with tasks by the setting it forces or the option it gives every task.
+    Two step-only routes sharing a step are still the original failure. That the PA-03 routes' targets
+    really differ on a condition is `test_lp970_routes.test_the_three_pa03_targets_differ`."""
     from app.services.condition_plan import ROUTES
 
     assert ROUTES, "the positive control: an empty table would pass this vacuously"
     for pair, routes in ROUTES.items():
-        steps = [route.step for route in routes]
-        assert len(steps) == len(set(steps)), f"{pair} has two routes with one step"
+        step_only = [
+            route.step for route in routes if route.setting is None and route.task_option is None
+        ]
+        assert len(step_only) == len(set(step_only)), f"{pair} has two routes with one step"
+        shapes = [(r.step, r.setting, r.setting_on, r.task_option) for r in routes]
+        assert len(shapes) == len(set(shapes)), f"{pair} has two routes with one target"
         assert len({route.key for route in routes}) == len(routes), f"{pair} repeats a route key"
 
 

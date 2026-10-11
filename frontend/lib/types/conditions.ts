@@ -1441,4 +1441,7 @@ export interface ConditionRoute {
   key: string;
   label: string;
   hint: string;
+  /** LP-970 — the route the lender's settings point to, and why. */
+  suggested?: boolean;
+  why?: string | null;
 }

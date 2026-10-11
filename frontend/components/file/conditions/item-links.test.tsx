@@ -18,6 +18,7 @@ vi.mock("@/lib/api/conditions", () => ({
   useUploadToItem: () => ({ isPending: false, mutate: (b: unknown) => calls.upload.push(b) }),
   useUpdateItem: () => ({ isPending: false, mutate: (b: unknown) => calls.update.push(b) }),
   useRevertPlan: () => ({ mutate: vi.fn(), isPending: false }),
+  useChooseRoute: () => ({ mutate: vi.fn(), isPending: false }),
   useFileLender: () => ({ data: undefined }),
   useLogCall: () => ({ mutate: vi.fn(), isPending: false }),
   useDescribeSteps: () => ({ mutate: vi.fn(), isPending: false }),

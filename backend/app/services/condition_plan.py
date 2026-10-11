@@ -156,20 +156,113 @@ _CANONICAL_DEFAULTS: dict[str, dict[str, Any]] = {
 
 @dataclass(frozen=True)
 class Route:
-    """LP-955 — one way a condition gets done at one lender, offered as a choice on the condition."""
+    """LP-955 — one way a condition gets done at one lender, offered as a choice on the condition.
+
+    LP-970 — THREE KINDS, by which field says what the route does:
+    - `step` only (LP-955's): the condition's own step; its tasks are left as they are.
+    - `setting`: THE PLAN AS IT WOULD BE BUILT WITH THIS LENDER SETTING ON OR OFF (`setting_on`). The
+      condition's step and every task's step are recomputed by the plan's own rules (`_step_and_reason`,
+      `_planned_option`) with that one setting forced, so a route can never disagree with what the plan
+      would have proposed. The route that matches the lender's actual setting is the SUGGESTED one.
+    - `task_option`: every task of the type to one step, the condition's step cleared ("You ask UWM to
+      order it": the inspection becomes an ask, which goes to the lender because the appraiser's asks
+      do, LP-942). Never suggested: no setting says so.
+
+    `label` and `hint` may name `{lender}`, filled with the lender's name.
+    """
 
     key: str
     label: str
     hint: str
     #: The condition's step when she picks it; None leaves the items to carry their own (her task).
-    step: PlanOption | None
+    step: PlanOption | None = None
+    setting: str | None = None
+    setting_on: bool = True
+    task_option: PlanOption | None = None
+    #: LP-970 — why this route is the suggestion, when it is (setting routes only).
+    suggested_because: str | None = None
 
 
 #: LP-955 — the choices a condition offers at a lender, by (canonical lender key, library type). Data,
 #: not branches: a new lender or type is a new row. IV-01 at UWM: credit pulled in UWM's own system
 #: means UWM holds the invoice, so the underwriter is asked to clear it; pulled through the broker's own
 #: vendor, the invoice is hers to upload.
+#: Types the Processor Assist setting ("lender orders title updates, insurance, payoffs") covers.
+_PROCESSOR_ASSIST_TYPES = frozenset({"TI-01", "TI-02", "TI-05", "IN-01", "IN-02", "IN-04"})
+
+#: LP-970 — the routes for a type at ANY lender, keyed `("*", type)`. Researched, not yet confirmed by the
+#: domain expert: each is driven by a lender setting the owner already decided (decision 1 and LP-925),
+#: so the suggestion has a basis on every file. A lender's own row (LP-955's) wins over these.
+_LENDER_ORDERS_INSPECTION = "lender_orders_final_inspection"
+_LENDER_VERIFIES_BUSINESS = "lender_verifies_business_existence"
+_PROCESSOR_ASSIST = "lender_orders_title_insurance_payoffs"
+_PROCESSOR_ASSIST_ROUTES: tuple[Route, ...] = (
+    Route(
+        key="lender_orders",
+        label="{lender} orders it (Processor Assist)",
+        hint="{lender} gets it from the title company or insurance agent. You watch for it to clear.",
+        setting=_PROCESSOR_ASSIST,
+        setting_on=True,
+        suggested_because="{lender}'s settings say it orders title, insurance and payoffs.",
+    ),
+    Route(
+        key="ask_party",
+        label="You ask for it",
+        hint="It goes in the email to the title company or insurance agent, and you send it.",
+        setting=_PROCESSOR_ASSIST,
+        setting_on=False,
+        suggested_because="{lender}'s settings say you ask the party yourself.",
+    ),
+)
+
 ROUTES: dict[tuple[str, str], tuple[Route, ...]] = {
+    ("*", "PA-03"): (
+        Route(
+            key="lender_orders",
+            label="{lender} orders it",
+            hint="{lender} orders the final inspection through its own appraisal company. You watch "
+            "for the completion report (1004D).",
+            setting=_LENDER_ORDERS_INSPECTION,
+            setting_on=True,
+            suggested_because="{lender}'s settings say it orders final inspections.",
+        ),
+        Route(
+            key="ask_lender",
+            label="You ask {lender} to order it",
+            hint="Appraisal requests go through the lender, so the order request goes in the email "
+            "to {lender}, and you send it.",
+            task_option=PlanOption.ASK_THIRD_PARTY,
+        ),
+        Route(
+            key="order_yourself",
+            label="You order it",
+            hint="You place the order, in {lender}'s portal or through your appraisal company, and "
+            "upload the completion report (1004D) when it comes.",
+            setting=_LENDER_ORDERS_INSPECTION,
+            setting_on=False,
+            suggested_because="{lender}'s settings say you order final inspections yourself.",
+        ),
+    ),
+    ("*", "IE-08"): (
+        Route(
+            key="lender_verifies",
+            label="{lender} verifies it",
+            hint="{lender} checks the business exists itself. You watch for it to clear.",
+            setting=_LENDER_VERIFIES_BUSINESS,
+            setting_on=True,
+            suggested_because="{lender}'s settings say it verifies self-employed businesses.",
+        ),
+        Route(
+            key="borrower_provides",
+            label="You get it from the borrower",
+            hint="The borrower sends a CPA letter, business licence or regulator listing, and we "
+            "check it.",
+            setting=_LENDER_VERIFIES_BUSINESS,
+            setting_on=False,
+            suggested_because="{lender}'s settings say the borrower provides it.",
+        ),
+    ),
+    **{("*", type_id): _PROCESSOR_ASSIST_ROUTES for type_id in sorted(_PROCESSOR_ASSIST_TYPES)},
     ("uwm", "IV-01"): (
         Route(
             key="lender_system",
@@ -188,12 +281,100 @@ ROUTES: dict[tuple[str, str], tuple[Route, ...]] = {
 
 
 def routes_for(lender_key: str | None, type_id: str | None) -> tuple[Route, ...]:
+    """The lender's own routes for the type (LP-955), else the type's routes at any lender (LP-970).
+
+    A file with no lender has none: a route names who does the work, and "the lender" with no lender
+    cannot be checked against a setting.
+    """
     if not lender_key or not type_id:
         return ()
-    return ROUTES.get((lender_key, type_id), ())
+    return ROUTES.get((lender_key, type_id)) or ROUTES.get(("*", type_id), ())
 
 
-def chosen_route(condition: Condition, routes: tuple[Route, ...]) -> str | None:
+#: LP-970 — the tasks a route sets: the ones still being worked, asked or not.
+_ROUTED_STATUSES = frozenset(
+    {ConditionItemStatus.OPEN, ConditionItemStatus.REQUESTED, ConditionItemStatus.RECEIVED}
+)
+#: LP-970 — the condition's steps that say nobody does the work.
+_NOT_DOING = frozenset({PlanOption.PUSH_BACK, PlanOption.INFORMATION_ONLY})
+
+
+def routes_offered(condition: Condition, lender_key: str | None) -> tuple[Route, ...]:
+    """The routes the condition offers now: none while its plan says nobody does the work (pushed back,
+    or information only). Every route there would be a click that changes nothing she can see: the
+    tasks are not needed, and how they would get done is moot until she moves it off that step."""
+    if condition.next_step in _NOT_DOING:
+        return ()
+    return routes_for(lender_key, condition.canonical_type_id)
+
+
+@dataclass(frozen=True)
+class _FileFacts:
+    """What `_item_option` reads of the file: the switch that hands third-party asks to the lender."""
+
+    lender_processing: bool
+
+
+def route_target(
+    route: Route,
+    condition: Condition,
+    settings: LenderConditionSettings,
+    *,
+    lender_processing: bool,
+) -> tuple[PlanOption | None, dict[str, PlanOption]]:
+    """LP-970 — what choosing `route` makes the condition: its own step, and each task's step by key.
+
+    An empty task map means the route leaves the tasks alone (LP-955's step-only routes)."""
+    from dataclasses import replace
+
+    if route.setting is None and route.task_option is None:
+        return route.step, {}
+    library = load_library()
+    condition_type = library.get(condition.canonical_type_id)
+    reading = condition.reading or {}
+    raws = [raw for raw in reading.get("items") or [] if isinstance(raw, dict)]
+    if route.task_option is not None:
+        library_keys = {each.key for each in condition_type.items} if condition_type else set()
+        return None, {
+            str(raw.get("key")): route.task_option
+            for raw in raws
+            if not library_keys or str(raw.get("key")) in library_keys
+        }
+    override: dict[str, Any] = {str(route.setting): route.setting_on}
+    forced = replace(settings, **override)
+    facts = _FileFacts(lender_processing=lender_processing)
+    # A route is how the work gets done, so it presumes the work is done: a reading's push back or
+    # "information only" is not put back on a condition she has moved off it (`routes_offered`).
+    doing = {k: v for k, v in reading.items() if k not in ("push_back", "information_only")}
+    step, _ = _step_and_reason(condition, condition_type, doing, forced, facts)  # type: ignore[arg-type]
+    if step in _NOT_DOING:
+        step = None
+    tasks: dict[str, PlanOption] = {}
+    for raw in raws:
+        option = _planned_option(raw, condition_type, step, forced, facts)
+        # `route_ask`'s rule (LP-942): an ask addressed to her is her own task.
+        if option in _ASKS and str((raw.get("performers") or ["borrower"])[0]) == "processor":
+            option = PlanOption.I_WILL_DO_IT
+        tasks[str(raw.get("key"))] = option
+    return _settled_step(step, [(option, True) for option in tasks.values()]), tasks
+
+
+def suggested_route(routes: tuple[Route, ...], settings: LenderConditionSettings) -> str | None:
+    """LP-970 — the route the lender's settings point to: the setting route matching the actual value."""
+    for route in routes:
+        if route.setting is not None and getattr(settings, route.setting) is route.setting_on:
+            return route.key
+    return None
+
+
+def chosen_route(
+    condition: Condition,
+    routes: tuple[Route, ...],
+    *,
+    items: list[Any] | None = None,
+    settings: LenderConditionSettings | None = None,
+    lender_processing: bool = False,
+) -> str | None:
     """The route this condition is on: the one whose step it carries, the task route (`step=None`)
     included. None when its step is one no route sets.
 
@@ -206,9 +387,35 @@ def chosen_route(condition: Condition, routes: tuple[Route, ...]) -> str | None:
 
     AT MOST ONE ROUTE PER PAIR MAY CARRY A GIVEN STEP, `None` included, or this is ambiguous;
     `test_no_two_routes_in_a_pair_share_a_step` pins it over the whole table.
+
+    LP-970 — A ROUTE WITH TASKS IS CHOSEN WHEN THE STEP AND EVERY TASK IT SETS MATCH: the condition's
+    step, and each live task (not a split part) its target names. `items` are the condition's tasks
+    as the payload has them; without `settings` only step-only routes can read as chosen.
     """
+    # The tasks still being worked, the ones `choose_route` changes: a done or not-needed task is on
+    # no route (a task the file already held reads "already in file", which no route sets).
+    live = [
+        each
+        for each in items or []
+        if getattr(each, "part_of_item_id", None) is None
+        and str(getattr(each, "status", "")) in _ROUTED_STATUSES
+    ]
     for route in routes:
-        if condition.next_step is route.step:
+        if route.setting is None and route.task_option is None:
+            if condition.next_step is route.step:
+                return route.key
+            continue
+        if settings is None:
+            continue
+        step, tasks = route_target(route, condition, settings, lender_processing=lender_processing)
+        if condition.next_step is not step:
+            continue
+        by_key = {str(each.key): each.option for each in live}
+        if all(by_key.get(key) in (None, option) for key, option in tasks.items()) and any(
+            key in by_key for key in tasks
+        ):
+            return route.key
+        if not tasks and not by_key:
             return route.key
     return None
 
@@ -219,21 +426,58 @@ async def choose_route(
     """LP-955 — she picks how this condition gets done. The step follows; the plan re-syncs its drafts
     (the underwriter's question appears or goes) through `set_next_step`, the one door for steps."""
     lender = await db.get(Lender, condition.lender_id) if condition.lender_id else None
-    routes = routes_for(
-        lender.canonical_lender_key if lender else None, condition.canonical_type_id
-    )
+    routes = routes_offered(condition, lender.canonical_lender_key if lender else None)
     route = next((each for each in routes if each.key == route_key), None)
     if route is None:
         raise PlanRefused("That choice is not offered for this condition.")
-    await set_next_step(db, condition=condition, next_step=route.step, actor_user_id=actor_user_id)
+    if route.setting is None and route.task_option is None:
+        await set_next_step(
+            db, condition=condition, next_step=route.step, actor_user_id=actor_user_id
+        )
+        return
+    # LP-970 — THE ROUTE REBUILDS THE PATH, THROUGH THE ONE DOOR FOR EACH CHANGE: the condition's step
+    # through `set_next_step`, each task's through `update_item`. Each writes its own
+    # `condition_plan_changed`, so the history says what changed, "Go back to the suggested plan"
+    # replays it (LP-968), and the drafts follow (an ask joins its email, a task leaves it).
+    loan_file = await db.get(LoanFile, condition.loan_file_id)
+    step, tasks = route_target(
+        route,
+        condition,
+        lender_condition_settings(lender),
+        lender_processing=bool(loan_file and loan_file.lender_processing),
+    )
+    if condition.next_step is not step:
+        await set_next_step(db, condition=condition, next_step=step, actor_user_id=actor_user_id)
+    items = (
+        await db.execute(
+            select(ConditionItem).where(
+                ConditionItem.condition_id == condition.id,
+                ConditionItem.deleted_at.is_(None),
+                ConditionItem.part_of_item_id.is_(None),
+                ConditionItem.status.in_(_ROUTED_STATUSES),
+            )
+        )
+    ).scalars()
+    for item in list(items):
+        option = tasks.get(item.key)
+        if option is None or option is item.option:
+            continue
+        await update_item(
+            db,
+            condition=condition,
+            item=item,
+            option=option,
+            name=None,
+            performers=None,
+            due_date=None,
+            actor_user_id=actor_user_id,
+        )
 
 
 #: Types the "lender orders the final inspection / appraisal updates" setting covers.
 _FINAL_INSPECTION_TYPES = frozenset({"PA-03"})
 #: LP-945 — types the "lender verifies business existence" setting covers.
 _BUSINESS_EXISTENCE_TYPES = frozenset({"IE-08"})
-#: Types the Processor Assist setting ("lender orders title updates, insurance, payoffs") covers.
-_PROCESSOR_ASSIST_TYPES = frozenset({"TI-01", "TI-02", "TI-05", "IN-01", "IN-02", "IN-04"})
 
 
 def lender_condition_settings(lender: Lender | None) -> LenderConditionSettings:
@@ -494,6 +738,47 @@ def _item_option(
     return option
 
 
+def _planned_option(
+    raw: dict[str, Any],
+    condition_type: ConditionType | None,
+    step: PlanOption | None,
+    settings: LenderConditionSettings,
+    loan_file: Any,
+) -> PlanOption:
+    """One task's step as the plan sets it, given the condition's own step. SHARED by `build_plan` and
+    the routes (LP-970), so a route is exactly the plan its setting would have built.
+
+    LP-954 — THE LENDER DOES THE TYPE'S WORK, NOT EVERY CLAUSE'S. A task the reading added for a clause
+    the library type does not cover (1228's "possibly a Change of Circumstance", the LO's re-disclosure)
+    keeps its own step when the lender orders the inspection.
+    """
+    option = _item_option(raw, condition_type, settings, loan_file)
+    library_keys = {each.key for each in condition_type.items} if condition_type else None
+    if step is PlanOption.LENDER_DOING_IT and (
+        library_keys is None or str(raw.get("key")) in library_keys
+    ):
+        return PlanOption.LENDER_DOING_IT
+    return option
+
+
+def _settled_step(
+    step: PlanOption | None, tasks: list[tuple[PlanOption, bool]]
+) -> PlanOption | None:
+    """The condition's step once its tasks are planned: each task's step, and whether it is still needed.
+    SHARED by `build_plan` and the routes (LP-970), like `_planned_option`.
+
+    When every task is the lender's, so is the condition. LP-954 — when the lender is not doing ALL of
+    it, the tasks carry their own steps, and the reason still says what the lender does.
+    """
+    if step is None and tasks and all(option is PlanOption.LENDER_DOING_IT for option, _ in tasks):
+        return PlanOption.LENDER_DOING_IT
+    if step is PlanOption.LENDER_DOING_IT and any(
+        option is not PlanOption.LENDER_DOING_IT for option, needed in tasks if needed
+    ):
+        return None
+    return step
+
+
 def _event(
     condition: Condition,
     kind: ConditionEventKind,
@@ -570,17 +855,12 @@ async def build_plan(db: AsyncSession, *, round_id: UUID, today: date | None = N
         # LP-954 — THE LENDER DOES THE TYPE'S WORK, NOT EVERY CLAUSE'S. An item the reading added for a
         # clause the library type does not cover (1228's "possibly a Change of Circumstance", the LO's
         # re-disclosure) keeps its own step when the lender orders the inspection.
-        library_keys = {each.key for each in condition_type.items} if condition_type else None
         for index, raw in enumerate(reading.get("items") or []):
             performers = [str(p) for p in raw.get("performers") or ["borrower"]]
-            option = _item_option(raw, condition_type, settings, loan_file)
+            option = _planned_option(raw, condition_type, step, settings, loan_file)
             status = ConditionItemStatus.OPEN
             if step in (PlanOption.PUSH_BACK, PlanOption.INFORMATION_ONLY):
                 status = ConditionItemStatus.NOT_NEEDED
-            elif step is PlanOption.LENDER_DOING_IT and (
-                library_keys is None or str(raw.get("key")) in library_keys
-            ):
-                option = PlanOption.LENDER_DOING_IT
             item = ConditionItem(
                 company_id=condition.company_id,
                 loan_file_id=condition.loan_file_id,
@@ -644,20 +924,9 @@ async def build_plan(db: AsyncSession, *, round_id: UUID, today: date | None = N
             reason = REASON_LENDER_PROCESSING
         if condition.reading_status is ConditionReadingStatus.NEEDS_CONFIRMATION:
             reason = REASON_CONFIRM
-        if (
-            step is None
-            and created
-            and all(i.option is PlanOption.LENDER_DOING_IT for i in created)
-        ):
-            step = PlanOption.LENDER_DOING_IT
-        elif step is PlanOption.LENDER_DOING_IT and any(
-            i.option is not PlanOption.LENDER_DOING_IT
-            for i in created
-            if i.status is not ConditionItemStatus.NOT_NEEDED
-        ):
-            # LP-954 — the lender is not doing ALL of it: the items carry their own steps, and the
-            # reason still says what the lender does.
-            step = None
+        step = _settled_step(
+            step, [(i.option, i.status is not ConditionItemStatus.NOT_NEEDED) for i in created]
+        )
 
         condition.next_step = step
         condition.plan_reason = reason

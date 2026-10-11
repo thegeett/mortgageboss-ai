@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   useAddItem,
+  useChooseRoute,
   useConfirmPlan,
   useFileLender,
   useLogCall,
@@ -61,10 +62,11 @@ import { useId, useState } from "react";
  * - opened: on the left what the lender wants, when, "How it gets done" and the lender's words; on the
  *   right ONE numbered timeline for the whole condition, with her edits on each task's first step.
  *
- * WHAT IS NOT THE MOCKUP YET, on purpose: the route choices with a suggestion and a reason (LP-970),
- * "Add a step" and "my own way" (LP-969), and "Describe it" (LP-971). Until LP-970, "How it gets done"
- * holds each task's Next step select, with its ⓘ and meaning — the only way to change a task today —
- * and "Route:" names what those selects say.
+ * LP-970 — "HOW IT GETS DONE" OFFERS THE CONDITION'S ROUTES where its type has them (a final
+ * inspection, a business check, title and insurance), the suggested one marked with its reason, as in
+ * the mockup; choosing one rebuilds the path on the server. Each task's Next step select stays under
+ * "Change each task's step yourself", and is all there is for a type with no routes; "Route:" names the
+ * chosen route when there is one, else what the selects say.
  *
  * NO HIDE (the owner, 2026-10-08: "there should not be hide button plan section"). The plan is the step
  * she is on until she confirms it; the list appears after (LP-964).
@@ -108,6 +110,7 @@ export function RoundPlanPanel({
   const logCall = useLogCall(fileId);
   // LP-979 — the file's lender, so each plan's ending names who clears it.
   const fileLender = useFileLender(fileId);
+  const chooseRoute = useChooseRoute(fileId);
   const ownWay = useOwnWay(fileId);
   const removeItem = useRemoveItem(fileId);
   // LP-969 — "Check a document on the file" opens the link dialog on the task it just added.
@@ -432,6 +435,10 @@ export function RoundPlanPanel({
             onChangeStep={(to) => changeStep(condition, to)}
             onHelp={(title, current) => setHelp({ title, current })}
             lenderName={fileLender.data?.lender?.name ?? null}
+            onChooseRoute={(routeKey) => {
+              setRefusal(null);
+              chooseRoute.mutate({ conditionId: condition.id, route: routeKey }, { onError });
+            }}
           />
         ))}
       </div>
@@ -479,6 +486,9 @@ function live(condition: Condition): ConditionItem[] {
  * select's change produces, so it cannot disagree with the selects below it.
  */
 function routeOf(condition: Condition): string | null {
+  // LP-970 — the chosen route by name, "(suggested)" when it is the one the lender's settings point to.
+  const chosen = condition.routes?.find((route) => route.key === condition.chosen_route);
+  if (chosen) return `${chosen.label}${chosen.suggested ? " (suggested)" : ""}`;
   if (condition.next_step) return actionFor(condition.next_step, null);
   const phrases: string[] = [];
   for (const item of live(condition)) {
@@ -493,6 +503,7 @@ function routeOf(condition: Condition): string | null {
 function PlanRow({
   condition,
   lenderName,
+  onChooseRoute,
   open,
   onToggle,
   onOpenCondition,
@@ -530,6 +541,8 @@ function PlanRow({
   onHelp: (title: string, current: PlanOption) => void;
   /** LP-979 — the file's lender by name, so the plan's ending says who clears it ("UWM clears 1228"). */
   lenderName: string | null;
+  /** LP-970 — she picks one of the condition's routes; the server rebuilds the path. */
+  onChooseRoute: (routeKey: string) => void;
 }) {
   const detailsId = useId();
   const items = live(condition);
@@ -625,33 +638,67 @@ function PlanRow({
                 <p className="text-xs font-semibold uppercase tracking-wide text-foreground-2">
                   How it gets done
                 </p>
-                {ownStep ? (
-                  <HowRow
-                    name="The whole condition"
-                    option={ownStep}
-                    item={null}
-                    onChange={onChangeStep}
-                    onHelp={() => onHelp(`the whole condition (${code})`, ownStep)}
-                  />
+                {condition.routes && condition.routes.length > 0 ? (
+                  <RouteChoices condition={condition} onChoose={onChooseRoute} />
                 ) : null}
-                {items.map((item) => (
-                  <HowRow
-                    key={item.id}
-                    name={item.name}
-                    option={item.option}
-                    item={item}
-                    onChange={(to) => onChangeItem(item, to)}
-                    onHelp={() => onHelp(`${item.name} (${code})`, item.option)}
-                  />
-                ))}
+                {condition.routes && condition.routes.length > 0 ? (
+                  <details className="text-sm">
+                    <summary className="cursor-pointer text-xs font-medium text-primary">
+                      Change each task’s step yourself
+                    </summary>
+                    <div className="mt-2 flex flex-col gap-2">
+                      {ownStep ? (
+                        <HowRow
+                          name="The whole condition"
+                          option={ownStep}
+                          item={null}
+                          onChange={onChangeStep}
+                          onHelp={() => onHelp(`the whole condition (${code})`, ownStep)}
+                        />
+                      ) : null}
+                      {items.map((item) => (
+                        <HowRow
+                          key={item.id}
+                          name={item.name}
+                          option={item.option}
+                          item={item}
+                          onChange={(to) => onChangeItem(item, to)}
+                          onHelp={() => onHelp(`${item.name} (${code})`, item.option)}
+                        />
+                      ))}
+                    </div>
+                  </details>
+                ) : (
+                  <>
+                    {ownStep ? (
+                      <HowRow
+                        name="The whole condition"
+                        option={ownStep}
+                        item={null}
+                        onChange={onChangeStep}
+                        onHelp={() => onHelp(`the whole condition (${code})`, ownStep)}
+                      />
+                    ) : null}
+                    {items.map((item) => (
+                      <HowRow
+                        key={item.id}
+                        name={item.name}
+                        option={item.option}
+                        item={item}
+                        onChange={(to) => onChangeItem(item, to)}
+                        onHelp={() => onHelp(`${item.name} (${code})`, item.option)}
+                      />
+                    ))}
+                  </>
+                )}
                 {condition.plan_reason ? (
                   <p className="text-sm text-foreground-2">
                     <strong className="font-semibold text-foreground">Why we suggest this:</strong>{" "}
                     {condition.plan_reason}
                   </p>
                 ) : null}
-                {/* LP-969 — the last route on every condition, until LP-970 brings the others. Only
-                    while there is a suggestion left to clear: an OPEN task or a step of its own. */}
+                {/* LP-969 — the last route on every condition. Only while there is a suggestion left
+                    to clear: an OPEN task or a step of its own. */}
                 {ownStep !== null || condition.items.some((each) => each.status === "open") ? (
                   <div className="flex flex-col gap-1 rounded-[var(--radius-container)] border border-dashed border-border px-3 py-2.5">
                     <button
@@ -784,6 +831,60 @@ function Detail({ heading, children }: { heading: string; children: React.ReactN
       <p className="text-xs font-semibold uppercase tracking-wide text-foreground-2">{heading}</p>
       <p className="text-sm leading-relaxed text-foreground">{children}</p>
     </div>
+  );
+}
+
+/**
+ * LP-970 — "How it gets done": the condition's routes as choices, the suggested one marked with its
+ * reason, as in the agreed mockup. The chosen one is the server's (`chosen_route`, read from the
+ * condition's step and tasks), so a choice shows as made only once the rebuilt path has come back.
+ */
+function RouteChoices({
+  condition,
+  onChoose,
+}: {
+  condition: Condition;
+  onChoose: (routeKey: string) => void;
+}) {
+  const name = useId();
+  return (
+    <fieldset className="flex flex-col gap-2">
+      <legend className="sr-only">How {condition.lender_code ?? "this condition"} gets done</legend>
+      {(condition.routes ?? []).map((route) => {
+        const chosen = condition.chosen_route === route.key;
+        return (
+          <label
+            key={route.key}
+            className={cn(
+              "flex cursor-pointer gap-2.5 rounded-[var(--radius-container)] border bg-card px-3 py-2.5",
+              chosen ? "border-primary" : "border-border",
+            )}
+          >
+            <input
+              type="radio"
+              name={name}
+              checked={chosen}
+              onChange={() => onChoose(route.key)}
+              className="mt-1 accent-primary"
+            />
+            <span className="flex flex-col gap-0.5">
+              <span className="flex flex-wrap items-baseline gap-2">
+                <span className="text-sm font-semibold text-foreground">{route.label}</span>
+                {route.suggested ? (
+                  <span className="rounded-md bg-ai px-1.5 py-px text-[11px] font-semibold text-ai-foreground">
+                    Suggested
+                  </span>
+                ) : null}
+              </span>
+              <span className="text-xs text-foreground-2">{route.hint}</span>
+              {route.suggested && route.why ? (
+                <span className="text-xs text-foreground-2">{route.why}</span>
+              ) : null}
+            </span>
+          </label>
+        );
+      })}
+    </fieldset>
   );
 }
 

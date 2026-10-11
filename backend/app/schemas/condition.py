@@ -2299,6 +2299,9 @@ class RoutePublic(BaseModel):
     key: str
     label: str
     hint: str
+    #: LP-970 — the route the lender's settings point to, and why (`condition_plan.suggested_route`).
+    suggested: bool = False
+    why: str | None = None
 
 
 class RouteRequest(BaseModel):

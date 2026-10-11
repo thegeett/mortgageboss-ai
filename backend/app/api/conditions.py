@@ -15,6 +15,7 @@ scoped, so a round can only ever be opened on a file the caller's company owns.
 """
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
@@ -142,6 +143,7 @@ from app.services.condition_import import (
     import_round,
 )
 from app.services.condition_plan import (
+    LenderConditionSettings,
     PlanRefused,
     add_item,
     confirm_round_plan,
@@ -625,6 +627,18 @@ async def get_condition_round(round_: ScopedRound, db: DbSession) -> ConditionRo
     return _round_public(round_, per_round=per_round, imports=imports)
 
 
+@dataclass(frozen=True)
+class RouteLender:
+    """LP-970 — what a condition's routes need of its lender: the key that picks the routes, the name
+    they say, the settings that pick the suggestion, and the file's lender-processing switch, which the
+    plan's own rules read (`_item_option`)."""
+
+    key: str | None
+    name: str
+    settings: LenderConditionSettings
+    lender_processing: bool
+
+
 def _condition_public(
     condition: Condition,
     *,
@@ -633,7 +647,7 @@ def _condition_public(
     items: list[ConditionItemPublic] | None = None,
     question_draft: DraftTailPublic | None = None,
     evidence: list[ConditionEvidencePublic] | None = None,
-    lender_keys: dict[UUID, str | None],
+    route_lenders: dict[UUID, RouteLender],
     plans_changed: set[UUID],
 ) -> ConditionPublic:
     """One condition as the wire sees it, with the SERVICE's rules supplying the derived fields.
@@ -660,42 +674,78 @@ def _condition_public(
         # LP-947: the server's rule for who the next send waits on, not a client copy of it.
         waiting_on_when_sent=waiting_on_when_sent(condition.next_step, items or []),
         # LP-955: how this condition can get done at its lender ("Pulled in UWM's system" / "Our
-        # vendor"). REQUIRED of every caller (`lender_keys`), so no door leaves the choice off.
-        routes=_routes_public(condition, lender_keys),
+        # vendor"). REQUIRED of every caller (`route_lenders`), so no door leaves the choice off.
+        routes=_routes_public(condition, route_lenders, items or []),
         # LP-979: whether she has changed this condition's plan since it was suggested. REQUIRED of
-        # every caller (`plans_changed`), as `lender_keys` is, so no door answers "never".
+        # every caller (`plans_changed`), as `route_lenders` is, so no door answers "never".
         plan_changed=condition.id in plans_changed,
     )
 
 
 def _routes_public(
-    condition: Condition, lender_keys: dict[UUID, str | None]
+    condition: Condition,
+    route_lenders: dict[UUID, RouteLender],
+    items: list[ConditionItemPublic],
 ) -> tuple[list[RoutePublic], str | None]:
-    from app.services.condition_plan import chosen_route, routes_for
+    from app.services.condition_plan import chosen_route, routes_offered, suggested_route
 
-    key = lender_keys.get(condition.lender_id) if condition.lender_id else None
-    routes = routes_for(key, condition.canonical_type_id)
+    lender = route_lenders.get(condition.lender_id) if condition.lender_id else None
+    if lender is None:
+        return [], None
+    routes = routes_offered(condition, lender.key)
+    suggested = suggested_route(routes, lender.settings)
+
+    def said(text: str | None) -> str | None:
+        return text.replace("{lender}", lender.name) if text else None
+
     return (
-        [RoutePublic(key=r.key, label=r.label, hint=r.hint) for r in routes],
-        chosen_route(condition, routes),
+        [
+            RoutePublic(
+                key=r.key,
+                label=said(r.label) or r.label,
+                hint=said(r.hint) or r.hint,
+                suggested=r.key == suggested,
+                why=said(r.suggested_because) if r.key == suggested else None,
+            )
+            for r in routes
+        ],
+        chosen_route(
+            condition,
+            routes,
+            items=items,
+            settings=lender.settings,
+            lender_processing=lender.lender_processing,
+        ),
     )
 
 
-async def _lender_keys(db: DbSession, loan_file_id: UUID) -> dict[UUID, str | None]:
-    """The canonical key of every lender the file's conditions name, in one query (LP-955)."""
+async def _route_lenders(db: DbSession, loan_file_id: UUID) -> dict[UUID, RouteLender]:
+    """Every lender the file's conditions name, as their routes need it, in one query (LP-955, LP-970)."""
     from app.models.lender import Lender
+    from app.services.condition_plan import lender_condition_settings
 
-    rows = await db.execute(
-        select(Lender.id, Lender.canonical_lender_key).where(
-            Lender.id.in_(
-                select(Condition.lender_id).where(
-                    Condition.loan_file_id == loan_file_id, Condition.lender_id.is_not(None)
+    loan_file = await db.get(LoanFile, loan_file_id)
+    processing = bool(loan_file and loan_file.lender_processing)
+    lenders = (
+        await db.execute(
+            select(Lender).where(
+                Lender.id.in_(
+                    select(Condition.lender_id).where(
+                        Condition.loan_file_id == loan_file_id, Condition.lender_id.is_not(None)
+                    )
                 )
             )
         )
-    )
-    # A LIST FIRST: `dict()` treats anything with `.keys()` as a mapping, and a SQLAlchemy result has one.
-    return dict(list(rows.tuples()))
+    ).scalars()
+    return {
+        lender.id: RouteLender(
+            key=lender.canonical_lender_key,
+            name=lender.name,
+            settings=lender_condition_settings(lender),
+            lender_processing=processing,
+        )
+        for lender in lenders
+    }
 
 
 #: Set when the read hit `MAX_CONDITIONS`, so a client can tell a full page from a truncated one.
@@ -811,7 +861,7 @@ async def list_file_conditions(
     items = await items_public_for_file(db, loan_file_id=loan_file.id)
     questions = await question_tails_for_file(db, loan_file_id=loan_file.id)
     evidence = await evidence_public_for_file(db, loan_file_id=loan_file.id)
-    lender_keys = await _lender_keys(db, loan_file.id)
+    route_lenders = await _route_lenders(db, loan_file.id)
     plans_changed = await plans_changed_for_file(db, loan_file_id=loan_file.id)
     return [
         _condition_public(
@@ -821,7 +871,7 @@ async def list_file_conditions(
             items=items.get(condition.id, []),
             question_draft=questions.get(condition.id),
             evidence=evidence.get(condition.id, []),
-            lender_keys=lender_keys,
+            route_lenders=route_lenders,
             plans_changed=plans_changed,
         )
         for condition in conditions
@@ -1577,7 +1627,7 @@ async def add_condition_by_hand(
     numbers, _ = await appearances_for_file(db, loan_file_id=loan_file.id)
     return _condition_public(
         condition,
-        lender_keys=await _lender_keys(db, condition.loan_file_id),
+        route_lenders=await _route_lenders(db, condition.loan_file_id),
         plans_changed=await plans_changed_for_file(db, loan_file_id=condition.loan_file_id),
         round_numbers=numbers.get(condition.id, []),
         today=datetime.now(UTC).date(),
@@ -1629,7 +1679,7 @@ async def _condition_response(
     numbers, _ = await appearances_for_file(db, loan_file_id=condition.loan_file_id)
     return _condition_public(
         condition,
-        lender_keys=await _lender_keys(db, condition.loan_file_id),
+        route_lenders=await _route_lenders(db, condition.loan_file_id),
         plans_changed=await plans_changed_for_file(db, loan_file_id=condition.loan_file_id),
         round_numbers=numbers.get(condition.id, []),
         today=datetime.now(UTC).date(),
@@ -2128,7 +2178,7 @@ async def get_condition(condition: ScopedCondition, db: DbSession) -> ConditionD
 
     public = _condition_public(
         condition,
-        lender_keys=await _lender_keys(db, condition.loan_file_id),
+        route_lenders=await _route_lenders(db, condition.loan_file_id),
         plans_changed=await plans_changed_for_file(db, loan_file_id=condition.loan_file_id),
         round_numbers=sorted(seen_on),
         today=datetime.now(UTC).date(),

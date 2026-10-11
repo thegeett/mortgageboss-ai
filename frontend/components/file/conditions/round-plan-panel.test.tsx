@@ -27,6 +27,7 @@ const calls = vi.hoisted(() => ({
   added: [] as unknown[],
   described: [] as unknown[],
   logged: [] as unknown[],
+  routes: [] as unknown[],
   confirms: [] as unknown[],
   ownWay: [] as unknown[],
   removed: [] as unknown[],
@@ -58,6 +59,10 @@ vi.mock("@/lib/api/conditions", () => ({
   useSetNextStep: () => ({ mutate: (body: unknown) => calls.steps.push(body) }),
   useUpdateItem: () => ({ mutate: (body: unknown) => calls.items.push(body) }),
   useRevertPlan: () => ({ mutate: (id: unknown) => calls.reverts.push(id), isPending: false }),
+  useChooseRoute: () => ({
+    mutate: (body: unknown) => calls.routes.push(body),
+    isPending: false,
+  }),
   useFileLender: () => ({ data: lender.data }),
   useLogCall: () => ({
     mutate: (body: unknown, options?: { onSuccess?: () => void }) => {
@@ -112,6 +117,7 @@ afterEach(() => {
   calls.described = [];
   lender.data = undefined;
   calls.logged = [];
+  calls.routes = [];
   calls.confirmError = null;
 });
 
@@ -1336,5 +1342,84 @@ describe("LP-971 review — Add these steps fires several adds from one press", 
     console.log("ADDED:", JSON.stringify(calls.added));
     expect(within(dialog).getByText("Check the HOA certificate")).toBeTruthy();
     expect(within(dialog).queryByText("Call the LO about the fee")).toBeNull();
+  });
+
+  describe("LP-970 — how it gets done: routes with a suggestion and a reason", () => {
+    const opened = (conditions: Condition[]) => {
+      show(conditions, unblocked());
+      fireEvent.click(screen.getByRole("button", { name: "See the plan" }));
+    };
+    const routed = (chosen: string | null) =>
+      condition({
+        lender_code: "1228",
+        items: [
+          item({
+            id: "i5",
+            key: "inspection",
+            name: "Final inspection",
+            option: "lender_doing_it",
+          }),
+        ],
+        next_step: "lender_doing_it",
+        routes: [
+          {
+            key: "lender_orders",
+            label: "UWM orders it",
+            hint: "UWM orders the final inspection through its own appraisal company.",
+            suggested: true,
+            why: "UWM's settings say it orders final inspections.",
+          },
+          {
+            key: "ask_lender",
+            label: "You ask UWM to order it",
+            hint: "The order request goes in the email to UWM, and you send it.",
+            suggested: false,
+            why: null,
+          },
+          {
+            key: "order_yourself",
+            label: "You order it",
+            hint: "You place the order and upload the completion report.",
+            suggested: false,
+            why: null,
+          },
+        ],
+        chosen_route: chosen,
+      } as Partial<Condition>);
+
+    it("offers the routes, the suggested one marked with its reason", () => {
+      opened([routed("lender_orders")]);
+      const choices = within(screen.getByRole("group", { name: /How 1228 gets done/ }));
+      expect(
+        (choices.getByRole("radio", { name: /UWM orders it/ }) as HTMLInputElement).checked,
+      ).toBe(true);
+      expect(choices.getByText("Suggested")).toBeTruthy();
+      expect(choices.getByText("UWM's settings say it orders final inspections.")).toBeTruthy();
+      expect(choices.getAllByRole("radio")).toHaveLength(3);
+    });
+
+    it("picking a route asks the server to rebuild the path", () => {
+      opened([routed("lender_orders")]);
+      fireEvent.click(screen.getByRole("radio", { name: /You ask UWM to order it/ }));
+      expect(calls.routes).toEqual([{ conditionId: "c1", route: "ask_lender" }]);
+    });
+
+    it("the collapsed Route line names the chosen route, and says when it is the suggestion", () => {
+      show([routed("lender_orders")], unblocked());
+      expect(screen.getByText("UWM orders it (suggested)")).toBeTruthy();
+      cleanup();
+      show([routed("ask_lender")], unblocked());
+      expect(screen.getByText("You ask UWM to order it")).toBeTruthy();
+      expect(screen.queryByText(/\(suggested\)/)).toBeNull();
+    });
+
+    it("with routes, each task's step is tucked under its own disclosure; without, it is as before", () => {
+      opened([routed("lender_orders")]);
+      expect(screen.getByText("Change each task’s step yourself")).toBeTruthy();
+      cleanup();
+      opened([condition({})]); // no routes for this type
+      expect(screen.queryByText("Change each task’s step yourself")).toBeNull();
+      expect(screen.getAllByLabelText("Next step").length).toBeGreaterThan(0);
+    });
   });
 });
