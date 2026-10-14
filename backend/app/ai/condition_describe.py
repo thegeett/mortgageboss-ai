@@ -77,8 +77,35 @@ OWN_TASK_BLOCKS = ("upload_mine", "todo", "check")
 #: (`condition_plan.same_document`). The screen sends `brings_document` for exactly these, and "wait".
 BRINGS_DOCUMENT = ("email", "upload_ask", "upload_mine", "check")
 #: Words a task's name may start with that do not change which task it is ("Upload the invoice").
+#:
+#: THE LENDER'S OWN VERBS BELONG HERE (LP-971 follow-up review, measured). Without `provide`, `send`,
+#: `obtain`, `request`, `order`, `pull` and `please`, EVERY ONE of the library's 52 task names reads as a
+#: different task once a verb is in front of it — so "Provide the bank statement" slipped past the
+#: repeat rule onto a condition that already has "Bank statement". `provide` is the word the lender
+#: uses (0006's own text is "Provide copy of invoice for credit report"), which is the wording the model
+#: is shown and the likeliest phrasing it returns. Adding them collapses no two library names together:
+#: `test_the_leading_words_merge_no_two_library_tasks` checks all 52 stay distinct.
 _LEADING = frozenset(
-    {"upload", "attach", "check", "get", "do", "the", "a", "an", "it", "our", "my"}
+    {
+        "upload",
+        "attach",
+        "check",
+        "get",
+        "do",
+        "provide",
+        "send",
+        "obtain",
+        "request",
+        "order",
+        "pull",
+        "please",
+        "the",
+        "a",
+        "an",
+        "it",
+        "our",
+        "my",
+    }
 )
 
 

@@ -336,3 +336,73 @@ async def test_describe_shows_the_tasks_leaves_out_the_repeat_and_names_the_chec
         )
     )
     assert count is None
+
+
+def test_the_lenders_own_verb_does_not_hide_a_repeat() -> None:
+    """LP-971 FOLLOW-UP REVIEW — the builder's fifth question, measured over the library.
+
+    The repeat rule compares `task_words`, which drops the LEADING words that do not change which task
+    it is. Without the lender's own verbs in that set, EVERY ONE of the library's 52 task names read as
+    a different task once a verb was in front of it: "Provide the bank statement" came back as a new
+    step on a condition that already has "Bank statement". `provide` is the word the lender uses —
+    0006's own text is "Provide copy of invoice for credit report" — so it is the wording the model is
+    shown and the likeliest phrasing it returns.
+    """
+    for verb in ("Provide", "Please provide", "Send", "Obtain", "Request", "Order", "Pull"):
+        assert task_words(f"{verb} the bank statement") == task_words("Bank statement"), verb
+
+    steps, left_out = checked_steps(
+        [{"block": "upload_mine", "text": "Provide the bank statement"}],
+        words="get the statement",
+        lender_words="Provide a bank statement.",
+        existing=["Bank statement"],
+    )
+    assert steps == []
+    assert left_out == [
+        "Left out “Provide the bank statement”: this condition already has that task."
+    ]
+
+    # THE CONTROL: a different task is still kept, verb or no verb.
+    steps, left_out = checked_steps(
+        [{"block": "upload_mine", "text": "Provide the HOA certificate"}],
+        words="get the HOA certificate",
+        lender_words="Provide a bank statement and an HOA certificate.",
+        existing=["Bank statement"],
+    )
+    assert [step.text for step in steps] == ["Provide the HOA certificate"]
+    assert left_out == []
+
+
+def test_the_leading_words_merge_no_two_library_tasks() -> None:
+    """The safety half of the set above: a word added to `_LEADING` must not make two DIFFERENT library
+    tasks read as the same one, or the repeat rule would start dropping real work. Checked over every
+    task in the library rather than the handful this ticket touches."""
+    from collections import defaultdict
+
+    from app.conditions.library.loader import load_library
+
+    def clashes_among(named: list[tuple[str, str]]) -> dict[str, list[str]]:
+        """Which of these names read as one task. `named` is (owner, name)."""
+        buckets: dict[str, list[str]] = defaultdict(list)
+        for owner, name in named:
+            buckets[task_words(name)].append(owner)
+        return {words: owners for words, owners in buckets.items() if len(owners) > 1}
+
+    # THE POSITIVE CONTROL FOR THE DETECTOR, because nothing in the library collides today: a guard
+    # against a state that does not exist passes whether or not it works. Two names differing only by
+    # a leading word must be reported, or the library loop below is comparing nothing.
+    assert clashes_among([("x/one", "Upload the bank statement"), ("y/two", "Bank statement")]) == {
+        "bank statement": ["x/one", "y/two"]
+    }
+
+    library = load_library()
+    types = getattr(library, "types", None) or getattr(library, "_types", None)
+    assert types, "and no library types would pass the loop vacuously"
+    named = [
+        (f"{type_id}/{item.key}", item.name)
+        for type_id, library_type in types.items()
+        for item in library_type.items
+        if item.name
+    ]
+    assert len(named) >= 40, f"only {len(named)} names compared; the library or the reader changed"
+    assert not clashes_among(named), f"these library tasks read as one: {clashes_among(named)}"

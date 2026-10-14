@@ -305,7 +305,15 @@ export function taskPath(item: ConditionItem, context: PathContext = {}): PathSt
       );
       break;
   }
-  const behind = alreadyBehind(item);
+  // LP-971 FOLLOW-UP REVIEW — THE TRIM MAY NOT EMPTY A TASK THAT IS NOT DONE. `alreadyBehind` returns
+  // fixed counts (2 for a sent ask, 4 for one that came back) that assumed every path ended in a
+  // "We check it" row. Dropping that row where nothing is checked made the counts one too many: a
+  // RECEIVED task with no checks trimmed to NOTHING — no steps on its card, and no entry for `nextOf`
+  // to read, so the condition's own "Next:" skipped it and named the lender's ending while she still
+  // had to accept the document. Measured: `received` + no `document_kinds` gave `[]`, where the same
+  // item with a kind gave `["We check it"]`. Capping the trim leaves the most advanced step she still
+  // owes — for her own task that is "upload what you get, or mark the task done", which is exactly it.
+  const behind = Math.min(alreadyBehind(item), Math.max(steps.length - 1, 0));
   return behind === 0
     ? steps
     : [

@@ -473,3 +473,54 @@ describe("plan path", () => {
     });
   });
 });
+
+describe("LP-971 follow-up review — the trim and the dropped check row", () => {
+  /**
+   * `alreadyBehind` returns fixed counts (2 for a sent ask, 4 for one that came back, 2 for her own
+   * received task) which assumed every path ended in a "We check it" row. Dropping that row where
+   * nothing is checked made those counts one too many, and a RECEIVED task with nothing to check
+   * trimmed to NOTHING: no steps on its card, and no entry for `nextOf`, so the condition's "Next:"
+   * skipped the task and named the lender's ending while she still had to accept the document.
+   */
+  const unchecked = (over: Partial<ConditionItem>) =>
+    item({ document_kinds: [], has_checks: false, ...over });
+
+  it("leaves her the step she still owes when nothing is checked", () => {
+    expect(
+      taskPath(unchecked({ option: "i_will_do_it", status: "received" })).map((s) => s.text),
+    ).toEqual(["Upload what you get to this task, or mark the task done"]);
+    // THE CONTROL: with something to check, the trim is unchanged — the check row is what is left.
+    // (The helper's default is `has_checks: true`, so the row is the general sentence.)
+    expect(
+      taskPath(item({ option: "i_will_do_it", status: "received" })).map((s) => s.text),
+    ).toEqual(["We check what you upload"]);
+    expect(
+      taskPath(
+        item({
+          option: "i_will_do_it",
+          status: "received",
+          has_checks: false,
+          document_kinds: ["service invoice"],
+        }),
+      ).map((s) => s.text),
+    ).toEqual(["We check it’s a service invoice"]);
+  });
+
+  it("leaves an ask that came back visible rather than empty", () => {
+    const steps = taskPath(unchecked({ status: "received" })).map((s) => s.text);
+    expect(steps.length).toBeGreaterThan(0);
+    expect(steps).toEqual(["Link it to this task"]);
+  });
+
+  it("still empties nothing that was not already empty (the controls)", () => {
+    // A done task keeps its own sentence, and an open one keeps its whole path.
+    expect(taskPath(unchecked({ status: "done" })).map((s) => s.text)).toEqual([
+      "This task is done — nothing left on it",
+    ]);
+    expect(taskPath(unchecked({ status: "open" })).length).toBeGreaterThan(1);
+    // A sent ask trims the two that happened, as before.
+    expect(taskPath(unchecked({ status: "requested" }))[0]?.text).toBe(
+      "Title / escrow sends it back",
+    );
+  });
+});
