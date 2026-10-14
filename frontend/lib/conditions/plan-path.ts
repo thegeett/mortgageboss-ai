@@ -23,7 +23,7 @@
  */
 import { emailWord, recipient } from "@/lib/conditions/next-step";
 import { PERFORMER_LABEL } from "@/lib/conditions/plan-words";
-import type { Condition, ConditionItem, PlanOption } from "@/lib/types/conditions";
+import type { Condition, ConditionItem, Performer, PlanOption } from "@/lib/types/conditions";
 
 /** Who does a step: the app, the processor, someone the app waits on, or the lender. */
 export type PathWho = "we" | "you" | "them" | "lender";
@@ -132,6 +132,24 @@ function shouldBe(item: ConditionItem): string | undefined {
   return item.generic || !item.acceptable ? undefined : `It should be: ${item.acceptable}.`;
 }
 
+/**
+ * LP-971 follow-up — "WE CHECK IT" SAYS WHAT IS CHECKED, AND IS NOT THERE WHEN NOTHING IS. The owner on
+ * 0006: "We check what you upload" sat on IV-01's invoice, which has no checks (only its type is
+ * compared, when she links one), and on a step she added, which had neither, so anything she linked
+ * passed. So: checks beyond the type keep the general sentence; a type alone names it ("We check it’s
+ * a service invoice"); nothing, no step.
+ */
+function checkSteps(item: ConditionItem, general: string): PathStep[] {
+  if (item.has_checks) return [CHECK(general, shouldBe(item))];
+  const kinds = item.document_kinds ?? [];
+  if (kinds.length === 0) return [];
+  return [CHECK(`We check it’s ${withArticle(kinds.join(" or "))}`, shouldBe(item))];
+}
+
+function withArticle(words: string): string {
+  return /^[aeiou]/i.test(words) ? `an ${words}` : `a ${words}`;
+}
+
 /** A task with nothing left on it: the path from HERE is empty, and an empty card says nothing. */
 const FINISHED: PathStep = {
   who: "we",
@@ -230,7 +248,7 @@ export function taskPath(item: ConditionItem, context: PathContext = {}): PathSt
             "If it comes by email to the file’s inbox, you accept the attachment onto the file.",
         },
         YOU("Link it to this task", "We suggest the document that matches."),
-        CHECK("We check it against what was asked", shouldBe(item)),
+        ...checkSteps(item, "We check it against what was asked"),
       );
       break;
     }
@@ -250,14 +268,14 @@ export function taskPath(item: ConditionItem, context: PathContext = {}): PathSt
               : undefined,
           },
           YOU("When it comes, upload or link it here, or mark the task done"),
-          CHECK("We check what you upload", shouldBe(item)),
+          ...checkSteps(item, "We check what you upload"),
         );
         break;
       }
       steps.push(
         YOU(item.task ? capital(item.task) : `Do it: ${item.name}`),
         YOU("Upload what you get to this task, or mark the task done"),
-        CHECK("We check what you upload", shouldBe(item)),
+        ...checkSteps(item, "We check what you upload"),
       );
       break;
     case "already_in_file": {
@@ -485,4 +503,75 @@ export function firstMoves(rows: Condition[], drafts: { codes: string[] }[]): Fi
     }
   }
   return out;
+}
+
+/**
+ * LP-971 follow-up — THE PATH A STEP WILL ADD, before it is added: "Describe it" shows each proposed step
+ * as the rows it becomes. The owner on 0006 added "two steps" and got eight rows, with nothing on screen
+ * saying one email is five of them. A stand-in task with the step's own option, performer and checked
+ * kinds, through `taskPath` itself, so the preview cannot drift from the path it previews.
+ */
+export function previewPath(task: {
+  name: string;
+  option: PlanOption;
+  performer: Performer;
+  waiting?: boolean;
+  documentKinds: string[];
+}): PathStep[] {
+  return taskPath({
+    id: "preview",
+    key: "preview",
+    name: task.name,
+    acceptable: "",
+    performer: task.performer,
+    performers: [task.performer],
+    option: task.option,
+    status: "open",
+    origin: "manual",
+    need_id: null,
+    need_title: null,
+    shared_with_codes: [],
+    document_id: null,
+    document_name: null,
+    document_page: null,
+    waits_on_condition_id: null,
+    waits_on_code: null,
+    due_date: null,
+    specifics: { amounts: [], account_bank: null, account_last4: null, month: null, names: [] },
+    task: null,
+    draft: null,
+    waiting: task.waiting ?? false,
+    document_kinds: task.documentKinds,
+    has_checks: false,
+  });
+}
+
+/** LP-971 follow-up — one task just added, and where it sits in the numbered path. */
+export interface AddedPlace {
+  item: ConditionItem;
+  /** The path's numbers, 1-based, of the task's first and last step. */
+  first: number;
+  last: number;
+}
+
+/**
+ * WHERE THE STEPS SHE JUST ADDED ARE (the owner on 0006: "it is confusing whether it was added or not").
+ * The numbers are the timeline's own, read from the same entries it draws, so "steps 4 to 8" is what she
+ * sees. A task with no step on the path (one already done) has no place and is left out.
+ */
+export function addedPlaces(entries: PlanEntry[], itemIds: readonly string[]): AddedPlace[] {
+  const places: AddedPlace[] = [];
+  for (const id of itemIds) {
+    let first = 0;
+    let last = 0;
+    let item: ConditionItem | null = null;
+    entries.forEach((entry, index) => {
+      if (entry.item?.id !== id) return;
+      item = entry.item;
+      if (first === 0) first = index + 1;
+      last = index + 1;
+    });
+    if (item !== null) places.push({ item, first, last });
+  }
+  return places;
 }

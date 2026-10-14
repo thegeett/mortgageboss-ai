@@ -1,12 +1,14 @@
 import type { Condition, ConditionItem, PlanOption } from "@/lib/types/conditions";
 import { describe, expect, it } from "vitest";
 import {
+  addedPlaces,
   askedWho,
   conditionPath,
   endingPath,
   firstMoves,
   nextOf,
   ownStepPath,
+  previewPath,
   taskPath,
 } from "./plan-path";
 
@@ -33,6 +35,9 @@ function item(overrides: Partial<ConditionItem>): ConditionItem {
     specifics: {} as ConditionItem["specifics"],
     task: null,
     draft: null,
+    // A library task with checks beyond its type, so "We check" keeps its general sentence; the
+    // LP-971 follow-up tests below take it away.
+    has_checks: true,
     ...overrides,
   };
 }
@@ -401,5 +406,70 @@ describe("plan path", () => {
       items: [item({ option: "i_will_do_it", status: "received" })],
     } as Condition);
     expect(nextOf(entries)?.text).toBe("Nothing to do: the lender is only telling you something");
+  });
+
+  describe("LP-971 follow-up — We check says what is checked", () => {
+    const last = (steps: ReturnType<typeof taskPath>) => steps[steps.length - 1];
+
+    it("a type alone is named; checks beyond it keep the general sentence", () => {
+      const typed = { has_checks: false, document_kinds: ["service invoice"] };
+      expect(last(taskPath(item({ option: "i_will_do_it", ...typed })))?.text).toBe(
+        "We check it’s a service invoice",
+      );
+      expect(last(taskPath(item({ ...typed })))?.text).toBe("We check it’s a service invoice");
+      const asset = { has_checks: false, document_kinds: ["asset statement"] };
+      expect(last(taskPath(item({ option: "i_will_do_it", ...asset })))?.text).toBe(
+        "We check it’s an asset statement",
+      );
+      // THE CONTROL: with checks, the general sentence.
+      expect(last(taskPath(item({ option: "i_will_do_it" })))?.text).toBe(
+        "We check what you upload",
+      );
+    });
+
+    it("with nothing to check, there is no We check step: not on a task, an ask or a wait", () => {
+      const bare = { has_checks: false, document_kinds: [] };
+      for (const overrides of [
+        { option: "i_will_do_it" as const },
+        { option: "ask_third_party" as const },
+        { option: "i_will_do_it" as const, waiting: true, due_date: "2026-10-15" },
+      ]) {
+        const steps = taskPath(item({ ...overrides, ...bare }));
+        expect(steps.length).toBeGreaterThan(0);
+        expect(steps.some((step) => step.whoLabel === "We check it")).toBe(false);
+      }
+    });
+
+    it("previews a step's rows through the path itself", () => {
+      const email = {
+        name: "Please provide invoice for credit report",
+        option: "ask_third_party" as const,
+        performer: "other_party" as const,
+      };
+      const checked = previewPath({ ...email, documentKinds: ["service invoice"] });
+      expect(checked.map((step) => step.text)).toEqual([
+        "We draft the email to Other party when you confirm the plan",
+        "Review the email, and send it once the plan is confirmed",
+        "Other party sends it back",
+        "Link it to this task",
+        "We check it’s a service invoice",
+      ]);
+      expect(previewPath({ ...email, documentKinds: [] })).toHaveLength(4);
+    });
+
+    it("numbers what was just added as the timeline does, and leaves out what is not on it", () => {
+      const own = item({ id: "a", option: "i_will_do_it" });
+      const asked = item({ id: "b" });
+      const entries = conditionPath({
+        id: "c1",
+        next_step: null,
+        items: [own, asked],
+      } as Condition);
+      const places = addedPlaces(entries, ["b", "missing"]);
+      expect(places.map((place) => [place.item.id, place.first, place.last])).toEqual([
+        ["b", 4, 8],
+      ]);
+      expect(entries[3]?.item?.id).toBe("b");
+    });
   });
 });

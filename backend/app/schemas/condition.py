@@ -1038,6 +1038,11 @@ class ConditionItemPublic(BaseModel):
     plan_note: str | None = None
     #: LP-972 — a "Wait for something" step: waiting on its performer by `due_date`.
     waiting: bool = False
+    #: LP-971 follow-up — WHAT "WE CHECK IT" CAN HONESTLY SAY. The document types an upload is checked
+    #: against, as a sentence names them ("service invoice"), and whether the item has checks beyond
+    #: its type. Neither: nothing checks an upload, so the path shows no "We check" step.
+    document_kinds: list[str] = Field(default_factory=list)
+    has_checks: bool = False
 
 
 class ConditionItemUpdate(BaseModel):
@@ -1061,6 +1066,11 @@ class ConditionItemCreate(BaseModel):
     option: PlanOption | None = None
     waiting: bool = False
     due_date: date_type | None = None
+    #: LP-971 follow-up — the step brings back a document (an email, an upload, a check, a wait), not a
+    #: to-do. Only such a step can take on the condition's own document and its check
+    #: (`condition_plan.same_document`): "Call the LO about the credit fee" names the credit invoice
+    #: and brings nothing.
+    brings_document: bool = False
 
 
 class CallLogRequest(BaseModel):
@@ -2084,6 +2094,10 @@ class DescribedStepPublic(BaseModel):
     ]
     text: str
     to: Performer | None = None
+    #: LP-971 follow-up — what the added step's upload will be checked as ("service invoice"): the
+    #: condition's own document when the step brings it (`condition_plan.same_document`), else none, and
+    #: then nothing checks it. The screen previews the step's path from this.
+    document_kinds: list[str] = Field(default_factory=list)
 
 
 class DescribePublic(BaseModel):

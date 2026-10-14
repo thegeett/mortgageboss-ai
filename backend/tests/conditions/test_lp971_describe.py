@@ -257,7 +257,7 @@ async def test_the_route_proposes_and_stores_nothing(
         )
     assert got.status_code == 200
     assert got.json() == {
-        "steps": [{"block": "todo", "text": "Call the builder", "to": None}],
+        "steps": [{"block": "todo", "text": "Call the builder", "to": None, "document_kinds": []}],
         "left_out": [],
         "refusal": None,
     }

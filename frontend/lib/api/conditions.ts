@@ -774,6 +774,8 @@ export function useAddItem(fileId: string) {
       /** LP-972 — "Wait for something": waits on `performers[0]` by `due_date`, with no email. */
       waiting?: boolean;
       due_date?: string;
+      /** LP-971 follow-up — it brings back a document, so it may be checked as the condition's own. */
+      brings_document?: boolean;
     }) => (await apiClient.post<Condition>(`${conditionPath(conditionId)}/items`, body)).data,
     onSuccess: () => invalidatePlan(queryClient, fileId),
   });

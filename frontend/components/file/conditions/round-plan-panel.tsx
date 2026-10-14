@@ -3,6 +3,7 @@
 import { ItemLinkActions } from "@/components/file/conditions/item-links";
 import { LinkDocumentDialog } from "@/components/file/conditions/link-document-dialog";
 import { AddStep, type AddedStep } from "@/components/file/conditions/plan-add-step";
+import { PlanAdded, planStepAnchor } from "@/components/file/conditions/plan-added";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -28,6 +29,7 @@ import {
 import {
   type PathWho,
   type PlanEntry,
+  addedPlaces,
   conditionPath,
   firstMoves,
   nextOf,
@@ -118,6 +120,8 @@ export function RoundPlanPanel({
     null,
   );
   const [refusal, setRefusal] = useState<string | null>(null);
+  // LP-971 follow-up — what the last add put on one condition's plan, until she presses Done.
+  const [justAdded, setJustAdded] = useState<JustAdded | null>(null);
   // LP-978 REVIEW — A REFUSED CONFIRM BELONGS BESIDE THE BUTTON, and the button moved. There is one
   // refusal line and it is under the conditions, which was right while Confirm was down there too; now
   // a 409 from `confirm_round_plan` (the blocking codes this screen holds can be stale) renders below
@@ -226,12 +230,34 @@ export function RoundPlanPanel({
   // it are threaded in as the next comparison. Exactly one item in each response is new, and it is
   // the one that step added. An error stops the chain — the refusal is shown and nothing after it is
   // added blindly.
-  const addSteps = (condition: Condition, steps: AddedStep[]) => {
+  //
+  // LP-971 follow-up — AND WHEN IT ENDS, SHE IS TOLD WHAT WENT IN (`PlanAdded`). The chain collects the
+  // ids it added and the own step it set; at its end (or where an error stops it, so what DID go in is
+  // still said) they become `justAdded`, which the row shows above "Add a step" and marks New in the
+  // timeline until she presses Done. A logged call is not in it: it adds nothing to the plan and says
+  // "Call logged" itself.
+  const addSteps = (condition: Condition, steps: AddedStep[], leftOut: string[] = []) => {
     setRefusal(null);
+    setJustAdded(null);
+    const addedIds: string[] = [];
+    let ownStep: PlanOption | null = null;
+    const finish = () => {
+      if (addedIds.length > 0 || ownStep !== null) {
+        setJustAdded({ conditionId: condition.id, itemIds: addedIds, ownStep, leftOut });
+      }
+    };
+    const stop = (error: unknown) => {
+      onError(error);
+      finish();
+    };
     const run = (rest: AddedStep[], known: ReadonlySet<string>) => {
       const [step, ...tail] = rest;
-      if (!step) return;
+      if (!step) {
+        finish();
+        return;
+      }
       if (step.kind === "own_step") {
+        ownStep = step.option;
         changeStep(condition, step.option);
         run(tail, known);
         return;
@@ -261,11 +287,13 @@ export function RoundPlanPanel({
           performers: step.performers,
           option: step.option,
           ...(step.waiting ? { waiting: true, due_date: step.dueDate } : {}),
+          ...(step.bringsDocument ? { brings_document: true } : {}),
         },
         {
-          onError,
+          onError: stop,
           onSuccess: (updated) => {
             const added = updated.items.find((each) => !known.has(each.id));
+            if (added) addedIds.push(added.id);
             if (step.link && added) setLinking({ condition: updated, item: added });
             run(tail, new Set(updated.items.map((each) => each.id)));
           },
@@ -423,7 +451,9 @@ export function RoundPlanPanel({
             fileId={fileId}
             adding={addItem.isPending || setNextStep.isPending}
             onAddStep={(step) => addStep(condition, step)}
-            onAddSteps={(steps) => addSteps(condition, steps)}
+            onAddSteps={(steps, leftOut) => addSteps(condition, steps, leftOut)}
+            justAdded={justAdded?.conditionId === condition.id ? justAdded : null}
+            onDoneAdded={() => setJustAdded(null)}
             onOwnWay={() => {
               setRefusal(null);
               ownWay.mutate(condition.id, { onError });
@@ -516,6 +546,8 @@ function PlanRow({
   adding,
   onAddStep,
   onAddSteps,
+  justAdded,
+  onDoneAdded,
   onOwnWay,
   onRemoveItem,
   onChangeStep,
@@ -534,7 +566,10 @@ function PlanRow({
   adding: boolean;
   onAddStep: (step: AddedStep) => void;
   /** LP-971 review — a whole proposal, so the adds can be chained rather than fired together. */
-  onAddSteps: (steps: AddedStep[]) => void;
+  onAddSteps: (steps: AddedStep[], leftOut?: string[]) => void;
+  /** LP-971 follow-up — what she just added to this condition, until she presses Done. */
+  justAdded: JustAdded | null;
+  onDoneAdded: () => void;
   onOwnWay: () => void;
   onRemoveItem: (item: ConditionItem) => void;
   onChangeStep: (to: PlanOption) => void;
@@ -773,10 +808,20 @@ function PlanRow({
                 fileId={fileId}
                 condition={condition}
                 entries={entries}
+                fresh={justAdded?.itemIds ?? []}
                 named={named}
                 onOpenDraft={onOpenDraft}
                 onMarkItem={onMarkItem}
                 onRemoveItem={onRemoveItem}
+              />
+            ) : null}
+            {justAdded ? (
+              <PlanAdded
+                code={code}
+                places={addedPlaces(entries, justAdded.itemIds)}
+                ownStep={justAdded.ownStep}
+                leftOut={justAdded.leftOut}
+                onDone={onDoneAdded}
               />
             ) : null}
             <AddStep
@@ -1136,6 +1181,7 @@ function Timeline({
   fileId,
   condition,
   entries,
+  fresh,
   named,
   onOpenDraft,
   onMarkItem,
@@ -1144,6 +1190,8 @@ function Timeline({
   fileId: string;
   condition: Condition;
   entries: PlanEntry[];
+  /** LP-971 follow-up — the tasks she just added: their steps are marked New. */
+  fresh: readonly string[];
   named: boolean;
   onOpenDraft?: (draftId: string) => void;
   onMarkItem: (item: ConditionItem, change: ItemMark) => void;
@@ -1156,8 +1204,16 @@ function Timeline({
         const dropped = item?.status === "not_needed";
         const finished = item?.status === "done" && item.option !== "already_in_file";
         const badge = badgeFor(entry, named);
+        const isNew = item !== null && fresh.includes(item.id);
         return (
-          <li key={`${index}-${item?.id ?? "c"}-${step.text}`} className="flex gap-3">
+          <li
+            key={`${index}-${item?.id ?? "c"}-${step.text}`}
+            id={item && entry.leads ? planStepAnchor(item.id) : undefined}
+            className={cn(
+              "flex scroll-mt-4 gap-3",
+              isNew && "-mx-2 rounded-[var(--radius-container)] bg-primary/5 px-2 pt-1.5",
+            )}
+          >
             <div className="flex w-7 shrink-0 flex-col items-center">
               <span
                 aria-hidden
@@ -1182,6 +1238,11 @@ function Timeline({
                 >
                   {dropped ? "You" : step.whoLabel}
                 </span>
+                {isNew ? (
+                  <span className="rounded-full bg-primary px-1.5 py-px text-[11px] font-semibold text-primary-foreground">
+                    New
+                  </span>
+                ) : null}
                 {badge ? (
                   <span className="rounded-md bg-muted px-1.5 py-px text-[11px] font-semibold text-foreground-2">
                     {badge}
@@ -1454,4 +1515,12 @@ function StepGuide({
 function usDate(iso: string): string {
   const [year, month, day] = iso.slice(0, 10).split("-");
   return `${month}/${day}/${year}`;
+}
+
+/** LP-971 follow-up — what one add (or one proposal's adds) put on a condition's plan. */
+interface JustAdded {
+  conditionId: string;
+  itemIds: string[];
+  ownStep: PlanOption | null;
+  leftOut: string[];
 }

@@ -1125,6 +1125,13 @@ export interface ConditionItem {
   plan_note?: string | null;
   /** LP-972 — a "Wait for something" step: waiting on its performer by `due_date`, no email. */
   waiting?: boolean;
+  /**
+   * LP-971 follow-up — what an upload is checked against: its document types as a sentence names them
+   * ("service invoice"), and whether it has checks beyond the type. Neither: nothing checks it, and the
+   * path shows no "We check" step.
+   */
+  document_kinds?: string[];
+  has_checks?: boolean;
 }
 
 /** LP-958 — one document of the file, as the Link dialog offers it. */
@@ -1414,6 +1421,8 @@ export interface DescribedStep {
   block: PlanBlock;
   text: string;
   to: Performer | null;
+  /** LP-971 follow-up — what the added step's upload will be checked as; empty: nothing checks it. */
+  document_kinds?: string[];
 }
 
 /** LP-971 — the proposal, or why there is none. Nothing is stored until she adds the steps. */

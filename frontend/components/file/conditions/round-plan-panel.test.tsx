@@ -167,6 +167,9 @@ function item(overrides: Partial<ConditionItem>): ConditionItem {
     specifics: {} as ConditionItem["specifics"],
     task: "upload the invoice",
     draft: null,
+    // IV-01's invoice as the server sends it: its document type and no checks beyond it.
+    document_kinds: ["service invoice"],
+    has_checks: false,
     ...overrides,
   };
 }
@@ -922,6 +925,7 @@ describe("RoundPlanPanel", () => {
           option: "i_will_do_it",
           waiting: true,
           due_date: "2026-10-15",
+          brings_document: true,
         },
       ]);
     });
@@ -952,6 +956,7 @@ describe("RoundPlanPanel", () => {
           name: "The final seller CD",
           performers: ["title"],
           option: "ask_third_party",
+          brings_document: true,
         },
       ]);
     });
@@ -985,6 +990,7 @@ describe("RoundPlanPanel", () => {
           name: "Two months of statements",
           performers: ["borrower"],
           option: "ask_borrower",
+          brings_document: true,
         },
       ]);
       calls.added = [];
@@ -1001,6 +1007,7 @@ describe("RoundPlanPanel", () => {
           name: "The signed LOE",
           performers: ["borrower"],
           option: "ask_borrower",
+          brings_document: true,
         },
       ]);
     });
@@ -1040,6 +1047,7 @@ describe("RoundPlanPanel", () => {
           name: "Check the HOA certificate",
           performers: ["processor"],
           option: "i_will_do_it",
+          brings_document: true,
         },
       ]);
       expect(screen.getByRole("dialog")).toBeTruthy();
@@ -1420,6 +1428,118 @@ describe("LP-971 review — Add these steps fires several adds from one press", 
       opened([condition({})]); // no routes for this type
       expect(screen.queryByText("Change each task’s step yourself")).toBeNull();
       expect(screen.getAllByLabelText("Next step").length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("LP-971 follow-up — after Add, what went in and where", () => {
+    // 0006 as the owner had it: IV-01's own invoice task (rows 1 to 3), then an email to the credit
+    // vendor she added. The server checks the added step as IV-01's invoice (`same_document`).
+    const ASKED = item({
+      id: "new",
+      key: "invoice.added2",
+      name: "Please provide invoice for credit report",
+      performer: "other_party",
+      performers: ["other_party"],
+      option: "ask_third_party",
+      origin: "manual",
+      task: null,
+    });
+    const withoutTheEmail = () => condition({});
+    const withTheEmail = () => condition({ items: [item({}), ASKED] });
+
+    function panel(conditions: Condition[]) {
+      plan.data = unblocked();
+      return (
+        <RoundPlanPanel
+          fileId="f1"
+          round={round}
+          conditions={conditions}
+          onOpenCondition={vi.fn()}
+          onConfirmReading={vi.fn()}
+          confirmedRoundIds={new Set()}
+        />
+      );
+    }
+
+    function addTheEmail() {
+      calls.addResponse = withTheEmail();
+      const view = render(panel([withoutTheEmail()]));
+      fireEvent.click(screen.getByRole("button", { name: "See the plan" }));
+      // THE CONTROL: nothing is new before she adds.
+      expect(screen.queryByText("New")).toBeNull();
+      expect(screen.queryByText(/Added to 0006’s plan/)).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Add a step" }));
+      fireEvent.click(screen.getByRole("button", { name: /^Email someone/ }));
+      fireEvent.change(screen.getByLabelText("To"), { target: { value: "other_party" } });
+      fireEvent.change(screen.getByLabelText("What should they send or do?"), {
+        target: { value: "Please provide invoice for credit report" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Add the step" }));
+      // The plan refetches: the panel draws the condition as it now stands.
+      view.rerender(panel([withTheEmail()]));
+      return view;
+    }
+
+    it("says what was added, which steps of the path it is, and that nothing is sent", () => {
+      addTheEmail();
+      const note = screen.getByRole("status");
+      expect(within(note).getByText(/Added to 0006’s plan/)).toBeTruthy();
+      expect(note.textContent).toContain(
+        "Email to Other party: Please provide invoice for credit report",
+      );
+      // Rows 1 to 3 are the invoice task; the email is the draft, her send, their reply, her link and
+      // our check of it as a service invoice.
+      expect(note.textContent).toContain("Steps 4 to 8 of the path.");
+      expect(note.textContent).toContain(
+        "Nothing is sent: you review the email and send it yourself.",
+      );
+      const steps = within(screen.getByRole("list", { name: "The plan, step by step" }));
+      expect(steps.getAllByText("New")).toHaveLength(5);
+      // Both the invoice task (row 3) and the email (row 8) are checked as what IV-01 asks for.
+      expect(
+        steps.getAllByText("We check it’s a service invoice", { selector: "span" }),
+      ).toHaveLength(2);
+    });
+
+    it("Show it goes to the task's first step, and Done clears the note and the marks", () => {
+      addTheEmail();
+      const show = within(screen.getByRole("status")).getByRole("link", { name: "Show it" });
+      const target = show.getAttribute("href")?.slice(1) ?? "";
+      expect(target).toBe("plan-step-new");
+      // The email's first step: the draft, not the invoice task above it.
+      expect(document.getElementById(target)?.textContent).toContain(
+        "We draft the email to Other party",
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+      expect(screen.queryByRole("status")).toBeNull();
+      expect(screen.queryByText("New")).toBeNull();
+    });
+
+    it("what Describe it left out is in the note too", () => {
+      calls.addResponse = withTheEmail();
+      calls.describeResult = {
+        steps: [
+          {
+            block: "email",
+            to: "other_party",
+            text: "Please provide invoice for credit report",
+            document_kinds: ["service invoice"],
+          },
+        ],
+        left_out: ["Left out “Credit report invoice”: this condition already has that task."],
+        refusal: null,
+      };
+      const view = render(panel([withoutTheEmail()]));
+      fireEvent.click(screen.getByRole("button", { name: "See the plan" }));
+      fireEvent.change(screen.getByLabelText("Or describe what you want to do"), {
+        target: { value: "Send email to credit report vendor, receive an email and attach here" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Turn it into steps" }));
+      fireEvent.click(screen.getByRole("button", { name: "Add this step" }));
+      view.rerender(panel([withTheEmail()]));
+      const note = screen.getByRole("status");
+      expect(note.textContent).toContain("Not added:");
+      expect(note.textContent).toContain("this condition already has that task.");
     });
   });
 });

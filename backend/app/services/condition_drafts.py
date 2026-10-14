@@ -55,7 +55,12 @@ from app.models.condition_draft import ConditionDraft, DraftRecipient
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_item import ConditionItem
 from app.models.condition_round import ConditionRound
-from app.models.condition_vocabulary import ConditionItemStatus, Performer, PlanOption
+from app.models.condition_vocabulary import (
+    ConditionItemOrigin,
+    ConditionItemStatus,
+    Performer,
+    PlanOption,
+)
 from app.models.lender import Lender
 from app.models.lender_contact import LenderContact, LenderContactRole
 from app.models.loan_file import LoanFile
@@ -1811,6 +1816,10 @@ def item_words(condition: Condition, item: ConditionItem) -> str:
     A key is an internal handle (`reask_3f2a9b1c`, and since LP-946 a part's `source.employer`), and
     the draft dialog is read by her and quoted to the people she emails.
     """
+    # LP-971 follow-up — ONE SHE ADDED KEEPS HER WORDS, even when it is checked as a library task's
+    # document (`<library key>.added<n>`, `condition_plan.same_document`): it is her step, not the task.
+    if item.origin is ConditionItemOrigin.MANUAL:
+        return in_sentence(item.name)
     library_type = load_library().get(condition.canonical_type_id)
     # A part (LP-946) is `<library key>.<performer>`; no library key has a dot (checked: 0 of 52).
     base = item.key.split(".", 1)[0]

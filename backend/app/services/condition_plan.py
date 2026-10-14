@@ -40,7 +40,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.conditions import facts
-from app.conditions.library import ConditionType, load_library
+from app.conditions.library import ConditionType, LibraryItem, load_library
 from app.models.activity_log import ActivityType
 from app.models.borrower import Borrower
 from app.models.condition import (
@@ -796,6 +796,23 @@ def _planned_option(
     ):
         return PlanOption.LENDER_DOING_IT
     return option
+
+
+def same_document(type_id: str | None, name: str) -> LibraryItem | None:
+    """LP-971 follow-up — the condition's own task a step she adds is about, by the library's match words
+    in her words: the ONE task of the type whose words appear ("credit" in "Please provide invoice for
+    credit report" is IV-01's invoice). None when no task's words appear, or more than one's: a guess
+    between two documents would check her upload against the wrong one."""
+    library_type = load_library().get(type_id) if type_id else None
+    if library_type is None:
+        return None
+    words = name.lower()
+    found = [
+        each
+        for each in library_type.items
+        if each.match_words and any(word.lower() in words for word in each.match_words)
+    ]
+    return found[0] if len(found) == 1 else None
 
 
 def _settled_step(
@@ -1712,8 +1729,16 @@ async def add_item(
     actor_user_id: UUID,
     waiting: bool = False,
     due_date: date | None = None,
+    brings_document: bool = False,
 ) -> ConditionItem:
     """S3-01's "Add an item", and LP-969's "Add a step".
+
+    LP-971 follow-up — A STEP THAT BRINGS THE CONDITION'S OWN DOCUMENT IS CHECKED AS THAT DOCUMENT. When
+    `brings_document` and her words name exactly one of the type's tasks (`same_document`), the step
+    takes that task's document types and acceptable form, and a key `<library key>.added<n>`, so the
+    library's match words find it (`condition_matching.library_item_for` reads the part before the dot,
+    as for a split part). Without that, nothing linked to an added step was checked and it passed as
+    anything: "Please provide invoice for credit report" accepted a bank statement.
 
     LP-972 — `waiting=True` is "Wait for something": a step that waits on its performer, by `due_date`,
     with a reminder on that date (`reminders`, `CONDITION_WAIT_DUE`). No email goes, because she asked
@@ -1738,22 +1763,24 @@ async def add_item(
         .limit(1)
     )
     chosen = option or option_for(performers[0])
+    sequence = (count or 0) + 1
+    same = same_document(condition.canonical_type_id, name) if brings_document else None
     item = ConditionItem(
         company_id=condition.company_id,
         loan_file_id=condition.loan_file_id,
         condition_id=condition.id,
         round_id=condition.last_seen_round_id,
-        key=f"manual_{(count or 0) + 1}",
+        key=f"{same.key}.added{sequence}" if same else f"manual_{sequence}",
         name=name.strip()[:200],
-        acceptable="",
+        acceptable=same.acceptable if same else "",
         performer=performers[0],
         performers=[p.value for p in performers][:3],
         option=chosen,
         origin=ConditionItemOrigin.MANUAL,
-        documents=[],
+        documents=list(same.documents) if same else [],
         checks=[],
         specifics={},
-        sequence=(count or 0) + 1,
+        sequence=sequence,
         due_date=due_date
         if waiting
         else facts.business_days_after(_today_et(), ASK_DUE_BUSINESS_DAYS)
@@ -2244,6 +2271,7 @@ def route_ask(item: ConditionItem) -> None:
 
 async def items_public_for_file(db: AsyncSession, *, loan_file_id: UUID) -> dict[UUID, list[Any]]:
     """Every live item on the file, as `ConditionItemPublic`, keyed by condition. ONE query per table."""
+    from app.documents.display_names import display_name, in_sentence
     from app.schemas.condition import ConditionItemPublic, ReadingSpecificsPublic
 
     by_condition = await _items_by_condition(db, loan_file_id)
@@ -2343,6 +2371,8 @@ async def items_public_for_file(db: AsyncSession, *, loan_file_id: UUID) -> dict
                     draft=tails.get(item.draft_id) if item.draft_id else None,
                     part_of_item_id=item.part_of_item_id,
                     plan_note=item.plan_note,
+                    document_kinds=[in_sentence(display_name(t)) for t in item.documents or []],
+                    has_checks=bool(item.checks),
                     waiting=item.waiting,
                 )
             )

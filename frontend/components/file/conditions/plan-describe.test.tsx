@@ -79,7 +79,10 @@ describe("DescribeSteps", () => {
 
     const proposed = within(screen.getByRole("list", { name: "Proposed steps" }));
     expect(proposed.getByText(/\(Title \/ escrow\): The final seller CD/)).toBeTruthy();
-    expect(proposed.getByText(/Call the builder/)).toBeTruthy();
+    // The step's own line, not its preview's "Do it: Call the builder" (LP-971 follow-up).
+    expect(proposed.getAllByText(/Call the builder/)[0]?.textContent).toMatch(
+      /^Something else: Call the builder/,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Add these 2 steps" }));
     // LP-971 review — ONE call with the whole list, so the parent can chain the adds.
@@ -90,8 +93,15 @@ describe("DescribeSteps", () => {
         name: "The final seller CD",
         performers: ["title"],
         option: "ask_third_party",
+        bringsDocument: true,
       },
-      { kind: "task", name: "Call the builder", performers: ["processor"], option: "i_will_do_it" },
+      {
+        kind: "task",
+        name: "Call the builder",
+        performers: ["processor"],
+        option: "i_will_do_it",
+        bringsDocument: false,
+      },
     ]);
     expect(onDone).toHaveBeenCalled();
   });
@@ -107,7 +117,7 @@ describe("DescribeSteps", () => {
     expect(screen.getByText(/We draft the note from the condition\. Put this in it/)).toBeTruthy();
     expect(screen.getByText(/It replaces this condition’s own step\./)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Add this step" }));
-    expect(onAddAll).toHaveBeenCalledWith([{ kind: "own_step", option: "ask_underwriter" }]);
+    expect(onAddAll).toHaveBeenCalledWith([{ kind: "own_step", option: "ask_underwriter" }], []);
   });
 
   it("the same question as the condition's own step replaces nothing (the control)", () => {
@@ -190,5 +200,47 @@ describe("LP-971 review — her words and the question block", () => {
     expect(
       (screen.getByLabelText("Or describe what you want to do") as HTMLTextAreaElement).value,
     ).toBe("");
+  });
+
+  describe("LP-971 follow-up — what each step adds to the path", () => {
+    it("an email the server checks as the condition's document adds five steps, named", () => {
+      state.result = {
+        steps: [
+          {
+            block: "email",
+            to: "other_party",
+            text: "Please provide invoice for credit report",
+            document_kinds: ["service invoice"],
+          },
+        ],
+        left_out: [],
+        refusal: null,
+      };
+      show();
+      turn("Send email to credit report vendor, receive an email and attach here");
+      const proposed = within(screen.getByRole("list", { name: "Proposed steps" }));
+      expect(proposed.getByText("Adds 5 steps to the path")).toBeTruthy();
+      expect(proposed.getByText(/We check it’s a service invoice/)).toBeTruthy();
+      expect(proposed.queryByText(/Nothing checks what comes back/)).toBeNull();
+    });
+
+    it("one nothing can check says so, and a to-do (which brings nothing) does not", () => {
+      state.result = {
+        steps: [
+          { block: "email", to: "title", text: "The payoff letter", document_kinds: [] },
+          { block: "todo", to: null, text: "Call the builder", document_kinds: [] },
+        ],
+        left_out: [],
+        refusal: null,
+      };
+      show();
+      turn("Ask title for the payoff letter and I'll call the builder");
+      const [email, todo] = within(screen.getByRole("list", { name: "Proposed steps" }))
+        .getAllByRole("listitem", { name: "" })
+        .filter((li) => li.parentElement?.getAttribute("aria-label") === "Proposed steps");
+      expect(email?.textContent).toContain("Adds 4 steps to the path");
+      expect(email?.textContent).toContain("Nothing checks what comes back");
+      expect(todo?.textContent).not.toContain("Nothing checks what comes back");
+    });
   });
 });

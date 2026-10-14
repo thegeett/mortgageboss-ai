@@ -20,13 +20,20 @@ Asking a model whether a model invented a figure has the same failure mode as th
 A REFUSAL OR A FAILURE SAYS SO. Never raises: no answer from the model, an unreadable one, or no steps
 come back as a sentence for her.
 
-WHAT GOES TO THE MODEL: her words, the lender's words and the reading's summary — what the reading
-already sends. Logs carry counts only.
+WHAT GOES TO THE MODEL: her words, the lender's words, the reading's summary — what the reading
+already sends — and the names of the condition's tasks. Logs carry counts only.
+
+NOT A TASK IT ALREADY HAS (the owner on 0006, 2026-10-11). "Send email to credit report vendor, receive
+an email and attach here" came back as the email AND a "Credit report invoice" task of hers: the second
+was the condition's own step 1 again, and what the email already brings back. The model is now shown
+the tasks and told what an email includes; and, not trusting the prompt alone, a task of hers whose
+words are a task the condition already has is left out by code, saying so.
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from app.ai.client import complete
@@ -39,7 +46,7 @@ from app.models.condition_vocabulary import Performer
 
 logger = get_logger(__name__)
 
-PROMPT_PATH = "conditions/describe_v1.txt"
+PROMPT_PATH = "conditions/describe_v2.txt"
 _MAX_TOKENS = 1200
 MAX_STEPS = 6
 _MAX_TEXT = 190
@@ -63,6 +70,26 @@ REFUSAL_UNREADABLE = "The AI's answer could not be read. Nothing was changed —
 REFUSAL_EMPTY = "Write a few words saying what you want to do."
 REFUSAL_NO_STEPS = "That didn't turn into any steps. Try saying who should do what."
 
+#: The blocks that make a task of HERS: the ones a task the condition already has would repeat. An ask
+#: (an email, a borrower upload) is how she gets a task's document, not a second copy of the task.
+OWN_TASK_BLOCKS = ("upload_mine", "todo", "check")
+#: The blocks whose step brings back a document, so it may be checked as the condition's own
+#: (`condition_plan.same_document`). The screen sends `brings_document` for exactly these, and "wait".
+BRINGS_DOCUMENT = ("email", "upload_ask", "upload_mine", "check")
+#: Words a task's name may start with that do not change which task it is ("Upload the invoice").
+_LEADING = frozenset(
+    {"upload", "attach", "check", "get", "do", "the", "a", "an", "it", "our", "my"}
+)
+
+
+def task_words(name: str) -> str:
+    """A task's name as compared for "the same task": lower case, punctuation as spaces, and the leading
+    verbs and articles that do not change which task it is dropped."""
+    words = "".join(ch if ch.isalnum() else " " for ch in name.lower()).split()
+    while words and words[0] in _LEADING:
+        words.pop(0)
+    return " ".join(words)
+
 
 @dataclass(frozen=True)
 class ProposedStep:
@@ -80,19 +107,25 @@ class DescribeProposal:
     refusal: str | None = None
 
 
-def _user_content(words: str, lender_words: str, summary: str | None) -> str:
+def _user_content(
+    words: str, lender_words: str, summary: str | None, existing: Sequence[str] = ()
+) -> str:
     parts = [f"HER WORDS:\n{words}", f"THE LENDER'S WORDS:\n{lender_words}"]
     if summary:
         parts.append(f"WHAT IT ASKS FOR:\n{summary}")
+    if existing:
+        parts.append("TASKS IT ALREADY HAS:\n" + "\n".join(f"- {name}" for name in existing))
     return "\n\n".join(parts)
 
 
 def checked_steps(
-    raw: object, *, words: str, lender_words: str
+    raw: object, *, words: str, lender_words: str, existing: Sequence[str] = ()
 ) -> tuple[list[ProposedStep], list[str]]:
-    """The model's steps, keeping only real blocks with nothing invented. Pure; tested directly."""
+    """The model's steps, keeping only real blocks with nothing invented and no task the condition
+    already has. Pure; tested directly."""
     steps: list[ProposedStep] = []
     left_out: list[str] = []
+    has = {task_words(name) for name in existing} - {""}
     source = f"{words}\n{lender_words}"
     asked_question = False
     for entry in raw if isinstance(raw, list) else []:
@@ -121,6 +154,9 @@ def checked_steps(
                 )
                 continue
             asked_question = True
+        if block in OWN_TASK_BLOCKS and task_words(text) in has:
+            left_out.append(f"Left out “{text}”: this condition already has that task.")
+            continue
         added = [w.fact for w in fact_warnings(source, text) if w.kind == "added"]
         if added:
             left_out.append(
@@ -136,7 +172,11 @@ def checked_steps(
 
 
 async def describe_steps(
-    *, words: str, lender_words: str, summary: str | None = None
+    *,
+    words: str,
+    lender_words: str,
+    summary: str | None = None,
+    existing: Sequence[str] = (),
 ) -> DescribeProposal:
     """One model call. Never raises: a failure is a refusal sentence."""
     words = " ".join((words or "").split())
@@ -146,7 +186,12 @@ async def describe_steps(
         result = await complete(
             model=settings.anthropic_model_reasoning,
             system=load_prompt(PROMPT_PATH),
-            messages=[{"role": "user", "content": _user_content(words, lender_words, summary)}],
+            messages=[
+                {
+                    "role": "user",
+                    "content": _user_content(words, lender_words, summary, existing),
+                }
+            ],
             max_tokens=_MAX_TOKENS,
             temperature=0.0,
         )
@@ -162,7 +207,9 @@ async def describe_steps(
     if not isinstance(payload, dict):
         logger.info("condition_describe_unreadable")
         return DescribeProposal(refusal=REFUSAL_UNREADABLE)
-    steps, left_out = checked_steps(payload.get("steps"), words=words, lender_words=lender_words)
+    steps, left_out = checked_steps(
+        payload.get("steps"), words=words, lender_words=lender_words, existing=existing
+    )
     # COUNTS ONLY: her words and the lender's can name the borrower, amounts and accounts.
     logger.info("condition_describe_proposed", steps=len(steps), left_out=len(left_out))
     if not steps:

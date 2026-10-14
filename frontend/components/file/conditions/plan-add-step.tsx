@@ -36,6 +36,12 @@ export type AddedStep =
       /** LP-972 — "Wait for something": waits on `performers[0]` by `dueDate`, with no email. */
       waiting?: boolean;
       dueDate?: string;
+      /**
+       * LP-971 follow-up — the step brings back a document (an email, an upload, a check, a wait), so
+       * the server may check it as the condition's own (`condition_plan.same_document`). A to-do does
+       * not: "Call the LO about the credit fee" names the invoice and brings nothing.
+       */
+      bringsDocument: boolean;
     }
   | { kind: "own_step"; option: "ask_underwriter" | "push_back" }
   /** LP-972 — "Call or talk to someone": a record in the history, not a task. */
@@ -190,6 +196,7 @@ export function addedStepFor(key: BlockKey, name: string, who: Performer, date =
         option: "i_will_do_it",
         waiting: true,
         dueDate: date,
+        bringsDocument: true,
       };
     case "email":
       return {
@@ -197,12 +204,32 @@ export function addedStepFor(key: BlockKey, name: string, who: Performer, date =
         name,
         performers: [who],
         option: who === "borrower" ? "ask_borrower" : "ask_third_party",
+        bringsDocument: true,
       };
     case "upload_ask":
-      return { kind: "task", name, performers: ["borrower"], option: "ask_borrower" };
+      return {
+        kind: "task",
+        name,
+        performers: ["borrower"],
+        option: "ask_borrower",
+        bringsDocument: true,
+      };
     case "upload_mine":
+      return {
+        kind: "task",
+        name,
+        performers: ["processor"],
+        option: "i_will_do_it",
+        bringsDocument: true,
+      };
     case "todo":
-      return { kind: "task", name, performers: ["processor"], option: "i_will_do_it" };
+      return {
+        kind: "task",
+        name,
+        performers: ["processor"],
+        option: "i_will_do_it",
+        bringsDocument: false,
+      };
     case "check":
       return {
         kind: "task",
@@ -210,6 +237,7 @@ export function addedStepFor(key: BlockKey, name: string, who: Performer, date =
         performers: ["processor"],
         option: "i_will_do_it",
         link: true,
+        bringsDocument: true,
       };
     case "underwriter":
       return { kind: "own_step", option: "ask_underwriter" };
@@ -237,7 +265,7 @@ export function AddStep({
   pending: boolean;
   onAdd: (step: AddedStep) => void;
   /** LP-971 review — a whole proposal at once, so its adds are chained and not raced. */
-  onAddAll: (steps: AddedStep[]) => void;
+  onAddAll: (steps: AddedStep[], leftOut?: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [chosen, setChosen] = useState<Block | null>(null);

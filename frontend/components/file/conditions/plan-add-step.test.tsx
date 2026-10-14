@@ -165,6 +165,7 @@ describe("AddStep", () => {
         option: "i_will_do_it",
         waiting: true,
         dueDate: "2026-10-15",
+        bringsDocument: true,
       });
     });
   });

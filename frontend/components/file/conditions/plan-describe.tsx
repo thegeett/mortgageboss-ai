@@ -8,6 +8,7 @@ import {
 } from "@/components/file/conditions/plan-add-step";
 import { Button } from "@/components/ui/button";
 import { useDescribeSteps } from "@/lib/api/conditions";
+import { previewPath } from "@/lib/conditions/plan-path";
 import { PERFORMER_LABEL } from "@/lib/conditions/plan-words";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import type { DescribeResult, DescribedStep, PlanOption } from "@/lib/types/conditions";
@@ -47,7 +48,7 @@ export function DescribeSteps({
    * than the step that asked for it, and N concurrent `resync_file` calls raced on one file. The parent
    * chains them, so this hands over the list and lets it.
    */
-  onAddAll: (steps: AddedStep[]) => void;
+  onAddAll: (steps: AddedStep[], leftOut: string[]) => void;
   onDone: () => void;
 }) {
   const describe = useDescribeSteps();
@@ -64,8 +65,12 @@ export function DescribeSteps({
       { onSuccess: setResult, onError: (err) => setError(getErrorMessage(err)) },
     );
   };
-  const addAll = (steps: DescribedStep[]) => {
-    onAddAll(steps.map((step) => addedStepFor(step.block, step.text, step.to ?? "borrower")));
+  const addAll = (steps: DescribedStep[], leftOut: string[]) => {
+    // LP-971 follow-up — what was left out goes with them, so the note after adding says it too.
+    onAddAll(
+      steps.map((step) => addedStepFor(step.block, step.text, step.to ?? "borrower")),
+      leftOut,
+    );
     // HER WORDS STAY WHEN A QUESTION TOOK THEM (LP-971 review). A question block sets the condition's
     // own step and keeps no text — `render_question` writes the note from the condition — so the step
     // says to put her words in the note before sending. Clearing the box in the same press took the
@@ -116,6 +121,7 @@ export function DescribeSteps({
               <li key={`${index}-${step.text}`} className="text-sm text-foreground">
                 <strong className="font-semibold">{BLOCK_LABEL[step.block]}</strong>
                 {step.to ? ` (${PERFORMER_LABEL[step.to]})` : ""}: {step.text}
+                <StepPreview step={step} />
                 {isQuestion(step.block) ? (
                   <span className="block text-xs text-foreground-2">
                     We draft the note from the condition. Put this in it before you send.
@@ -128,7 +134,12 @@ export function DescribeSteps({
             ))}
           </ol>
           <div className="flex gap-2">
-            <Button type="button" size="sm" disabled={pending} onClick={() => addAll(result.steps)}>
+            <Button
+              type="button"
+              size="sm"
+              disabled={pending}
+              onClick={() => addAll(result.steps, result.left_out)}
+            >
               {result.steps.length === 1
                 ? "Add this step"
                 : `Add these ${result.steps.length} steps`}
@@ -147,6 +158,44 @@ export function DescribeSteps({
         </ul>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * LP-971 follow-up — WHAT THE STEP BECOMES, BEFORE SHE ADDS IT. The owner added "two steps" on 0006 and
+ * got eight rows: one email is a draft, her send, their reply, her link and our check. Each proposed step
+ * says how many steps of the path it adds and lists them, from `previewPath`, the path's own function. A
+ * step that brings back a document nothing can check says that too, rather than promising a check.
+ */
+function StepPreview({ step }: { step: DescribedStep }) {
+  const added = addedStepFor(step.block, step.text, step.to ?? "borrower");
+  if (added.kind !== "task") return null;
+  const rows = previewPath({
+    name: added.name,
+    option: added.option,
+    performer: added.performers[0] ?? "processor",
+    waiting: added.waiting,
+    documentKinds: step.document_kinds ?? [],
+  });
+  const unchecked = added.bringsDocument && (step.document_kinds ?? []).length === 0;
+  return (
+    <details className="mt-0.5 text-xs text-foreground-2">
+      <summary className="cursor-pointer">
+        Adds {rows.length} {rows.length === 1 ? "step" : "steps"} to the path
+      </summary>
+      <ol className="mt-1 flex list-decimal flex-col gap-0.5 pl-4">
+        {rows.map((row) => (
+          <li key={`${row.whoLabel}-${row.text}`}>
+            <span className="font-semibold">{row.whoLabel}:</span> {row.text}
+          </li>
+        ))}
+      </ol>
+      {unchecked ? (
+        <p className="mt-1">
+          Nothing checks what comes back: we can’t tell which of this condition’s documents it is.
+        </p>
+      ) : null}
+    </details>
   );
 }
 

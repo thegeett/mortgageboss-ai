@@ -1838,6 +1838,7 @@ async def add_condition_item(
             actor_user_id=current_user.id,
             waiting=payload.waiting,
             due_date=payload.due_date,
+            brings_document=payload.brings_document,
         )
     except PlanRefused as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=exc.reason) from exc
@@ -1964,23 +1965,53 @@ async def revert_condition_plan(
 
 @conditions_by_id_router.post("/{condition_id}/plan/describe", response_model=DescribePublic)
 async def describe_condition_steps(
-    condition: ScopedCondition, payload: DescribeRequest
+    condition: ScopedCondition, payload: DescribeRequest, db: DbSession
 ) -> DescribePublic:
     """LP-971 — "Describe it": her sentence as proposed steps. Stores nothing; she adds them herself
-    through the add-a-step doors, so each is drafted, checked and recorded as any other step."""
-    from app.ai.condition_describe import describe_steps
+    through the add-a-step doors, so each is drafted, checked and recorded as any other step.
 
+    LP-971 follow-up — the condition's live tasks go with it, so a task it already has is not proposed
+    again; and each step says what its upload will be checked as, by the rule `add_item` applies."""
+    from app.ai.condition_describe import BRINGS_DOCUMENT, describe_steps
+    from app.documents.display_names import display_name, in_sentence
+    from app.models.condition_item import ConditionItem
+    from app.models.condition_vocabulary import ConditionItemStatus
+    from app.services.condition_plan import same_document
+
+    existing = list(
+        (
+            await db.execute(
+                select(ConditionItem.name)
+                .where(
+                    ConditionItem.condition_id == condition.id,
+                    ConditionItem.deleted_at.is_(None),
+                    ConditionItem.part_of_item_id.is_(None),
+                    ConditionItem.status != ConditionItemStatus.NOT_NEEDED,
+                )
+                .order_by(ConditionItem.sequence)
+            )
+        ).scalars()
+    )
     proposal = await describe_steps(
         words=payload.text,
         lender_words=condition.verbatim_text,
         summary=(condition.reading or {}).get("summary"),
+        existing=existing,
     )
+
+    def kinds(block: str, text: str) -> list[str]:
+        same = (
+            same_document(condition.canonical_type_id, text) if block in BRINGS_DOCUMENT else None
+        )
+        return [in_sentence(display_name(t)) for t in same.documents] if same else []
+
     return DescribePublic(
         steps=[
             DescribedStepPublic(
                 block=step.block,  # type: ignore[arg-type]
                 text=step.text,
                 to=Performer(step.to) if step.to else None,
+                document_kinds=kinds(step.block, step.text),
             )
             for step in proposal.steps
         ],
