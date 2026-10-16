@@ -199,6 +199,9 @@ function condition(overrides: Partial<Condition>): Condition {
       playbook: "Usually already in the file from when credit was pulled; point to it.",
     },
     items: [item({})],
+    // LP-980 — the server always sends where the condition stands; the confirmed plan shows it.
+    prep_status: "to_do",
+    waiting_on: null,
     ...overrides,
   } as Condition;
 }
@@ -1201,10 +1204,18 @@ describe("RoundPlanPanel", () => {
         confirmedPlan(),
         new Set(["r1"]),
       );
-      expect(screen.getByText("1 condition was added after you confirmed the plan")).toBeTruthy();
-      expect(screen.getByText(/an email that includes\s+it\s+is not sent/)).toBeTruthy();
-      expect(screen.getByRole("button", { name: "4410" })).toBeTruthy();
-      expect(screen.queryByRole("button", { name: "0006" })).toBeNull();
+      const added = within(
+        screen
+          .getByText("1 condition was added after you confirmed the plan")
+          .closest("section") as HTMLElement,
+      );
+      expect(added.getByText(/an email that includes\s+it\s+is not sent/)).toBeTruthy();
+      expect(added.getByRole("button", { name: "4410" })).toBeTruthy();
+      expect(added.queryByRole("button", { name: "0006" })).toBeNull();
+      // LP-980 — 0006, confirmed, is in the confirmed plan above instead, and 4410 is not.
+      const confirmed = within(screen.getByRole("region", { name: "The confirmed plan" }));
+      expect(confirmed.getByRole("button", { name: "0006" })).toBeTruthy();
+      expect(confirmed.queryByRole("button", { name: "4410" })).toBeNull();
       fireEvent.click(screen.getByRole("button", { name: "Confirm its plan" }));
       expect(calls.confirms).toEqual([{ roundId: "r1" }]);
     });
@@ -1297,6 +1308,9 @@ describe("RoundPlanPanel", () => {
     it("is gone when nothing was added since", () => {
       show([stamped("c1", "0006")], confirmedPlan(), new Set(["r1"]));
       expect(screen.queryByRole("button", { name: /Confirm/ })).toBeNull();
+      expect(screen.queryByText(/added after you confirmed the plan/)).toBeNull();
+      // LP-980 — what stays is the plan she confirmed, as the working view.
+      expect(screen.getByRole("region", { name: "The confirmed plan" })).toBeTruthy();
     });
   });
 });
@@ -1541,5 +1555,120 @@ describe("LP-971 review — Add these steps fires several adds from one press", 
       expect(note.textContent).toContain("Not added:");
       expect(note.textContent).toContain("this condition already has that task.");
     });
+  });
+});
+
+describe("LP-980 — after Confirm, the plan stays on screen and the work starts on it", () => {
+  const CONFIRMED_AT = "2026-10-13T14:00:00Z";
+  // 1947, its email to Title sent on 10/13 (the task is asked); 0006, its invoice already in the file.
+  const asked = condition({
+    id: "c2",
+    lender_code: "1947",
+    sequence: 1,
+    plan_confirmed_at: CONFIRMED_AT,
+    prep_status: "waiting",
+    waiting_on: "title",
+    reading: {
+      summary: "Final seller Closing Disclosure",
+      explanation: "The final seller CD.",
+    } as Condition["reading"],
+    items: [
+      item({
+        ...TITLE_ITEM,
+        status: "requested",
+        draft: { id: "d1", status: "sent", sent_on: "2026-10-13" },
+      }),
+    ],
+  });
+  const toSend = condition({
+    id: "c3",
+    lender_code: "1228",
+    sequence: 2,
+    plan_confirmed_at: CONFIRMED_AT,
+    prep_status: "to_do",
+    reading: {
+      summary: "Final inspection",
+      explanation: "A final inspection.",
+    } as Condition["reading"],
+    items: [item({ ...TITLE_ITEM, id: "i3", draft: { id: "d3", status: "draft", sent_on: null } })],
+  });
+  const ready = condition({
+    id: "c1",
+    sequence: 3,
+    plan_confirmed_at: CONFIRMED_AT,
+    prep_status: "ready",
+    items: [item({ option: "already_in_file", status: "done", document_name: "Credit invoice" })],
+  });
+
+  function working(onOpenDraft = vi.fn()) {
+    plan.data = { ...unblocked(), confirmed_at: CONFIRMED_AT };
+    render(
+      <RoundPlanPanel
+        fileId="f1"
+        round={round}
+        conditions={[asked, toSend, ready]}
+        onOpenCondition={vi.fn()}
+        onConfirmReading={vi.fn()}
+        onOpenDraft={onOpenDraft}
+        confirmedRoundIds={new Set(["r1"])}
+      />,
+    );
+    return within(screen.getByRole("region", { name: "The confirmed plan" }));
+  }
+
+  it("keeps the confirmed plan with where each condition stands and the step it is on", () => {
+    const plan = working();
+    expect(plan.getByText(/Plan for round 1 · confirmed 10\/13\/2026/)).toBeTruthy();
+    expect(plan.getByText("1 of 3 ready to send")).toBeTruthy();
+    expect(plan.getByText("Waiting on Title")).toBeTruthy();
+    // "To do" twice: the count above (To do 1) and 1228's own status.
+    expect(plan.getAllByText("To do")).toHaveLength(2);
+    expect(plan.getAllByText("Ready to send").length).toBeGreaterThan(0);
+    // "Now:" with the step it is on: 1947 waits on Title, 1228's email is hers to send.
+    expect(plan.getByText("Title / escrow sends it back")).toBeTruthy();
+    expect(plan.getAllByText("Now:")).toHaveLength(3);
+    // THE CONTROL: nothing to confirm on a confirmed plan.
+    expect(screen.queryByRole("button", { name: /Confirm/ })).toBeNull();
+  });
+
+  it("Review and send opens the email the step is about, only where that is the step", () => {
+    const onOpenDraft = vi.fn();
+    const plan = working(onOpenDraft);
+    const buttons = plan.getAllByRole("button", { name: "Review and send" });
+    expect(buttons).toHaveLength(1);
+    fireEvent.click(buttons[0] as HTMLElement);
+    expect(onOpenDraft).toHaveBeenCalledWith("d3");
+  });
+
+  it("Show steps: done steps ticked, the step she is on marked Now, and no editing tools", () => {
+    const plan = working();
+    fireEvent.click(plan.getAllByRole("button", { name: "Show steps" })[0] as HTMLElement);
+    const steps = within(plan.getByRole("list", { name: "The plan, step by step" }));
+    expect(steps.getByText("Sent 10/13")).toBeTruthy();
+    expect(steps.getAllByLabelText("Done")).toHaveLength(2);
+    expect(steps.getByText("Now")).toBeTruthy();
+    expect(steps.queryByRole("button", { name: "Already done" })).toBeNull();
+    expect(plan.queryByText("How it gets done")).toBeNull();
+  });
+
+  it("Change the plan opens the editing tools on that row, and Done puts them away", () => {
+    const plan = working();
+    fireEvent.click(plan.getAllByRole("button", { name: "Show steps" })[0] as HTMLElement);
+    fireEvent.click(plan.getByRole("button", { name: "Change the plan for 1947" }));
+    expect(plan.getByText(/Changing 1947’s plan\./)).toBeTruthy();
+    expect(plan.getByText("How it gets done")).toBeTruthy();
+    expect(plan.getByRole("button", { name: "Already done" })).toBeTruthy();
+    // 1947's email went out: Already done and Not needed are offered (the owner's choice a), with what
+    // they do, and switching it to her own task is not.
+    expect(plan.getByRole("button", { name: "Not needed" })).toBeTruthy();
+    expect(
+      plan.getByText(/Its email went out\. Marking it done or not needed sends nothing more/),
+    ).toBeTruthy();
+    expect(plan.queryByRole("button", { name: "I’ll do this step myself" })).toBeNull();
+    // Done steps stay ticked while she changes the plan: they are the record.
+    expect(plan.getAllByLabelText("Done").length).toBeGreaterThan(0);
+    fireEvent.click(plan.getByRole("button", { name: "Done" }));
+    expect(plan.queryByText(/Changing 1947’s plan/)).toBeNull();
+    expect(plan.queryByText("How it gets done")).toBeNull();
   });
 });

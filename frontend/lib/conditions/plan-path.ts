@@ -36,6 +36,8 @@ export interface PathStep {
   detail?: string;
   /** LP-968 — the prepared draft this step is about, so the step can open it. */
   draftId?: string;
+  /** LP-980 — already done (shown ticked), when the path keeps its done steps (`keepDone`). */
+  done?: boolean;
 }
 
 /**
@@ -192,6 +194,12 @@ export interface PathContext {
    * ("UWM clears 1228"). Absent while the file names no lender: the ending says "the lender".
    */
   lenderName?: string | null;
+  /**
+   * LP-980 — KEEP THE STEPS ALREADY DONE, marked `done`, instead of starting the path where the task
+   * is. The confirmed plan is the working view, so what already happened ("Sent Tue 13 Oct") stays on
+   * it, ticked. The plan before Confirm leaves this off and is unchanged.
+   */
+  keepDone?: boolean;
 }
 
 /** One task's steps, from its own next step and how far it has got. */
@@ -220,14 +228,19 @@ export function taskPath(item: ConditionItem, context: PathContext = {}): PathSt
       steps.push(
         drafted
           ? { ...WE(`We drafted the email to ${who}`, together), draftId: drafted }
-          : WE(
-              context.needsConfirmation
-                ? `We draft the email to ${who} once you confirm how we read this condition`
-                : `We draft the email to ${who} when you confirm the plan`,
-              together,
-            ),
+          : // LP-980 — once it is sent, its draft is in the past: the confirmed plan shows it ticked.
+            item.draft?.status === "sent"
+            ? WE(`We drafted the email to ${who}`, together)
+            : WE(
+                context.needsConfirmation
+                  ? `We draft the email to ${who} once you confirm how we read this condition`
+                  : `We draft the email to ${who} when you confirm the plan`,
+                together,
+              ),
         YOU(
-          "Review the email, and send it once the plan is confirmed",
+          item.draft?.status === "sent" && item.draft.sent_on
+            ? `Sent ${usShort(item.draft.sent_on)}`
+            : "Review the email, and send it once the plan is confirmed",
           // AND "FIRST" MEANS THE FIRST ONE SENT (LP-973 review, from a6's mutation pass).
           // `first_asked_owner` walks the items in order but SKIPS any ask whose email has not gone
           // (`gone(item) is None`), so a condition asking Title first and the borrower second, with
@@ -314,6 +327,12 @@ export function taskPath(item: ConditionItem, context: PathContext = {}): PathSt
   // item with a kind gave `["We check it"]`. Capping the trim leaves the most advanced step she still
   // owes — for her own task that is "upload what you get, or mark the task done", which is exactly it.
   const behind = Math.min(alreadyBehind(item), Math.max(steps.length - 1, 0));
+  if (context.keepDone && behind > 0) {
+    const from = item.waits_on_code ? 1 : 0;
+    return steps.map((step, index) =>
+      index >= from && index < from + behind ? { ...step, done: true } : step,
+    );
+  }
   return behind === 0
     ? steps
     : [
@@ -462,7 +481,7 @@ export function conditionPath(condition: Condition, context: PathContext = {}): 
  */
 export function nextOf(entries: PlanEntry[]): PathStep | null {
   const ahead = entries.filter(
-    (entry) => entry.item?.status !== "not_needed" && entry.step !== FINISHED,
+    (entry) => entry.item?.status !== "not_needed" && entry.step !== FINISHED && !entry.step.done,
   );
   return (ahead.find((entry) => entry.step.who !== "we") ?? ahead[0])?.step ?? null;
 }

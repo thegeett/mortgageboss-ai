@@ -523,4 +523,31 @@ describe("LP-971 follow-up review — the trim and the dropped check row", () =>
       "Title / escrow sends it back",
     );
   });
+
+  describe("LP-980 — the confirmed plan keeps its done steps", () => {
+    const sent = item({
+      status: "requested",
+      draft: { id: "d1", status: "sent", sent_on: "2026-10-13" },
+    });
+
+    it("keeps the steps already done, marked done, and says when it was sent", () => {
+      const kept = taskPath(sent, { keepDone: true });
+      expect(kept.map((step) => [step.text, step.done === true])).toEqual([
+        ["We drafted the email to Title / escrow", true],
+        ["Sent 10/13", true],
+        ["Title / escrow sends it back", false],
+        ["Link it to this task", false],
+        ["We check it against what was asked", false],
+      ]);
+      // THE CONTROL: without keepDone the path starts where the task is, as before.
+      expect(taskPath(sent).map((step) => step.text)[0]).toBe("Title / escrow sends it back");
+    });
+
+    it("Now passes over what is done", () => {
+      const entries = conditionPath({ id: "c1", next_step: null, items: [sent] } as Condition, {
+        keepDone: true,
+      });
+      expect(nextOf(entries)?.text).toBe("Title / escrow sends it back");
+    });
+  });
 });

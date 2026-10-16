@@ -26,7 +26,9 @@ import {
   useSetNextStep,
   useUpdateItem,
 } from "@/lib/api/conditions";
+import { OWNER_LABEL } from "@/lib/conditions/owners";
 import {
+  type PathStep,
   type PathWho,
   type PlanEntry,
   addedPlaces,
@@ -46,6 +48,7 @@ import {
   meaningFor,
 } from "@/lib/conditions/step-meaning";
 import { getErrorMessage } from "@/lib/errors/api-error";
+import { CONDITION_PREP_STATUS } from "@/lib/status";
 import { notifySuccess } from "@/lib/toast";
 import { BUCKET_KIND_CHIP } from "@/lib/types/conditions";
 import type { Condition, ConditionItem, ConditionRound, PlanOption } from "@/lib/types/conditions";
@@ -168,7 +171,8 @@ export function RoundPlanPanel({
     !condition.plan_confirmed_at ||
     blocking.has(condition.lender_code ?? "");
   const rows = onRound.filter(shown).sort((a, b) => a.sequence - b.sequence);
-  if (late && rows.length === 0) return null;
+  // LP-980 — the plan section (to confirm) shows unless the round is confirmed and nothing was added.
+  const showPlan = !(late && rows.length === 0);
   // The rounds a late condition is on: confirming its plan is a confirm of each.
   const lateRoundIds = late ? [...new Set(rows.map((row) => row.last_seen_round_id))] : [];
   const notShown = onRound.filter((condition) => !shown(condition));
@@ -311,169 +315,234 @@ export function RoundPlanPanel({
       return next;
     });
 
-  return (
-    <section className="flex flex-col gap-4 rounded-[var(--radius-container)] border border-primary/35 bg-card p-4 sm:p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <p className="flex flex-wrap gap-x-1.5 text-xs font-semibold uppercase tracking-wide text-primary">
-            <span>
-              {late ? "Added after you confirmed" : `Plan for round ${data.round_number ?? ""}`}
-            </span>
-            <span aria-hidden>·</span>
-            <span>
-              {rows.length} {carried > 0 ? "new " : ""}
-              {rows.length === 1 ? "condition" : "conditions"}
-              {late
-                ? ""
-                : ` · sheet dated ${usDate(data.round_date)} · ${data.nothing_sent ? "nothing sent yet" : "some emails were sent"}`}
-            </span>
-          </p>
-          <h2 className="text-xl font-semibold text-foreground">
-            {late
-              ? `${rows.length} ${rows.length === 1 ? "condition was" : "conditions were"} added after you confirmed the plan`
-              : rows.length === 0
-                ? "Nothing new to plan on this sheet"
-                : `Here’s how we’ll get ${rows.length === 1 ? "this condition" : `these ${rows.length} ${carried > 0 ? "new " : ""}conditions`} cleared`}
-          </h2>
-          {late ? (
-            <p className="max-w-prose text-sm text-foreground-2">
-              From a PDF you attached, an email you filed into the round, or one you added by hand.
-              Check {rows.length === 1 ? "its" : "their"} plan, then confirm it. Until you do,{" "}
-              {rows.length === 1 ? "its" : "their"} steps wait, and an email that includes{" "}
-              {rows.length === 1 ? "it" : "them"} is not sent.
-            </p>
-          ) : rows.length > 0 ? (
-            <p className="max-w-prose text-sm text-foreground-2">
-              For each condition we worked out what it needs, prepared the emails we could, and laid
-              out every step until the lender clears it. Check the plan, change a step if it’s
-              wrong, then confirm. Nothing is sent until you do.
-            </p>
-          ) : null}
-          {carried > 0 ? (
-            <p className="max-w-prose text-sm text-foreground-2">
-              <strong className="font-semibold text-foreground">
-                {carried} {carried === 1 ? "condition" : "conditions"} from earlier rounds{" "}
-                {carried === 1 ? "keeps its" : "keep their"} plan.
-              </strong>{" "}
-              You’ll see {carried === 1 ? "it" : "them"} in the list after you confirm.
-            </p>
-          ) : null}
-        </div>
-      </div>
+  // LP-980 — one row, for the plan to confirm and for the confirmed plan (`working`).
+  const rowFor = (condition: Condition, working = false) => (
+    <PlanRow
+      key={condition.id}
+      working={working}
+      condition={condition}
+      open={open.has(condition.id)}
+      onToggle={() => toggle(condition.id)}
+      onOpenCondition={() => onOpenCondition(condition.id)}
+      onConfirmReading={() => onConfirmReading(condition.id)}
+      onChangeItem={(item, to) => changeItem(condition, item, to)}
+      onMarkItem={(item, change) => markItem(condition, item, change)}
+      onRevert={() => {
+        setRefusal(null);
+        revert.mutate(condition.id, { onError });
+      }}
+      onOpenDraft={onOpenDraft}
+      fileId={fileId}
+      adding={addItem.isPending || setNextStep.isPending}
+      onAddStep={(step) => addStep(condition, step)}
+      onAddSteps={(steps, leftOut) => addSteps(condition, steps, leftOut)}
+      justAdded={justAdded?.conditionId === condition.id ? justAdded : null}
+      onDoneAdded={() => setJustAdded(null)}
+      onOwnWay={() => {
+        setRefusal(null);
+        ownWay.mutate(condition.id, { onError });
+      }}
+      onRemoveItem={(item) => {
+        setRefusal(null);
+        removeItem.mutate({ conditionId: condition.id, itemId: item.id }, { onError });
+      }}
+      onChangeStep={(to) => changeStep(condition, to)}
+      onHelp={(title, current) => setHelp({ title, current })}
+      lenderName={fileLender.data?.lender?.name ?? null}
+      onChooseRoute={(routeKey) => {
+        setRefusal(null);
+        chooseRoute.mutate({ conditionId: condition.id, route: routeKey }, { onError });
+      }}
+    />
+  );
 
-      {/* THE CONFIRM BLOCK IS AT THE TOP (the owner, 2026-10-10: "put Plan confirmation button section on
+  // LP-980 — AFTER CONFIRM, THE PLAN SHE CONFIRMED STAYS ON SCREEN AND THE WORK STARTS ON IT (the owner,
+  // 2026-10-13: "Once we confirm the plan it should display what we decided in plan and actual work
+  // should start."). The newest round's confirmed conditions, each with its status, the step it is on
+  // and its steps so far; the editing tools wait behind "Change the plan" on each row.
+  const confirmedRows = late
+    ? conditions
+        .filter(
+          (condition) => condition.last_seen_round_id === round.id && !!condition.plan_confirmed_at,
+        )
+        .sort((a, b) => a.sequence - b.sequence)
+    : [];
+  const tally = { toDo: 0, waiting: 0, ready: 0 };
+  for (const condition of confirmedRows) {
+    if (condition.prep_status === "ready") tally.ready += 1;
+    else if (condition.prep_status === "waiting" || condition.prep_status === "with_underwriter")
+      tally.waiting += 1;
+    else tally.toDo += 1;
+  }
+
+  return (
+    <>
+      {confirmedRows.length > 0 ? (
+        <section
+          aria-label="The confirmed plan"
+          className="flex flex-col gap-4 rounded-[var(--radius-container)] border border-border bg-card p-4 sm:p-5"
+        >
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="flex flex-col gap-1">
+              <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+                Plan for round {data.round_number ?? ""}
+                {data.confirmed_at ? ` · confirmed ${usDate(data.confirmed_at)}` : ""}
+              </p>
+              <h2 className="text-xl font-semibold text-foreground">
+                {tally.ready} of {confirmedRows.length} ready to send
+              </h2>
+              <p className="max-w-prose text-sm text-foreground-2">
+                The plan you confirmed. Each condition shows the step it is on; done steps are
+                ticked.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Pill>
+                To do <b className="font-semibold">{tally.toDo}</b>
+              </Pill>
+              <Pill>
+                Waiting on others <b className="font-semibold">{tally.waiting}</b>
+              </Pill>
+              <Pill>
+                Ready to send <b className="font-semibold">{tally.ready}</b>
+              </Pill>
+            </div>
+          </div>
+          <div className="overflow-hidden rounded-[var(--radius-container)] border border-border">
+            {confirmedRows.map((condition) => rowFor(condition, true))}
+          </div>
+          {refusal && !showPlan ? <p className="text-sm text-destructive">{refusal}</p> : null}
+        </section>
+      ) : null}
+      {showPlan ? (
+        <section className="flex flex-col gap-4 rounded-[var(--radius-container)] border border-primary/35 bg-card p-4 sm:p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex flex-col gap-1">
+              <p className="flex flex-wrap gap-x-1.5 text-xs font-semibold uppercase tracking-wide text-primary">
+                <span>
+                  {late ? "Added after you confirmed" : `Plan for round ${data.round_number ?? ""}`}
+                </span>
+                <span aria-hidden>·</span>
+                <span>
+                  {rows.length} {carried > 0 ? "new " : ""}
+                  {rows.length === 1 ? "condition" : "conditions"}
+                  {late
+                    ? ""
+                    : ` · sheet dated ${usDate(data.round_date)} · ${data.nothing_sent ? "nothing sent yet" : "some emails were sent"}`}
+                </span>
+              </p>
+              <h2 className="text-xl font-semibold text-foreground">
+                {late
+                  ? `${rows.length} ${rows.length === 1 ? "condition was" : "conditions were"} added after you confirmed the plan`
+                  : rows.length === 0
+                    ? "Nothing new to plan on this sheet"
+                    : `Here’s how we’ll get ${rows.length === 1 ? "this condition" : `these ${rows.length} ${carried > 0 ? "new " : ""}conditions`} cleared`}
+              </h2>
+              {late ? (
+                <p className="max-w-prose text-sm text-foreground-2">
+                  From a PDF you attached, an email you filed into the round, or one you added by
+                  hand. Check {rows.length === 1 ? "its" : "their"} plan, then confirm it. Until you
+                  do, {rows.length === 1 ? "its" : "their"} steps wait, and an email that includes{" "}
+                  {rows.length === 1 ? "it" : "them"} is not sent.
+                </p>
+              ) : rows.length > 0 ? (
+                <p className="max-w-prose text-sm text-foreground-2">
+                  For each condition we worked out what it needs, prepared the emails we could, and
+                  laid out every step until the lender clears it. Check the plan, change a step if
+                  it’s wrong, then confirm. Nothing is sent until you do.
+                </p>
+              ) : null}
+              {carried > 0 ? (
+                <p className="max-w-prose text-sm text-foreground-2">
+                  <strong className="font-semibold text-foreground">
+                    {carried} {carried === 1 ? "condition" : "conditions"} from earlier rounds{" "}
+                    {carried === 1 ? "keeps its" : "keep their"} plan.
+                  </strong>{" "}
+                  You’ll see {carried === 1 ? "it" : "them"} in the list after you confirm.
+                </p>
+              ) : null}
+            </div>
+          </div>
+
+          {/* THE CONFIRM BLOCK IS AT THE TOP (the owner, 2026-10-10: "put Plan confirmation button section on
           top"). What Confirm will do and the button sit under the heading, so she does not scroll past
           every condition to reach them; the conditions below are what she checks before pressing it. */}
-      <div className="flex flex-col gap-3 rounded-[var(--radius-container)] bg-muted/50 p-4">
-        <ConfirmSummary rows={rows} drafts={drafts} carriedCodes={carriedCodes} />
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            disabled={blocked || confirm.isPending}
-            onClick={() => {
-              setRefusal(null);
-              setConfirmRefusal(null);
-              // LP-976 — a confirm on a confirmed round confirms the plan of what was added to it.
-              for (const roundId of late ? lateRoundIds : [round.id]) {
-                confirm.mutate(
-                  { roundId },
-                  { onError: (error) => setConfirmRefusal(getErrorMessage(error)) },
-                );
-              }
-            }}
-          >
-            <Check className="h-4 w-4" aria-hidden />
-            {late ? `Confirm ${rows.length === 1 ? "its" : "their"} plan` : "Confirm the plan"}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              const first = rows[0];
-              if (first) onOpenCondition(first.id);
-            }}
-          >
-            Review one by one
-          </Button>
-          {blocked ? (
-            <p className="text-xs text-muted-foreground">
-              {namedBlocker !== null
-                ? `Confirm ${namedBlocker}’s reading first — `
-                : `Check how we read ${data.blocking_codes.length === 1 ? "it" : "them"} first — `}
-              {data.blocking_codes.length === 1
-                ? "one condition still needs you."
-                : `${data.blocking_codes.length} conditions still need you.`}
-            </p>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              Nothing is sent until you press confirm, and every email waits for your review.
-            </p>
-          )}
-        </div>
-        {confirmRefusal ? <p className="text-sm text-destructive">{confirmRefusal}</p> : null}
-      </div>
+          <div className="flex flex-col gap-3 rounded-[var(--radius-container)] bg-muted/50 p-4">
+            <ConfirmSummary rows={rows} drafts={drafts} carriedCodes={carriedCodes} />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                disabled={blocked || confirm.isPending}
+                onClick={() => {
+                  setRefusal(null);
+                  setConfirmRefusal(null);
+                  // LP-976 — a confirm on a confirmed round confirms the plan of what was added to it.
+                  for (const roundId of late ? lateRoundIds : [round.id]) {
+                    confirm.mutate(
+                      { roundId },
+                      { onError: (error) => setConfirmRefusal(getErrorMessage(error)) },
+                    );
+                  }
+                }}
+              >
+                <Check className="h-4 w-4" aria-hidden />
+                {late ? `Confirm ${rows.length === 1 ? "its" : "their"} plan` : "Confirm the plan"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  const first = rows[0];
+                  if (first) onOpenCondition(first.id);
+                }}
+              >
+                Review one by one
+              </Button>
+              {blocked ? (
+                <p className="text-xs text-muted-foreground">
+                  {namedBlocker !== null
+                    ? `Confirm ${namedBlocker}’s reading first — `
+                    : `Check how we read ${data.blocking_codes.length === 1 ? "it" : "them"} first — `}
+                  {data.blocking_codes.length === 1
+                    ? "one condition still needs you."
+                    : `${data.blocking_codes.length} conditions still need you.`}
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Nothing is sent until you press confirm, and every email waits for your review.
+                </p>
+              )}
+            </div>
+            {confirmRefusal ? <p className="text-sm text-destructive">{confirmRefusal}</p> : null}
+          </div>
 
-      <FirstMovesBox rows={rows} drafts={drafts} />
+          <FirstMovesBox rows={rows} drafts={drafts} />
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-foreground-2">
-        <span className="font-semibold text-foreground">Who does each step:</span>
-        {LEGEND.map(([who, label]) => (
-          <span key={who} className="inline-flex items-center gap-1.5">
-            <span aria-hidden className={cn("h-2.5 w-2.5 rounded-full", WHO_DOT[who])} />
-            {label}
-          </span>
-        ))}
-        {data.needs_confirmation > 0 ? (
-          <Pill tone="warning">
-            <TriangleAlert className="h-3.5 w-3.5" aria-hidden />
-            <b className="font-semibold">{data.needs_confirmation}</b> need you to check how we read
-            {data.needs_confirmation === 1 ? " it" : " them"}
-          </Pill>
-        ) : null}
-      </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-foreground-2">
+            <span className="font-semibold text-foreground">Who does each step:</span>
+            {LEGEND.map(([who, label]) => (
+              <span key={who} className="inline-flex items-center gap-1.5">
+                <span aria-hidden className={cn("h-2.5 w-2.5 rounded-full", WHO_DOT[who])} />
+                {label}
+              </span>
+            ))}
+            {data.needs_confirmation > 0 ? (
+              <Pill tone="warning">
+                <TriangleAlert className="h-3.5 w-3.5" aria-hidden />
+                <b className="font-semibold">{data.needs_confirmation}</b> need you to check how we
+                read
+                {data.needs_confirmation === 1 ? " it" : " them"}
+              </Pill>
+            ) : null}
+          </div>
 
-      <div className="overflow-hidden rounded-[var(--radius-container)] border border-border">
-        {rows.map((condition) => (
-          <PlanRow
-            key={condition.id}
-            condition={condition}
-            open={open.has(condition.id)}
-            onToggle={() => toggle(condition.id)}
-            onOpenCondition={() => onOpenCondition(condition.id)}
-            onConfirmReading={() => onConfirmReading(condition.id)}
-            onChangeItem={(item, to) => changeItem(condition, item, to)}
-            onMarkItem={(item, change) => markItem(condition, item, change)}
-            onRevert={() => {
-              setRefusal(null);
-              revert.mutate(condition.id, { onError });
-            }}
-            onOpenDraft={onOpenDraft}
-            fileId={fileId}
-            adding={addItem.isPending || setNextStep.isPending}
-            onAddStep={(step) => addStep(condition, step)}
-            onAddSteps={(steps, leftOut) => addSteps(condition, steps, leftOut)}
-            justAdded={justAdded?.conditionId === condition.id ? justAdded : null}
-            onDoneAdded={() => setJustAdded(null)}
-            onOwnWay={() => {
-              setRefusal(null);
-              ownWay.mutate(condition.id, { onError });
-            }}
-            onRemoveItem={(item) => {
-              setRefusal(null);
-              removeItem.mutate({ conditionId: condition.id, itemId: item.id }, { onError });
-            }}
-            onChangeStep={(to) => changeStep(condition, to)}
-            onHelp={(title, current) => setHelp({ title, current })}
-            lenderName={fileLender.data?.lender?.name ?? null}
-            onChooseRoute={(routeKey) => {
-              setRefusal(null);
-              chooseRoute.mutate({ conditionId: condition.id, route: routeKey }, { onError });
-            }}
-          />
-        ))}
-      </div>
+          <div className="overflow-hidden rounded-[var(--radius-container)] border border-border">
+            {rows.map((condition) => rowFor(condition))}
+          </div>
 
-      {refusal ? <p className="text-sm text-destructive">{refusal}</p> : null}
+          {refusal ? <p className="text-sm text-destructive">{refusal}</p> : null}
+        </section>
+      ) : null}
 
       <StepGuide help={help} onClose={() => setHelp(null)} />
       {linking ? (
@@ -488,7 +557,7 @@ export function RoundPlanPanel({
           onDone={() => setLinking(null)}
         />
       ) : null}
-    </section>
+    </>
   );
 }
 
@@ -532,6 +601,7 @@ function routeOf(condition: Condition): string | null {
 
 function PlanRow({
   condition,
+  working = false,
   lenderName,
   onChooseRoute,
   open,
@@ -554,6 +624,11 @@ function PlanRow({
   onHelp,
 }: {
   condition: Condition;
+  /**
+   * LP-980 — the row of a confirmed plan: its status, the step it is on and its steps so far. The
+   * editing tools wait behind "Change the plan".
+   */
+  working?: boolean;
   open: boolean;
   onToggle: () => void;
   onOpenCondition: () => void;
@@ -589,9 +664,26 @@ function PlanRow({
   // ANY task counts, a dropped one too (LP-974): a condition whose only task she marked not needed was
   // worked out, and calling it unread hid the crossed-out task with her reason and its Undo.
   const unworked = condition.items.length === 0 && ownStep === null;
-  const entries = conditionPath(condition, { needsConfirmation: needsHer, lenderName });
+  // LP-980 — on the confirmed plan, "Change the plan" opens the editing tools on this row only.
+  const [editing, setEditing] = useState(false);
+  const showsEdits = !working || editing;
+  const expanded = open || (working && editing);
+  // The confirmed plan keeps the steps already done, ticked: they are the record of what happened.
+  const entries = conditionPath(condition, {
+    needsConfirmation: needsHer,
+    lenderName,
+    keepDone: working,
+  });
   const route = routeOf(condition);
   const next = nextOf(entries);
+  // LP-980 — THE DRAFT "Review and send" OPENS: the one of the task whose step she is on, when that
+  // step is hers. "Now" passes over the app's own steps, so the step she is on is "Review the email…"
+  // and the draft's id sits on the same task's "We drafted the email" step just before it.
+  const nowItem = entries.find((entry) => entry.step === next)?.item ?? null;
+  const toReview =
+    working && next?.who === "you" && nowItem
+      ? entries.find((entry) => entry.item === nowItem && entry.step.draftId)?.step.draftId
+      : undefined;
   // A task's name over its first step only when there is more than one thing on the timeline to tell
   // apart; on a one-task condition the name would repeat the condition's title.
   const named = condition.items.length + (ownStep ? 1 : 0) > 1;
@@ -612,6 +704,7 @@ function PlanRow({
             <span className="rounded-md border border-border px-1.5 py-0.5 text-xs text-foreground-2">
               {BUCKET_KIND_CHIP[condition.bucket_kind]}
             </span>
+            {working ? <PrepChip condition={condition} /> : null}
             {needsHer && !unworked ? (
               <button
                 type="button"
@@ -630,7 +723,10 @@ function PlanRow({
           ) : null}
           {next ? (
             <p className="text-sm text-foreground-2">
-              <strong className="font-semibold text-foreground">Next:</strong> {next.text}
+              <strong className="font-semibold text-foreground">
+                {working ? "Now:" : "Next:"}
+              </strong>{" "}
+              {next.text}
             </p>
           ) : null}
           {unworked ? (
@@ -640,25 +736,78 @@ function PlanRow({
             />
           ) : null}
         </div>
-        <div className="flex flex-[1_1_10rem] justify-end">
-          <Button
-            type="button"
-            variant="outline"
-            aria-expanded={open}
-            aria-controls={detailsId}
-            onClick={onToggle}
-          >
-            {open ? (
-              <ChevronUp className="h-4 w-4" aria-hidden />
-            ) : (
-              <ChevronDown className="h-4 w-4" aria-hidden />
-            )}
-            {open ? "Hide the plan" : "See the plan"}
-          </Button>
+        <div className="flex flex-[1_1_10rem] flex-wrap justify-end gap-2">
+          {/* LP-980 — THE STEP'S OWN BUTTON, when the step she is on is an email to review and send. */}
+          {toReview && onOpenDraft ? (
+            <Button type="button" onClick={() => onOpenDraft(toReview)}>
+              Review and send
+            </Button>
+          ) : null}
+          {working && editing ? null : (
+            <Button
+              type="button"
+              variant="outline"
+              aria-expanded={open}
+              aria-controls={detailsId}
+              onClick={onToggle}
+            >
+              {open ? (
+                <ChevronUp className="h-4 w-4" aria-hidden />
+              ) : (
+                <ChevronDown className="h-4 w-4" aria-hidden />
+              )}
+              {working
+                ? open
+                  ? "Hide steps"
+                  : "Show steps"
+                : open
+                  ? "Hide the plan"
+                  : "See the plan"}
+            </Button>
+          )}
         </div>
       </div>
 
-      {open ? (
+      {working && editing ? (
+        <div className="mx-4 mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[var(--radius-container)] border border-primary/30 bg-primary/5 px-3 py-2.5">
+          <span className="min-w-0 flex-[999_1_16rem] text-sm text-foreground">
+            <strong className="font-semibold">Changing {code}’s plan.</strong> Changes apply as you
+            make them.
+          </span>
+          <Button type="button" size="sm" onClick={() => setEditing(false)}>
+            Done
+          </Button>
+        </div>
+      ) : null}
+
+      {/* LP-980 — THE CONFIRMED PLAN'S STEPS, without the editing tools. */}
+      {expanded && !showsEdits ? (
+        <div id={detailsId} className="mx-4 mb-4 flex flex-col gap-2">
+          {entries.length > 0 ? (
+            <Timeline
+              fileId={fileId}
+              condition={condition}
+              entries={entries}
+              fresh={[]}
+              named={named}
+              now={next}
+              editable={false}
+              onOpenDraft={onOpenDraft}
+              onMarkItem={onMarkItem}
+              onRemoveItem={onRemoveItem}
+            />
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="self-start text-sm font-semibold text-primary underline-offset-2 hover:underline"
+          >
+            Change the plan for {code}
+          </button>
+        </div>
+      ) : null}
+
+      {expanded && showsEdits ? (
         <div id={detailsId} className="mx-4 mb-4 grid items-start gap-x-6 gap-y-5 md:grid-cols-2">
           <div className="flex flex-col gap-4 rounded-[var(--radius-container)] border border-border bg-muted/40 p-4">
             <Detail heading="What the lender wants">
@@ -810,6 +959,8 @@ function PlanRow({
                 entries={entries}
                 fresh={justAdded?.itemIds ?? []}
                 named={named}
+                now={working ? next : null}
+                editable
                 onOpenDraft={onOpenDraft}
                 onMarkItem={onMarkItem}
                 onRemoveItem={onRemoveItem}
@@ -1054,7 +1205,11 @@ function TaskEdits({ item, onMark }: { item: ConditionItem; onMark: (change: Ite
       </button>
     );
   }
-  if (item.status !== "open") return null; // asked or answered: its record stands
+  // Answered: its record stands. LP-980 — ASKED IS NOT: her email went out, and she may still find it
+  // done or not needed (the owner's choice a). That records it and sends nothing more; if the answer
+  // comes anyway, it is linked to the task.
+  const asked = item.status === "requested";
+  if (item.status !== "open" && !asked) return null;
   const theirs = item.option !== "i_will_do_it";
   const required = mode === "not_needed" || (mode === "done" && theirs);
   const prompt =
@@ -1081,7 +1236,7 @@ function TaskEdits({ item, onMark }: { item: ConditionItem; onMark: (change: Ite
   if (mode === null) {
     return (
       <div className="flex flex-wrap gap-x-4 gap-y-1">
-        {ASK_OPTIONS.includes(item.option) ? (
+        {ASK_OPTIONS.includes(item.option) && !asked ? (
           <button
             type="button"
             onClick={() => setMode("myself")}
@@ -1104,6 +1259,12 @@ function TaskEdits({ item, onMark }: { item: ConditionItem; onMark: (change: Ite
         >
           Not needed
         </button>
+        {asked ? (
+          <span className="w-full text-xs text-foreground-2">
+            Its email went out. Marking it done or not needed sends nothing more; if it comes
+            anyway, we link it to this task.
+          </span>
+        ) : null}
       </div>
     );
   }
@@ -1183,6 +1344,8 @@ function Timeline({
   entries,
   fresh,
   named,
+  now,
+  editable,
   onOpenDraft,
   onMarkItem,
   onRemoveItem,
@@ -1193,6 +1356,10 @@ function Timeline({
   /** LP-971 follow-up — the tasks she just added: their steps are marked New. */
   fresh: readonly string[];
   named: boolean;
+  /** LP-980 — on the confirmed plan, the step she is on, marked Now. */
+  now: PathStep | null;
+  /** LP-980 — her edits to each task (Already done, Not needed, Remove step); off on the working view. */
+  editable: boolean;
   onOpenDraft?: (draftId: string) => void;
   onMarkItem: (item: ConditionItem, change: ItemMark) => void;
   onRemoveItem: (item: ConditionItem) => void;
@@ -1205,6 +1372,8 @@ function Timeline({
         const finished = item?.status === "done" && item.option !== "already_in_file";
         const badge = badgeFor(entry, named);
         const isNew = item !== null && fresh.includes(item.id);
+        const isNow = now !== null && step === now;
+        const ticked = step.done === true;
         return (
           <li
             key={`${index}-${item?.id ?? "c"}-${step.text}`}
@@ -1219,10 +1388,15 @@ function Timeline({
                 aria-hidden
                 className={cn(
                   "flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full text-xs font-semibold",
-                  dropped || finished ? "bg-muted-foreground/60 text-card" : WHO_DOT[step.who],
+                  ticked
+                    ? "bg-success text-success-foreground"
+                    : dropped || finished
+                      ? "bg-muted-foreground/60 text-card"
+                      : WHO_DOT[step.who],
+                  isNow && "ring-2 ring-primary ring-offset-2 ring-offset-card",
                 )}
               >
-                {index + 1}
+                {ticked ? <Check className="h-3.5 w-3.5" aria-label="Done" /> : index + 1}
               </span>
               {index < entries.length - 1 ? (
                 <span aria-hidden className="min-h-3.5 w-0.5 flex-1 bg-border" />
@@ -1243,6 +1417,11 @@ function Timeline({
                     New
                   </span>
                 ) : null}
+                {isNow ? (
+                  <span className="rounded-full bg-primary px-1.5 py-px text-[11px] font-semibold text-primary-foreground">
+                    Now
+                  </span>
+                ) : null}
                 {badge ? (
                   <span className="rounded-md bg-muted px-1.5 py-px text-[11px] font-semibold text-foreground-2">
                     {badge}
@@ -1252,7 +1431,11 @@ function Timeline({
               <span
                 className={cn(
                   "text-[15px] font-medium leading-snug",
-                  dropped ? "text-muted-foreground line-through" : "text-foreground",
+                  dropped
+                    ? "text-muted-foreground line-through"
+                    : ticked
+                      ? "text-foreground-2"
+                      : "text-foreground",
                 )}
               >
                 {step.text}
@@ -1285,7 +1468,7 @@ function Timeline({
                   <ItemLinkActions fileId={fileId} condition={condition} item={item} />
                 </div>
               ) : null}
-              {item && entry.leads ? (
+              {item && entry.leads && editable ? (
                 <div className="flex flex-wrap items-start gap-x-4 gap-y-1">
                   <TaskEdits item={item} onMark={(change) => onMarkItem(item, change)} />
                   {/* A STEP SHE ADDED CAN GO (S3-01's remove, a soft delete). One the reading
@@ -1523,4 +1706,30 @@ interface JustAdded {
   itemIds: string[];
   ownStep: PlanOption | null;
   leftOut: string[];
+}
+
+/**
+ * LP-980 — where the condition stands, in the words the conditions list uses (`CONDITION_PREP_STATUS`):
+ * To do, Waiting on Title, Ready to send, Sent to lender. The server moves it as work happens.
+ */
+function PrepChip({ condition }: { condition: Condition }) {
+  const status = condition.prep_status;
+  const label =
+    status === "waiting" && condition.waiting_on
+      ? `Waiting on ${OWNER_LABEL[condition.waiting_on]}`
+      : CONDITION_PREP_STATUS[status].label;
+  return (
+    <span
+      className={cn(
+        "rounded-full border px-2 py-0.5 text-xs font-semibold",
+        status === "ready"
+          ? "border-success/40 bg-success/10 text-success"
+          : status === "waiting" || status === "with_underwriter"
+            ? "border-warning/40 bg-warning/10 text-warning"
+            : "border-primary/30 bg-primary/5 text-primary",
+      )}
+    >
+      {label}
+    </span>
+  );
 }

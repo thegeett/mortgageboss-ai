@@ -267,13 +267,11 @@ async def test_a_waiting_she_set_herself_is_not_moved_on_by_the_plan(
     assert condition.prep_status is ConditionPrepStatus.WAITING
 
 
-async def test_a_waiting_an_email_made_is_not_moved_on_by_the_plan(
-    db_session: AsyncSession,
-) -> None:
-    """THE OTHER SIDE OF THE DISCRIMINATION (the LP-977 peer). The rule is "the WAIT made this Waiting",
-    not "Waiting may advance": a Waiting a sent email made is the lender's side genuinely waiting on
-    someone, and must not advance when her tasks are done. Fails if the `by` values drift, if the
-    latest-move lookup changes, or if the branch is widened to a set of statuses."""
+async def _email_waiting_then_her_task_done(
+    db_session: AsyncSession, others_status: ConditionItemStatus
+) -> Any:
+    """A condition a sent email moved to Waiting on Title, with her own task marked done and every
+    other task at `others_status`."""
     from app.models.condition_item import ConditionItem
     from app.models.condition_round import ConditionRound
     from app.services.condition_status import _event as status_event
@@ -315,7 +313,7 @@ async def test_a_waiting_an_email_made_is_not_moved_on_by_the_plan(
             ConditionItem.id != mine.id,
         )
     ):
-        other.status = ConditionItemStatus.NOT_NEEDED
+        other.status = others_status
     await db_session.flush()
     await update_item(
         db_session,
@@ -328,7 +326,67 @@ async def test_a_waiting_an_email_made_is_not_moved_on_by_the_plan(
         actor_user_id=actor,
         status=ConditionItemStatus.DONE,
     )
+    return condition
+
+
+async def test_a_waiting_an_email_made_stays_while_its_ask_is_out(db_session: AsyncSession) -> None:
+    """THE OTHER SIDE OF THE DISCRIMINATION (the LP-977 peer): a Waiting a sent email made is someone
+    genuinely being waited on while the asked task is still out, so her own task being done does not
+    move it.
+
+    LP-980 — WHAT HOLDS THIS NOW IS `ready_because`, NOT THE WAITING RULE. `_waiting_moves_on` lets an
+    email's Waiting through; the asked task is REQUESTED, not done, so `ready_because` refuses. A change
+    to `ready_because` that fails this test is the place to look, not the Waiting rule."""
+    condition = await _email_waiting_then_her_task_done(db_session, ConditionItemStatus.REQUESTED)
     assert _status(condition) is ConditionPrepStatus.WAITING
+
+
+async def test_a_waiting_an_email_made_moves_on_once_nothing_is_asked(
+    db_session: AsyncSession,
+) -> None:
+    """LP-980 — THE OWNER'S CHOICE (a). The email went out, then she found the document and marked the
+    asked task done (or not needed): nobody is waited on any more, so "Waiting on Title" moves to Ready
+    like any finished plan. This test asserted the opposite before LP-980 (same setup: every asked task
+    off, her task done, the condition left at Waiting for good)."""
+    condition = await _email_waiting_then_her_task_done(db_session, ConditionItemStatus.NOT_NEEDED)
+    assert _status(condition) is ConditionPrepStatus.READY
+
+
+async def test_marking_the_sent_ask_already_done_moves_it_on(db_session: AsyncSession) -> None:
+    """LP-980 — THE OWNER'S CASE (a), through the door the button uses. 1947's email to Title went out
+    (the ask is REQUESTED, the condition Waiting on Title); she finds the CD on the file and marks THAT
+    task Already done, with how she knows. Nothing is waited on, so the condition is Ready."""
+    from app.models.condition_item import ConditionItem
+
+    condition = await _email_waiting_then_her_task_done(db_session, ConditionItemStatus.REQUESTED)
+    assert _status(condition) is ConditionPrepStatus.WAITING, "the premise: the ask is out"
+    asked = list(
+        await db_session.scalars(
+            select(ConditionItem).where(
+                ConditionItem.condition_id == condition.id,
+                ConditionItem.status == ConditionItemStatus.REQUESTED,
+            )
+        )
+    )
+    assert asked, "the premise: something is asked"
+    from app.models.loan_file import LoanFile
+
+    loan_file = await db_session.get(LoanFile, condition.loan_file_id)
+    actor = await _actor(db_session, loan_file)
+    for item in asked:
+        await update_item(
+            db_session,
+            condition=condition,
+            item=item,
+            option=None,
+            name=None,
+            performers=None,
+            due_date=None,
+            actor_user_id=actor,
+            status=ConditionItemStatus.DONE,
+            note="Found the final CD on the file",
+        )
+    assert _status(condition) is ConditionPrepStatus.READY
 
 
 async def test_a_later_send_still_names_who_we_wait_on(db_session: AsyncSession) -> None:

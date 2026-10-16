@@ -1445,8 +1445,16 @@ async def plan_confirmed(db: AsyncSession, condition: Condition) -> bool:
     return condition.plan_confirmed_at is not None
 
 
-async def _waiting_by_wait(db: AsyncSession, condition: Condition) -> bool:
-    """LP-977 — whether the condition's latest status move was the one a wait step made."""
+async def _waiting_moves_on(db: AsyncSession, condition: Condition) -> bool:
+    """Whether a Waiting the code made may move on when every task is done (`ready_because` decides
+    that after this; a Waiting she picked has no `by` and is never moved).
+
+    LP-977 — one a wait step made: it is the plan's own.
+    LP-980 — and one a sent email made. While its asked task is out (`requested`) the task is not done,
+    so nothing moves and the Waiting stays, as LP-977 meant. But when she marks the asked task done or
+    not needed herself (the owner's choice a: the email went out, then she found it on the file), nobody
+    is waited on any more, and "Waiting on Title" would stay untrue for good.
+    """
     last = (
         await db.execute(
             select(ConditionEvent.detail)
@@ -1458,7 +1466,7 @@ async def _waiting_by_wait(db: AsyncSession, condition: Condition) -> bool:
             .limit(1)
         )
     ).scalar_one_or_none()
-    return bool(last and last.get("by") == "wait")
+    return bool(last and last.get("by") in ("wait", "email"))
 
 
 async def apply_step_status(
@@ -1478,11 +1486,13 @@ async def apply_step_status(
     LP-977 — OR FROM A WAITING THE WAIT ITSELF MADE. A "Wait for something" step moves To do to Waiting
     (`_wait_moves_status`). That Waiting is the plan's, not hers, so when every task is done it moves on
     exactly as To do would have. Without this, marking the wait done left the condition at Waiting with
-    nothing left to wait on, a regression on the To do → Ready it had before the wait moved it. A
-    Waiting she picked, or one a sent email made, is still left alone.
+    nothing left to wait on, a regression on the To do → Ready it had before the wait moved it.
+
+    LP-980 — AND FROM ONE A SENT EMAIL MADE, once every task is done (`_waiting_moves_on`): while the
+    asked task is out it is not done, so nothing moves. A Waiting she picked is still left alone.
     """
     if condition.prep_status is ConditionPrepStatus.WAITING:
-        if not await _waiting_by_wait(db, condition):
+        if not await _waiting_moves_on(db, condition):
             return False
     elif condition.prep_status is not ConditionPrepStatus.TO_DO:
         return False
