@@ -268,10 +268,11 @@ async def test_a_waiting_she_set_herself_is_not_moved_on_by_the_plan(
 
 
 async def _email_waiting_then_her_task_done(
-    db_session: AsyncSession, others_status: ConditionItemStatus
+    db_session: AsyncSession, others_status: ConditionItemStatus, by: str = "email"
 ) -> Any:
-    """A condition a sent email moved to Waiting on Title, with her own task marked done and every
-    other task at `others_status`."""
+    """A condition code moved to Waiting on Title, with her own task marked done and every other task
+    at `others_status`. `by` is what made the move: a sent email, or (LP-980 review) a mechanism added
+    later, which must behave the same way because neither is a status she picked."""
     from app.models.condition_item import ConditionItem
     from app.models.condition_round import ConditionRound
     from app.services.condition_status import _event as status_event
@@ -291,7 +292,7 @@ async def _email_waiting_then_her_task_done(
                 "prep_status_from": "to_do",
                 "prep_status_to": "waiting",
                 "waiting_on": "title",
-                "by": "email",
+                "by": by,
                 "recipient": "title_attorney",
             },
             actor_user_id=actor,
@@ -386,6 +387,26 @@ async def test_marking_the_sent_ask_already_done_moves_it_on(db_session: AsyncSe
             status=ConditionItemStatus.DONE,
             note="Found the final CD on the file",
         )
+    assert _status(condition) is ConditionPrepStatus.READY
+
+
+async def test_a_waiting_no_person_chose_moves_on_whatever_made_it(
+    db_session: AsyncSession,
+) -> None:
+    """LP-980 REVIEW — THE RULE IS "SHE DID NOT CHOOSE IT", NOT A LIST OF THE MECHANISMS.
+
+    The Waiting rule read `by in ("wait", "email")`, and the LP-977 review had already taken that shape
+    out of `condition_drafts` for the reason it fails: a mechanism the list does not name reads as a
+    status SHE picked, so the condition sits at Waiting for ever with nothing left to wait on, and the
+    event history cannot change to free it. `by: "reminder"` here stands for the next one added; today's
+    two are covered by the tests above. Both callers now ask `condition_status.last_move_was_not_hers`.
+
+    Its control is `test_a_waiting_she_set_herself_is_not_moved_on_by_the_plan`, where the move carries
+    no `by` at all and the condition stays at Waiting.
+    """
+    condition = await _email_waiting_then_her_task_done(
+        db_session, ConditionItemStatus.NOT_NEEDED, by="reminder"
+    )
     assert _status(condition) is ConditionPrepStatus.READY
 
 

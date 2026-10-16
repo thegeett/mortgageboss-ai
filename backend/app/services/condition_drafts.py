@@ -1577,6 +1577,7 @@ async def _wait_on_first_asked(
             return False
 
     from app.services.condition_status import _event as status_event
+    from app.services.condition_status import last_move_was_not_hers
 
     if target is None:
         return False
@@ -1591,7 +1592,7 @@ async def _wait_on_first_asked(
     elif (
         condition.prep_status is ConditionPrepStatus.WAITING
         and condition.waiting_on is not target_owner
-        and await _last_move_was_not_hers(db, condition)
+        and await last_move_was_not_hers(db, condition)
     ):
         detail = {
             "prep_status_from": ConditionPrepStatus.WAITING.value,
@@ -1625,35 +1626,6 @@ async def _condition_items(db: AsyncSession, condition: Condition) -> list[Condi
             )
         ).scalars()
     )
-
-
-async def _last_move_was_not_hers(db: AsyncSession, condition: Condition) -> bool:
-    """Whether the condition's latest status move was made by code rather than chosen by her.
-
-    LP-977 REVIEW — IT ASKED "WAS IT A SEND?" AND MEANT "IS IT OURS TO RENAME?". A send is the most
-    authoritative statement of who we are waiting on — we have just emailed them — and the one thing it
-    must not overwrite is a status SHE picked. This read `by == "email"`, so once LP-977 let a WAIT move
-    a condition to Waiting, every later send was refused the rename: a wait on Title followed by the
-    borrower's email left the row saying "Waiting on Title" with the newest email sitting in the
-    borrower's inbox, for ever, because the event history never changes.
-
-    So the question is whether the move carries a `by` at all. Every code-made move has one — `email`,
-    `wait`, `plan`, `evidence` — and the move `condition_status` writes when she picks a status by hand
-    has none. A future `by` therefore behaves like the others instead of being silently excluded, which
-    is the trap the enumerated version just fell into.
-    """
-    last = (
-        await db.execute(
-            select(ConditionEvent.detail)
-            .where(
-                ConditionEvent.condition_id == condition.id,
-                ConditionEvent.kind == ConditionEventKind.CONDITION_PREP_MOVED,
-            )
-            .order_by(ConditionEvent.occurred_at.desc(), ConditionEvent.id.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    return last is not None and "by" in last
 
 
 async def _name_the_send(

@@ -506,10 +506,38 @@ describe("LP-971 follow-up review — the trim and the dropped check row", () =>
     ).toEqual(["We check it’s a service invoice"]);
   });
 
-  it("leaves an ask that came back visible rather than empty", () => {
+  it("leaves an ask that came back visible, and names what is still open", () => {
     const steps = taskPath(unchecked({ status: "received" })).map((s) => s.text);
     expect(steps.length).toBeGreaterThan(0);
-    expect(steps).toEqual(["Link it to this task"]);
+    // LP-980 review — the step says "or mark the task done", because with nothing to check that is
+    // the only thing left on a document she has already linked.
+    expect(steps).toEqual(["Link it to this task, or mark the task done"]);
+    // THE CONTROL: with something to check, linking is the whole step and the check is what remains.
+    expect(taskPath(item({ status: "received" })).map((s) => s.text)).toEqual([
+      "We check it against what was asked",
+    ]);
+  });
+
+  it("ticks nothing it has not done, in the working view (LP-980 review)", () => {
+    // `keepDone` marks the first `alreadyBehind` steps done. For an ask that came back with nothing
+    // to check, the path's last step IS the linking that happened, so the view ticked three steps,
+    // left "Link it to this task" unticked, and `nextOf` named it as the next thing to do on a
+    // document already linked. The step now names her acceptance, so leaving it open is true.
+    const ticks = taskPath(unchecked({ status: "received" }), { keepDone: true }).map(
+      (step) => `${step.done ? "x" : " "} ${step.text}`,
+    );
+    expect(ticks).toEqual([
+      "x We draft the email to Title / escrow when you confirm the plan",
+      "x Review the email, and send it once the plan is confirmed",
+      "x Title / escrow sends it back",
+      "  Link it to this task, or mark the task done",
+    ]);
+    // And with a check row the ticks are unchanged: linking is done, the check is what is left.
+    expect(
+      taskPath(item({ status: "received" }), { keepDone: true })
+        .filter((step) => !step.done)
+        .map((step) => step.text),
+    ).toEqual(["We check it against what was asked"]);
   });
 
   it("still empties nothing that was not already empty (the controls)", () => {

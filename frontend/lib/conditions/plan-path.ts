@@ -225,6 +225,7 @@ export function taskPath(item: ConditionItem, context: PathContext = {}): PathSt
       // and except on a plan built before LP-968, which still drafts at confirm. Each case says its own.
       const drafted = item.draft?.status === "draft" ? item.draft.id : undefined;
       const together = `It goes in the ${email} email, with anything else asked of ${who} this round.`;
+      const checks = checkSteps(item, "We check it against what was asked");
       steps.push(
         drafted
           ? { ...WE(`We drafted the email to ${who}`, together), draftId: drafted }
@@ -260,8 +261,21 @@ export function taskPath(item: ConditionItem, context: PathContext = {}): PathSt
           detail:
             "If it comes by email to the file’s inbox, you accept the attachment onto the file.",
         },
-        YOU("Link it to this task", "We suggest the document that matches."),
-        ...checkSteps(item, "We check it against what was asked"),
+        // LP-980 REVIEW — THE LAST STEP HAS TO NAME WHAT IS STILL OPEN. With a check row after it,
+        // linking is the whole of this step and the check is what remains. With nothing to check
+        // (`document_kinds` empty and no `checks`), linking is the LAST thing the path knows about —
+        // and a RECEIVED task is linked, so the working view ticked everything before this step,
+        // left this one unticked, and `nextOf` named "Link it to this task" as what to do next on a
+        // document she had already linked. Her remaining action is to accept it, which is the clause
+        // the other two paths already end with, so this one ends with it too rather than inventing a
+        // sentence: "or mark the task done" is what is owed, and the step reads true in both states.
+        checks.length > 0
+          ? YOU("Link it to this task", "We suggest the document that matches.")
+          : YOU(
+              "Link it to this task, or mark the task done",
+              "We suggest the document that matches. Nothing checks this one, so it is yours to accept.",
+            ),
+        ...checks,
       );
       break;
     }

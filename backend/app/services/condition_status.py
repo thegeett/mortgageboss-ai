@@ -866,12 +866,43 @@ def came_back_verdict(*, note_date: date, round_id: UUID, at: datetime) -> dict[
     }
 
 
+async def last_move_was_not_hers(db: AsyncSession, condition: Condition) -> bool:
+    """Whether the condition's latest status move was made by code rather than chosen by her.
+
+    LP-977 REVIEW — THE QUESTION IS WHETHER THE MOVE CARRIES A `by` AT ALL. Every code-made move has one
+    — `email`, `wait`, `plan`, `evidence`, `unlink` — and the move this module writes when she picks a
+    status by hand has none. The version that enumerated the mechanisms it knew ("was it a send?") was
+    silently wrong the moment LP-977 added a third: a wait on Title followed by the borrower's email
+    left the row saying "Waiting on Title" with the newest email in the borrower's inbox, for ever,
+    because the event history does not change.
+
+    LP-980 REVIEW — AND IT LIVES HERE BECAUSE TWO CALLERS ASK IT. `condition_drafts` asks it to decide
+    whether a send may rename who we wait on; `condition_plan.apply_step_status` asks it to decide
+    whether a Waiting may move on when every task is done. They are one question — "is this status ours
+    or hers?" — and LP-980 wrote the second copy as an enumeration again (`by in ("wait", "email")`),
+    which is green only because nothing else moves a condition to Waiting today. One rule, called twice.
+    """
+    last = (
+        await db.execute(
+            select(ConditionEvent.detail)
+            .where(
+                ConditionEvent.condition_id == condition.id,
+                ConditionEvent.kind == ConditionEventKind.CONDITION_PREP_MOVED,
+            )
+            .order_by(ConditionEvent.occurred_at.desc(), ConditionEvent.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return last is not None and "by" in last
+
+
 __all__ = [
     "BulkOutcome",
     "ConditionRefused",
     "RefusalCode",
     "apply_bulk",
     "came_back_verdict",
+    "last_move_was_not_hers",
     "move_prep_status",
     "normalise_note_text",
     "record_verdict",

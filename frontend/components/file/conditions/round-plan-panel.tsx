@@ -122,7 +122,12 @@ export function RoundPlanPanel({
   const [linking, setLinking] = useState<{ condition: Condition; item: ConditionItem } | null>(
     null,
   );
-  const [refusal, setRefusal] = useState<string | null>(null);
+  // LP-980 REVIEW — A REFUSAL BELONGS IN THE SECTION WHOSE ROW RAISED IT, which is the LP-978 review's
+  // finding one section later: there are now two lists of rows, each with its own refusal line, and a
+  // refused edit on a CONFIRMED row rendered under the plan-to-confirm section below it — past every
+  // row of both lists, which is where LP-978 said a refusal must not be. So the refusal carries the
+  // condition it came from, and each section shows the one its own rows raised.
+  const [refusal, setRefusal] = useState<{ conditionId: string; text: string } | null>(null);
   // LP-971 follow-up — what the last add put on one condition's plan, until she presses Done.
   const [justAdded, setJustAdded] = useState<JustAdded | null>(null);
   // LP-978 REVIEW — A REFUSED CONFIRM BELONGS BESIDE THE BUTTON, and the button moved. There is one
@@ -202,10 +207,14 @@ export function RoundPlanPanel({
     : data.drafts;
   const emails = drafts.length;
 
-  const onError = (error: unknown) => setRefusal(getErrorMessage(error));
+  const onErrorFor = (condition: Condition) => (error: unknown) =>
+    setRefusal({ conditionId: condition.id, text: getErrorMessage(error) });
   const changeItem = (condition: Condition, item: ConditionItem, to: PlanOption) => {
     setRefusal(null);
-    updateItem.mutate({ conditionId: condition.id, itemId: item.id, option: to }, { onError });
+    updateItem.mutate(
+      { conditionId: condition.id, itemId: item.id, option: to },
+      { onError: onErrorFor(condition) },
+    );
   };
   // LP-968 — her edits to a task: Already done, Not needed, I'll do this myself (each with her words).
   const markItem = (
@@ -214,11 +223,17 @@ export function RoundPlanPanel({
     change: { status?: "done" | "not_needed" | "open"; option?: PlanOption; note?: string },
   ) => {
     setRefusal(null);
-    updateItem.mutate({ conditionId: condition.id, itemId: item.id, ...change }, { onError });
+    updateItem.mutate(
+      { conditionId: condition.id, itemId: item.id, ...change },
+      { onError: onErrorFor(condition) },
+    );
   };
   const changeStep = (condition: Condition, to: PlanOption) => {
     setRefusal(null);
-    setNextStep.mutate({ conditionId: condition.id, next_step: to }, { onError });
+    setNextStep.mutate(
+      { conditionId: condition.id, next_step: to },
+      { onError: onErrorFor(condition) },
+    );
   };
   // LP-969 — a step she adds: a task (`add_item`) or the condition's own question (`set_next_step`).
   // LP-971 REVIEW — ONE AT A TIME, AND EACH KNOWS WHAT WAS THERE BEFORE IT.
@@ -250,8 +265,9 @@ export function RoundPlanPanel({
         setJustAdded({ conditionId: condition.id, itemIds: addedIds, ownStep, leftOut });
       }
     };
+    const fail = onErrorFor(condition);
     const stop = (error: unknown) => {
-      onError(error);
+      fail(error);
       finish();
     };
     const run = (rest: AddedStep[], known: ReadonlySet<string>) => {
@@ -272,7 +288,7 @@ export function RoundPlanPanel({
         logCall.mutate(
           { conditionId: condition.id, with_whom: step.with, on: step.on, agreed: step.agreed },
           {
-            onError,
+            onError: fail,
             onSuccess: () => {
               notifySuccess({
                 title: "Call logged",
@@ -329,7 +345,7 @@ export function RoundPlanPanel({
       onMarkItem={(item, change) => markItem(condition, item, change)}
       onRevert={() => {
         setRefusal(null);
-        revert.mutate(condition.id, { onError });
+        revert.mutate(condition.id, { onError: onErrorFor(condition) });
       }}
       onOpenDraft={onOpenDraft}
       fileId={fileId}
@@ -340,18 +356,24 @@ export function RoundPlanPanel({
       onDoneAdded={() => setJustAdded(null)}
       onOwnWay={() => {
         setRefusal(null);
-        ownWay.mutate(condition.id, { onError });
+        ownWay.mutate(condition.id, { onError: onErrorFor(condition) });
       }}
       onRemoveItem={(item) => {
         setRefusal(null);
-        removeItem.mutate({ conditionId: condition.id, itemId: item.id }, { onError });
+        removeItem.mutate(
+          { conditionId: condition.id, itemId: item.id },
+          { onError: onErrorFor(condition) },
+        );
       }}
       onChangeStep={(to) => changeStep(condition, to)}
       onHelp={(title, current) => setHelp({ title, current })}
       lenderName={fileLender.data?.lender?.name ?? null}
       onChooseRoute={(routeKey) => {
         setRefusal(null);
-        chooseRoute.mutate({ conditionId: condition.id, route: routeKey }, { onError });
+        chooseRoute.mutate(
+          { conditionId: condition.id, route: routeKey },
+          { onError: onErrorFor(condition) },
+        );
       }}
     />
   );
@@ -367,6 +389,7 @@ export function RoundPlanPanel({
         )
         .sort((a, b) => a.sequence - b.sequence)
     : [];
+  const confirmedIds = new Set(confirmedRows.map((condition) => condition.id));
   const tally = { toDo: 0, waiting: 0, ready: 0 };
   for (const condition of confirmedRows) {
     if (condition.prep_status === "ready") tally.ready += 1;
@@ -411,7 +434,9 @@ export function RoundPlanPanel({
           <div className="overflow-hidden rounded-[var(--radius-container)] border border-border">
             {confirmedRows.map((condition) => rowFor(condition, true))}
           </div>
-          {refusal && !showPlan ? <p className="text-sm text-destructive">{refusal}</p> : null}
+          {refusal && confirmedIds.has(refusal.conditionId) ? (
+            <p className="text-sm text-destructive">{refusal.text}</p>
+          ) : null}
         </section>
       ) : null}
       {showPlan ? (
@@ -540,7 +565,9 @@ export function RoundPlanPanel({
             {rows.map((condition) => rowFor(condition))}
           </div>
 
-          {refusal ? <p className="text-sm text-destructive">{refusal}</p> : null}
+          {refusal && !confirmedIds.has(refusal.conditionId) ? (
+            <p className="text-sm text-destructive">{refusal.text}</p>
+          ) : null}
         </section>
       ) : null}
 
@@ -676,14 +703,21 @@ function PlanRow({
   });
   const route = routeOf(condition);
   const next = nextOf(entries);
-  // LP-980 — THE DRAFT "Review and send" OPENS: the one of the task whose step she is on, when that
-  // step is hers. "Now" passes over the app's own steps, so the step she is on is "Review the email…"
-  // and the draft's id sits on the same task's "We drafted the email" step just before it.
-  const nowItem = entries.find((entry) => entry.step === next)?.item ?? null;
-  const toReview =
-    working && next?.who === "you" && nowItem
-      ? entries.find((entry) => entry.item === nowItem && entry.step.draftId)?.step.draftId
-      : undefined;
+  // LP-980 — THE DRAFT "Review and send" OPENS: an email of hers on this condition that has not gone.
+  // A step carries a draft id only while that draft is UNSENT (`taskPath`: `status === "draft"`), so
+  // the button can never open a sent email, and the id is the drafted step's own — never another
+  // task's.
+  //
+  // LP-980 REVIEW — AN UNSENT EMAIL, NOT ONLY THE TASK SHE IS ON. This asked for the draft of the NOW
+  // task, and "Now" is one step for the whole row: on a condition that asks two people (the code's own
+  // example is 0132, title's wire instructions and the LO's disclosure), once the first email has gone
+  // the row's Now is "Title / escrow sends it back" — someone else's step — and the second email, still
+  // unsent and hers to send, offered no button at all. Nothing else sends it, so the row has to. A
+  // ticked step is excluded: a draft never sent on a task whose document arrived another way is behind
+  // her, and the path shows it ticked.
+  const toReview = working
+    ? entries.find((entry) => entry.step.draftId && !entry.step.done)?.step.draftId
+    : undefined;
   // A task's name over its first step only when there is more than one thing on the timeline to tell
   // apart; on a one-task condition the name would repeat the condition's title.
   const named = condition.items.length + (ownStep ? 1 : 0) > 1;

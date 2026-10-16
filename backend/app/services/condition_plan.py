@@ -1454,19 +1454,17 @@ async def _waiting_moves_on(db: AsyncSession, condition: Condition) -> bool:
     so nothing moves and the Waiting stays, as LP-977 meant. But when she marks the asked task done or
     not needed herself (the owner's choice a: the email went out, then she found it on the file), nobody
     is waited on any more, and "Waiting on Title" would stay untrue for good.
+
+    LP-980 REVIEW — IT IS `condition_status.last_move_was_not_hers`, NOT A LIST OF THE MECHANISMS. This
+    read `by in ("wait", "email")`, which is the same question asked a second way: the LP-977 review had
+    already replaced that enumeration in `condition_drafts` because a mechanism it did not list behaves
+    like hers and sticks for good. It is green today only because `wait` and `email` are the only moves
+    that reach Waiting (`plan` and `evidence` go to Ready, `unlink` to To do), so the next one to be
+    added would be excluded in silence. One rule now, in the module that writes the events.
     """
-    last = (
-        await db.execute(
-            select(ConditionEvent.detail)
-            .where(
-                ConditionEvent.condition_id == condition.id,
-                ConditionEvent.kind == ConditionEventKind.CONDITION_PREP_MOVED,
-            )
-            .order_by(ConditionEvent.occurred_at.desc(), ConditionEvent.id.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    return bool(last and last.get("by") in ("wait", "email"))
+    from app.services.condition_status import last_move_was_not_hers
+
+    return await last_move_was_not_hers(db, condition)
 
 
 async def apply_step_status(

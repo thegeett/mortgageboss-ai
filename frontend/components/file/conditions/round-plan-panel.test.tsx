@@ -43,6 +43,8 @@ const calls = vi.hoisted(() => ({
   describeResult: null as DescribeResult | null,
   /** LP-978 review — what the confirm call refuses with: axios-shaped, as the real one is. */
   confirmError: null as unknown,
+  /** LP-980 review — what an item edit refuses with, for the same reason. */
+  itemError: null as unknown,
 }));
 vi.mock("@/lib/api/conditions", () => ({
   useRoundPlan: () => ({ data: plan.data }),
@@ -57,7 +59,15 @@ vi.mock("@/lib/api/conditions", () => ({
     isPending: false,
   }),
   useSetNextStep: () => ({ mutate: (body: unknown) => calls.steps.push(body) }),
-  useUpdateItem: () => ({ mutate: (body: unknown) => calls.items.push(body) }),
+  useUpdateItem: () => ({
+    mutate: (body: unknown, options?: { onError?: (error: unknown) => void }) => {
+      calls.items.push(body);
+      // LP-980 REVIEW — the server refuses item edits too (a 409 from `update_item`), and the same
+      // argument the LP-978 review made for confirm applies here: a mock that never calls `onError`
+      // cannot show WHERE that refusal lands, and the panel now has two places it could land in.
+      if (calls.itemError) options?.onError?.(calls.itemError);
+    },
+  }),
   useRevertPlan: () => ({ mutate: (id: unknown) => calls.reverts.push(id), isPending: false }),
   useChooseRoute: () => ({
     mutate: (body: unknown) => calls.routes.push(body),
@@ -119,6 +129,7 @@ afterEach(() => {
   calls.logged = [];
   calls.routes = [];
   calls.confirmError = null;
+  calls.itemError = null;
 });
 
 const basePlan: RoundPlan = {
@@ -1183,6 +1194,33 @@ describe("RoundPlanPanel", () => {
       expect(screen.getByText("1 condition from earlier rounds keeps its plan.")).toBeTruthy();
     });
 
+    it("LP-980 review: a carried condition is in the working view, as this screen promises", () => {
+      // LP-973 keeps a carried condition OUT of the plan to confirm — it already has a confirmed plan
+      // — and this screen tells her "You’ll see it in the list after you confirm". Before LP-980 there
+      // was no list to see it in: after confirm, `onRound` holds only the conditions with no confirmed
+      // plan, so a carried one appeared in neither section and the sentence was a promise of nothing.
+      // The working view is keyed on the round it was last seen on, so it is there, with its own
+      // status and the step it is on — which is what makes the sentence true.
+      show([condition({}), seenAgain("c8", "1947")], unblocked());
+      expect(screen.getByText("1 condition from earlier rounds keeps its plan.")).toBeTruthy();
+      expect(screen.getByText(/You’ll see it in the list after you confirm\./)).toBeTruthy();
+      expect(screen.queryByRole("region", { name: "The confirmed plan" })).toBeNull();
+      cleanup();
+      show(
+        [condition({ id: "c9", plan_confirmed_at: null }), seenAgain("c8", "1947")],
+        { ...unblocked(), confirmed_at: "2026-10-13T14:00:00Z" } as RoundPlan,
+        new Set(["r1"]),
+      );
+      const work = within(screen.getByRole("region", { name: "The confirmed plan" }));
+      expect(work.getByRole("button", { name: "1947" })).toBeTruthy();
+      expect(work.getByText("0 of 1 ready to send")).toBeTruthy(); // its own status, To do
+      // And it is not asked to be confirmed a second time: the plan below is only what was added.
+      expect(
+        screen.getByRole("heading", { level: 2, name: /added after you confirmed the plan/ }),
+      ).toBeTruthy();
+      expect(work.queryByRole("button", { name: "0006" })).toBeNull();
+    });
+
     it("round 1 has nothing carried, and says nothing about it (the control)", () => {
       show([condition({}), condition({ id: "c2", lender_code: "1947", sequence: 2 })], unblocked());
       expect(screen.queryByText(/from earlier rounds/)).toBeNull();
@@ -1640,6 +1678,131 @@ describe("LP-980 — after Confirm, the plan stays on screen and the work starts
     expect(onOpenDraft).toHaveBeenCalledWith("d3");
   });
 
+  // LP-980 REVIEW — ONE CONDITION, TWO ASKS TO DIFFERENT PEOPLE, the borrower's email still unsent.
+  // `toReview` takes the first step of the NOW task that carries a draft, so the question is which
+  // task is Now: Title's ask has gone, and "Title / escrow sends it back" is a step of someone else's.
+  const twoAsks = condition({
+    id: "c5",
+    lender_code: "0132",
+    sequence: 1,
+    plan_confirmed_at: CONFIRMED_AT,
+    prep_status: "waiting",
+    waiting_on: "title",
+    items: [
+      item({
+        ...TITLE_ITEM,
+        id: "i5",
+        status: "requested",
+        draft: { id: "d5", status: "sent", sent_on: "2026-10-13" },
+      }),
+      item({
+        id: "i6",
+        name: "Signed disclosure",
+        performer: "borrower",
+        performers: ["borrower"],
+        option: "ask_borrower",
+        draft: { id: "d6", status: "draft", sent_on: null },
+      }),
+    ],
+  });
+
+  it("offers the unsent email of a condition that also waits on an earlier ask (LP-980 review)", () => {
+    const onOpenDraft = vi.fn();
+    plan.data = { ...unblocked(), confirmed_at: CONFIRMED_AT };
+    render(
+      <RoundPlanPanel
+        fileId="f1"
+        round={round}
+        conditions={[twoAsks]}
+        onOpenCondition={vi.fn()}
+        onConfirmReading={vi.fn()}
+        onOpenDraft={onOpenDraft}
+        confirmedRoundIds={new Set(["r1"])}
+      />,
+    );
+    const work = within(screen.getByRole("region", { name: "The confirmed plan" }));
+    // The row is waiting on Title AND holds an email of hers to send; the button must be the
+    // borrower's own draft, never the sent one.
+    fireEvent.click(work.getByRole("button", { name: "Review and send" }));
+    expect(onOpenDraft).toHaveBeenCalledWith("d6");
+    cleanup();
+
+    // AND WITH BOTH EMAILS UNSENT, the row names the first and the steps reach the rest: one
+    // "Review and send" (title's, the first task), and a "Review draft" on each drafted step.
+    const first = twoAsks.items[0] as ConditionItem;
+    plan.data = { ...unblocked(), confirmed_at: CONFIRMED_AT };
+    render(
+      <RoundPlanPanel
+        fileId="f1"
+        round={round}
+        conditions={[
+          {
+            ...twoAsks,
+            items: [
+              { ...first, status: "open", draft: { id: "d5", status: "draft", sent_on: null } },
+              twoAsks.items[1] as ConditionItem,
+            ],
+          },
+        ]}
+        onOpenCondition={vi.fn()}
+        onConfirmReading={vi.fn()}
+        onOpenDraft={onOpenDraft}
+        confirmedRoundIds={new Set(["r1"])}
+      />,
+    );
+    const both = within(screen.getByRole("region", { name: "The confirmed plan" }));
+    fireEvent.click(both.getByRole("button", { name: "Review and send" }));
+    expect(onOpenDraft).toHaveBeenLastCalledWith("d5");
+    fireEvent.click(both.getByRole("button", { name: "Show steps" }));
+    expect(both.getAllByRole("button", { name: "Review draft" })).toHaveLength(2);
+  });
+
+  it("does not offer an email behind her: the document came another way (LP-980 review)", () => {
+    const onOpenDraft = vi.fn();
+    // Her ask to Title was never sent; the seller CD came by another route and she linked it, so the
+    // task is RECEIVED and the path ticks the draft and the send. The email is behind her.
+    const linked = item({
+      ...TITLE_ITEM,
+      id: "i7",
+      status: "received",
+      document_id: "doc1",
+      document_name: "Seller CD",
+      draft: { id: "d7", status: "draft", sent_on: null },
+    });
+    const show = (where: typeof linked) => {
+      plan.data = { ...unblocked(), confirmed_at: CONFIRMED_AT };
+      render(
+        <RoundPlanPanel
+          fileId="f1"
+          round={round}
+          conditions={[
+            condition({
+              id: "c6",
+              lender_code: "1947",
+              plan_confirmed_at: CONFIRMED_AT,
+              items: [where],
+            }),
+          ]}
+          onOpenCondition={vi.fn()}
+          onConfirmReading={vi.fn()}
+          onOpenDraft={onOpenDraft}
+          confirmedRoundIds={new Set(["r1"])}
+        />,
+      );
+      return within(screen.getByRole("region", { name: "The confirmed plan" }));
+    };
+    expect(show(linked).queryByRole("button", { name: "Review and send" })).toBeNull();
+    cleanup();
+    // THE CONTROL: the same task and the same unsent draft, before the document came — the email is
+    // ahead of her, and the button is there. Otherwise "no button" would be true of the fixture.
+    expect(
+      show({ ...linked, status: "open", document_id: null, document_name: null }).getByRole(
+        "button",
+        { name: "Review and send" },
+      ),
+    ).toBeTruthy();
+  });
+
   it("Show steps: done steps ticked, the step she is on marked Now, and no editing tools", () => {
     const plan = working();
     fireEvent.click(plan.getAllByRole("button", { name: "Show steps" })[0] as HTMLElement);
@@ -1649,6 +1812,72 @@ describe("LP-980 — after Confirm, the plan stays on screen and the work starts
     expect(steps.getByText("Now")).toBeTruthy();
     expect(steps.queryByRole("button", { name: "Already done" })).toBeNull();
     expect(plan.queryByText("How it gets done")).toBeNull();
+  });
+
+  // LP-980 REVIEW — A CONDITION IMPORTED AFTER THE CONFIRM, so both sections are on screen at once:
+  // the confirmed plan (the working view) above, and the plan to confirm for what was added below.
+  // Every test above has `rows.length === 0`, so `showPlan` is false and only one section renders —
+  // the configuration where the two refusal slots can disagree was untested.
+  const added = condition({
+    id: "c4",
+    lender_code: "1582",
+    sequence: 4,
+    plan_confirmed_at: null,
+    items: [item({ id: "i4" })],
+  });
+
+  function both(): ReturnType<typeof within> {
+    plan.data = { ...unblocked(), confirmed_at: CONFIRMED_AT };
+    render(
+      <RoundPlanPanel
+        fileId="f1"
+        round={round}
+        conditions={[asked, toSend, ready, added]}
+        onOpenCondition={vi.fn()}
+        onConfirmReading={vi.fn()}
+        onOpenDraft={vi.fn()}
+        confirmedRoundIds={new Set(["r1"])}
+      />,
+    );
+    return within(screen.getByRole("region", { name: "The confirmed plan" }));
+  }
+
+  /** Drop the first task, from a row: the working rows keep their tools behind "Change the plan". */
+  function dropFirstTask(section: ReturnType<typeof within>, code?: string) {
+    if (code) {
+      fireEvent.click(section.getAllByRole("button", { name: "Show steps" })[0] as HTMLElement);
+      fireEvent.click(section.getByRole("button", { name: `Change the plan for ${code}` }));
+    } else {
+      fireEvent.click(section.getByRole("button", { name: "See the plan" }));
+    }
+    fireEvent.click(section.getByRole("button", { name: "Not needed" }));
+    fireEvent.change(screen.getByLabelText("Why isn’t it needed?"), {
+      target: { value: "already in the package" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Mark not needed" }));
+  }
+
+  it("shows a refused edit in the section whose row raised it (LP-980 review)", () => {
+    calls.itemError = {
+      isAxiosError: true,
+      response: { status: 409, data: { detail: "1947’s email went out; it cannot be dropped." } },
+    };
+    const work = both();
+    dropFirstTask(work, "1947");
+    // It is rendered — this test is only about WHERE, so the red says "wrong section", not "absent".
+    expect(screen.getByText(/1947’s email went out/)).toBeTruthy();
+    expect(work.getByText(/1947’s email went out/)).toBeTruthy();
+  });
+
+  it("and a refused edit on the plan to confirm stays there (the control, LP-980 review)", () => {
+    calls.itemError = {
+      isAxiosError: true,
+      response: { status: 409, data: { detail: "1582 is still being read." } },
+    };
+    const work = both();
+    dropFirstTask(within(document.body)); // "See the plan" is only on the row still to confirm
+    expect(screen.getByText(/1582 is still being read/)).toBeTruthy();
+    expect(work.queryByText(/1582 is still being read/)).toBeNull();
   });
 
   it("Change the plan opens the editing tools on that row, and Done puts them away", () => {
