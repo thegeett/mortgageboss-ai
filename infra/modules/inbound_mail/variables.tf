@@ -9,22 +9,6 @@ variable "tags" {
   default     = {}
 }
 
-variable "mail_domain" {
-  description = <<-EOT
-    The domain that RECEIVES borrower mail, e.g. imboxstaging.mortgageboss.ai.
-
-    It must be a domain that sends nothing. An inbound MX overlapping an authenticated
-    SENDING domain is the documented cause of an infinite mail loop, so this is deliberately
-    a subdomain of its own with no SPF, no DKIM and no A record — see the module header.
-  EOT
-  type        = string
-}
-
-variable "route53_zone_id" {
-  description = "The hosted zone the MX and verification records are written into."
-  type        = string
-}
-
 variable "aws_region" {
   description = "Region for the SES receipt endpoint. Email receiving is not available everywhere."
   type        = string
@@ -36,12 +20,12 @@ variable "aws_account_id" {
 }
 
 variable "bucket_name" {
-  description = "Bucket that receives raw .eml objects."
+  description = "Bucket for all raw mail: `inbound/` written by SES, `outbound/` by the worker."
   type        = string
 }
 
 variable "kms_key_arn" {
-  description = "Customer managed key for SSE-KMS on the bucket and on the SES write."
+  description = "Customer managed key for the bucket's default SSE-KMS, the SNS topic and the queues."
   type        = string
 }
 

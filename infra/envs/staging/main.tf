@@ -670,50 +670,13 @@ module "scheduler" {
 # --------------------------------------------------------------------------- #
 # INFRA-1 — inbound borrower mail
 # --------------------------------------------------------------------------- #
-# STAGING NEEDS A REGISTRAR STEP NOW, AND DID NOT BEFORE (LP-836). This said the opposite, and
-# it was true of the old name: `inbox.staging.mortgageboss.ai` sits inside the
-# `staging.mortgageboss.ai` hosted zone Terraform already owns, so it was one MX record and no
-# human. The confirmed name is `imboxstaging.mortgageboss.ai` — a sibling label directly under the
-# apex `mortgageboss.ai`, which is NOT in Route 53 (phase4.md §3: the apex stays with the existing
-# registrar and is never delegated).
-#
-# So this module now needs a hosted zone for its own name and NS records entered at the registrar,
-# exactly as production does. That is a change to what INFRA-1 costs, not a detail: it is a person
-# and a propagation wait, on an environment that previously needed neither.
-#
-# Production reuses `modules/dns` with enable_tls = false — an inbound-only mail domain serves no
-# HTTPS and needs no certificate.
+# Shared plumbing only (LP-981): bucket, rule set + one rule, SNS, SQS + DLQ, malware scan. No domain
+# of its own — each receiving domain is an SES identity created elsewhere with its MX at SES, and the
+# rule accepts mail for all of them.
 #
 # COUNTED, NOT CONDITIONAL ON A HAND EDIT. `inbound_mail_enabled` defaults to false so this plans
 # as a no-op until somebody turns it on deliberately, and the same flag drives the KMS grant above —
 # so the key policy and the rule cannot come into existence separately.
-# LP-836 REVIEW — THE ZONE THE COMMENT ABOVE ASKS FOR, because the wiring below did not have it.
-#
-# The note above states that `imboxstaging.mortgageboss.ai` is a sibling of the apex and therefore
-# needs its own hosted zone and a registrar step. The module call still passed `module.dns.zone_id`
-# — the zone for `staging.mortgageboss.ai` — and both of `inbound_mail`'s records are named for the
-# MAIL domain: `_amazonses.${var.inbox_domain}` and `${var.inbox_domain}`. Route 53 refuses a record
-# whose name is not inside the zone it is written to, so the first apply with
-# `inbound_mail_enabled = true` would have failed with `InvalidChangeBatch: RRSet with DNS name
-# imboxstaging.mortgageboss.ai. is not permitted in zone staging.mortgageboss.ai.`
-#
-# It would not have failed sooner: the flag defaults to false, so this plans as a no-op today, and
-# nothing in CI runs `terraform validate` or `plan` (LP-827's escalation). The comment recorded the
-# requirement and nothing enforced it.
-#
-# `enable_tls = false` because an inbound-only mail domain serves no HTTPS and needs no certificate
-# — and because DNS validation cannot succeed before the NS records exist at the registrar, which is
-# the human step this zone creates the need for. Its name servers are an output for that person.
-module "inbox_dns" {
-  count  = var.inbound_mail_enabled ? 1 : 0
-  source = "../../modules/dns"
-
-  name_prefix = "${var.name_prefix}-imbox"
-  tags        = local.tags
-  domain_name = var.inbox_domain
-  enable_tls  = false
-}
-
 module "inbound_mail" {
   count  = var.inbound_mail_enabled ? 1 : 0
   source = "../../modules/inbound_mail"
@@ -721,12 +684,10 @@ module "inbound_mail" {
   name_prefix = var.name_prefix
   tags        = local.tags
 
-  mail_domain     = var.inbox_domain
-  route53_zone_id = module.inbox_dns[0].zone_id
-  aws_region      = var.aws_region
-  aws_account_id  = var.aws_account_id
+  aws_region     = var.aws_region
+  aws_account_id = var.aws_account_id
 
-  bucket_name = "${var.name_prefix}-inbound-mail"
+  bucket_name = "${var.name_prefix}-mail"
   kms_key_arn = module.secrets.kms_key_arn
 
   rule_set_name   = var.inbound_rule_set_name
