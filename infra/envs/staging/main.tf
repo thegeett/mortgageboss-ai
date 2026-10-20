@@ -753,7 +753,7 @@ module "outbound_mail" {
   tags        = local.tags
 
   send_domain     = "mail.${var.domain_name}"
-  bounce_domain   = "bounces.${var.domain_name}"
+  bounce_domain   = "bounces.mail.${var.domain_name}"
   route53_zone_id = module.dns.zone_id
   aws_region      = var.aws_region
 

@@ -24,12 +24,20 @@ variable "bounce_domain" {
   description = <<-EOT
     The custom MAIL FROM domain — the envelope sender, where bounces are returned.
 
-    AWS's requirements, quoted: the MAIL FROM domain "has to be a subdomain of the parent domain of
-    a verified identity", "shouldn't be a subdomain that you also use to send email from", and
-    "shouldn't be a subdomain that you use to receive email". `bounces.<parent>` satisfies all three
-    against a `mail.<parent>` identity.
+    Must be a subdomain OF `send_domain`, e.g. `bounces.mail.<parent>` for a `mail.<parent>`
+    identity. AWS's docs say "a subdomain of the parent domain of a verified identity", which reads
+    as if a sibling (`bounces.<parent>`) would do; SES rejects that at apply time with
+    `InvalidParameterValue: ... is not subdomain of the domain of the identity` (first
+    apply, 2026-10-19). The validation below makes plan fail on it instead.
+
+    It also "shouldn't be a subdomain that you use to receive email" — keep it off the inbound domain.
   EOT
   type        = string
+
+  validation {
+    condition     = endswith(lower(var.bounce_domain), ".${lower(var.send_domain)}")
+    error_message = "bounce_domain must be a subdomain of send_domain (end with \".<send_domain>\"); SES rejects any other MAIL FROM domain."
+  }
 }
 
 variable "route53_zone_id" {

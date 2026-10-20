@@ -409,7 +409,8 @@ inbound_malware_scan_enabled = false
 # --------------------------------------------------------------------------- #
 # INFRA-3 — outbound sending identity and the bounce path
 # --------------------------------------------------------------------------- #
-# FALSE, and the address below is empty on purpose: DMARC reports name a real mailbox somebody has
-# to read, and picking one for them would create a report nobody receives. Set both together.
-outbound_mail_enabled = false
-dmarc_report_address  = ""
+# ON since 2026-10-19, to verify the sending identity and request SES production access. Nothing
+# sends yet — the app has no SES transport (LP-811/LP-816). DMARC reports name a real mailbox
+# somebody has to read: contact@mortgageboss.ai is that mailbox. Change both together.
+outbound_mail_enabled = true
+dmarc_report_address  = "contact@mortgageboss.ai"

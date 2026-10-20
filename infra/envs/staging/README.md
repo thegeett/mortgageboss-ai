@@ -64,3 +64,39 @@ comes from the migration task run against an empty RDS instance.
 Kept from C2, when this directory held only that file as proof the modules were
 portable. `terraform.tfvars` is now the real thing and is what applies — the
 example is historical and can be deleted once nobody needs the comparison.
+
+## SES production access
+
+Requested 2026-10-19 with `aws sesv2 put-account-details` (CLI, not the console
+wizard), after `mail.staging.mortgageboss.ai` verified (identity, DKIM and MAIL FROM
+`bounces.mail.staging.mortgageboss.ai` all `SUCCESS`).
+
+| | |
+|---|---|
+| Date requested | 2026-10-19 |
+| Case ID | `179246520300535` |
+| Status | `GRANTED` 2026-10-19, `ProductionAccessEnabled = true` (observed at 23:00 local, under 15 min after the request) |
+| Mail type | `TRANSACTIONAL` |
+| Website | https://mortgageboss.ai |
+| Contact | contact@mortgageboss.ai |
+
+Use-case text as submitted:
+
+> MortgageBoss is a B2B tool for mortgage loan processors. It sends transactional
+> email on behalf of a processor to a borrower on a specific loan file: document
+> requests, receipt confirmations, and up to two reminders per outstanding document.
+> Mail goes only to borrowers and loan participants already on the file; we never
+> send to purchased or marketing lists and send no promotional content. Expected
+> volume at pilot is under 2,000 emails per month. Each customer sends from its own
+> verified subdomain with DKIM and DMARC. Bounces and complaints come back through an
+> SES configuration set to SNS and SQS; our application stores them, suppresses
+> bounced addresses and shows bounces to the processor. CloudWatch alarms alert us at
+> 5% bounce and 0.1% complaint rates. Recipients can reply to stop reminders, which
+> pauses automation on the file.
+
+Several of those statements describe the planned feature, not what is deployed today:
+the SES transport, the SQS events queue, bounce suppression and the CloudWatch alarms
+are not built yet (`docs/email-communication/loan-email.md` §14). They must exist
+before real borrower mail is sent.
+
+Production access is per account and region; repeat this request in any new account (e.g. a future production account).
