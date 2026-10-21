@@ -731,3 +731,14 @@ module "outbound_mail" {
 
   kms_key_arn = module.secrets.kms_key_arn
 }
+
+# LP-984 — account-wide "do not send" list. SES adds an address after a hard bounce or a spam
+# complaint and refuses later sends to it. Account singleton, so it lives here, not in a module.
+resource "aws_sesv2_account_suppression_attributes" "this" {
+  suppressed_reasons = ["BOUNCE", "COMPLAINT"]
+
+  # Deleting this could clear the account's suppression reasons; we never want that.
+  lifecycle {
+    prevent_destroy = true
+  }
+}
