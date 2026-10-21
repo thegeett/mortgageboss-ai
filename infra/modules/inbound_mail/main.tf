@@ -2,7 +2,7 @@
 #
 # THE SHAPE. A borrower emails a loan file's address. SES accepts it, writes the raw message to S3
 # under `inbound/`, and publishes a notification; SNS fans that to SQS, which the worker polls. The
-# raw `.eml` is the record of what arrived and is kept for the retention period; everything the
+# raw `.eml` is the record of what arrived and is kept (nothing here expires it); everything the
 # application derives from it is reproducible, and the object is not.
 #
 # SHARED PLUMBING, NO DOMAIN (LP-981). This module owns no domain, identity or DNS record. Each
@@ -86,13 +86,18 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "this" {
   }
 }
 
-# Retention, identical for `inbound/` and `outbound/`: one rule per prefix rather than one unfiltered
-# rule, so GuardDuty's bucket-root test object and anything else added later is not swept up in it.
-# Glacier first because a stored message is read once on arrival and then almost never;
-# expiry because "keep everything forever" is itself a finding under the Safeguards Rule's disposal
-# duty. A LEGAL HOLD MUST SUPPRESS THIS — that flag is LP-821's, and `phase4.md` §6 says it ships
-# BEFORE the purge job. This rule IS the purge job, and it is created here on day one of the
-# critical path, so the ordering matters: see the note in the module header of the ticket doc.
+# Storage class only, identical for `inbound/` and `outbound/`: one rule per prefix rather than one
+# unfiltered rule, so GuardDuty's bucket-root test object and anything else added later is not swept
+# up in it. Glacier because a stored message is read once on arrival and then almost never.
+#
+# TRANSITION-ONLY, NO EXPIRATION OF EITHER KIND. v1 keeps every message (loan-email.md NFR-18). A
+# legal hold is a flag in the database, and S3 lifecycle never reads the database: an `expiration`
+# or `noncurrent_version_expiration` here would delete held correspondence on schedule, and there is
+# nothing to stop it. Add expiry back only together with something that makes deletion respect a
+# hold (S3 Object Lock legal holds, or a purge job that checks the flag).
+#
+# The bucket is versioned, so a DELETE only writes a delete marker; with no noncurrent expiry the
+# version behind it stays until someone removes it by version id.
 resource "aws_s3_bucket_lifecycle_configuration" "this" {
   bucket = aws_s3_bucket.this.id
 
@@ -115,25 +120,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "this" {
         storage_class = "GLACIER_IR"
       }
 
-      expiration {
-        days = var.retention_years * 365
-      }
-
-      # THIRTY DAYS WOULD HAVE BEEN THE EARLY PURGE, not the five-year one. The bucket is versioned,
-      # so a DELETE does not remove anything: it writes a delete marker and makes the message's only
-      # version noncurrent. At 30 days that version is destroyed permanently — five years before the
-      # `expiration` rule above would have touched it, and with no legal hold able to intervene
-      # because that flag is LP-821, in M5.
-      #
-      # `phase4.md` §6 says the legal-hold flag ships BEFORE the purge job. The five-year expiry does
-      # not actually conflict with that, since nothing can reach five years before LP-821 lands. This
-      # rule did. Noncurrent versions therefore keep the same retention as current ones until there is
-      # something that can suppress a purge; SES writes a unique key per message, so overwrites are
-      # rare and holding the versions costs close to nothing.
-      noncurrent_version_expiration {
-        noncurrent_days = var.retention_years * 365
-      }
-
+      # Parts of an upload that never completed; never a stored message.
       abort_incomplete_multipart_upload {
         days_after_initiation = 7
       }

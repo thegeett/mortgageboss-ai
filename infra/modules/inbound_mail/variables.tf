@@ -29,20 +29,6 @@ variable "kms_key_arn" {
   type        = string
 }
 
-variable "retention_years" {
-  description = <<-EOT
-    How long a raw inbound message is kept. The execution protocol fixes this at 5 years,
-    matching the Closing Disclosure floor.
-
-    Retention pulls two ways: 5 years is a FLOOR for some records, and the Safeguards Rule
-    imposes a 2-year disposal duty from last use for others. Keeping everything forever is a
-    finding, not just a cost — which is why this is a variable with a stated default rather
-    than an omitted lifecycle rule.
-  EOT
-  type        = number
-  default     = 5
-}
-
 variable "glacier_after_days" {
   description = "Days before an object transitions to Glacier Instant Retrieval."
   type        = number

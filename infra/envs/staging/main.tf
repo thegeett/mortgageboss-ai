@@ -690,8 +690,7 @@ module "inbound_mail" {
   bucket_name = "${var.name_prefix}-mail"
   kms_key_arn = module.secrets.kms_key_arn
 
-  rule_set_name   = var.inbound_rule_set_name
-  retention_years = var.inbound_retention_years
+  rule_set_name = var.inbound_rule_set_name
 
   # INFRA-2 — its own flag and its own apply. Enabling the scan on a bucket that receives nothing
   # costs nothing and proves the wiring; enabling mail WITHOUT it would put unscanned borrower

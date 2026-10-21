@@ -707,12 +707,6 @@ variable "inbound_rule_set_name" {
   default     = "mbai-inbound"
 }
 
-variable "inbound_retention_years" {
-  description = "How long a raw inbound message is kept. The execution protocol fixes this at 5."
-  type        = number
-  default     = 5
-}
-
 variable "inbound_malware_scan_enabled" {
   description = <<-EOT
     INFRA-2 — GuardDuty Malware Protection for S3 over the inbound bucket.
