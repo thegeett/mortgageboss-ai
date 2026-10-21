@@ -40,6 +40,12 @@ interface_endpoint_services = [
   "logs",
   "secretsmanager",
   "bedrock-runtime",
+  # Email feature (loan-email.md, LP-985). sqs: the worker reads the inbound and delivery-events
+  # queues. email: the SES API (not email-smtp), for sending and creating tenant identities.
+  # No sns, kms or sts: the worker never calls SNS, S3 and SQS call KMS on our behalf, and tasks
+  # get credentials from the container metadata endpoint.
+  "sqs",
+  "email",
 ]
 
 # --- DNS / TLS / auth -------------------------------------------------------- #
