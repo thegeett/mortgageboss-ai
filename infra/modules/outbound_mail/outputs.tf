@@ -37,3 +37,8 @@ output "events_dlq_arn" {
   description = "Dead-letter queue for delivery events that could not be processed."
   value       = aws_sqs_queue.events_dlq.arn
 }
+
+output "configuration_set_arn" {
+  description = "ARN of the configuration set. SES send permissions are granted against it (LP-986)."
+  value       = aws_ses_configuration_set.this.arn
+}

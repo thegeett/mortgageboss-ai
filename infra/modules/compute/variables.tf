@@ -491,3 +491,35 @@ variable "readonly_db_user" {
   type        = string
   default     = "mbai_readonly"
 }
+
+# --- Email (LP-986) --------------------------------------------------------- #
+
+variable "mail_bucket_arn" {
+  description = "The raw-mail bucket (inbound/ and outbound/). Empty when receiving is off; the mail-bucket grants then do not render."
+  type        = string
+  default     = ""
+}
+
+variable "mail_kms_key_arn" {
+  description = "The key the mail bucket and the mail queues are encrypted with. Empty means no mail key grant."
+  type        = string
+  default     = ""
+}
+
+variable "worker_queue_arns" {
+  description = "Queues the worker consumes (inbound mail, malware-scan results, delivery events). Empty means no SQS grant."
+  type        = list(string)
+  default     = []
+}
+
+variable "ses_configuration_set_arn" {
+  description = "The SES configuration set named on every send. Sending authorises against it as well as the identity."
+  type        = string
+  default     = ""
+}
+
+variable "ses_send_enabled" {
+  description = "Let the worker send email through SES. Off means no SES grant at all."
+  type        = bool
+  default     = false
+}

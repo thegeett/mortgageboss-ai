@@ -602,6 +602,16 @@ module "compute" {
   documents_bucket_kms_key_arn = module.secrets.kms_key_arn
   secrets_kms_key_arn          = module.secrets.kms_key_arn
 
+  # LP-986 — email permissions. The inbound grants render only when receiving is on.
+  mail_bucket_arn  = var.inbound_mail_enabled ? module.inbound_mail[0].bucket_arn : ""
+  mail_kms_key_arn = module.secrets.kms_key_arn
+  worker_queue_arns = concat(
+    var.inbound_mail_enabled ? compact([module.inbound_mail[0].queue_arn, try(module.inbound_mail[0].scan_results_queue_arn, "")]) : [],
+    var.outbound_mail_enabled ? [module.outbound_mail[0].events_queue_arn] : [],
+  )
+  ses_configuration_set_arn = var.outbound_mail_enabled ? module.outbound_mail[0].configuration_set_arn : ""
+  ses_send_enabled          = var.outbound_mail_enabled
+
   bedrock_foundation_model_arns  = local.bedrock_foundation_model_arns
   bedrock_inference_profile_arns = local.bedrock_inference_profile_arns
 
