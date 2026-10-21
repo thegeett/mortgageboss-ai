@@ -241,3 +241,8 @@ output "outbound_events_queue_url" {
   description = "SES delivery, bounce, complaint and reject events (LP-983). Null when outbound mail is off."
   value       = var.outbound_mail_enabled ? module.outbound_mail[0].events_queue_url : null
 }
+
+output "ops_alerts_topic_arn" {
+  description = "SNS topic every ops alarm notifies (LP-987). Emailed to ops_alert_email."
+  value       = aws_sns_topic.ops_alerts.arn
+}

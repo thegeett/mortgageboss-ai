@@ -258,3 +258,71 @@ resource "aws_sns_topic_subscription" "events_queue" {
   endpoint             = aws_sqs_queue.events.arn
   raw_message_delivery = true
 }
+
+# --------------------------------------------------------------------------- #
+# Alarms (LP-987)
+# --------------------------------------------------------------------------- #
+# Thresholds are HALF of where AWS starts reviewing the account: 5% bounces and 0.1% complaints
+# ("Amazon SES Sending review process FAQs"). The metrics are fractions, not percentages
+# (0.05 = 5%), per "Creating reputation monitoring alarms using CloudWatch". These are
+# account-level metrics, so they have no dimensions.
+resource "aws_cloudwatch_metric_alarm" "ses_bounce_rate" {
+  count = var.alarms_enabled ? 1 : 0
+
+  alarm_name        = "${var.name_prefix}-ses-bounce-rate"
+  alarm_description = "SES bounce rate is above 2.5%. AWS reviews the account at 5%. Check recent sends and stop the tenant causing it."
+
+  namespace           = "AWS/SES"
+  metric_name         = "Reputation.BounceRate"
+  statistic           = "Maximum"
+  period              = 3600
+  evaluation_periods  = 1
+  threshold           = 0.025
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_topic_arn]
+  ok_actions    = [var.alarm_topic_arn]
+  tags          = var.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "ses_complaint_rate" {
+  count = var.alarms_enabled ? 1 : 0
+
+  alarm_name        = "${var.name_prefix}-ses-complaint-rate"
+  alarm_description = "SES complaint rate is above 0.05%. AWS reviews the account at 0.1%. Check recent sends and stop the tenant causing it."
+
+  namespace           = "AWS/SES"
+  metric_name         = "Reputation.ComplaintRate"
+  statistic           = "Maximum"
+  period              = 3600
+  evaluation_periods  = 1
+  threshold           = 0.0005
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_topic_arn]
+  ok_actions    = [var.alarm_topic_arn]
+  tags          = var.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "events_dlq_not_empty" {
+  count = var.alarms_enabled ? 1 : 0
+
+  alarm_name        = "${var.name_prefix}-outbound-mail-events-dlq-not-empty"
+  alarm_description = "A delivery event could not be processed and is in the events dead-letter queue. Look at it, fix the cause, then redrive or delete it."
+
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  dimensions          = { QueueName = aws_sqs_queue.events_dlq.name }
+  statistic           = "Maximum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_topic_arn]
+  ok_actions    = [var.alarm_topic_arn]
+  tags          = var.tags
+}

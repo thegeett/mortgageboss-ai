@@ -782,3 +782,8 @@ variable "dkim_signing_hosted_zone" {
   type        = string
   default     = "dkim.amazonses.com"
 }
+
+variable "ops_alert_email" {
+  description = "Mailbox that receives ops alarms. Must exist and be read."
+  type        = string
+}

@@ -709,6 +709,9 @@ module "inbound_mail" {
 
   rule_set_name = var.inbound_rule_set_name
 
+  alarms_enabled  = true
+  alarm_topic_arn = aws_sns_topic.ops_alerts.arn
+
   # INFRA-2 — its own flag and its own apply. Enabling the scan on a bucket that receives nothing
   # costs nothing and proves the wiring; enabling mail WITHOUT it would put unscanned borrower
   # attachments into the extraction pipeline.
@@ -740,6 +743,9 @@ module "outbound_mail" {
   receive_enabled = var.inbound_mail_enabled
 
   kms_key_arn = module.secrets.kms_key_arn
+
+  alarms_enabled  = true
+  alarm_topic_arn = aws_sns_topic.ops_alerts.arn
 }
 
 # LP-984 — account-wide "do not send" list. SES adds an address after a hard bounce or a spam
@@ -751,4 +757,47 @@ resource "aws_sesv2_account_suppression_attributes" "this" {
   lifecycle {
     prevent_destroy = true
   }
+}
+
+# --------------------------------------------------------------------------- #
+# Ops alerts (LP-987)
+# --------------------------------------------------------------------------- #
+# One general-purpose topic every alarm notifies, emailed to `ops_alert_email`. NOT KMS-encrypted:
+# CloudWatch publishing to an encrypted topic needs another key grant, and an alarm message holds no
+# customer data, only the alarm's name, state and reason.
+resource "aws_sns_topic" "ops_alerts" {
+  name = "${var.name_prefix}-ops-alerts"
+  tags = local.tags
+}
+
+resource "aws_sns_topic_subscription" "ops_alerts_email" {
+  topic_arn = aws_sns_topic.ops_alerts.arn
+  protocol  = "email"
+  endpoint  = var.ops_alert_email
+}
+
+data "aws_iam_policy_document" "ops_alerts" {
+  statement {
+    sid    = "AllowCloudWatchAlarms"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["cloudwatch.amazonaws.com"]
+    }
+
+    actions   = ["sns:Publish"]
+    resources = [aws_sns_topic.ops_alerts.arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [var.aws_account_id]
+    }
+  }
+}
+
+resource "aws_sns_topic_policy" "ops_alerts" {
+  arn    = aws_sns_topic.ops_alerts.arn
+  policy = data.aws_iam_policy_document.ops_alerts.json
 }

@@ -420,3 +420,6 @@ inbound_malware_scan_enabled = false
 # somebody has to read: contact@mortgageboss.ai is that mailbox. Change both together.
 outbound_mail_enabled = true
 dmarc_report_address  = "contact@mortgageboss.ai"
+
+# LP-987 — where CloudWatch alarms are emailed. The subscription must be confirmed from this mailbox.
+ops_alert_email = "contact@mortgageboss.ai"

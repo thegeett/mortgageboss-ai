@@ -70,3 +70,18 @@ variable "malware_scan_enabled" {
   type        = bool
   default     = false
 }
+
+variable "alarms_enabled" {
+  description = <<-EOT
+    Create this module's CloudWatch alarms (LP-987). A bool rather than a test on `alarm_topic_arn`:
+    the topic is created in the same apply, so its ARN is unknown at plan time and cannot drive `count`.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "alarm_topic_arn" {
+  description = "SNS topic the alarms notify (LP-987). Required when alarms_enabled is true."
+  type        = string
+  default     = ""
+}
