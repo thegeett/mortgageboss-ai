@@ -121,6 +121,27 @@ resource "aws_kms_key_policy" "this" {
             }
           }
         },
+      ],
+      # LP-983 — SNS cannot deliver to a CMK-encrypted SQS queue unless the key policy lets it use the
+      # key: without this, a publish succeeds and the delivery to the queue fails with nothing queued.
+      # Conditioned on our own topic ARNs, and absent when there are none.
+      length(var.sns_topic_arns) == 0 ? [] : [
+        {
+          Sid       = "AllowSNSDeliveryToEncryptedQueues"
+          Effect    = "Allow"
+          Principal = { Service = "sns.amazonaws.com" }
+          Action = [
+            "kms:GenerateDataKey*",
+            "kms:Decrypt",
+          ]
+          Resource = "*"
+          Condition = {
+            StringEquals = {
+              "AWS:SourceAccount" = data.aws_caller_identity.current.account_id
+              "AWS:SourceArn"     = var.sns_topic_arns
+            }
+          }
+        },
     ])
   })
 }

@@ -98,3 +98,9 @@ variable "ses_receipt_rule_arns" {
   type        = list(string)
   default     = []
 }
+
+variable "sns_topic_arns" {
+  description = "SNS topics allowed to use this key, so they can deliver to CMK-encrypted SQS queues. Empty means no SNS grant."
+  type        = list(string)
+  default     = []
+}

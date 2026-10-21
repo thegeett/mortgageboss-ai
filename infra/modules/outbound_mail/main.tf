@@ -148,6 +148,9 @@ resource "aws_route53_record" "dmarc" {
 # require SES to rewrite links in the message body, which for a borrower document request means
 # rewriting a secure upload link, and neither the tracking nor the rewrite is something this product
 # has asked for.
+# NOT ENCRYPTED, deliberately; the queue below is. The topic only passes events through to the queue,
+# and a CMK-encrypted topic would need its own key grant for SES to publish to it. The events rest
+# only in the queue, and the queue uses the CMK (LP-983).
 resource "aws_sns_topic" "events" {
   name = "${var.name_prefix}-outbound-mail-events"
   tags = var.tags
@@ -192,4 +195,66 @@ data "aws_iam_policy_document" "events_topic" {
 resource "aws_sns_topic_policy" "events" {
   arn    = aws_sns_topic.events.arn
   policy = data.aws_iam_policy_document.events_topic.json
+}
+
+# --------------------------------------------------------------------------- #
+# The delivery-events queue (LP-983)
+# --------------------------------------------------------------------------- #
+# Without a subscriber SNS drops every event. Same pattern as inbound_mail's queue: SQS + DLQ, CMK
+# encrypted, SNS allowed to send only from this topic. The worker reads it from step 2.
+#
+# SNS can deliver to a CMK-encrypted queue only because the key policy grants sns.amazonaws.com for
+# this topic (`sns_topic_arns` in modules/secrets).
+resource "aws_sqs_queue" "events_dlq" {
+  name                      = "${var.name_prefix}-outbound-mail-events-dlq"
+  message_retention_seconds = var.message_retention_seconds
+  kms_master_key_id         = var.kms_key_arn
+  tags                      = var.tags
+}
+
+resource "aws_sqs_queue" "events" {
+  name                       = "${var.name_prefix}-outbound-mail-events"
+  message_retention_seconds  = var.message_retention_seconds
+  kms_master_key_id          = var.kms_key_arn
+  visibility_timeout_seconds = 300
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.events_dlq.arn
+    maxReceiveCount     = var.max_receive_count
+  })
+
+  tags = var.tags
+}
+
+data "aws_iam_policy_document" "events_queue" {
+  statement {
+    sid    = "AllowSNSDeliver"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["sns.amazonaws.com"]
+    }
+
+    actions   = ["sqs:SendMessage"]
+    resources = [aws_sqs_queue.events.arn]
+
+    condition {
+      test     = "ArnEquals"
+      variable = "aws:SourceArn"
+      values   = [aws_sns_topic.events.arn]
+    }
+  }
+}
+
+resource "aws_sqs_queue_policy" "events" {
+  queue_url = aws_sqs_queue.events.id
+  policy    = data.aws_iam_policy_document.events_queue.json
+}
+
+resource "aws_sns_topic_subscription" "events_queue" {
+  topic_arn            = aws_sns_topic.events.arn
+  protocol             = "sqs"
+  endpoint             = aws_sqs_queue.events.arn
+  raw_message_delivery = true
 }

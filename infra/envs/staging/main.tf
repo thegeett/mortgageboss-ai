@@ -174,6 +174,13 @@ module "secrets" {
   ses_receipt_rule_arns = var.inbound_mail_enabled ? [
     "arn:aws:ses:${var.aws_region}:${var.aws_account_id}:receipt-rule-set/${var.inbound_rule_set_name}:receipt-rule/${var.name_prefix}-inbound"
   ] : []
+
+  # LP-983 — SNS cannot deliver to a CMK-encrypted queue unless THE KEY POLICY grants it. Built from
+  # names for the same reason as above: reading the topic ARNs from the mail modules would be a cycle.
+  sns_topic_arns = concat(
+    var.inbound_mail_enabled ? ["arn:aws:sns:${var.aws_region}:${var.aws_account_id}:${var.name_prefix}-inbound-mail"] : [],
+    var.outbound_mail_enabled ? ["arn:aws:sns:${var.aws_region}:${var.aws_account_id}:${var.name_prefix}-outbound-mail-events"] : [],
+  )
 }
 
 
@@ -721,4 +728,6 @@ module "outbound_mail" {
   dkim_signing_hosted_zone = var.dkim_signing_hosted_zone
 
   receive_enabled = var.inbound_mail_enabled
+
+  kms_key_arn = module.secrets.kms_key_arn
 }

@@ -98,3 +98,20 @@ variable "behavior_on_mx_failure" {
   type        = string
   default     = "RejectMessage"
 }
+
+variable "kms_key_arn" {
+  description = "Customer managed key for the delivery-events queue and its DLQ."
+  type        = string
+}
+
+variable "message_retention_seconds" {
+  description = "SQS retention for the delivery-events queues. 14 days, the maximum, so a stuck consumer loses nothing."
+  type        = number
+  default     = 1209600
+}
+
+variable "max_receive_count" {
+  description = "Receives before a delivery event goes to the DLQ."
+  type        = number
+  default     = 3
+}

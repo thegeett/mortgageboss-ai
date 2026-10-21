@@ -236,3 +236,8 @@ output "shutdown_dlq_url" {
   EOT
   value       = module.scheduler.dead_letter_queue_url
 }
+
+output "outbound_events_queue_url" {
+  description = "SES delivery, bounce, complaint and reject events (LP-983). Null when outbound mail is off."
+  value       = var.outbound_mail_enabled ? module.outbound_mail[0].events_queue_url : null
+}
