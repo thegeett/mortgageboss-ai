@@ -719,4 +719,6 @@ module "outbound_mail" {
 
   dmarc_report_address     = var.dmarc_report_address
   dkim_signing_hosted_zone = var.dkim_signing_hosted_zone
+
+  receive_enabled = var.inbound_mail_enabled
 }

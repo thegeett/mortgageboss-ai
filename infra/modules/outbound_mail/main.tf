@@ -99,6 +99,25 @@ resource "aws_route53_record" "bounce_spf" {
 }
 
 # --------------------------------------------------------------------------- #
+# Receiving on the send domain (LP-982)
+# --------------------------------------------------------------------------- #
+# GATED ON `receive_enabled`, because an MX tells the world "deliver mail here". Published before
+# the inbound bucket and receipt rule exist, SES would accept nothing and senders would bounce.
+#
+# A different name from `bounce_mx` above: this is the MX of `send_domain`, that one is the MX of the
+# MAIL FROM domain (`bounce_domain`, a subdomain of it). Each name keeps exactly one MX, which is the
+# MAIL FROM rule quoted above, so the two do not conflict.
+resource "aws_route53_record" "receive_mx" {
+  count = var.receive_enabled ? 1 : 0
+
+  zone_id = var.route53_zone_id
+  name    = var.send_domain
+  type    = "MX"
+  ttl     = 600
+  records = ["10 inbound-smtp.${var.aws_region}.amazonaws.com"]
+}
+
+# --------------------------------------------------------------------------- #
 # DMARC
 # --------------------------------------------------------------------------- #
 # p=none, which is monitoring mode and is where AWS's own rollout guidance starts: "Start with a

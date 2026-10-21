@@ -40,6 +40,12 @@ variable "bounce_domain" {
   }
 }
 
+variable "receive_enabled" {
+  description = "Add an MX record so send_domain also receives mail through SES. Turn on only when the inbound mail stack (bucket + receipt rule) exists."
+  type        = bool
+  default     = false
+}
+
 variable "route53_zone_id" {
   description = "The hosted zone every record below is written into."
   type        = string
