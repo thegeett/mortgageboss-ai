@@ -9,22 +9,6 @@ variable "tags" {
   default     = {}
 }
 
-variable "mail_domain" {
-  description = <<-EOT
-    The domain that RECEIVES borrower mail, e.g. imboxstaging.mortgageboss.ai.
-
-    It must be a domain that sends nothing. An inbound MX overlapping an authenticated
-    SENDING domain is the documented cause of an infinite mail loop, so this is deliberately
-    a subdomain of its own with no SPF, no DKIM and no A record — see the module header.
-  EOT
-  type        = string
-}
-
-variable "route53_zone_id" {
-  description = "The hosted zone the MX and verification records are written into."
-  type        = string
-}
-
 variable "aws_region" {
   description = "Region for the SES receipt endpoint. Email receiving is not available everywhere."
   type        = string
@@ -36,27 +20,13 @@ variable "aws_account_id" {
 }
 
 variable "bucket_name" {
-  description = "Bucket that receives raw .eml objects."
+  description = "Bucket for all raw mail: `inbound/` written by SES, `outbound/` by the worker."
   type        = string
 }
 
 variable "kms_key_arn" {
-  description = "Customer managed key for SSE-KMS on the bucket and on the SES write."
+  description = "Customer managed key for the bucket's default SSE-KMS, the SNS topic and the queues."
   type        = string
-}
-
-variable "retention_years" {
-  description = <<-EOT
-    How long a raw inbound message is kept. The execution protocol fixes this at 5 years,
-    matching the Closing Disclosure floor.
-
-    Retention pulls two ways: 5 years is a FLOOR for some records, and the Safeguards Rule
-    imposes a 2-year disposal duty from last use for others. Keeping everything forever is a
-    finding, not just a cost — which is why this is a variable with a stated default rather
-    than an omitted lifecycle rule.
-  EOT
-  type        = number
-  default     = 5
 }
 
 variable "glacier_after_days" {
@@ -99,4 +69,19 @@ variable "malware_scan_enabled" {
   EOT
   type        = bool
   default     = false
+}
+
+variable "alarms_enabled" {
+  description = <<-EOT
+    Create this module's CloudWatch alarms (LP-987). A bool rather than a test on `alarm_topic_arn`:
+    the topic is created in the same apply, so its ARN is unknown at plan time and cannot drive `count`.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "alarm_topic_arn" {
+  description = "SNS topic the alarms notify (LP-987). Required when alarms_enabled is true."
+  type        = string
+  default     = ""
 }

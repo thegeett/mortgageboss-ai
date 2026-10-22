@@ -121,6 +121,49 @@ resource "aws_kms_key_policy" "this" {
             }
           }
         },
+      ],
+      # LP-983 — SNS cannot deliver to a CMK-encrypted SQS queue unless the key policy lets it use the
+      # key: without this, a publish succeeds and the delivery to the queue fails with nothing queued.
+      # Conditioned on our own topic ARNs, and absent when there are none.
+      length(var.sns_topic_arns) == 0 ? [] : [
+        {
+          Sid       = "AllowSNSDeliveryToEncryptedQueues"
+          Effect    = "Allow"
+          Principal = { Service = "sns.amazonaws.com" }
+          Action = [
+            "kms:GenerateDataKey*",
+            "kms:Decrypt",
+          ]
+          Resource = "*"
+          Condition = {
+            StringEquals = {
+              "AWS:SourceAccount" = data.aws_caller_identity.current.account_id
+              "AWS:SourceArn"     = var.sns_topic_arns
+            }
+          }
+        },
+      ],
+      # LP-990 — EventBridge needs the same grant SNS needed. LP-989 found the GuardDuty scan-results
+      # rule matching its event and failing to deliver it (MatchedEvents 1, FailedInvocations 1): the
+      # queue is CMK-encrypted and this policy did not name events.amazonaws.com, so the event was
+      # dropped. Conditioned on our own rule ARNs, and absent when there are none.
+      length(var.eventbridge_rule_arns) == 0 ? [] : [
+        {
+          Sid       = "AllowEventBridgeDeliveryToEncryptedQueues"
+          Effect    = "Allow"
+          Principal = { Service = "events.amazonaws.com" }
+          Action = [
+            "kms:GenerateDataKey*",
+            "kms:Decrypt",
+          ]
+          Resource = "*"
+          Condition = {
+            StringEquals = {
+              "AWS:SourceAccount" = data.aws_caller_identity.current.account_id
+              "AWS:SourceArn"     = var.eventbridge_rule_arns
+            }
+          }
+        },
     ])
   })
 }

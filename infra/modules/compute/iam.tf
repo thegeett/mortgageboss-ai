@@ -134,6 +134,10 @@ locals {
 # the download proxy. It has NO Bedrock permission of any kind: every one of the
 # 13 complete() call sites is reachable only from a Celery task, never from a
 # FastAPI route (docs/bedrock-call-sites.md).
+#
+# Email (LP-986): READS raw received mail, because accepting an attachment runs here
+# (api/inbound.py -> services/inbound_triage.accept_attachment). It CANNOT send, cannot
+# write to the mail bucket, and has no queue access — those are the worker's.
 # --------------------------------------------------------------------------- #
 
 resource "aws_iam_role" "api_task" {
@@ -189,6 +193,30 @@ data "aws_iam_policy_document" "api_task" {
       resources = [var.documents_bucket_kms_key_arn]
     }
   }
+
+  # Accepting an attachment reads the raw received message (LP-986). inbound/ only, read only.
+  dynamic "statement" {
+    for_each = var.mail_bucket_arn == "" ? [] : [1]
+
+    content {
+      sid       = "MailInboundRead"
+      effect    = "Allow"
+      actions   = ["s3:GetObject"]
+      resources = ["${var.mail_bucket_arn}/inbound/*"]
+    }
+  }
+
+  # Decrypt only: the api reads raw mail and never writes it.
+  dynamic "statement" {
+    for_each = var.mail_bucket_arn != "" && var.mail_kms_key_arn != "" ? [1] : []
+
+    content {
+      sid       = "MailKeyDecrypt"
+      effect    = "Allow"
+      actions   = ["kms:Decrypt"]
+      resources = [var.mail_kms_key_arn]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "api_task" {
@@ -201,7 +229,11 @@ resource "aws_iam_role_policy" "api_task" {
 # Worker task role
 #
 # The ONLY role with Bedrock. READ-ONLY on documents — it never writes one, so it
-# has no s3:PutObject and needs no kms:GenerateDataKey.
+# has no s3:PutObject on that bucket.
+#
+# Email (LP-986): the ONLY role that sends. It reads raw received mail (inbound/),
+# writes a copy of each sent message (outbound/, step 2), and consumes the mail
+# queues. Its kms:GenerateDataKey is for the mail bucket and queues, not documents.
 # --------------------------------------------------------------------------- #
 
 resource "aws_iam_role" "worker_task" {
@@ -250,6 +282,84 @@ data "aws_iam_policy_document" "worker_task" {
       effect    = "Allow"
       actions   = ["kms:Decrypt"]
       resources = [var.documents_bucket_kms_key_arn]
+    }
+  }
+
+  # Reads each raw received message to triage it (LP-986).
+  dynamic "statement" {
+    for_each = var.mail_bucket_arn == "" ? [] : [1]
+
+    content {
+      sid       = "MailInboundRead"
+      effect    = "Allow"
+      actions   = ["s3:GetObject"]
+      resources = ["${var.mail_bucket_arn}/inbound/*"]
+    }
+  }
+
+  # Step 2 saves a copy of each sent message. outbound/ only; inbound/ is SES's to write.
+  dynamic "statement" {
+    for_each = var.mail_bucket_arn == "" ? [] : [1]
+
+    content {
+      sid       = "MailOutboundWrite"
+      effect    = "Allow"
+      actions   = ["s3:PutObject"]
+      resources = ["${var.mail_bucket_arn}/outbound/*"]
+    }
+  }
+
+  # Consumes the inbound, malware-scan-results and delivery-events queues. No SendMessage:
+  # only SNS and EventBridge put messages on them.
+  dynamic "statement" {
+    for_each = length(var.worker_queue_arns) == 0 ? [] : [1]
+
+    content {
+      sid    = "MailQueuesConsume"
+      effect = "Allow"
+      actions = [
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:ChangeMessageVisibility",
+        "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl",
+      ]
+      resources = var.worker_queue_arns
+    }
+  }
+
+  # Sending authorises against the From identity AND the configuration set, so both are
+  # listed. identity/* because tenant identities are created at onboarding (step 3).
+  dynamic "statement" {
+    for_each = var.ses_send_enabled ? [1] : []
+
+    content {
+      sid    = "SesSend"
+      effect = "Allow"
+      actions = [
+        "ses:SendEmail",
+        "ses:SendRawEmail",
+      ]
+      resources = compact([
+        "arn:aws:ses:${var.aws_region}:${data.aws_caller_identity.current.account_id}:identity/*",
+        var.ses_configuration_set_arn,
+      ])
+    }
+  }
+
+  # The mail bucket and queues are encrypted with this key: Decrypt to read a message,
+  # GenerateDataKey to write to outbound/.
+  dynamic "statement" {
+    for_each = var.mail_kms_key_arn != "" && (var.mail_bucket_arn != "" || length(var.worker_queue_arns) > 0) ? [1] : []
+
+    content {
+      sid    = "MailKey"
+      effect = "Allow"
+      actions = [
+        "kms:Decrypt",
+        "kms:GenerateDataKey",
+      ]
+      resources = [var.mail_kms_key_arn]
     }
   }
 }

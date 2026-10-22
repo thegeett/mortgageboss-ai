@@ -174,6 +174,19 @@ module "secrets" {
   ses_receipt_rule_arns = var.inbound_mail_enabled ? [
     "arn:aws:ses:${var.aws_region}:${var.aws_account_id}:receipt-rule-set/${var.inbound_rule_set_name}:receipt-rule/${var.name_prefix}-inbound"
   ] : []
+
+  # LP-983 — SNS cannot deliver to a CMK-encrypted queue unless THE KEY POLICY grants it. Built from
+  # names for the same reason as above: reading the topic ARNs from the mail modules would be a cycle.
+  sns_topic_arns = concat(
+    var.inbound_mail_enabled ? ["arn:aws:sns:${var.aws_region}:${var.aws_account_id}:${var.name_prefix}-inbound-mail"] : [],
+    var.outbound_mail_enabled ? ["arn:aws:sns:${var.aws_region}:${var.aws_account_id}:${var.name_prefix}-outbound-mail-events"] : [],
+  )
+
+  # LP-990 — EventBridge cannot deliver to a CMK-encrypted queue unless THE KEY POLICY grants it. Built
+  # from the rule's name for the same reason as above: reading it from `module.inbound_mail` is a cycle.
+  eventbridge_rule_arns = var.inbound_mail_enabled && var.inbound_malware_scan_enabled ? [
+    "arn:aws:events:${var.aws_region}:${var.aws_account_id}:rule/${var.name_prefix}-inbound-scan-results"
+  ] : []
 }
 
 
@@ -553,6 +566,20 @@ module "compute" {
     var.redis_auth_enabled ? {} : {
       REDIS_URL = "rediss://${module.data.redis_primary_endpoint}:6379/0?ssl_cert_reqs=required"
     },
+    # LP-988 — email resource names, set only when their stack exists (a disabled stack sets nothing,
+    # so the settings stay None). INBOUND_BUCKET / INBOUND_QUEUE_URL: the raw-mail bucket and the
+    # queue `inbound.poll_queue` drains (not on the beat schedule). EVENTS_QUEUE_URL,
+    # SES_CONFIGURATION_SET and MAIL_TRANSPORT are for step 2 and not read yet; settings ignore
+    # unknown variables (`extra="ignore"`).
+    var.inbound_mail_enabled ? {
+      INBOUND_BUCKET    = module.inbound_mail[0].bucket_name
+      INBOUND_QUEUE_URL = module.inbound_mail[0].queue_url
+    } : {},
+    var.outbound_mail_enabled ? {
+      EVENTS_QUEUE_URL      = module.outbound_mail[0].events_queue_url
+      SES_CONFIGURATION_SET = module.outbound_mail[0].configuration_set_name
+      MAIL_TRANSPORT        = "ses"
+    } : {},
   )
 
   frontend_environment_variables = {
@@ -594,6 +621,16 @@ module "compute" {
   # AccessDenied from S3 rather than from KMS.
   documents_bucket_kms_key_arn = module.secrets.kms_key_arn
   secrets_kms_key_arn          = module.secrets.kms_key_arn
+
+  # LP-986 — email permissions. The inbound grants render only when receiving is on.
+  mail_bucket_arn  = var.inbound_mail_enabled ? module.inbound_mail[0].bucket_arn : ""
+  mail_kms_key_arn = module.secrets.kms_key_arn
+  worker_queue_arns = concat(
+    var.inbound_mail_enabled ? compact([module.inbound_mail[0].queue_arn, try(module.inbound_mail[0].scan_results_queue_arn, "")]) : [],
+    var.outbound_mail_enabled ? [module.outbound_mail[0].events_queue_arn] : [],
+  )
+  ses_configuration_set_arn = var.outbound_mail_enabled ? module.outbound_mail[0].configuration_set_arn : ""
+  ses_send_enabled          = var.outbound_mail_enabled
 
   bedrock_foundation_model_arns  = local.bedrock_foundation_model_arns
   bedrock_inference_profile_arns = local.bedrock_inference_profile_arns
@@ -670,50 +707,13 @@ module "scheduler" {
 # --------------------------------------------------------------------------- #
 # INFRA-1 — inbound borrower mail
 # --------------------------------------------------------------------------- #
-# STAGING NEEDS A REGISTRAR STEP NOW, AND DID NOT BEFORE (LP-836). This said the opposite, and
-# it was true of the old name: `inbox.staging.mortgageboss.ai` sits inside the
-# `staging.mortgageboss.ai` hosted zone Terraform already owns, so it was one MX record and no
-# human. The confirmed name is `imboxstaging.mortgageboss.ai` — a sibling label directly under the
-# apex `mortgageboss.ai`, which is NOT in Route 53 (phase4.md §3: the apex stays with the existing
-# registrar and is never delegated).
-#
-# So this module now needs a hosted zone for its own name and NS records entered at the registrar,
-# exactly as production does. That is a change to what INFRA-1 costs, not a detail: it is a person
-# and a propagation wait, on an environment that previously needed neither.
-#
-# Production reuses `modules/dns` with enable_tls = false — an inbound-only mail domain serves no
-# HTTPS and needs no certificate.
+# Shared plumbing only (LP-981): bucket, rule set + one rule, SNS, SQS + DLQ, malware scan. No domain
+# of its own — each receiving domain is an SES identity created elsewhere with its MX at SES, and the
+# rule accepts mail for all of them.
 #
 # COUNTED, NOT CONDITIONAL ON A HAND EDIT. `inbound_mail_enabled` defaults to false so this plans
 # as a no-op until somebody turns it on deliberately, and the same flag drives the KMS grant above —
 # so the key policy and the rule cannot come into existence separately.
-# LP-836 REVIEW — THE ZONE THE COMMENT ABOVE ASKS FOR, because the wiring below did not have it.
-#
-# The note above states that `imboxstaging.mortgageboss.ai` is a sibling of the apex and therefore
-# needs its own hosted zone and a registrar step. The module call still passed `module.dns.zone_id`
-# — the zone for `staging.mortgageboss.ai` — and both of `inbound_mail`'s records are named for the
-# MAIL domain: `_amazonses.${var.inbox_domain}` and `${var.inbox_domain}`. Route 53 refuses a record
-# whose name is not inside the zone it is written to, so the first apply with
-# `inbound_mail_enabled = true` would have failed with `InvalidChangeBatch: RRSet with DNS name
-# imboxstaging.mortgageboss.ai. is not permitted in zone staging.mortgageboss.ai.`
-#
-# It would not have failed sooner: the flag defaults to false, so this plans as a no-op today, and
-# nothing in CI runs `terraform validate` or `plan` (LP-827's escalation). The comment recorded the
-# requirement and nothing enforced it.
-#
-# `enable_tls = false` because an inbound-only mail domain serves no HTTPS and needs no certificate
-# — and because DNS validation cannot succeed before the NS records exist at the registrar, which is
-# the human step this zone creates the need for. Its name servers are an output for that person.
-module "inbox_dns" {
-  count  = var.inbound_mail_enabled ? 1 : 0
-  source = "../../modules/dns"
-
-  name_prefix = "${var.name_prefix}-imbox"
-  tags        = local.tags
-  domain_name = var.inbox_domain
-  enable_tls  = false
-}
-
 module "inbound_mail" {
   count  = var.inbound_mail_enabled ? 1 : 0
   source = "../../modules/inbound_mail"
@@ -721,16 +721,16 @@ module "inbound_mail" {
   name_prefix = var.name_prefix
   tags        = local.tags
 
-  mail_domain     = var.inbox_domain
-  route53_zone_id = module.inbox_dns[0].zone_id
-  aws_region      = var.aws_region
-  aws_account_id  = var.aws_account_id
+  aws_region     = var.aws_region
+  aws_account_id = var.aws_account_id
 
-  bucket_name = "${var.name_prefix}-inbound-mail"
+  bucket_name = "${var.name_prefix}-mail"
   kms_key_arn = module.secrets.kms_key_arn
 
-  rule_set_name   = var.inbound_rule_set_name
-  retention_years = var.inbound_retention_years
+  rule_set_name = var.inbound_rule_set_name
+
+  alarms_enabled  = true
+  alarm_topic_arn = aws_sns_topic.ops_alerts.arn
 
   # INFRA-2 — its own flag and its own apply. Enabling the scan on a bucket that receives nothing
   # costs nothing and proves the wiring; enabling mail WITHOUT it would put unscanned borrower
@@ -759,4 +759,65 @@ module "outbound_mail" {
 
   dmarc_report_address     = var.dmarc_report_address
   dkim_signing_hosted_zone = var.dkim_signing_hosted_zone
+
+  receive_enabled = var.inbound_mail_enabled
+
+  kms_key_arn = module.secrets.kms_key_arn
+
+  alarms_enabled  = true
+  alarm_topic_arn = aws_sns_topic.ops_alerts.arn
+}
+
+# LP-984 — account-wide "do not send" list. SES adds an address after a hard bounce or a spam
+# complaint and refuses later sends to it. Account singleton, so it lives here, not in a module.
+resource "aws_sesv2_account_suppression_attributes" "this" {
+  suppressed_reasons = ["BOUNCE", "COMPLAINT"]
+
+  # Deleting this could clear the account's suppression reasons; we never want that.
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# --------------------------------------------------------------------------- #
+# Ops alerts (LP-987)
+# --------------------------------------------------------------------------- #
+# One general-purpose topic every alarm notifies, emailed to `ops_alert_email`. NOT KMS-encrypted:
+# CloudWatch publishing to an encrypted topic needs another key grant, and an alarm message holds no
+# customer data, only the alarm's name, state and reason.
+resource "aws_sns_topic" "ops_alerts" {
+  name = "${var.name_prefix}-ops-alerts"
+  tags = local.tags
+}
+
+resource "aws_sns_topic_subscription" "ops_alerts_email" {
+  topic_arn = aws_sns_topic.ops_alerts.arn
+  protocol  = "email"
+  endpoint  = var.ops_alert_email
+}
+
+data "aws_iam_policy_document" "ops_alerts" {
+  statement {
+    sid    = "AllowCloudWatchAlarms"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["cloudwatch.amazonaws.com"]
+    }
+
+    actions   = ["sns:Publish"]
+    resources = [aws_sns_topic.ops_alerts.arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [var.aws_account_id]
+    }
+  }
+}
+
+resource "aws_sns_topic_policy" "ops_alerts" {
+  arn    = aws_sns_topic.ops_alerts.arn
+  policy = data.aws_iam_policy_document.ops_alerts.json
 }

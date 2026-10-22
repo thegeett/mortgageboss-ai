@@ -40,6 +40,12 @@ variable "bounce_domain" {
   }
 }
 
+variable "receive_enabled" {
+  description = "Add an MX record so send_domain also receives mail through SES. Turn on only when the inbound mail stack (bucket + receipt rule) exists."
+  type        = bool
+  default     = false
+}
+
 variable "route53_zone_id" {
   description = "The hosted zone every record below is written into."
   type        = string
@@ -91,4 +97,36 @@ variable "behavior_on_mx_failure" {
   EOT
   type        = string
   default     = "RejectMessage"
+}
+
+variable "kms_key_arn" {
+  description = "Customer managed key for the delivery-events queue and its DLQ."
+  type        = string
+}
+
+variable "message_retention_seconds" {
+  description = "SQS retention for the delivery-events queues. 14 days, the maximum, so a stuck consumer loses nothing."
+  type        = number
+  default     = 1209600
+}
+
+variable "max_receive_count" {
+  description = "Receives before a delivery event goes to the DLQ."
+  type        = number
+  default     = 3
+}
+
+variable "alarms_enabled" {
+  description = <<-EOT
+    Create this module's CloudWatch alarms (LP-987). A bool rather than a test on `alarm_topic_arn`:
+    the topic is created in the same apply, so its ARN is unknown at plan time and cannot drive `count`.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "alarm_topic_arn" {
+  description = "SNS topic the alarms notify (LP-987). Required when alarms_enabled is true."
+  type        = string
+  default     = ""
 }

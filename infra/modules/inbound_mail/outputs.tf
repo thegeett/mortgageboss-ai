@@ -1,5 +1,5 @@
 output "bucket_name" {
-  description = "Bucket holding raw inbound .eml objects."
+  description = "Bucket holding all raw mail, inbound and outbound."
   value       = aws_s3_bucket.this.id
 }
 
@@ -7,9 +7,14 @@ output "bucket_arn" {
   value = aws_s3_bucket.this.arn
 }
 
-output "object_prefix" {
-  description = "Key prefix every stored message lands under."
+output "inbound_prefix" {
+  description = "Key prefix SES writes received mail under."
   value       = local.object_prefix
+}
+
+output "outbound_prefix" {
+  description = "Key prefix the worker writes a copy of each sent message under."
+  value       = local.outbound_prefix
 }
 
 output "queue_url" {
@@ -29,14 +34,14 @@ output "topic_arn" {
   value = aws_sns_topic.this.arn
 }
 
+output "rule_set_name" {
+  description = "The rule set to activate by hand, once per account (`set-active-receipt-rule-set`)."
+  value       = aws_ses_receipt_rule_set.this.rule_set_name
+}
+
 output "receipt_rule_name" {
   description = "Named in the SES source-ARN conditions on the bucket, topic and key policies."
   value       = aws_ses_receipt_rule.store.name
-}
-
-output "mail_domain" {
-  description = "Becomes settings.inbox_domain (LP-802)."
-  value       = var.mail_domain
 }
 
 output "scan_results_queue_url" {

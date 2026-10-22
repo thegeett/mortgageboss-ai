@@ -237,19 +237,12 @@ output "shutdown_dlq_url" {
   value       = module.scheduler.dead_letter_queue_url
 }
 
-output "imbox_name_servers" {
-  description = <<-EOT
-    Name servers for the borrower inbox zone (LP-836 review) — the registrar step staging
-    did not previously need.
+output "outbound_events_queue_url" {
+  description = "SES delivery, bounce, complaint and reject events (LP-983). Null when outbound mail is off."
+  value       = var.outbound_mail_enabled ? module.outbound_mail[0].events_queue_url : null
+}
 
-    `imboxstaging.mortgageboss.ai` is a sibling label under the apex, not a child of
-    `staging.mortgageboss.ai`, so it has its own hosted zone and the apex's registrar must
-    delegate to these four. Until that is done, SES cannot verify the domain and no
-    borrower mail is received — the MX record exists in a zone nothing resolves to.
-
-    Empty until `inbound_mail_enabled` is turned on, which is when the zone is created.
-
-      terraform output -json imbox_name_servers
-  EOT
-  value       = var.inbound_mail_enabled ? module.inbox_dns[0].name_servers : []
+output "ops_alerts_topic_arn" {
+  description = "SNS topic every ops alarm notifies (LP-987). Emailed to ops_alert_email."
+  value       = aws_sns_topic.ops_alerts.arn
 }

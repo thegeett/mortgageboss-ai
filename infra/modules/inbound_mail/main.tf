@@ -1,14 +1,17 @@
-# Inbound borrower mail — SES receipt into S3, notified through SNS to SQS (INFRA-1).
+# Inbound borrower mail — SES receipt into S3, notified through SNS to SQS (INFRA-1, LP-981).
 #
-# THE SHAPE. A borrower emails lf-<token>@<mail_domain>. SES accepts it, writes the raw message to
-# S3 under a prefix, and publishes a notification; SNS fans that to SQS, which the worker polls. The
-# raw `.eml` is the record of what arrived and is kept for the retention period; everything the
+# THE SHAPE. A borrower emails a loan file's address. SES accepts it, writes the raw message to S3
+# under `inbound/`, and publishes a notification; SNS fans that to SQS, which the worker polls. The
+# raw `.eml` is the record of what arrived and is kept (nothing here expires it); everything the
 # application derives from it is reproducible, and the object is not.
 #
-# THIS DOMAIN SENDS NOTHING, and that is a control rather than an omission. No SPF, no DKIM, no A
-# record, no MAIL FROM. An inbound MX overlapping an authenticated sending domain is the documented
-# cause of an infinite mail loop — a bounce to a bouncing address, forever, against a borrower's
-# mailbox. Outbound identity is INFRA-3's, on its own subdomains.
+# SHARED PLUMBING, NO DOMAIN (LP-981). This module owns no domain, identity or DNS record. Each
+# receiving domain — `mail.<env domain>` and every customer subdomain — is an SES identity created
+# elsewhere, with its MX pointed at SES. The one rule here has no recipient condition, so it accepts
+# mail for all of them; the worker routes by envelope recipient.
+#
+# ONE BUCKET FOR ALL RAW MAIL. `inbound/` is written by SES; `outbound/` by the worker, a copy of
+# each message it sends. SES may write only `inbound/`.
 #
 # ONE ACTIVE RULE SET PER ACCOUNT PER REGION. `aws_ses_active_receipt_rule_set` is therefore a
 # whole-account switch, not a per-module resource: applying a second one deactivates the first and
@@ -27,46 +30,16 @@ terraform {
 }
 
 locals {
-  # The prefix every stored message lands under. A prefix rather than the bucket root so a lifecycle
-  # rule can be scoped to inbound mail alone, and so a future second producer cannot collide.
-  object_prefix = "inbound/"
+  # SES writes received mail under `object_prefix`; the worker writes sent mail under
+  # `outbound_prefix`. Separate prefixes so SES's write grant can be limited to its own.
+  object_prefix   = "inbound/"
+  outbound_prefix = "outbound/"
 
   rule_name = "${var.name_prefix}-inbound"
 
   # The SES source ARN both the bucket policy and the key policy condition on. It names the RULE,
   # not the service — so a different rule in the same account cannot write here.
   receipt_rule_arn = "arn:aws:ses:${var.aws_region}:${var.aws_account_id}:receipt-rule-set/${var.rule_set_name}:receipt-rule/${local.rule_name}"
-}
-
-# --------------------------------------------------------------------------- #
-# Domain identity and DNS
-# --------------------------------------------------------------------------- #
-resource "aws_ses_domain_identity" "this" {
-  domain = var.mail_domain
-}
-
-resource "aws_route53_record" "verification" {
-  zone_id = var.route53_zone_id
-  name    = "_amazonses.${var.mail_domain}"
-  type    = "TXT"
-  ttl     = 600
-  records = [aws_ses_domain_identity.this.verification_token]
-}
-
-resource "aws_ses_domain_identity_verification" "this" {
-  domain     = aws_ses_domain_identity.this.id
-  depends_on = [aws_route53_record.verification]
-}
-
-# The MX that makes the domain receivable. `inbound-smtp.<region>` is the receipt endpoint, which is
-# a DIFFERENT hostname from the sending endpoint and exists only in regions where SES email
-# receiving is available.
-resource "aws_route53_record" "mx" {
-  zone_id = var.route53_zone_id
-  name    = var.mail_domain
-  type    = "MX"
-  ttl     = 600
-  records = ["10 inbound-smtp.${var.aws_region}.amazonaws.com"]
 }
 
 # --------------------------------------------------------------------------- #
@@ -113,48 +86,44 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "this" {
   }
 }
 
-# Retention. Glacier first because a stored message is read once on arrival and then almost never;
-# expiry because "keep everything forever" is itself a finding under the Safeguards Rule's disposal
-# duty. A LEGAL HOLD MUST SUPPRESS THIS — that flag is LP-821's, and `phase4.md` §6 says it ships
-# BEFORE the purge job. This rule IS the purge job, and it is created here on day one of the
-# critical path, so the ordering matters: see the note in the module header of the ticket doc.
+# Storage class only, identical for `inbound/` and `outbound/`: one rule per prefix rather than one
+# unfiltered rule, so GuardDuty's bucket-root test object and anything else added later is not swept
+# up in it. Glacier because a stored message is read once on arrival and then almost never.
+#
+# TRANSITION-ONLY, NO EXPIRATION OF EITHER KIND. v1 keeps every message (loan-email.md NFR-18). A
+# legal hold is a flag in the database, and S3 lifecycle never reads the database: an `expiration`
+# or `noncurrent_version_expiration` here would delete held correspondence on schedule, and there is
+# nothing to stop it. Add expiry back only together with something that makes deletion respect a
+# hold (S3 Object Lock legal holds, or a purge job that checks the flag).
+#
+# The bucket is versioned, so a DELETE only writes a delete marker; with no noncurrent expiry the
+# version behind it stays until someone removes it by version id.
 resource "aws_s3_bucket_lifecycle_configuration" "this" {
   bucket = aws_s3_bucket.this.id
 
-  rule {
-    id     = "inbound-retention"
-    status = "Enabled"
-
-    filter {
-      prefix = local.object_prefix
+  dynamic "rule" {
+    for_each = {
+      "inbound-retention"  = local.object_prefix
+      "outbound-retention" = local.outbound_prefix
     }
 
-    transition {
-      days          = var.glacier_after_days
-      storage_class = "GLACIER_IR"
-    }
+    content {
+      id     = rule.key
+      status = "Enabled"
 
-    expiration {
-      days = var.retention_years * 365
-    }
+      filter {
+        prefix = rule.value
+      }
 
-    # THIRTY DAYS WOULD HAVE BEEN THE EARLY PURGE, not the five-year one. The bucket is versioned,
-    # so a DELETE does not remove anything: it writes a delete marker and makes the message's only
-    # version noncurrent. At 30 days that version is destroyed permanently — five years before the
-    # `expiration` rule above would have touched it, and with no legal hold able to intervene
-    # because that flag is LP-821, in M5.
-    #
-    # `phase4.md` §6 says the legal-hold flag ships BEFORE the purge job. The five-year expiry does
-    # not actually conflict with that, since nothing can reach five years before LP-821 lands. This
-    # rule did. Noncurrent versions therefore keep the same retention as current ones until there is
-    # something that can suppress a purge; SES writes a unique key per message, so overwrites are
-    # rare and holding the versions costs close to nothing.
-    noncurrent_version_expiration {
-      noncurrent_days = var.retention_years * 365
-    }
+      transition {
+        days          = var.glacier_after_days
+        storage_class = "GLACIER_IR"
+      }
 
-    abort_incomplete_multipart_upload {
-      days_after_initiation = 7
+      # Parts of an upload that never completed; never a stored message.
+      abort_incomplete_multipart_upload {
+        days_after_initiation = 7
+      }
     }
   }
 }
@@ -325,10 +294,14 @@ resource "aws_ses_receipt_rule_set" "this" {
   rule_set_name = var.rule_set_name
 }
 
+# No `recipients`: the rule matches every verified identity whose MX points at SES (LP-981).
+#
+# No `kms_key_arn` on the S3 action. Setting one switches SES to CLIENT-side encryption, which only
+# an S3 encryption client can read. The bucket's default SSE-KMS encrypts the object instead, and
+# the worker reads it with a plain `get_object`.
 resource "aws_ses_receipt_rule" "store" {
   name          = local.rule_name
   rule_set_name = aws_ses_receipt_rule_set.this.rule_set_name
-  recipients    = [var.mail_domain]
   enabled       = true
   scan_enabled  = true
   tls_policy    = "Require"
@@ -336,7 +309,6 @@ resource "aws_ses_receipt_rule" "store" {
   s3_action {
     bucket_name       = aws_s3_bucket.this.id
     object_key_prefix = local.object_prefix
-    kms_key_arn       = var.kms_key_arn
     topic_arn         = aws_sns_topic.this.arn
     position          = 1
   }
@@ -344,7 +316,6 @@ resource "aws_ses_receipt_rule" "store" {
   depends_on = [
     aws_s3_bucket_policy.this,
     aws_sns_topic_policy.this,
-    aws_ses_domain_identity_verification.this,
   ]
 }
 

@@ -99,6 +99,25 @@ resource "aws_route53_record" "bounce_spf" {
 }
 
 # --------------------------------------------------------------------------- #
+# Receiving on the send domain (LP-982)
+# --------------------------------------------------------------------------- #
+# GATED ON `receive_enabled`, because an MX tells the world "deliver mail here". Published before
+# the inbound bucket and receipt rule exist, SES would accept nothing and senders would bounce.
+#
+# A different name from `bounce_mx` above: this is the MX of `send_domain`, that one is the MX of the
+# MAIL FROM domain (`bounce_domain`, a subdomain of it). Each name keeps exactly one MX, which is the
+# MAIL FROM rule quoted above, so the two do not conflict.
+resource "aws_route53_record" "receive_mx" {
+  count = var.receive_enabled ? 1 : 0
+
+  zone_id = var.route53_zone_id
+  name    = var.send_domain
+  type    = "MX"
+  ttl     = 600
+  records = ["10 inbound-smtp.${var.aws_region}.amazonaws.com"]
+}
+
+# --------------------------------------------------------------------------- #
 # DMARC
 # --------------------------------------------------------------------------- #
 # p=none, which is monitoring mode and is where AWS's own rollout guidance starts: "Start with a
@@ -129,6 +148,9 @@ resource "aws_route53_record" "dmarc" {
 # require SES to rewrite links in the message body, which for a borrower document request means
 # rewriting a secure upload link, and neither the tracking nor the rewrite is something this product
 # has asked for.
+# NOT ENCRYPTED, deliberately; the queue below is. The topic only passes events through to the queue,
+# and a CMK-encrypted topic would need its own key grant for SES to publish to it. The events rest
+# only in the queue, and the queue uses the CMK (LP-983).
 resource "aws_sns_topic" "events" {
   name = "${var.name_prefix}-outbound-mail-events"
   tags = var.tags
@@ -173,4 +195,134 @@ data "aws_iam_policy_document" "events_topic" {
 resource "aws_sns_topic_policy" "events" {
   arn    = aws_sns_topic.events.arn
   policy = data.aws_iam_policy_document.events_topic.json
+}
+
+# --------------------------------------------------------------------------- #
+# The delivery-events queue (LP-983)
+# --------------------------------------------------------------------------- #
+# Without a subscriber SNS drops every event. Same pattern as inbound_mail's queue: SQS + DLQ, CMK
+# encrypted, SNS allowed to send only from this topic. The worker reads it from step 2.
+#
+# SNS can deliver to a CMK-encrypted queue only because the key policy grants sns.amazonaws.com for
+# this topic (`sns_topic_arns` in modules/secrets).
+resource "aws_sqs_queue" "events_dlq" {
+  name                      = "${var.name_prefix}-outbound-mail-events-dlq"
+  message_retention_seconds = var.message_retention_seconds
+  kms_master_key_id         = var.kms_key_arn
+  tags                      = var.tags
+}
+
+resource "aws_sqs_queue" "events" {
+  name                       = "${var.name_prefix}-outbound-mail-events"
+  message_retention_seconds  = var.message_retention_seconds
+  kms_master_key_id          = var.kms_key_arn
+  visibility_timeout_seconds = 300
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.events_dlq.arn
+    maxReceiveCount     = var.max_receive_count
+  })
+
+  tags = var.tags
+}
+
+data "aws_iam_policy_document" "events_queue" {
+  statement {
+    sid    = "AllowSNSDeliver"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["sns.amazonaws.com"]
+    }
+
+    actions   = ["sqs:SendMessage"]
+    resources = [aws_sqs_queue.events.arn]
+
+    condition {
+      test     = "ArnEquals"
+      variable = "aws:SourceArn"
+      values   = [aws_sns_topic.events.arn]
+    }
+  }
+}
+
+resource "aws_sqs_queue_policy" "events" {
+  queue_url = aws_sqs_queue.events.id
+  policy    = data.aws_iam_policy_document.events_queue.json
+}
+
+resource "aws_sns_topic_subscription" "events_queue" {
+  topic_arn            = aws_sns_topic.events.arn
+  protocol             = "sqs"
+  endpoint             = aws_sqs_queue.events.arn
+  raw_message_delivery = true
+}
+
+# --------------------------------------------------------------------------- #
+# Alarms (LP-987)
+# --------------------------------------------------------------------------- #
+# Thresholds are HALF of where AWS starts reviewing the account: 5% bounces and 0.1% complaints
+# ("Amazon SES Sending review process FAQs"). The metrics are fractions, not percentages
+# (0.05 = 5%), per "Creating reputation monitoring alarms using CloudWatch". These are
+# account-level metrics, so they have no dimensions.
+resource "aws_cloudwatch_metric_alarm" "ses_bounce_rate" {
+  count = var.alarms_enabled ? 1 : 0
+
+  alarm_name        = "${var.name_prefix}-ses-bounce-rate"
+  alarm_description = "SES bounce rate is above 2.5%. AWS reviews the account at 5%. Check recent sends and stop the tenant causing it."
+
+  namespace           = "AWS/SES"
+  metric_name         = "Reputation.BounceRate"
+  statistic           = "Maximum"
+  period              = 3600
+  evaluation_periods  = 1
+  threshold           = 0.025
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_topic_arn]
+  ok_actions    = [var.alarm_topic_arn]
+  tags          = var.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "ses_complaint_rate" {
+  count = var.alarms_enabled ? 1 : 0
+
+  alarm_name        = "${var.name_prefix}-ses-complaint-rate"
+  alarm_description = "SES complaint rate is above 0.05%. AWS reviews the account at 0.1%. Check recent sends and stop the tenant causing it."
+
+  namespace           = "AWS/SES"
+  metric_name         = "Reputation.ComplaintRate"
+  statistic           = "Maximum"
+  period              = 3600
+  evaluation_periods  = 1
+  threshold           = 0.0005
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_topic_arn]
+  ok_actions    = [var.alarm_topic_arn]
+  tags          = var.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "events_dlq_not_empty" {
+  count = var.alarms_enabled ? 1 : 0
+
+  alarm_name        = "${var.name_prefix}-outbound-mail-events-dlq-not-empty"
+  alarm_description = "A delivery event could not be processed and is in the events dead-letter queue. Look at it, fix the cause, then redrive or delete it."
+
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  dimensions          = { QueueName = aws_sqs_queue.events_dlq.name }
+  statistic           = "Maximum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alarm_topic_arn]
+  ok_actions    = [var.alarm_topic_arn]
+  tags          = var.tags
 }

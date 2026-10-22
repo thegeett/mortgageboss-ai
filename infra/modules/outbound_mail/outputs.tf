@@ -22,3 +22,23 @@ output "dkim_tokens" {
   description = "The three Easy DKIM tokens, for checking the published CNAMEs by hand."
   value       = aws_ses_domain_dkim.send.dkim_tokens
 }
+
+output "events_queue_url" {
+  description = "Queue the delivery events land in. The worker reads it from step 2."
+  value       = aws_sqs_queue.events.id
+}
+
+output "events_queue_arn" {
+  description = "ARN of the delivery-events queue."
+  value       = aws_sqs_queue.events.arn
+}
+
+output "events_dlq_arn" {
+  description = "Dead-letter queue for delivery events that could not be processed."
+  value       = aws_sqs_queue.events_dlq.arn
+}
+
+output "configuration_set_arn" {
+  description = "ARN of the configuration set. SES send permissions are granted against it (LP-986)."
+  value       = aws_ses_configuration_set.this.arn
+}
