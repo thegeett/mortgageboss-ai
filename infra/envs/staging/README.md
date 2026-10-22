@@ -119,3 +119,4 @@ Production access is per account and region; repeat this request in any new acco
   inbound queue with the right recipient and every verdict `PASS`. **One gap:** GuardDuty's scan-result
   events never reach the `mbai-staging-scan-results` queue, because EventBridge cannot use the KMS key.
   See `docs/tickets/LP-989.md`.
+- **2026-10-21 (US Eastern):** scan results now delivered (LP-990).

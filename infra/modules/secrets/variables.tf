@@ -104,3 +104,9 @@ variable "sns_topic_arns" {
   type        = list(string)
   default     = []
 }
+
+variable "eventbridge_rule_arns" {
+  description = "EventBridge rules allowed to use this key, so they can deliver to CMK-encrypted SQS queues. Empty means no EventBridge grant."
+  type        = list(string)
+  default     = []
+}

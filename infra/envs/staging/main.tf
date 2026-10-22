@@ -181,6 +181,12 @@ module "secrets" {
     var.inbound_mail_enabled ? ["arn:aws:sns:${var.aws_region}:${var.aws_account_id}:${var.name_prefix}-inbound-mail"] : [],
     var.outbound_mail_enabled ? ["arn:aws:sns:${var.aws_region}:${var.aws_account_id}:${var.name_prefix}-outbound-mail-events"] : [],
   )
+
+  # LP-990 — EventBridge cannot deliver to a CMK-encrypted queue unless THE KEY POLICY grants it. Built
+  # from the rule's name for the same reason as above: reading it from `module.inbound_mail` is a cycle.
+  eventbridge_rule_arns = var.inbound_mail_enabled && var.inbound_malware_scan_enabled ? [
+    "arn:aws:events:${var.aws_region}:${var.aws_account_id}:rule/${var.name_prefix}-inbound-scan-results"
+  ] : []
 }
 
 
