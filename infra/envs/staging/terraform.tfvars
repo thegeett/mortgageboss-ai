@@ -401,16 +401,18 @@ rds_maintenance_window = "wed:15:30-wed:16:00" # 11:30 EDT / 10:30 EST
 # --------------------------------------------------------------------------- #
 # INFRA-1 — inbound borrower mail
 # --------------------------------------------------------------------------- #
-# FALSE until the application can process what arrives. Turning this on publishes an MX record, and
-# from that moment the domain accepts mail from anyone with no path to route it — LP-803 (ingest)
-# and LP-805 (routing) are both in M2. The Terraform is written now because production's registrar
-# step has lead time, not because staging should start receiving early.
-inbound_mail_enabled = false
+# ON since 2026-10-21 (LP-989), to prove step 1 of loan-email.md end to end. This creates the mail
+# bucket, the receipt rule, the queues and the MX on mail.staging.mortgageboss.ai. Mail accepted now
+# waits in the inbound queue: nothing consumes it yet (`inbound.poll_queue` is unscheduled; step 2/4).
+# Receiving also needs the rule set activated by hand. Kill switch, no infra change:
+#   aws ses set-active-receipt-rule-set --region us-east-1
+inbound_mail_enabled = true
 
-# INFRA-2 — the malware scan. Gated inside the same module, so this is inert while
-# inbound_mail_enabled is false. Listed explicitly rather than left to the default so that turning
-# mail on without deciding about scanning is not something that can happen by omission.
-inbound_malware_scan_enabled = false
+# INFRA-2 — the malware scan. ON since 2026-10-21 (LP-989), set first so no mail can arrive
+# unscanned. Gated inside the inbound module, so it takes effect together with
+# inbound_mail_enabled. Listed explicitly so that turning mail on without deciding about scanning is
+# not something that can happen by omission.
+inbound_malware_scan_enabled = true
 
 # --------------------------------------------------------------------------- #
 # INFRA-3 — outbound sending identity and the bounce path

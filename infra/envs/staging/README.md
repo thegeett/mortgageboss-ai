@@ -100,3 +100,22 @@ are not built yet (`docs/email-communication/loan-email.md` §14). They must exi
 before real borrower mail is sent.
 
 Production access is per account and region; repeat this request in any new account (e.g. a future production account).
+
+## Receiving switched on
+
+- **Date:** 2026-10-21. `inbound_mail_enabled` and `inbound_malware_scan_enabled` applied, and the
+  receipt rule set activated at 00:20:50 US Eastern (LP-989).
+- **Rule set:** `mbai-inbound` (rule `mbai-staging-inbound`). It is the only rule set in the account.
+- **Activated by:** SSO user `GeetaIdev` (`AdministratorAccess`), from CloudTrail `SetActiveReceiptRuleSet`.
+- **Kill switch,** which stops all receiving in the account with no infra change. Run it with no
+  rule-set name:
+
+  ```bash
+  aws ses set-active-receipt-rule-set --region us-east-1
+  ```
+
+- **Test result:** a real email to `test@mail.staging.mortgageboss.ai` landed in
+  `mbai-staging-mail/inbound/`, KMS-encrypted and tagged `NO_THREATS_FOUND`. Its notice reached the
+  inbound queue with the right recipient and every verdict `PASS`. **One gap:** GuardDuty's scan-result
+  events never reach the `mbai-staging-scan-results` queue, because EventBridge cannot use the KMS key.
+  See `docs/tickets/LP-989.md`.
