@@ -15997,6 +15997,20 @@ printed, forwarded, quoted, and never expires.
 
 *Status.* Accepted (LP-802). Amends ADR-094.
 
+**Amended 2026-10-26 (LP-991).**
+
+- The file address is now `lf-<display_id>@<company's active mail domain>`, e.g.
+  `lf-y36e@mail.staging.mortgageboss.ai`. It no longer contains the inbox token. A company with no
+  active domain has no file address at all, and nothing shows one.
+- The address is not a secret. `display_id` is guessable by design (ADR-048). The defence is the
+  authenticated-sender gate: DMARC pass plus a known contact on the file. Keeping the address secret
+  is no longer part of it, so the "bearer credential" reasoning above no longer applies to the
+  address. It still applies to `inbox_token` while the resolver uses it.
+- No grace period. Token addresses on `INBOX_DOMAIN` never received mail, so nothing sent to one
+  was ever delivered and nothing needs to keep resolving.
+- The inbound resolver still matches the token address until step 4 moves it to `display_id`.
+  `LoanFile.get_inbox_address()` is removed; `services/mail_domain.file_address` replaces it.
+
 ---
 
 ## ADR-398

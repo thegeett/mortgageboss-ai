@@ -19,6 +19,7 @@ from app.services.email_draft import add_needs_to_draft
 from app.services.loan_files import create_loan_file
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from tests.mail_address import link_mail_domain
 
 API = "/api/v1/loan-files"
 
@@ -100,6 +101,7 @@ async def _file_with_draft(db: AsyncSession, company, user):
 
 async def test_the_draft_reads_back_as_a_message(client: AsyncClient, db: AsyncSession) -> None:
     company, user, token = await _company_user_token(db, slug="acme", email="u@acme.com")
+    domain = await link_mail_domain(db, company.id)
     loan_file, _need, draft = await _file_with_draft(db, company, user)
     await db.commit()
 
@@ -108,8 +110,9 @@ async def test_the_draft_reads_back_as_a_message(client: AsyncClient, db: AsyncS
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["id"] == str(draft.id)
-    assert payload["reply_to"] == loan_file.get_inbox_address()
-    assert payload["suggested_bcc"] == loan_file.get_inbox_address()
+    address = f"{loan_file.display_id.lower()}@{domain}"
+    assert payload["reply_to"] == address
+    assert payload["suggested_bcc"] == address
     assert f"[{loan_file.display_id}]" in payload["body"]
     assert payload["needs_item_count"] == 1
     assert payload["mailto_available"] is True

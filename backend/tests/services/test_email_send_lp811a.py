@@ -137,9 +137,6 @@ def test_the_footer_tag_is_the_display_id_and_never_the_token() -> None:
         display_id = "LF-6T3N"
         inbox_token = "s3cr3t-token-value"  # pragma: allowlist secret
 
-        def get_inbox_address(self) -> str:
-            return f"lf-{self.inbox_token}@inbox.example.com"
-
     loan_file = _File()
     tag = footer_tag(loan_file)  # type: ignore[arg-type]
     assert tag == "[LF-6T3N]"
@@ -153,10 +150,12 @@ def test_the_footer_tag_round_trips(db_session: AsyncSession) -> None:
     class _File:
         display_id = "LF-6T3N"
 
-        def get_inbox_address(self) -> str:
-            return "lf-abc@inbox.example.com"
-
-    message = build_outbound(_File(), subject="Documents", body="Please send these.")  # type: ignore[arg-type]
+    message = build_outbound(
+        _File(),  # type: ignore[arg-type]
+        address="lf-6t3n@mb-mail.example.test",
+        subject="Documents",
+        body="Please send these.",
+    )
     assert loan_reference_in(message.body) == "LF-6T3N"
 
 
@@ -166,11 +165,29 @@ def test_a_message_with_no_tag_resolves_to_nothing() -> None:
     assert loan_reference_in("An ordinary reply with no tag in it.") is None
 
 
-async def test_the_reply_to_is_the_files_inbox_address(db_session: AsyncSession) -> None:
+async def test_the_reply_to_is_the_files_address(db_session: AsyncSession) -> None:
     loan_file, _actor, _needs, _draft = await _setup(db_session)
-    message = build_outbound(loan_file, subject="Documents", body="Please send these.")
-    assert message.reply_to == loan_file.get_inbox_address()
-    assert message.suggested_bcc == loan_file.get_inbox_address()
+    address = f"{loan_file.display_id.lower()}@mb-mail.example.test"
+    message = build_outbound(
+        loan_file, address=address, subject="Documents", body="Please send these."
+    )
+    assert message.reply_to == address
+    assert message.suggested_bcc == address
+
+
+async def test_no_address_means_no_reply_to_and_the_same_body(db_session: AsyncSession) -> None:
+    """LP-991 — a company with no active mail domain: no Reply-To, no suggested BCC, and the body
+    and the mailto verdict exactly as they are with an address."""
+    loan_file, _actor, _needs, _draft = await _setup(db_session)
+    with_address = build_outbound(
+        loan_file, address="lf-x@mb-mail.example.test", subject="Documents", body="Please send."
+    )
+    without = build_outbound(loan_file, address=None, subject="Documents", body="Please send.")
+    assert without.reply_to is None
+    assert without.suggested_bcc is None
+    assert without.body == with_address.body == f"Please send.\n\n[{loan_file.display_id}]"
+    assert without.subject == with_address.subject
+    assert without.mailto_available == with_address.mailto_available
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -182,14 +199,19 @@ async def test_a_long_message_does_not_offer_a_mail_client_link(db_session: Asyn
     offered and hoped for."""
     loan_file, _actor, _needs, _draft = await _setup(db_session)
     long_body = "x" * (MAILTO_MAX_CHARS + 1)
-    assert build_outbound(loan_file, subject="D", body=long_body).mailto_available is False
+    assert (
+        build_outbound(loan_file, address=None, subject="D", body=long_body).mailto_available
+        is False
+    )
 
 
 async def test_a_short_message_does_offer_one(db_session: AsyncSession) -> None:
     """The control: a threshold that refused everything would satisfy the test above and would leave
     the feature permanently unavailable, which looks exactly like it not being built."""
     loan_file, _actor, _needs, _draft = await _setup(db_session)
-    assert build_outbound(loan_file, subject="D", body="Short.").mailto_available is True
+    assert (
+        build_outbound(loan_file, address=None, subject="D", body="Short.").mailto_available is True
+    )
 
 
 # --------------------------------------------------------------------------------------------- #

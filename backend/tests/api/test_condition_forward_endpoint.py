@@ -37,6 +37,7 @@ from app.services.loan_files import create_loan_file
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.mail_address import token_address
 
 
 @pytest.fixture
@@ -114,7 +115,7 @@ async def _setup(
     loan_file = await create_loan_file(db, company_id=company.id)
     attachment = await _arrive(
         db,
-        address=loan_file.get_inbox_address(),
+        address=token_address(loan_file),
         content=content if content is not None else _pdf(),
     )
     message = await db.get(InboundMessage, attachment.inbound_message_id)

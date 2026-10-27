@@ -40,6 +40,7 @@ from app.communications.templates import (
     Framing,
     RenderedTemplate,
     TemplateKey,
+    file_address_phrase,
     plain_framing,
     render,
     render_document_block,
@@ -62,6 +63,7 @@ from app.models.loan_file import LoanFile
 from app.models.needs_item import NeedsItem, NeedsItemDisposition, NeedsItemOrigin
 from app.models.upload_link import UploadLink, hash_token
 from app.models.user import User
+from app.services.mail_domain import file_address
 from app.services.needs_items import AWAITING_COLLECTION, create_needs_item
 from app.services.party_requests import (
     PARTY_ROLE,
@@ -380,6 +382,7 @@ def render_draft_body(
     loan_file: LoanFile,
     needs: list[NeedsItem],
     *,
+    address: str | None,
     party: ResponsibleParty = ResponsibleParty.BORROWER,
     borrower_name: str = "",
     property_address: str = "",
@@ -397,6 +400,10 @@ def render_draft_body(
     The processor's name is left as the template's own placeholder rather than resolved here. A
     draft is not addressed to anyone until it is sent, and LP-811 owns the send — resolving a signer
     now would bake in whoever happened to click "request", who is not necessarily who sends it.
+
+    LP-991 — `address` is the file's address from `mail_domain.file_address`, or None when the
+    company has no active mail domain; the borrower template then drops the "or send them to"
+    phrase entirely.
     """
     document_list = "\n\n".join(_document_line(need) for need in needs)
     key = template_for(party)
@@ -431,7 +438,7 @@ def render_draft_body(
             "processor_name": "$processor_name",
             "loan_reference": loan_file.display_id,
             "document_list": document_list,
-            "inbox_address": loan_file.get_inbox_address(),
+            "file_address_phrase": file_address_phrase(address, reassure=True),
             "opening": words.opening,
             "bridge": words.bridge,
             "closing": words.closing,
@@ -996,6 +1003,7 @@ async def _render_current(
     return render_draft_body(
         loan_file,
         needs,
+        address=await file_address(db, loan_file),
         party=party,
         borrower_name=identity[0],
         property_address=identity[1],

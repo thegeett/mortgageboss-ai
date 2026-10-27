@@ -55,6 +55,7 @@ from app.services.email_reply import (
     set_important,
 )
 from app.services.email_send import CannotSendError, build_outbound, send_draft
+from app.services.mail_domain import file_address
 from app.services.message_detail import message_detail
 
 router = APIRouter(prefix="/loan-files/{file_identifier}/outbound", tags=["communications"])
@@ -80,7 +81,12 @@ async def get_open_draft_endpoint(
     resolved, suggested_recipient = await draft_for_reading(
         db, draft=draft, loan_file=loan_file, reader=current_user
     )
-    outbound = build_outbound(loan_file, subject=draft.subject or "", body=resolved)
+    outbound = build_outbound(
+        loan_file,
+        address=await file_address(db, loan_file),
+        subject=draft.subject or "",
+        body=resolved,
+    )
     return OutboundDraftPublic(
         id=draft.id,
         subject=outbound.subject,
@@ -460,8 +466,9 @@ class MessageDetailPublic(BaseModel):
     #: to save it against. Never derived on the client: five parties share one template key.
     party: str | None
     #: LP-831 review — what a `mailto:` link and a copy need. Nothing here transmits mail, so these
-    #: are how the message actually reaches anybody; see `MessageDetail`.
-    suggested_bcc: str
+    #: are how the message actually reaches anybody; see `MessageDetail`. None when the company has
+    #: no active mail domain (LP-991).
+    suggested_bcc: str | None
     mailto_available: bool
     mailto_max_chars: int
 

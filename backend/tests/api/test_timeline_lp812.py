@@ -19,6 +19,7 @@ from app.services.activity_log import log_activity
 from app.services.loan_files import create_loan_file
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from tests.mail_address import link_mail_domain
 
 API = "/api/v1/loan-files"
 
@@ -107,6 +108,7 @@ async def _history(db: AsyncSession, loan_file) -> None:
 
 async def test_the_timeline_reads_back(client: AsyncClient, db: AsyncSession) -> None:
     company, token = await _company_user_token(db, slug="acme")
+    domain = await link_mail_domain(db, company.id)
     loan_file = await create_loan_file(
         db, company_id=company.id, loan_program=LoanProgram.CONVENTIONAL
     )
@@ -121,8 +123,21 @@ async def test_the_timeline_reads_back(client: AsyncClient, db: AsyncSession) ->
     # what it always described. Stated rather than counted off the fixture, so a change to what the
     # timeline carries fails here instead of agreeing with itself.
     assert [e["kind"] for e in resp.json()["entries"]] == ["message", "message"]
-    # Spec 4.3 asks for the address on this screen; ADR-397's accessor is what produces it.
-    assert resp.json()["inbox_address"] == loan_file.get_inbox_address()
+    # Spec 4.3 asks for the address on this screen (LP-991: on the company's own domain).
+    assert resp.json()["inbox_address"] == f"{loan_file.display_id.lower()}@{domain}"
+
+
+async def test_no_mail_domain_means_no_address(client: AsyncClient, db: AsyncSession) -> None:
+    """LP-991 — a company with no active domain gets `inbox_address: null`, not an address on a
+    domain that never received mail."""
+    company, token = await _company_user_token(db, slug="nodomain")
+    loan_file = await create_loan_file(db, company_id=company.id)
+    await db.commit()
+
+    resp = await client.get(f"{API}/{loan_file.display_id}/timeline", headers=_auth(token))
+
+    assert resp.status_code == 200
+    assert resp.json()["inbox_address"] is None
 
 
 async def test_the_filter_is_a_server_parameter(client: AsyncClient, db: AsyncSession) -> None:

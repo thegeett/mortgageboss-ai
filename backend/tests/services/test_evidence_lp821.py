@@ -39,6 +39,7 @@ from app.services.evidence import (
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.mail_address import token_address
 
 
 async def _company_and_file(db: AsyncSession, *, slug: str):
@@ -259,7 +260,7 @@ async def test_an_inbound_record_carries_the_manifest_and_the_verdicts(
     ).read_bytes()
     message = EmailMessage()
     message["From"] = "jane@borrower.example"
-    message["To"] = loan_file.get_inbox_address()
+    message["To"] = token_address(loan_file)
     message["Subject"] = "Statements"
     message["Message-ID"] = "<ev1@example.com>"
     message.set_content("attached")

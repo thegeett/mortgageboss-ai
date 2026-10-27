@@ -19,6 +19,7 @@ import pytest
 from app.models import Company, LoanProgram
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.mail_address import token_address
 
 
 async def _company_with_file(db: AsyncSession, *, slug: str):
@@ -51,11 +52,9 @@ async def test_a_token_resolves_only_its_own_file(db_session: AsyncSession) -> N
     assert their_file.inbox_token != my_file.inbox_token
 
     resolved_theirs = await resolve_loan_file_by_address(
-        db_session, address=their_file.get_inbox_address()
+        db_session, address=token_address(their_file)
     )
-    resolved_mine = await resolve_loan_file_by_address(
-        db_session, address=my_file.get_inbox_address()
-    )
+    resolved_mine = await resolve_loan_file_by_address(db_session, address=token_address(my_file))
 
     assert resolved_theirs is not None and resolved_theirs.id == their_file.id
     assert resolved_mine is not None and resolved_mine.id == my_file.id
@@ -74,9 +73,7 @@ async def test_the_company_comes_from_the_resolved_file_and_nowhere_else(
     theirs, their_file = await _company_with_file(db_session, slug="theirs")
     mine, _my_file = await _company_with_file(db_session, slug="mine")
 
-    resolved = await resolve_loan_file_by_address(
-        db_session, address=their_file.get_inbox_address()
-    )
+    resolved = await resolve_loan_file_by_address(db_session, address=token_address(their_file))
 
     assert resolved is not None
     assert resolved.company_id == theirs.id
@@ -110,7 +107,7 @@ async def test_a_soft_deleted_file_does_not_resolve(db_session: AsyncSession) ->
     from app.services.inbound_routing import resolve_loan_file_by_address
 
     _company, loan_file = await _company_with_file(db_session, slug="theirs")
-    address = loan_file.get_inbox_address()
+    address = token_address(loan_file)
     assert await resolve_loan_file_by_address(db_session, address=address) is not None
 
     loan_file.deleted_at = utcnow()
@@ -125,7 +122,7 @@ async def test_the_lookup_is_case_insensitive(db_session: AsyncSession) -> None:
     from app.services.inbound_routing import resolve_loan_file_by_address
 
     _company, loan_file = await _company_with_file(db_session, slug="theirs")
-    shouted = loan_file.get_inbox_address().upper()
+    shouted = token_address(loan_file).upper()
 
     resolved = await resolve_loan_file_by_address(db_session, address=shouted)
     assert resolved is not None and resolved.id == loan_file.id
@@ -138,7 +135,7 @@ async def test_a_token_from_another_domain_does_not_resolve(db_session: AsyncSes
     from app.services.inbound_routing import resolve_loan_file_by_address
 
     _company, loan_file = await _company_with_file(db_session, slug="theirs")
-    local = loan_file.get_inbox_address().split("@", 1)[0]
+    local = token_address(loan_file).split("@", 1)[0]
 
     assert (
         await resolve_loan_file_by_address(db_session, address=f"{local}@elsewhere.example.com")
@@ -170,7 +167,7 @@ async def test_rung_one_routes_on_the_inbox_token(db_session: AsyncSession) -> N
     from app.services.inbound_routing import RoutingSignal, route_message
 
     _company, loan_file = await _company_with_file(db_session, slug="theirs")
-    message = await _message(db_session, to_addresses=[loan_file.get_inbox_address()])
+    message = await _message(db_session, to_addresses=[token_address(loan_file)])
 
     outcome = await route_message(db_session, message=message)
 
@@ -283,7 +280,7 @@ async def test_quarantine_is_the_default(db_session: AsyncSession) -> None:
     _company, loan_file = await _company_with_file(db_session, slug="theirs")
     message = await _message(
         db_session,
-        to_addresses=[loan_file.get_inbox_address()],
+        to_addresses=[token_address(loan_file)],
         auth_verdicts={"dmarcVerdict": "PASS", "virusVerdict": "PASS"},
     )
     outcome = await route_message(db_session, message=message)
@@ -313,7 +310,7 @@ async def test_a_trusted_sender_on_a_certain_match_may_auto_accept(
 
     message = await _message(
         db_session,
-        to_addresses=[loan_file.get_inbox_address()],
+        to_addresses=[token_address(loan_file)],
         auth_verdicts={"dmarcVerdict": "PASS", "virusVerdict": "PASS"},
     )
     outcome = await route_message(db_session, message=message)
@@ -342,7 +339,7 @@ async def test_gray_is_not_pass(db_session: AsyncSession) -> None:
 
     message = await _message(
         db_session,
-        to_addresses=[loan_file.get_inbox_address()],
+        to_addresses=[token_address(loan_file)],
         auth_verdicts={"dmarcVerdict": "GRAY", "virusVerdict": "PASS"},
     )
     outcome = await route_message(db_session, message=message)
@@ -357,7 +354,7 @@ async def test_a_virus_is_rejected_outright(db_session: AsyncSession) -> None:
     _company, loan_file = await _company_with_file(db_session, slug="theirs")
     message = await _message(
         db_session,
-        to_addresses=[loan_file.get_inbox_address()],
+        to_addresses=[token_address(loan_file)],
         auth_verdicts={"virusVerdict": "FAIL"},
     )
     outcome = await route_message(db_session, message=message)
@@ -375,12 +372,12 @@ async def test_dmarc_fail_under_a_reject_policy_is_rejected(db_session: AsyncSes
     _company, loan_file = await _company_with_file(db_session, slug="theirs")
     rejected = await _message(
         db_session,
-        to_addresses=[loan_file.get_inbox_address()],
+        to_addresses=[token_address(loan_file)],
         auth_verdicts={"dmarcVerdict": "FAIL", "dmarcPolicy": "REJECT"},
     )
     triaged = await _message(
         db_session,
-        to_addresses=[loan_file.get_inbox_address()],
+        to_addresses=[token_address(loan_file)],
         auth_verdicts={"dmarcVerdict": "FAIL", "dmarcPolicy": "NONE"},
     )
 
@@ -405,7 +402,7 @@ async def test_applying_routing_writes_the_company_from_the_file(
 
     company, loan_file = await _company_with_file(db_session, slug="theirs")
     _other, _other_file = await _company_with_file(db_session, slug="mine")
-    message = await _message(db_session, to_addresses=[loan_file.get_inbox_address()])
+    message = await _message(db_session, to_addresses=[token_address(loan_file)])
 
     await apply_routing(db_session, message=message)
 
@@ -440,7 +437,7 @@ async def test_routing_opens_the_correspondence_record(db_session: AsyncSession)
     from sqlalchemy import select
 
     _company, loan_file = await _company_with_file(db_session, slug="theirs")
-    message = await _message(db_session, to_addresses=[loan_file.get_inbox_address()])
+    message = await _message(db_session, to_addresses=[token_address(loan_file)])
 
     await apply_routing(db_session, message=message)
 

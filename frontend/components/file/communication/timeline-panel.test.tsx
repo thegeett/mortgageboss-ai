@@ -381,6 +381,16 @@ describe("the inbox address", () => {
 
     expect(container.querySelector('a[href^="mailto:"]')).toBeNull();
   });
+
+  it("is not shown at all when the company has no mail domain (LP-991)", () => {
+    loaded([MESSAGE], { inbox_address: null });
+    render(<TimelinePanel fileId="f1" />, { wrapper });
+
+    expect(screen.queryByText("This file's address")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy this file's address" })).toBeNull();
+    // The control: the rest of the panel still rendered, so the absence is not an empty render.
+    expect(screen.getByText("All")).toBeTruthy();
+  });
 });
 
 describe("a truncated timeline", () => {

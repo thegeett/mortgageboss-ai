@@ -95,13 +95,13 @@ export interface Timeline {
    */
   truncated: boolean;
   /**
-   * The file's inbox address, for telling a borrower where to send documents.
+   * The file's address, for telling a borrower where to send documents.
    *
-   * A BEARER CAPABILITY (ADR-397), not a label: anyone holding it can post documents into this file.
-   * It is on this screen because spec 4.3 asks for it here — a processor noticing nothing has
-   * arrived is already looking at the timeline.
+   * LP-991 — `lf-<display_id>@<company's active mail domain>`, or null when the company has none;
+   * every screen hides the address then. It is on this screen because spec 4.3 asks for it here — a
+   * processor noticing nothing has arrived is already looking at the timeline.
    */
-  inbox_address: string;
+  inbox_address: string | null;
   /** Arrived messages nobody has opened, counted over the WHOLE file — not over `entries`, or the
    *  badge would shrink when somebody clicked a filter pill. */
   unread_count: number;

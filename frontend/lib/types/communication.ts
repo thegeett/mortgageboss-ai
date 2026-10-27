@@ -4,8 +4,9 @@ export interface OutboundDraft {
   id: string;
   subject: string;
   body: string;
-  reply_to: string;
-  suggested_bcc: string;
+  /** LP-991 — null when the company has no active mail domain. */
+  reply_to: string | null;
+  suggested_bcc: string | null;
   /**
    * Whether a `mailto:` link can carry this message intact. Computed SERVER-SIDE, deliberately:
    * `mailto:` does not fail when it is too long, it opens a compose window containing half an
@@ -82,7 +83,8 @@ export interface MessageDetail {
   is_editable: boolean;
   /** LP-831 review — what a `mailto:` link and a copy need. Nothing here transmits mail, so these
    * are how the message actually reaches anybody. */
-  suggested_bcc: string;
+  /** LP-991 — null when the company has no active mail domain; the mailto link then has no bcc. */
+  suggested_bcc: string | null;
   mailto_available: boolean;
   mailto_max_chars: number;
   /**

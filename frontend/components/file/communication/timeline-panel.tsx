@@ -427,6 +427,7 @@ export function TimelinePanel({
 }) {
   const [filter, setFilter] = useState<TimelineFilter>("all");
   const { data, isPending, isError } = useTimeline(fileId, filter);
+  const fileAddress = data?.inbox_address ?? null;
   const [copied, setCopied] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   // LP-829 — which message the dialog is showing. Separate from `open`, which is the inline reply
@@ -522,19 +523,23 @@ export function TimelinePanel({
             STILL COPYABLE AND STILL NEVER A LINK. It is a bearer capability: anyone holding it can
             post documents into this file, so it is shown and copied, never linked. The mono face
             stays HERE and only here — §5.3 takes it off the rows, and an address is the one thing
-            on this screen a person reads character by character. */}
-        {data ? (
+            on this screen a person reads character by character.
+
+            LP-991 — null when the company has no active mail domain: no address, so no line. The
+            address is `lf-<display_id>@<company domain>` now and no longer a capability (ADR-397,
+            amended); it is still shown and copied rather than linked. */}
+        {fileAddress ? (
           <div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
             <span className="shrink-0">This file&apos;s address</span>
-            <code className="min-w-0 flex-1 truncate font-mono" title={data.inbox_address}>
-              {data.inbox_address}
+            <code className="min-w-0 flex-1 truncate font-mono" title={fileAddress}>
+              {fileAddress}
             </code>
             <Button
               size="sm"
               variant="ghost"
               className="h-6 shrink-0 px-1"
               aria-label="Copy this file's address"
-              onClick={() => void copyAddress(data.inbox_address)}
+              onClick={() => void copyAddress(fileAddress)}
             >
               {copied ? (
                 <Check className="h-3.5 w-3.5" aria-hidden />

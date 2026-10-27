@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.conditions.fixture_helpers import UWM_ROUND_1
 from tests.conditions.uwm_pdf_fixture import render_uwm_pdf
+from tests.mail_address import token_address
 from tests.models.conftest_helpers import make_loan_file
 
 SHEET_NUMBER = "1226500417"
@@ -360,7 +361,7 @@ async def test_a_forwarded_pdf_merged_into_a_round_is_checked_too(db_session: As
     loan_file = await _file(db_session, "Patel")
     round_ = await _pasted(db_session, loan_file)
     attachment = await _arrive(
-        db_session, address=loan_file.get_inbox_address(), content=render_uwm_pdf(UWM_ROUND_1)
+        db_session, address=token_address(loan_file), content=render_uwm_pdf(UWM_ROUND_1)
     )
     message = await db_session.get(InboundMessage, attachment.inbound_message_id)
     assert message is not None

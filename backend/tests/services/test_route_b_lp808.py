@@ -34,6 +34,7 @@ from app.services.mailbox_connections import (
     revoke_connection,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.mail_address import token_address
 
 
 async def _company(db: AsyncSession, slug: str) -> Company:
@@ -136,7 +137,7 @@ async def test_a_file_address_does_not_resolve_as_a_connection(db_session: Async
     loan_file = await _file(db_session, company)
 
     assert (
-        await resolve_connection_by_address(db_session, address=loan_file.get_inbox_address())
+        await resolve_connection_by_address(db_session, address=token_address(loan_file))
     ) is None
 
 
@@ -319,7 +320,7 @@ async def test_the_token_rung_still_wins(db_session: AsyncSession) -> None:
     other = await _file(db_session, company)
     message = await _arrived(
         db_session,
-        to=[loan_file.get_inbox_address()],
+        to=[token_address(loan_file)],
         subject=f"About {other.display_id}",
     )
     message.company_id = company.id

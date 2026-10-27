@@ -27,6 +27,7 @@ from app.communications.templates import (
     TemplateError,
     TemplateKey,
     _load,
+    file_address_phrase,
     file_fingerprint,
     placeholders,
     plain_framing,
@@ -35,13 +36,16 @@ from app.communications.templates import (
     render_document_block,
 )
 
+_ADDRESS = "lf-6t3n@mb-mail.example.test"
+
 #: A context supplying every variable any template declares, so one fixture renders all five.
 _CONTEXT = {
     "borrower_first_name": "Akash",
     "processor_name": "Priya",
     "loan_reference": "LF-6T3N",
     "document_list": "- Bank statements",
-    "inbox_address": "lf-token@inbox.example.com",
+    # LP-991 — the address phrase as `file_address_phrase` renders it for a linked company.
+    "file_address_phrase": file_address_phrase(_ADDRESS),
     "status_summary": "The appraisal came back on Tuesday.",
     "next_step": "We expect the underwriter's decision this week.",
     "condition_list": "- A letter of explanation",
@@ -74,7 +78,9 @@ _CONTEXT = {
 #: its variables — that is what "hands the borrower somewhere to send documents" MEANS — and the
 #: spec already states it. Measured: this picks out the same three today, and a fourth inherits the
 #: requirement the moment it declares the slot.
-_ADDRESS_BEARING = {key for key, spec in TEMPLATES.items() if "inbox_address" in spec.variables}
+_ADDRESS_BEARING = {
+    key for key, spec in TEMPLATES.items() if "file_address_phrase" in spec.variables
+}
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -233,14 +239,14 @@ def test_the_notice_names_the_route_but_never_a_url() -> None:
 def test_the_asking_templates_give_the_inbox_address(key: TemplateKey) -> None:
     """M3's routing depends on the borrower having been given the address. A template that asks for
     documents without saying where to send them is an ask with no answer."""
-    assert _CONTEXT["inbox_address"] in render(key, _CONTEXT).body
+    assert f"or send them to {_ADDRESS}" in render(key, _CONTEXT).body
 
 
 @pytest.mark.parametrize("key", sorted(set(TemplateKey) - _ADDRESS_BEARING))
 def test_the_non_asking_templates_do_not(key: TemplateKey) -> None:
     """The control for the test above — without it, an address in all five would pass that one and
     say nothing about whether the distinction is real."""
-    assert "inbox_address" not in TEMPLATES[key].variables
+    assert "file_address_phrase" not in TEMPLATES[key].variables
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -253,7 +259,7 @@ def test_the_initial_request_is_at_v4_and_the_older_versions_still_resolve() -> 
 
     This is the first bump, and it is the case the pin exists for: an in-place edit here would have
     left every v1 audit row describing an email that no longer exists in that form."""
-    assert TEMPLATES[TemplateKey.INITIAL_DOCUMENTATION_REQUEST].version == "v4"
+    assert TEMPLATES[TemplateKey.INITIAL_DOCUMENTATION_REQUEST].version == "v5"
     assert (TemplateKey.INITIAL_DOCUMENTATION_REQUEST, "v1") in VERSION_FINGERPRINTS
     assert (TemplateKey.INITIAL_DOCUMENTATION_REQUEST, "v2") in VERSION_FINGERPRINTS
 

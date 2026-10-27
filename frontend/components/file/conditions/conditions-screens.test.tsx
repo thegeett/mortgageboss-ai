@@ -210,9 +210,23 @@ describe("the Conditions tab with no rounds (S1-01)", () => {
     expect(useTimeline).toHaveBeenCalledWith("f1", "all");
   });
 
+  it("drops the forward card when the company has no mail domain (LP-991)", () => {
+    // `null` from the server, not `undefined` while loading: there is no address to forward to, so
+    // the card that says "Forward it to this file's address" is not offered.
+    useTimeline.mockReturnValue({ data: { inbox_address: null } });
+    render(<ConditionsEmpty fileId="f1" onPaste={vi.fn()} onAddByHand={vi.fn()} />);
+    expect(screen.queryByRole("heading", { name: "Forward the lender’s email" })).toBeNull();
+    expect(screen.queryByText("Loading this file’s address…")).toBeNull();
+    // The control: the other three ways in are still there.
+    for (const title of ["Upload the lender’s conditions", "Paste conditions", "Add one by hand"]) {
+      expect(screen.getByRole("heading", { name: title })).toBeDefined();
+    }
+  });
+
   it("says the address is still loading rather than rendering an empty one", () => {
     // AN EMPTY ADDRESS IS NOT A STATE TO SHOW. A Copy button beside nothing copies nothing, and a
-    // blank line reads as "this file has no address", which is never true.
+    // blank line reads as "this file has no address", which is not what loading means (LP-991: a null address
+    // drops the card instead — see above).
     renderEmpty(null);
     expect(screen.getByText("Loading this file’s address…")).toBeDefined();
     expect(screen.queryByRole("button", { name: /copy/i })).toBeNull();

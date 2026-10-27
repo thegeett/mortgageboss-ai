@@ -23,8 +23,9 @@ class OutboundDraftPublic(BaseModel):
     id: UUID
     subject: str
     body: str
-    reply_to: str
-    suggested_bcc: str
+    #: None when the company has no active mail domain (LP-991).
+    reply_to: str | None
+    suggested_bcc: str | None
     mailto_available: bool
     #: Included so the UI can explain WHY the link is unavailable rather than just disabling it.
     mailto_max_chars: int = Field(default=MAILTO_MAX_CHARS)

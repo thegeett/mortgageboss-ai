@@ -37,6 +37,7 @@ from app.services.email_draft import (
 )
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from tests.mail_address import link_mail_domain
 
 
 async def _file_and_actor(db: AsyncSession):
@@ -292,13 +293,14 @@ async def test_the_draft_carries_the_files_own_inbox_address(db_session: AsyncSe
     """M3's routing depends on the borrower having been given THIS file's address. One file's
     address in another file's email would route documents to the wrong loan."""
     loan_file, actor = await _file_and_actor(db_session)
+    domain = await link_mail_domain(db_session, loan_file.company_id)
     need = await _need(db_session, loan_file, title="Pay stubs", needs_type="pay_stub")
 
     result = await add_needs_to_draft(
         db_session, loan_file=loan_file, needs=[need], actor_user_id=actor
     )
 
-    assert loan_file.get_inbox_address() in result.draft.body
+    assert f"or send them to {loan_file.display_id.lower()}@{domain}." in result.draft.body
 
 
 async def test_two_files_get_two_drafts(db_session: AsyncSession) -> None:
@@ -974,8 +976,11 @@ async def test_no_third_party_email_carries_the_file_inbox_address(
     identification block is built from file data and is exactly the kind of place it would arrive.
     """
     loan_file, actor = await _file_and_actor(db_session)
-    inbox = loan_file.get_inbox_address()
-    assert inbox, "the fixture has no inbox address; this test would pass on nothing"
+    # LINKED, so the address exists: with no domain there is nothing to leak and the test would
+    # pass on nothing (LP-991).
+    inbox = (
+        f"{loan_file.display_id.lower()}@{await link_mail_domain(db_session, loan_file.company_id)}"
+    )
 
     appraisal = await _need(db_session, loan_file, title="Appraisal", needs_type="appraisal")
     voe = await _need(db_session, loan_file, title="VOE", needs_type="voe")

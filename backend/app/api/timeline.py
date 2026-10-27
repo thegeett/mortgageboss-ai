@@ -103,12 +103,14 @@ class TimelinePublic(BaseModel):
 
     `inbox_address` IS HERE because spec 4.3 asks for it on this screen: a processor telling a
     borrower where to send documents needs it in front of her, and the timeline is where she is
-    when she notices nothing has arrived. It is a bearer capability (ADR-397) returned to an
-    authenticated user of the owning company, through the one accessor.
+    when she notices nothing has arrived.
+
+    LP-991 — `lf-<display_id>@<company's active mail domain>`, or None when the company has none:
+    the screen then shows no address. It is no longer a secret (ADR-397, amended LP-991).
     """
 
     entries: list[TimelineEntryPublic]
-    inbox_address: str
+    inbox_address: str | None
     #: How many arrived messages nobody has opened — the badge (§C.5: "without the badge the queue is
     #: pull-only and an evening reply sits unseen until she happens to open the tab").
     #:
@@ -137,11 +139,12 @@ async def read(
     drafts — two definitions of one word that nothing forces to agree.
     """
     from app.services.email_reply import unread_count
+    from app.services.mail_domain import file_address
 
     entries, truncated = await build_timeline(db, loan_file=loan_file, wanted=filter)
     return TimelinePublic(
         entries=[TimelineEntryPublic.of(entry) for entry in entries],
-        inbox_address=loan_file.get_inbox_address(),
+        inbox_address=await file_address(db, loan_file),
         truncated=truncated,
         unread_count=await unread_count(db, loan_file=loan_file),
     )

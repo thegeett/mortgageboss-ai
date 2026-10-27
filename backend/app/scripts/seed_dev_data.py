@@ -75,6 +75,7 @@ from app.models.user import User, UserRole
 from app.services.activity_log import log_activity
 from app.services.extractions import create_extraction_version
 from app.services.loan_files import create_loan_file
+from app.services.mail_domain import set_company_mail_domain
 from app.storage import get_storage_backend
 
 logger = structlog.get_logger(__name__)
@@ -83,6 +84,8 @@ logger = structlog.get_logger(__name__)
 # These passwords are local-dev conveniences, not secrets.
 _COMPANY_NAME = "Summit Mortgage Processing"
 _COMPANY_SLUG = "summit"
+#: LP-991 — `.localhost` cannot receive real mail, by design (loan-email.md §4).
+_MAIL_DOMAIN = "mb-mail.localhost"
 _ADMIN_EMAIL = "admin@summit-demo.com"
 _PROCESSOR_EMAIL = "priya@summit-demo.com"
 _SEED_PASSWORD = "DevPassword123!"  # pragma: allowlist secret  (DEV-ONLY, documented)
@@ -845,7 +848,9 @@ async def _seed_inbound_mail(db: AsyncSession, *, company: Company) -> int:
         logger.info("seed_inbound_skipped_no_files")
         return 0
     loan_file = files[0]
-    address = loan_file.get_inbox_address()
+    # THE TOKEN ADDRESS, NOT THE FILE ADDRESS (LP-991). This feeds the inbound resolver, which still
+    # matches `lf-<inbox_token>@<INBOX_DOMAIN>` until step 4 moves it to `display_id`.
+    address = f"lf-{loan_file.inbox_token}@{settings.inbox_domain}"
 
     # A zip that claims to be a PDF — LP-804b's own acceptance criterion, and the shape a processor
     # most needs the queue to catch.
@@ -996,6 +1001,9 @@ async def seed(*, reset: bool) -> None:
             await _clear_seed(db)
 
         company, company_created = await _get_or_create_company(db)
+        # LP-991 — the dev company's mail domain, so its files have an address. Idempotent: the
+        # function updates the row it finds.
+        await set_company_mail_domain(db, company_id=company.id, domain=_MAIL_DOMAIN)
         admin, admin_created = await _get_or_create_user(
             db,
             company_id=company.id,
@@ -1062,6 +1070,7 @@ def _print_summary(
     state = "created" if company_created else "already existed"
     print("\n=== Dev seed complete (DEV-ONLY) ===")
     print(f"Company: {_COMPANY_NAME} (slug: {_COMPANY_SLUG}) [{state}]")
+    print(f"Mail domain: {_MAIL_DOMAIN} (file addresses lf-xxxx@{_MAIL_DOMAIN})")
     print(f"Loan files seeded this run: {files_created} (re-runs skip existing)")
     print("  Incl. one file imported from MISMO (synthetic PII) — the LP-53 import path.")
     print("Inbound mail: three messages through the real ingest chain (routed / quarantined /")

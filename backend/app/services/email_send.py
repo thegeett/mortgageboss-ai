@@ -42,6 +42,7 @@ from app.services.email_draft import (
     get_open_draft,
     greeting_name_for,
 )
+from app.services.mail_domain import file_address
 from app.services.needs_items import AWAITING_COLLECTION, request_needs_item
 
 #: `mailto:` is truncated somewhere around 2,000 characters in several mail clients, and a truncated
@@ -104,10 +105,12 @@ class OutboundMessage:
 
     subject: str
     body: str
-    reply_to: str
+    #: LP-991 — None when the company has no active mail domain: there is no file address to reply to.
+    reply_to: str | None
     #: Offered, not applied — the processor chooses. Bccing the file address is how the sent copy is
-    #: captured when the message goes out through their own client rather than ours.
-    suggested_bcc: str
+    #: captured when the message goes out through their own client rather than ours. None with
+    #: `reply_to`.
+    suggested_bcc: str | None
     #: False when the body is too long for a `mailto:` link to survive intact.
     mailto_available: bool
 
@@ -134,9 +137,13 @@ def loan_reference_in(text: str) -> str | None:
 
 
 def build_outbound(
-    loan_file: LoanFile, *, subject: str, body: str, html: bool = False
+    loan_file: LoanFile, *, address: str | None, subject: str, body: str, html: bool = False
 ) -> OutboundMessage:
     """Assemble the message a processor will send, footer tag included.
+
+    LP-991 — `address` is the file's address from `mail_domain.file_address`, looked up by the async
+    caller because this function is sync. None leaves `reply_to` and `suggested_bcc` empty and the
+    body exactly as it would otherwise be.
 
     LP-853 REVIEW — THE TAG HAS TO BE IN THE BODY'S OWN LANGUAGE. Until LP-853 every body was plain
     text, so `\n\n[LF-XXXX]` put the tag on its own line. An authored body is HTML, where a newline
@@ -144,7 +151,6 @@ def build_outbound(
     in the message the borrower reads. `html=True` appends it as a paragraph instead. The tag's TEXT
     is identical either way, so `inbound_routing`'s threading match is unaffected.
     """
-    address = loan_file.get_inbox_address()
     # LP-823 REVIEW — IDEMPOTENT, because this function runs TWICE over one message. `GET
     # /outbound/draft` returns `build_outbound(...).body`, the panel puts that in the textarea, and
     # the send posts the textarea back through here again. Measured over the real HTTP round trip:
@@ -333,7 +339,10 @@ async def send_draft(
     # LP-853 REVIEW — THE FORMAT THE ROW IS IN, so an authored body gets its tag as a paragraph
     # rather than a newline that HTML collapses into the preceding sentence.
     authored = draft.body_format is BodyFormat.HTML
-    outbound = build_outbound(loan_file, subject=subject_sent, body=body, html=authored)
+    address = await file_address(db, loan_file)
+    outbound = build_outbound(
+        loan_file, address=address, subject=subject_sent, body=body, html=authored
+    )
 
     # LP-823 REVIEW — RESOLVED THE SAME WAY, so the comparison downstream is like with like.
     # `EvidencePublic.was_edited` is `body_composed != body_as_sent`, and its own comment says it
@@ -364,6 +373,7 @@ async def send_draft(
     # newline inside an HTML body, which is the very thing the flag was added to stop.
     body_composed = build_outbound(
         loan_file,
+        address=address,
         subject=draft.subject or "",
         body=finalise_draft_body(
             body_composed or "", borrower_first_name=greeting, processor_name=signature
@@ -542,7 +552,12 @@ async def open_draft_preview(db: AsyncSession, *, loan_file: LoanFile) -> Outbou
     draft = await get_open_draft(db, loan_file_id=loan_file.id)
     if draft is None:
         return None
-    return build_outbound(loan_file, subject=draft.subject or "", body=draft.body or "")
+    return build_outbound(
+        loan_file,
+        address=await file_address(db, loan_file),
+        subject=draft.subject or "",
+        body=draft.body or "",
+    )
 
 
 __all__ = [

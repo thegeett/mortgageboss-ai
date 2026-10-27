@@ -32,6 +32,7 @@ from app.services.loan_files import create_loan_file
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from tests.mail_address import token_address
 
 API = "/api/v1/loan-files"
 QUEUE = "/api/v1/inbound/queue"
@@ -139,7 +140,7 @@ async def test_a_files_messages_come_back_with_the_senders_words(
     loan_file = await create_loan_file(
         db, company_id=company.id, loan_program=LoanProgram.CONVENTIONAL
     )
-    message = await _arrive(db, address=loan_file.get_inbox_address(), message_id="a1@example.com")
+    message = await _arrive(db, address=token_address(loan_file), message_id="a1@example.com")
     await db.commit()
 
     resp = await client.get(f"{API}/{loan_file.display_id}/inbound/messages", headers=_auth(token))
@@ -159,7 +160,7 @@ async def test_another_companys_file_is_not_readable(client: AsyncClient, db: As
     their_file = await create_loan_file(
         db, company_id=theirs.id, loan_program=LoanProgram.CONVENTIONAL
     )
-    await _arrive(db, address=their_file.get_inbox_address(), message_id="t1@example.com")
+    await _arrive(db, address=token_address(their_file), message_id="t1@example.com")
     await db.commit()
 
     resp = await client.get(
@@ -177,7 +178,7 @@ async def test_a_safe_attachment_previews_as_a_png(client: AsyncClient, db: Asyn
     loan_file = await create_loan_file(
         db, company_id=company.id, loan_program=LoanProgram.CONVENTIONAL
     )
-    message = await _arrive(db, address=loan_file.get_inbox_address(), message_id="p1@example.com")
+    message = await _arrive(db, address=token_address(loan_file), message_id="p1@example.com")
     attachment = await _attachment_of(db, message)
     await db.commit()
 
@@ -201,7 +202,7 @@ async def test_an_unsafe_attachment_will_not_be_rendered(
     loan_file = await create_loan_file(
         db, company_id=company.id, loan_program=LoanProgram.CONVENTIONAL
     )
-    message = await _arrive(db, address=loan_file.get_inbox_address(), message_id="u1@example.com")
+    message = await _arrive(db, address=token_address(loan_file), message_id="u1@example.com")
     attachment = await _attachment_of(db, message)
     assert attachment.safety_state is AttachmentSafetyState.SAFE, (
         "the fixture must START safe, or flipping it below proves nothing"
@@ -233,7 +234,7 @@ async def test_an_attachment_on_another_file_is_the_same_404_as_a_missing_one(
     )
     my_file = await create_loan_file(db, company_id=mine.id, loan_program=LoanProgram.CONVENTIONAL)
     their_message = await _arrive(
-        db, address=their_file.get_inbox_address(), message_id="o1@example.com"
+        db, address=token_address(their_file), message_id="o1@example.com"
     )
     their_attachment = await _attachment_of(db, their_message)
     await db.commit()

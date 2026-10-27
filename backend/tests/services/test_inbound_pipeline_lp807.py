@@ -39,6 +39,7 @@ from app.services.inbound_triage import (
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.mail_address import token_address
 
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "attachments"
 _PDF = (_FIXTURES / "clean.pdf").read_bytes()
@@ -108,7 +109,7 @@ async def _one_attachment(db: AsyncSession, message_id: UUID) -> InboundAttachme
 async def test_the_chain_assesses_and_routes_what_it_ingests(db_session: AsyncSession) -> None:
     """One call, and the message comes out routed to a real file with a SAFE attachment."""
     _company, loan_file = await _company_and_file(db_session, slug="acme")
-    raw = _message_to(loan_file.get_inbox_address(), message_id="chain-1@example.com")
+    raw = _message_to(token_address(loan_file), message_id="chain-1@example.com")
 
     result = await process_raw_message(
         db_session, raw=raw, raw_storage_path=None, store_raw=True, receipt=None
@@ -136,7 +137,7 @@ async def test_ingest_alone_leaves_the_message_pending_and_unrouted(
     was in before LP-807, from a call that looks like a complete ingest.
     """
     _company, loan_file = await _company_and_file(db_session, slug="control")
-    raw = _message_to(loan_file.get_inbox_address(), message_id="control-1@example.com")
+    raw = _message_to(token_address(loan_file), message_id="control-1@example.com")
 
     result = await ingest_raw_message(db_session, raw=raw, raw_storage_path=None)
 
@@ -172,7 +173,7 @@ async def test_a_quarantined_attachment_still_routes_its_message(db_session: Asy
     """A bad attachment is not a bad message. The message routes; the attachment is refused."""
     _company, loan_file = await _company_and_file(db_session, slug="quar")
     raw = _message_to(
-        loan_file.get_inbox_address(), message_id="quar-1@example.com", content=_ZIP_AS_PDF
+        token_address(loan_file), message_id="quar-1@example.com", content=_ZIP_AS_PDF
     )
 
     result = await process_raw_message(db_session, raw=raw, raw_storage_path=None, store_raw=True)
@@ -192,7 +193,7 @@ async def test_store_raw_writes_bytes_that_read_back_identical(db_session: Async
     from app.storage import get_storage_backend
 
     _company, loan_file = await _company_and_file(db_session, slug="stored")
-    raw = _message_to(loan_file.get_inbox_address(), message_id="stored-1@example.com")
+    raw = _message_to(token_address(loan_file), message_id="stored-1@example.com")
 
     result = await process_raw_message(db_session, raw=raw, raw_storage_path=None, store_raw=True)
 
@@ -210,7 +211,7 @@ async def test_without_store_raw_the_path_is_whatever_the_caller_passed(
 ) -> None:
     """SES's own bucket already holds the object; the task passes its key and stores nothing."""
     _company, loan_file = await _company_and_file(db_session, slug="ses")
-    raw = _message_to(loan_file.get_inbox_address(), message_id="ses-1@example.com")
+    raw = _message_to(token_address(loan_file), message_id="ses-1@example.com")
 
     result = await process_raw_message(
         db_session, raw=raw, raw_storage_path="s3://inbound/abc", store_raw=False
@@ -229,7 +230,7 @@ async def test_an_injected_message_can_actually_be_accepted(db_session: AsyncSes
     """
     company, loan_file = await _company_and_file(db_session, slug="whole")
     actor = await _processor(db_session, company)
-    raw = _message_to(loan_file.get_inbox_address(), message_id="whole-1@example.com")
+    raw = _message_to(token_address(loan_file), message_id="whole-1@example.com")
     result = await process_raw_message(db_session, raw=raw, raw_storage_path=None, store_raw=True)
     message = await db_session.get(InboundMessage, UUID(result.message_id))
     assert message is not None
@@ -246,7 +247,7 @@ async def test_an_injected_message_can_actually_be_accepted(db_session: AsyncSes
 async def test_a_redelivery_does_not_reassess_or_reroute(db_session: AsyncSession) -> None:
     """A message a processor has already acted on must not have its verdicts recomputed under them."""
     _company, loan_file = await _company_and_file(db_session, slug="dup")
-    raw = _message_to(loan_file.get_inbox_address(), message_id="dup-1@example.com")
+    raw = _message_to(token_address(loan_file), message_id="dup-1@example.com")
     first = await process_raw_message(
         db_session, raw=raw, raw_storage_path=None, store_raw=True, ses_message_id="ses-dup"
     )
@@ -286,13 +287,13 @@ async def test_a_files_messages_exclude_a_sibling_files(db_session: AsyncSession
     )
     await process_raw_message(
         db_session,
-        raw=_message_to(mine.get_inbox_address(), message_id="sib-mine@example.com"),
+        raw=_message_to(token_address(mine), message_id="sib-mine@example.com"),
         raw_storage_path=None,
         store_raw=True,
     )
     await process_raw_message(
         db_session,
-        raw=_message_to(theirs.get_inbox_address(), message_id="sib-theirs@example.com"),
+        raw=_message_to(token_address(theirs), message_id="sib-theirs@example.com"),
         raw_storage_path=None,
         store_raw=True,
     )
@@ -310,7 +311,7 @@ async def test_a_files_messages_exclude_a_sibling_files(db_session: AsyncSession
 async def _attachment_for(db: AsyncSession, *, slug: str, content: bytes, filename: str):
     _company, loan_file = await _company_and_file(db, slug=slug)
     raw = _message_to(
-        loan_file.get_inbox_address(),
+        token_address(loan_file),
         message_id=f"{slug}-p@example.com",
         content=content,
         filename=filename,

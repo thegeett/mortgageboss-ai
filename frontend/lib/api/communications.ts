@@ -315,7 +315,9 @@ export function messageMailtoUrl(
   if (!message.mailto_available) return null;
   const subject = message.subject ?? "";
   if (body.length + subject.length > message.mailto_max_chars) return null;
-  const params = new URLSearchParams({ subject, body, bcc: message.suggested_bcc });
+  const params = new URLSearchParams({ subject, body });
+  // LP-991 — no file address, no bcc. `URLSearchParams` would otherwise write the word "null".
+  if (message.suggested_bcc) params.set("bcc", message.suggested_bcc);
   return `mailto:${encodeURIComponent(recipient)}?${params.toString()}`;
 }
 
@@ -325,10 +327,7 @@ export function mailtoUrl(draft: OutboundDraft, recipient: string, body: string)
   // that verdict was formed. Either one saying no is a no.
   if (!draft.mailto_available) return null;
   if (body.length + draft.subject.length > draft.mailto_max_chars) return null;
-  const params = new URLSearchParams({
-    subject: draft.subject,
-    body,
-    bcc: draft.suggested_bcc,
-  });
+  const params = new URLSearchParams({ subject: draft.subject, body });
+  if (draft.suggested_bcc) params.set("bcc", draft.suggested_bcc);
   return `mailto:${encodeURIComponent(recipient)}?${params.toString()}`;
 }

@@ -24,6 +24,7 @@ from app.models.communication import (
 from app.models.communication_evidence import CommunicationEvidence, EvidenceEvent
 from app.models.communication_needs_item import CommunicationNeedsItem
 from app.models.company import Company
+from app.models.company_mail_domain import CompanyMailDomain, MailDomainStatus
 from app.models.condition import (
     BucketKind,
     Condition,
@@ -160,6 +161,7 @@ __all__ = [
     "CommunicationNeedsItem",
     "CommunicationStatus",
     "Company",
+    "CompanyMailDomain",
     "Condition",
     "ConditionDraft",
     "ConditionEvent",
@@ -221,6 +223,7 @@ __all__ = [
     "LoanPurpose",
     "LongStr",
     "LtvOverride",
+    "MailDomainStatus",
     "MailboxConnection",
     "MailboxConnectionKind",
     "MailboxConnectionStatus",

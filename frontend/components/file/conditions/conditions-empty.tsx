@@ -158,6 +158,10 @@ export function ConditionsEmpty({
   onAddByHand: () => void;
 }) {
   const upload = useUploadConditionSheet(fileId);
+  // LP-991 — a company with no active mail domain has no file address, so there is nothing to
+  // forward to. `null` is the server's answer; `undefined` is still loading and keeps the card.
+  const timeline = useTimeline(fileId, "all");
+  const hasNoAddress = timeline.data?.inbox_address === null;
 
   const onDrop = useCallback(
     (accepted: File[], rejected: FileRejection[]) => {
@@ -263,15 +267,17 @@ export function ConditionsEmpty({
           </div>
         </WayIn>
 
-        <WayIn title="Forward the lender’s email">
-          <p className="text-sm text-muted-foreground">
-            Forward it to this file’s address. The PDF lands in Communication, where you choose{" "}
-            <span className="font-medium text-foreground-2">Use as condition sheet</span>.
-          </p>
-          <div className="mt-auto">
-            <InboxAddress fileId={fileId} />
-          </div>
-        </WayIn>
+        {hasNoAddress ? null : (
+          <WayIn title="Forward the lender’s email">
+            <p className="text-sm text-muted-foreground">
+              Forward it to this file’s address. The PDF lands in Communication, where you choose{" "}
+              <span className="font-medium text-foreground-2">Use as condition sheet</span>.
+            </p>
+            <div className="mt-auto">
+              <InboxAddress fileId={fileId} />
+            </div>
+          </WayIn>
+        )}
 
         <WayIn title="Add one by hand">
           <p className="text-sm text-muted-foreground">

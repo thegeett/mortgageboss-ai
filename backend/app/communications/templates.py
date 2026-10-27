@@ -185,12 +185,15 @@ TEMPLATES: dict[TemplateKey, TemplateSpec] = {
         # v4 (LP-834) — the security sentence becomes `$secure_upload_block`, so a draft can carry a
         # live upload link where the processor has minted one, and LP-824's wording where they have
         # not. The words are unchanged in the second case; the slot is what is new.
-        version="v4",
+        # v5 (LP-991) — the address paragraph becomes `$file_address_phrase`, which is the whole
+        # "or send them to" phrase or nothing. v4 printed the token address on `INBOX_DOMAIN`, which
+        # never received mail; a company with no active mail domain now gets no address at all.
+        version="v5",
         variables=_COMMON
         | {
             "loan_reference",
             "document_list",
-            "inbox_address",
+            "file_address_phrase",
             "opening",
             "bridge",
             "closing",
@@ -203,8 +206,9 @@ TEMPLATES: dict[TemplateKey, TemplateSpec] = {
         # with them attached, or send them to $inbox_address" and carried the old notice verbatim.
         # Bumped with the reported one because an asymmetry is a class: leaving it would ship the
         # defect on the day somebody wires this template up, with nothing to say it was known.
-        version="v2",
-        variables=_COMMON | {"loan_reference", "document_list", "inbox_address"},
+        # v3 (LP-991) — `$file_address_phrase`, as `initial_documentation_request` v5.
+        version="v3",
+        variables=_COMMON | {"loan_reference", "document_list", "file_address_phrase"},
     ),
     TemplateKey.STATUS_UPDATE: TemplateSpec(
         key=TemplateKey.STATUS_UPDATE,
@@ -214,8 +218,9 @@ TEMPLATES: dict[TemplateKey, TemplateSpec] = {
     TemplateKey.CONDITION_RESPONSE_REQUEST: TemplateSpec(
         key=TemplateKey.CONDITION_RESPONSE_REQUEST,
         # v2 (LP-824) — the third member of the class, same words, also unrendered today.
-        version="v2",
-        variables=_COMMON | {"loan_reference", "condition_list", "inbox_address"},
+        # v3 (LP-991) — `$file_address_phrase`, as `initial_documentation_request` v5.
+        version="v3",
+        variables=_COMMON | {"loan_reference", "condition_list", "file_address_phrase"},
     ),
     # LP-843 — NEITHER CARRIES `$inbox_address`, and that is a decision rather than an omission.
     # The file inbox address is a bearer capability (ADR-397): anyone holding it can post documents
@@ -225,6 +230,10 @@ TEMPLATES: dict[TemplateKey, TemplateSpec] = {
     #
     # Reply-to is the return path here. Adding the address later is one template version; un-sending
     # it is impossible, so the reversible direction is the one to be wrong in.
+    #
+    # LP-991 — the address is now `lf-<display_id>@<company domain>` and no longer a secret; the
+    # defence is the authenticated-sender gate. Third parties still do not get it: that is a product
+    # choice now, not a secrecy one.
     TemplateKey.DOCUMENT_REQUEST_THIRD_PARTY: TemplateSpec(
         key=TemplateKey.DOCUMENT_REQUEST_THIRD_PARTY,
         version="v1",
@@ -267,6 +276,18 @@ TEMPLATES: dict[TemplateKey, TemplateSpec] = {
 #: added row rather than an edit to an existing one — the old hash stays readable, which is what
 #: makes a historical audit row checkable against the words that were actually sent.
 VERSION_FINGERPRINTS: dict[tuple[TemplateKey, str], str] = {
+    (
+        TemplateKey.INITIAL_DOCUMENTATION_REQUEST,
+        "v5",
+    ): "7ab1bdf10991c3c167fd803659aef938a24f1be1b639a5f0a864e0a4526505a4",  # pragma: allowlist secret
+    (
+        TemplateKey.REMINDER_FOLLOW_UP,
+        "v3",
+    ): "41896a39224b7ca6846ba66acd9907e6bf95144b6e2dbc0012bc99d638a61ce9",  # pragma: allowlist secret
+    (
+        TemplateKey.CONDITION_RESPONSE_REQUEST,
+        "v3",
+    ): "5e23e868170f70f6cec13568d3f3b3de9f455b21c38658df0e1174743b3780c9",  # pragma: allowlist secret
     (
         TemplateKey.DOCUMENT_REQUEST_THIRD_PARTY,
         "v1",
@@ -316,6 +337,27 @@ VERSION_FINGERPRINTS: dict[tuple[TemplateKey, str], str] = {
         "v1",
     ): "b2a700f1ecf8450e825b4d2be1f9c0a0ed00bbfcfb2bea1e3c9366fc69ccef39",  # pragma: allowlist secret
 }
+
+
+#: LP-991 — what `initial_documentation_request` v4 said under the address, kept with it.
+_ADDRESS_REASSURANCE = (
+    "Anything sent to that address reaches your loan file directly, so it does not get lost even "
+    "when we are away from our desks"
+)
+
+
+def file_address_phrase(address: str | None, *, reassure: bool = False) -> str:
+    """The `$file_address_phrase` slot: ", or send them to <address>", or "" when there is none.
+
+    The template supplies the sentence's own full stop, so both cases read cleanly:
+    "...with them attached, or send them to lf-y36e@mb-mail.localhost." and
+    "...with them attached." `reassure` adds v4's sentence about where that mail goes, without its
+    own full stop for the same reason.
+    """
+    if address is None:
+        return ""
+    phrase = f", or send them to {address}"
+    return f"{phrase}. {_ADDRESS_REASSURANCE}" if reassure else phrase
 
 
 class TemplateError(Exception):

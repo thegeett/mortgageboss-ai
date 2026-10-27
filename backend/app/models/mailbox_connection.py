@@ -147,7 +147,7 @@ class MailboxConnection(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     def get_ingest_address(self) -> str:
         """`co-<token>@<inbox domain>` — the address an admin routes mail to.
 
-        THE ONE ACCESSOR, matching `LoanFile.get_inbox_address` and ADR-397's reasoning: the token
+        THE ONE ACCESSOR, on ADR-397's original reasoning (Route B, superseded): the token
         field itself stays out of every response, and the capability is handed over in the one shape
         that is meant to be handed over.
         """

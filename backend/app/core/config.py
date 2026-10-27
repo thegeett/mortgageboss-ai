@@ -344,10 +344,11 @@ class Settings(BaseSettings):
     # The default is still PRODUCTION's domain, so this still fails OPEN: an environment that forgets
     # to set INBOX_DOMAIN starts happily and advertises production's address on every file. That
     # default is deliberate — see the note in `env_files` about why a loud failure is preferred where
-    # one is possible — and LP-836 adds the guard that makes the open failure survivable:
-    # `LoanFile.get_inbox_address` REFUSES to hand out the production domain outside production. The
-    # wiring in each environment is still what supplies the right value; the guard is what stops a
-    # missing one becoming a staging file that takes real borrower mail.
+    # one is possible.
+    #
+    # LP-991 — the address shown on a file no longer uses this (it is `lf-<display_id>@<company's
+    # mail domain>`), so LP-836's guard went with `LoanFile.get_inbox_address`. Only the inbound
+    # resolver reads this now; step 4 removes it with `INBOX_DOMAIN`.
     inbox_domain: str = PRODUCTION_INBOX_DOMAIN
 
     # LP-815 — where the borrower's upload link points. The app's own public origin, not the API's:

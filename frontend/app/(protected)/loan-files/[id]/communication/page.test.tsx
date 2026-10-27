@@ -121,7 +121,8 @@ function entries(rows: Row[]) {
         ...row,
       })),
       unread_count: 0,
-      inbox_address: "lf@imbox.example.test",
+      // LP-991 — null: a company with no mail domain, the state every company starts in.
+      inbox_address: null,
     },
     isPending: false,
     isError: false,

@@ -42,7 +42,7 @@ from app.models.loan_file import LoanFile
 logger = get_logger(__name__)
 
 #: `lf-<token>@<domain>`. The token is what `services/loan_file_ids.py` mints; the prefix is what
-#: `LoanFile.get_inbox_address` writes.
+#: `LoanFile.get_inbox_address` wrote until LP-991. Step 4 moves this to `display_id`.
 _INBOX_LOCAL_PART = re.compile(r"^lf-(?P<token>[A-Za-z0-9_-]+)$")
 
 

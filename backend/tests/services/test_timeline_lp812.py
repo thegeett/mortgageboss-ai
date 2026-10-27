@@ -36,6 +36,7 @@ from app.services.timeline import (
 )
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.mail_address import token_address
 
 _PDF = (Path(__file__).resolve().parents[1] / "fixtures" / "attachments" / "clean.pdf").read_bytes()
 
@@ -76,7 +77,7 @@ async def test_one_real_arrival_is_one_timeline_row(db_session: AsyncSession) ->
     _company, loan_file = await _company_and_file(db_session, slug="once")
     await process_raw_message(
         db_session,
-        raw=_raw(loan_file.get_inbox_address(), message_id="once@example.com"),
+        raw=_raw(token_address(loan_file), message_id="once@example.com"),
         raw_storage_path=None,
         store_raw=True,
     )
@@ -129,7 +130,7 @@ async def test_the_one_row_carries_the_attachment_manifest(db_session: AsyncSess
     _company, loan_file = await _company_and_file(db_session, slug="manifest")
     await process_raw_message(
         db_session,
-        raw=_raw(loan_file.get_inbox_address(), message_id="manifest@example.com"),
+        raw=_raw(token_address(loan_file), message_id="manifest@example.com"),
         raw_storage_path=None,
         store_raw=True,
     )
@@ -163,7 +164,7 @@ async def test_the_manifest_says_which_attachments_were_accepted(db_session: Asy
     _company, loan_file = await _company_and_file(db_session, slug="accepted")
     await process_raw_message(
         db_session,
-        raw=_raw(loan_file.get_inbox_address(), message_id="accepted@example.com"),
+        raw=_raw(token_address(loan_file), message_id="accepted@example.com"),
         raw_storage_path=None,
         store_raw=True,
     )

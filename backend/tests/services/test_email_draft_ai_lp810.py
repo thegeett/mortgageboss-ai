@@ -19,6 +19,10 @@ from app.services.email_draft import add_needs_to_draft, compose_open_draft_pros
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+#: The template's own sentence, unchanged by composition. These companies have no mail domain, so
+#: it ends without an address (LP-991).
+_REPLY_LINE = "You can reply to this message with them attached.\n"
+
 _COMPOSED = DraftComposition(
     opening="A quick note about your file.",
     bridge="These are the items still outstanding:",
@@ -105,7 +109,7 @@ async def test_with_the_flag_on_the_composed_framing_reaches_the_draft(
     assert _COMPOSED.opening in result.draft.body
     assert plain_framing().opening not in result.draft.body
     # The structure the template owns is untouched — the model replaced three sentences, not the email.
-    assert loan_file.get_inbox_address() in result.draft.body
+    assert _REPLY_LINE in result.draft.body
     assert "Every page of each statement" in result.draft.body
 
 
@@ -134,7 +138,7 @@ async def test_a_refused_composition_falls_back_to_a_complete_email(
     assert framing.opening in result.draft.body
     assert framing.bridge in result.draft.body
     assert framing.closing in result.draft.body
-    assert loan_file.get_inbox_address() in result.draft.body
+    assert _REPLY_LINE in result.draft.body
 
 
 async def test_a_second_regeneration_reuses_the_cache_rather_than_recomposing(

@@ -49,6 +49,7 @@ from app.services.email_draft import (
     party_for_draft_template,
 )
 from app.services.email_send import MAILTO_MAX_CHARS, build_outbound
+from app.services.mail_domain import file_address
 from app.services.timeline import TimelineAttachment, _attachment_manifest, _inbound_senders
 
 
@@ -111,7 +112,8 @@ class MessageDetail:
     #: on `OutboundDraftPanel`, which LP-831 took off the page — so the dialog that replaced it could
     #: record a send with no way to perform one. These three carry `build_outbound`'s answer to the
     #: editor, exactly as `OutboundDraftPublic` carries it to the panel that no longer renders.
-    suggested_bcc: str
+    #: `suggested_bcc` is None when the company has no active mail domain (LP-991).
+    suggested_bcc: str | None
     mailto_available: bool
     mailto_max_chars: int
 
@@ -189,7 +191,12 @@ async def message_detail(
 
     # LP-831 REVIEW — over the RESOLVED body, which is what a processor copies. Computing it from
     # the stored one would answer about text nobody sees.
-    outbound = build_outbound(loan_file, subject=message.subject or "", body=body)
+    outbound = build_outbound(
+        loan_file,
+        address=await file_address(db, loan_file),
+        subject=message.subject or "",
+        body=body,
+    )
 
     documents: tuple[str, ...] = ()
     if message.direction is CommunicationDirection.OUTBOUND:
