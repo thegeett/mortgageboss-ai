@@ -222,17 +222,13 @@ TEMPLATES: dict[TemplateKey, TemplateSpec] = {
         version="v3",
         variables=_COMMON | {"loan_reference", "condition_list", "file_address_phrase"},
     ),
-    # LP-843 — NEITHER CARRIES `$inbox_address`, and that is a decision rather than an omission.
-    # The file inbox address is a bearer capability (ADR-397): anyone holding it can post documents
-    # into this loan file, and nothing authenticates the sender. Handing that to a borrower is the
-    # design; handing it to their employer, their insurer or a title company gives file-write access
-    # to a third party, and the person who carries the consequence is not the person we gave it to.
+    # LP-843 — NEITHER CARRIES THE FILE ADDRESS, and that is a decision rather than an omission.
+    # Reply-to is the return path for a third party. Adding the address later is one template
+    # version; un-sending it is impossible, so the reversible direction is the one to be wrong in.
     #
-    # Reply-to is the return path here. Adding the address later is one template version; un-sending
-    # it is impossible, so the reversible direction is the one to be wrong in.
-    #
-    # LP-991 — the address is now `lf-<display_id>@<company domain>` and no longer a secret; the
-    # defence is the authenticated-sender gate. Third parties still do not get it: that is a product
+    # LP-843 gave a second reason that no longer holds: the address was a bearer capability. Since
+    # LP-991 it is `lf-<display_id>@<company domain>`, guessable by design, and the defence is the
+    # authenticated-sender gate (ADR-397, amended). Keeping it from third parties is a product
     # choice now, not a secrecy one.
     TemplateKey.DOCUMENT_REQUEST_THIRD_PARTY: TemplateSpec(
         key=TemplateKey.DOCUMENT_REQUEST_THIRD_PARTY,
@@ -339,25 +335,20 @@ VERSION_FINGERPRINTS: dict[tuple[TemplateKey, str], str] = {
 }
 
 
-#: LP-991 — what `initial_documentation_request` v4 said under the address, kept with it.
-_ADDRESS_REASSURANCE = (
-    "Anything sent to that address reaches your loan file directly, so it does not get lost even "
-    "when we are away from our desks"
-)
-
-
-def file_address_phrase(address: str | None, *, reassure: bool = False) -> str:
+def file_address_phrase(address: str | None) -> str:
     """The `$file_address_phrase` slot: ", or send them to <address>", or "" when there is none.
 
     The template supplies the sentence's own full stop, so both cases read cleanly:
     "...with them attached, or send them to lf-y36e@mb-mail.localhost." and
-    "...with them attached." `reassure` adds v4's sentence about where that mail goes, without its
-    own full stop for the same reason.
+    "...with them attached."
+
+    NO PROMISE ABOUT WHERE THE MAIL GOES. v4 followed the address with "Anything sent to that
+    address reaches your loan file directly". Until the inbound resolver reads `display_id`
+    addresses (step 4) that is false, so v5 does not say it; a later version can, once it is true.
     """
     if address is None:
         return ""
-    phrase = f", or send them to {address}"
-    return f"{phrase}. {_ADDRESS_REASSURANCE}" if reassure else phrase
+    return f", or send them to {address}"
 
 
 class TemplateError(Exception):

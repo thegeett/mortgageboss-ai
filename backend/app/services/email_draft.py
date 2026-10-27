@@ -402,13 +402,13 @@ def render_draft_body(
     now would bake in whoever happened to click "request", who is not necessarily who sends it.
 
     LP-991 — `address` is the file's address from `mail_domain.file_address`, or None when the
-    company has no active mail domain; the borrower template then drops the "or send them to"
-    phrase entirely.
+    company has no active mail domain or `FILE_ADDRESSES_ENABLED` is off; the borrower template
+    then drops the "or send them to" phrase entirely.
     """
     document_list = "\n\n".join(_document_line(need) for need in needs)
     key = template_for(party)
     if key is not DRAFT_TEMPLATE:
-        # LP-843 — NO `$inbox_address` AND NO BORROWER FRAMING. The third-party and employer
+        # LP-843 — NO FILE ADDRESS AND NO BORROWER FRAMING. The third-party and employer
         # templates declare neither, so supplying them would fail the declared-variables check
         # rather than leak quietly, which is the right way round.
         return render(
@@ -438,7 +438,7 @@ def render_draft_body(
             "processor_name": "$processor_name",
             "loan_reference": loan_file.display_id,
             "document_list": document_list,
-            "file_address_phrase": file_address_phrase(address, reassure=True),
+            "file_address_phrase": file_address_phrase(address),
             "opening": words.opening,
             "bridge": words.bridge,
             "closing": words.closing,
@@ -535,6 +535,23 @@ def _known_party_of(draft: Communication) -> ResponsibleParty | None:
     return party_for_draft_template(draft.template_key)
 
 
+def _carries_file_address(key: TemplateKey) -> bool:
+    """Whether the template's body names the file address (LP-991)."""
+    return "file_address_phrase" in TEMPLATES[key].variables
+
+
+async def _file_address_moved(
+    db: AsyncSession, *, draft: Communication, loan_file: LoanFile, key: TemplateKey
+) -> bool:
+    """Whether the address the draft's body names is no longer the file's address (LP-991).
+
+    Only for a template that carries the address, so a third-party draft costs no query.
+    """
+    if not _carries_file_address(key):
+        return False
+    return draft.rendered_file_address != await file_address(db, loan_file)
+
+
 async def refresh_if_stale(db: AsyncSession, *, draft: Communication, loan_file: LoanFile) -> bool:
     """Re-render an unsent draft whose template has moved on. Returns whether it did (LP-848).
 
@@ -547,6 +564,11 @@ async def refresh_if_stale(db: AsyncSession, *, draft: Communication, loan_file:
     STALENESS IS DERIVED, NOT GUESSED. The draft records what rendered it; `template_for(party)` and
     the registry say what would render it now. If those disagree the words are old, and that
     comparison keeps working for the NEXT template bump without anybody remembering this function.
+
+    LP-991 — THE FILE ADDRESS IS PART OF WHAT RENDERED IT. It is a value the template takes, not
+    words in the template, so the key and version stay the same when a company's domain is linked,
+    changed or deactivated. The draft records the address its body names; a different one now is
+    stale too.
 
     REGENERATION IS LOSSLESS FOR AN UNSENT DRAFT, which is what makes doing it on read safe rather
     than destructive. Measured: exactly two things write `Communication.body` — `_regenerate`, from
@@ -591,6 +613,7 @@ async def refresh_if_stale(db: AsyncSession, *, draft: Communication, loan_file:
     if (
         draft.template_key == expected.value
         and draft.template_version == TEMPLATES[expected].version
+        and not await _file_address_moved(db, draft=draft, loan_file=loan_file, key=expected)
     ):
         return False
     await _regenerate(db, draft=draft, loan_file=loan_file)
@@ -981,8 +1004,12 @@ async def _render_current(
     draft: Communication,
     loan_file: LoanFile,
     party: ResponsibleParty,
+    address: str | None,
 ) -> RenderedTemplate:
     """What the template WOULD produce for this draft right now. Writes nothing.
+
+    `address` is `mail_domain.file_address` for the file, looked up by the caller because
+    `_regenerate` also stamps it on the draft (LP-991).
 
     LIFTED OUT OF `_regenerate` FOR LP-851, which needs the same words without storing them: the
     warning quotes the processor's own first edited line, and "their own" can only be decided
@@ -1003,7 +1030,7 @@ async def _render_current(
     return render_draft_body(
         loan_file,
         needs,
-        address=await file_address(db, loan_file),
+        address=address,
         party=party,
         borrower_name=identity[0],
         property_address=identity[1],
@@ -1038,7 +1065,10 @@ async def _edited_excerpt(
     party = _known_party_of(draft)
     if party is None:
         return None
-    generated = (await _render_current(db, draft=draft, loan_file=loan_file, party=party)).body
+    address = await file_address(db, loan_file)
+    generated = (
+        await _render_current(db, draft=draft, loan_file=loan_file, party=party, address=address)
+    ).body
     for line in text_lines(draft.body or ""):
         if line and line not in generated:
             # TRUNCATION IS VISIBLE. A processor writing one long paragraph gets a fragment, and a
@@ -1107,7 +1137,10 @@ async def _regenerate(
             draft_id=str(draft.id),
         )
         return
-    rendered = await _render_current(db, draft=draft, loan_file=loan_file, party=party)
+    address = await file_address(db, loan_file)
+    rendered = await _render_current(
+        db, draft=draft, loan_file=loan_file, party=party, address=address
+    )
     draft.subject = rendered.subject
     draft.body = rendered.body
     # LP-853 — THE COLUMN SAYS WHO WROTE THE BODY, AND THIS FUNCTION JUST DID. A forced rewrite
@@ -1130,6 +1163,8 @@ async def _regenerate(
     # one thing the hash pin exists to make impossible.
     draft.template_key = rendered.template_key.value
     draft.template_version = rendered.version
+    # LP-991 — the address the body now names, which `refresh_if_stale` compares on read.
+    draft.rendered_file_address = address if _carries_file_address(rendered.template_key) else None
     await db.flush()
 
 

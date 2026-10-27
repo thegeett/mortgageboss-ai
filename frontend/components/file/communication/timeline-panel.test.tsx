@@ -373,8 +373,7 @@ describe("the inbox address", () => {
   });
 
   it("is never a mailto link", () => {
-    // It is a bearer capability (ADR-397): anyone holding it can post documents into this file. A
-    // link invites a click that opens a compose window addressed to it from the processor's own
+    // A link invites a click that opens a compose window addressed to it from the processor's own
     // account, which is not what it is for.
     loaded([MESSAGE]);
     const { container } = render(<TimelinePanel fileId="f1" />, { wrapper });

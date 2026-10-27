@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
+import pytest
 import pytest_asyncio
 from app.core.database import get_db
 from app.main import app
@@ -106,6 +107,7 @@ async def _history(db: AsyncSession, loan_file) -> None:
     await db.flush()
 
 
+@pytest.mark.usefixtures("file_addresses_on")
 async def test_the_timeline_reads_back(client: AsyncClient, db: AsyncSession) -> None:
     company, token = await _company_user_token(db, slug="acme")
     domain = await link_mail_domain(db, company.id)
@@ -127,9 +129,10 @@ async def test_the_timeline_reads_back(client: AsyncClient, db: AsyncSession) ->
     assert resp.json()["inbox_address"] == f"{loan_file.display_id.lower()}@{domain}"
 
 
+@pytest.mark.usefixtures("file_addresses_on")
 async def test_no_mail_domain_means_no_address(client: AsyncClient, db: AsyncSession) -> None:
     """LP-991 — a company with no active domain gets `inbox_address: null`, not an address on a
-    domain that never received mail."""
+    domain that never received mail. With file addresses ON, so the null is the domain's doing."""
     company, token = await _company_user_token(db, slug="nodomain")
     loan_file = await create_loan_file(db, company_id=company.id)
     await db.commit()

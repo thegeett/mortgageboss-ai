@@ -289,6 +289,7 @@ async def test_the_draft_records_the_template_and_version_that_rendered_it(
     assert result.draft.template_version == TEMPLATES[DRAFT_TEMPLATE].version
 
 
+@pytest.mark.usefixtures("file_addresses_on")
 async def test_the_draft_carries_the_files_own_inbox_address(db_session: AsyncSession) -> None:
     """M3's routing depends on the borrower having been given THIS file's address. One file's
     address in another file's email would route documents to the wrong loan."""
@@ -301,6 +302,61 @@ async def test_the_draft_carries_the_files_own_inbox_address(db_session: AsyncSe
     )
 
     assert f"or send them to {loan_file.display_id.lower()}@{domain}." in result.draft.body
+
+
+@pytest.mark.usefixtures("file_addresses_on")
+async def test_a_draft_follows_the_files_address_when_the_domain_changes(
+    db_session: AsyncSession,
+) -> None:
+    """LP-991 — the address is a value the template takes, so the key and version stay put when a
+    company's domain is linked, changed or deactivated. Reading the draft must still show the
+    address the file has now, or none."""
+    from app.models import User
+    from app.models.company_mail_domain import MailDomainStatus
+    from app.services.email_draft import draft_for_reading, refresh_if_stale
+    from app.services.mail_domain import set_company_mail_domain
+
+    loan_file, actor = await _file_and_actor(db_session)
+    need = await _need(db_session, loan_file, title="Pay stubs", needs_type="pay_stub")
+    draft = (
+        await add_needs_to_draft(db_session, loan_file=loan_file, needs=[need], actor_user_id=actor)
+    ).draft
+    reader = await db_session.get(User, actor)
+    assert draft is not None and reader is not None
+    assert "or send them to" not in (draft.body or "")
+    assert draft.rendered_file_address is None
+
+    async def read() -> str:
+        body, _ = await draft_for_reading(
+            db_session, draft=draft, loan_file=loan_file, reader=reader
+        )
+        return body
+
+    first = (
+        f"{loan_file.display_id.lower()}@{await link_mail_domain(db_session, loan_file.company_id)}"
+    )
+    assert f"or send them to {first}." in await read()
+    assert draft.rendered_file_address == first
+    # The control: nothing moved, so nothing is re-rendered.
+    assert await refresh_if_stale(db_session, draft=draft, loan_file=loan_file) is False
+
+    second = (
+        f"{loan_file.display_id.lower()}@{await link_mail_domain(db_session, loan_file.company_id)}"
+    )
+    body = await read()
+    assert f"or send them to {second}." in body
+    assert first not in body
+
+    await set_company_mail_domain(
+        db_session,
+        company_id=loan_file.company_id,
+        domain=second.split("@")[1],
+        status=MailDomainStatus.INACTIVE,
+    )
+    body = await read()
+    assert "or send them to" not in body
+    assert "You can reply to this message with them attached." in body
+    assert draft.rendered_file_address is None
 
 
 async def test_two_files_get_two_drafts(db_session: AsyncSession) -> None:
@@ -960,6 +1016,7 @@ async def test_a_lender_is_not_told_it_is_their_loan_file(db_session: AsyncSessi
     assert "credit report" in body
 
 
+@pytest.mark.usefixtures("file_addresses_on")
 async def test_no_third_party_email_carries_the_file_inbox_address(
     db_session: AsyncSession,
 ) -> None:

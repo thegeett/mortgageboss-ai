@@ -351,6 +351,21 @@ class Settings(BaseSettings):
     # resolver reads this now; step 4 removes it with `INBOX_DOMAIN`.
     inbox_domain: str = PRODUCTION_INBOX_DOMAIN
 
+    # LP-991 — whether this deployment shows file addresses (`lf-<display_id>@<company domain>`) at
+    # all. Off, `services.mail_domain.file_address` returns None for every company: no address on a
+    # screen, in a template, or as reply-to/bcc.
+    #
+    # OFF BY DEFAULT BECAUSE NOTHING ROUTES THAT ADDRESS YET. The inbound resolver matches only
+    # `lf-<inbox_token>@<INBOX_DOMAIN>` until step 4. A fresh email to `lf-y36e@mail.staging...` is
+    # received (staging receives on that domain since LP-989) and then reaches no file; only a reply
+    # still finds it, through its thread headers or the `[LF-…]` footer tag. Printing the address
+    # before step 4 would hand borrowers a route that drops their documents.
+    #
+    # A SETTING AND NOT THE ROW'S STATUS, because routing is a fact about the deployed code, not
+    # about a company. A company can be linked to its domain (LP-998) without the address being
+    # advertised. Step 4 turns this on with the resolver change, or removes it.
+    file_addresses_enabled: bool = False
+
     # LP-815 — where the borrower's upload link points. The app's own public origin, not the API's:
     # the token lands in a browser, on a page a person reads.
     #

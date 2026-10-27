@@ -130,8 +130,9 @@ export function emailBodyToHtml(body: string): string {
     }
     const indented = /^\s+\S/.test(raw);
     // AN INDENTED LINE IMMEDIATELY UNDER A BULLET is that bullet's detail. Separated from it by a
-    // blank line it is not: the borrower template indents `$inbox_address` further down, and
-    // adopting it into the document above would put the file's address inside "what we cannot
+    // blank line it is not: the borrower template up to v4 indents `$inbox_address` further down
+    // (v5, LP-991, puts the address inline), and v1–v4 bodies are still stored and still read.
+    // Adopting it into the document above would put the file's address inside "what we cannot
     // accept".
     if (indented && items.length > 0 && !blank) {
       const last = items[items.length - 1];

@@ -232,6 +232,17 @@ describe("the Conditions tab with no rounds (S1-01)", () => {
     expect(screen.queryByRole("button", { name: /copy/i })).toBeNull();
   });
 
+  it("says the address failed to load, with a retry, instead of loading for ever", () => {
+    const refetch = vi.fn();
+    useTimeline.mockReturnValue({ data: undefined, isError: true, refetch });
+    render(<ConditionsEmpty fileId="f1" onPaste={vi.fn()} onAddByHand={vi.fn()} />);
+
+    expect(screen.getByText("Couldn’t load this file’s address.")).toBeDefined();
+    expect(screen.queryByText("Loading this file’s address…")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(refetch).toHaveBeenCalledOnce();
+  });
+
   it("hands the paste and add actions to the parent", () => {
     // They open dialogs built in §4. Pinning the callbacks is what stops them becoming buttons that
     // silently do nothing when the dialogs land.

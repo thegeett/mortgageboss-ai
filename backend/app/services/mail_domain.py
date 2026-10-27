@@ -12,14 +12,16 @@ THE ADDRESS IS NOT A SECRET. `display_id` is guessable by design (ADR-048); the 
 authenticated-sender gate — DMARC pass plus a known contact on the file (ADR-397, amended LP-991).
 
 The inbound resolver still reads `lf-<inbox_token>@<settings.inbox_domain>` until step 4 moves it to
-`display_id`.
+`display_id`, so until then `settings.file_addresses_enabled` is off and no address is shown anywhere.
 """
 
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.company_mail_domain import CompanyMailDomain, MailDomainStatus
 from app.models.loan_file import LoanFile
 
@@ -60,7 +62,13 @@ async def active_mail_domain(db: AsyncSession, company_id: UUID) -> str | None:
 
 
 async def file_address(db: AsyncSession, loan_file: LoanFile) -> str | None:
-    """`lf-<display_id>@<domain>`, lowercase, or None when the company has no active domain."""
+    """`lf-<display_id>@<domain>`, lowercase, or None.
+
+    None when the company has no active domain, and for every company while
+    `settings.file_addresses_enabled` is off (nothing routes the address until step 4).
+    """
+    if not settings.file_addresses_enabled:
+        return None
     domain = await active_mail_domain(db, loan_file.company_id)
     if domain is None:
         return None
@@ -88,13 +96,21 @@ async def set_company_mail_domain(
     row = await db.scalar(
         select(CompanyMailDomain).where(CompanyMailDomain.company_id == company_id)
     )
-    if row is None:
-        row = CompanyMailDomain(company_id=company_id, domain=cleaned, status=status)
-        db.add(row)
-    else:
-        row.domain = cleaned
-        row.status = status
-    await db.flush()
+    # The check above and this write are two statements, so a concurrent writer can take the domain
+    # (or create this company's row) between them. The unique constraints refuse it; the savepoint
+    # keeps that refusal from poisoning the caller's transaction, so it reads like the check's own.
+    try:
+        async with db.begin_nested():
+            if row is None:
+                row = CompanyMailDomain(company_id=company_id, domain=cleaned, status=status)
+                db.add(row)
+            else:
+                row.domain = cleaned
+                row.status = status
+    except IntegrityError as exc:
+        raise MailDomainError(
+            f"{cleaned} could not be set: another write took it or this company's row first."
+        ) from exc
     return row
 
 

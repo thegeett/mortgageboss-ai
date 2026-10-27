@@ -16010,6 +16010,9 @@ printed, forwarded, quoted, and never expires.
   was ever delivered and nothing needs to keep resolving.
 - The inbound resolver still matches the token address until step 4 moves it to `display_id`.
   `LoanFile.get_inbox_address()` is removed; `services/mail_domain.file_address` replaces it.
+- Until then no file address is shown: `FILE_ADDRESSES_ENABLED` (default off) gates
+  `file_address` for every company. An address nothing routes is not given to a borrower. Step 4
+  turns it on with the resolver change.
 
 ---
 

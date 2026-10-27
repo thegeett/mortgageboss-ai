@@ -30,6 +30,8 @@ DISPLAY_PREFIX = "LF-"
 # a bearer capability (anyone holding the address can post documents into the file), it is printed in
 # an email address that gets forwarded and quoted, and it has no expiry — so its entropy is the whole
 # of its security. Existing tokens keep working; the column is String(64) and needs no migration.
+# LP-991 — no longer printed anywhere: the address shown is `lf-<display_id>@<company domain>`. The
+# inbound resolver still routes on this token until step 4, so its entropy still matters until then.
 INBOX_TOKEN_BYTES = 16
 
 MAX_DISPLAY_ID_ATTEMPTS = 10

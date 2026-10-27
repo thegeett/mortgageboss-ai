@@ -46,6 +46,16 @@ def _pin_inbox_domain(monkeypatch: pytest.MonkeyPatch) -> None:
     runs after this and wins.
     """
     monkeypatch.setattr(settings, "inbox_domain", TEST_INBOX_DOMAIN)
+    # LP-991 — pinned to its default for the same reason: a local `.env` with
+    # FILE_ADDRESSES_ENABLED=true must not change what the suite sees. `file_addresses_on` turns it
+    # on for the tests about the address itself.
+    monkeypatch.setattr(settings, "file_addresses_enabled", False)
+
+
+@pytest.fixture
+def file_addresses_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LP-991 — show file addresses, as a deployment with step 4 will."""
+    monkeypatch.setattr(settings, "file_addresses_enabled", True)
 
 
 @pytest.fixture(autouse=True)

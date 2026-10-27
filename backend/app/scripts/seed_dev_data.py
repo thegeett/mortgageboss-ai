@@ -59,6 +59,7 @@ from app.models.activity_log import ActivityType
 from app.models.base import utcnow
 from app.models.borrower import Borrower, MaritalStatus
 from app.models.company import Company
+from app.models.company_mail_domain import CompanyMailDomain
 from app.models.document import Document, DocumentCategory, DocumentStatus, UploadSource
 from app.models.extraction import ExtractionStatus
 from app.models.inbound_message import InboundMessage
@@ -812,6 +813,22 @@ _UNROUTED_KEY = "seed-unrouted@demo.invalid"
 _SEEDED_INGEST_KEYS = (_ROUTED_KEY, _QUARANTINED_KEY, _UNROUTED_KEY)
 
 
+async def _link_dev_mail_domain(db: AsyncSession, *, company: Company) -> bool:
+    """LP-991 — link the dev company to `mb-mail.localhost`, so its files have an address (with
+    FILE_ADDRESSES_ENABLED on). Returns whether it linked.
+
+    Only when the company has no row: a re-run must not undo a domain or an `--inactive` set since
+    with `set_company_mail_domain`.
+    """
+    linked = await db.scalar(
+        select(CompanyMailDomain.id).where(CompanyMailDomain.company_id == company.id)
+    )
+    if linked is not None:
+        return False
+    await set_company_mail_domain(db, company_id=company.id, domain=_MAIL_DOMAIN)
+    return True
+
+
 async def _seed_inbound_mail(db: AsyncSession, *, company: Company) -> int:
     """Seed the triage queue by SENDING MAIL, not by writing rows (§H3). Returns messages created.
 
@@ -1001,9 +1018,7 @@ async def seed(*, reset: bool) -> None:
             await _clear_seed(db)
 
         company, company_created = await _get_or_create_company(db)
-        # LP-991 — the dev company's mail domain, so its files have an address. Idempotent: the
-        # function updates the row it finds.
-        await set_company_mail_domain(db, company_id=company.id, domain=_MAIL_DOMAIN)
+        await _link_dev_mail_domain(db, company=company)
         admin, admin_created = await _get_or_create_user(
             db,
             company_id=company.id,
@@ -1070,7 +1085,7 @@ def _print_summary(
     state = "created" if company_created else "already existed"
     print("\n=== Dev seed complete (DEV-ONLY) ===")
     print(f"Company: {_COMPANY_NAME} (slug: {_COMPANY_SLUG}) [{state}]")
-    print(f"Mail domain: {_MAIL_DOMAIN} (file addresses lf-xxxx@{_MAIL_DOMAIN})")
+    print(f"Mail domain: {_MAIL_DOMAIN} unless already linked (FILE_ADDRESSES_ENABLED shows them)")
     print(f"Loan files seeded this run: {files_created} (re-runs skip existing)")
     print("  Incl. one file imported from MISMO (synthetic PII) — the LP-53 import path.")
     print("Inbound mail: three messages through the real ingest chain (routed / quarantined /")

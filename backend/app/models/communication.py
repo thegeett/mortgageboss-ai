@@ -249,6 +249,10 @@ class Communication(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # where the honest answer is "none".
     template_key: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
     template_version: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
+    #: LP-991 — the file address this body was rendered with, NULL when it names none. Templates take
+    #: the address as a value, so key and version alone cannot say the body is out of date when a
+    #: company's domain is linked, changed or deactivated; `refresh_if_stale` compares this too.
+    rendered_file_address: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
 

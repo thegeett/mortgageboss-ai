@@ -506,6 +506,8 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # sits unread are facts about how it works and name nobody.
     # LP-834 adds `upload_link_url`: the plaintext upload token, a bearer credential, and the same
     # secret already inside `body` one entry along.
+    # LP-991 adds `rendered_file_address`: names no person, excluded only to avoid rebuilding the view
+    # for a column no query uses yet.
     "communications": frozenset(
         {
             "sender",
@@ -514,6 +516,7 @@ EXCLUDED: dict[str, frozenset[str]] = {
             "body",
             "in_reply_to_message_id",
             "upload_link_url",
+            "rendered_file_address",
         }
     ),
     # LP-822 — a processor's writing voice. `greeting`, `closing` and `signature_block` are typed by

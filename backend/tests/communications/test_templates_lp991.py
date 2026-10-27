@@ -48,26 +48,26 @@ _SECURITY = (
 
 def test_the_phrase_is_whole_or_empty() -> None:
     assert file_address_phrase(None) == ""
-    assert file_address_phrase(None, reassure=True) == ""
     assert file_address_phrase(_ADDRESS) == f", or send them to {_ADDRESS}"
 
 
 def test_the_initial_request_with_an_address() -> None:
     body = render(
         TemplateKey.INITIAL_DOCUMENTATION_REQUEST,
-        _INITIAL | {"file_address_phrase": file_address_phrase(_ADDRESS, reassure=True)},
+        _INITIAL | {"file_address_phrase": file_address_phrase(_ADDRESS)},
     ).body
+    # No "Anything sent to that address reaches your loan file directly" (v4's promise): nothing
+    # routes this address until step 4.
     assert body == (
         _INITIAL_HEAD + "You can reply to this message with them attached, or send them to "
-        "lf-y36e@mb-mail.localhost. Anything sent to that address reaches your loan file "
-        "directly, so it does not get lost even when we are away from our desks." + _INITIAL_TAIL
+        "lf-y36e@mb-mail.localhost." + _INITIAL_TAIL
     )
 
 
 def test_the_initial_request_without_an_address() -> None:
     body = render(
         TemplateKey.INITIAL_DOCUMENTATION_REQUEST,
-        _INITIAL | {"file_address_phrase": file_address_phrase(None, reassure=True)},
+        _INITIAL | {"file_address_phrase": file_address_phrase(None)},
     ).body
     assert body == (
         _INITIAL_HEAD + "You can reply to this message with them attached." + _INITIAL_TAIL

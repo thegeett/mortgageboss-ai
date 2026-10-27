@@ -10,8 +10,9 @@
  *
  * THE INBOX ADDRESS SITS ON THIS SCREEN because spec 4.3 asks for it here: a processor noticing that
  * nothing has arrived is already looking at the timeline, and that is the moment she wants the
- * address to tell a borrower. It is a bearer capability, not a label — anyone holding it can post
- * documents into this file — so it is shown, copyable, and never linked.
+ * address to tell a borrower. It is shown and copyable, never linked: a link would open a compose
+ * window from the processor's own account. Null — no line at all — when the file has no address
+ * (LP-991).
  */
 
 import { Button } from "@/components/ui/button";
@@ -520,14 +521,13 @@ export function TimelinePanel({
             either and wrapping to two lines inside a 300px rail — the loudest thing in a header it
             was not the subject of. It is referenced rarely and never read aloud.
 
-            STILL COPYABLE AND STILL NEVER A LINK. It is a bearer capability: anyone holding it can
-            post documents into this file, so it is shown and copied, never linked. The mono face
-            stays HERE and only here — §5.3 takes it off the rows, and an address is the one thing
-            on this screen a person reads character by character.
+            STILL COPYABLE AND STILL NEVER A LINK. A link invites a click that opens a compose window
+            from the processor's own account, which is not what it is for. The mono face stays HERE
+            and only here — §5.3 takes it off the rows, and an address is the one thing on this
+            screen a person reads character by character.
 
-            LP-991 — null when the company has no active mail domain: no address, so no line. The
-            address is `lf-<display_id>@<company domain>` now and no longer a capability (ADR-397,
-            amended); it is still shown and copied rather than linked. */}
+            LP-991 — `lf-<display_id>@<company domain>`, and no longer a secret (ADR-397, amended).
+            Null when the company has no active mail domain or file addresses are off: no line. */}
         {fileAddress ? (
           <div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
             <span className="shrink-0">This file&apos;s address</span>

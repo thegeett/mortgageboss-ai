@@ -113,8 +113,21 @@ function InboxAddress({ fileId }: { fileId: string }) {
     }
   }
 
+  if (timeline.isError) {
+    // A FAILED FETCH IS NOT "LOADING". Without this branch the card said "Loading…" for ever.
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-xs text-muted-foreground">Couldn’t load this file’s address.</p>
+        <Button variant="outline" size="sm" onClick={() => void timeline.refetch()}>
+          Try again
+        </Button>
+      </div>
+    );
+  }
+
   if (!address) {
-    // Not an error state: the address is fetched, and a missing one means it has not arrived yet.
+    // The address is fetched, and a missing one here means it has not arrived yet. A file with no
+    // address (null, LP-991) never reaches this: the parent hides the whole card.
     return <p className="text-xs text-muted-foreground">Loading this file’s address…</p>;
   }
 

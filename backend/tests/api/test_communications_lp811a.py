@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
+import pytest
 import pytest_asyncio
 from app.core.database import get_db
 from app.main import app
@@ -99,6 +100,7 @@ async def _file_with_draft(db: AsyncSession, company, user):
     return loan_file, need, result.draft
 
 
+@pytest.mark.usefixtures("file_addresses_on")
 async def test_the_draft_reads_back_as_a_message(client: AsyncClient, db: AsyncSession) -> None:
     company, user, token = await _company_user_token(db, slug="acme", email="u@acme.com")
     domain = await link_mail_domain(db, company.id)
