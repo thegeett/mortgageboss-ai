@@ -574,9 +574,11 @@ module "compute" {
     #
     # LP-992 — MAIL_BUCKET was INBOUND_BUCKET (nothing read it). One bucket: `inbound/` (SES writes)
     # and `outbound/` (the worker writes a copy of each sent message, from LP-994), read through
-    # `app.storage.get_mail_storage`.
+    # `app.storage.get_mail_storage`. MAIL_KMS_KEY_ID is the bucket's own default key (from the
+    # module), sent on every write, so the mail key and the documents key can differ.
     var.inbound_mail_enabled ? {
       MAIL_BUCKET       = module.inbound_mail[0].bucket_name
+      MAIL_KMS_KEY_ID   = module.inbound_mail[0].kms_key_arn
       INBOUND_QUEUE_URL = module.inbound_mail[0].queue_url
     } : {},
     var.outbound_mail_enabled ? {

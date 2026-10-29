@@ -393,6 +393,11 @@ class Settings(BaseSettings):
     # sent message). Read through `app.storage.get_mail_storage`. None in local dev, which uses a
     # folder under `storage_local_path` instead.
     mail_bucket: str | None = None
+    # The mail bucket's own CMK, sent as SSEKMSKeyId on every write. Its own setting, not
+    # `s3_kms_key_id`: that is the DOCUMENTS key, which matches the mail bucket's only by
+    # coincidence of today's staging, and KMS refuses a write naming the wrong key. Staging sets it
+    # from the bucket module's own encryption rule. Required with `mail_bucket` in s3 mode.
+    mail_kms_key_id: str | None = None
     inbound_queue_url: str | None = None
     inbound_kms_key_arn: str | None = None
 
@@ -466,7 +471,14 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator("s3_bucket", "s3_endpoint_url", "s3_kms_key_id", mode="before")
+    @field_validator(
+        "s3_bucket",
+        "s3_endpoint_url",
+        "s3_kms_key_id",
+        "mail_bucket",
+        "mail_kms_key_id",
+        mode="before",
+    )
     @classmethod
     def _blank_s3_str_is_none(cls, value: object) -> object:
         """Treat a blank/whitespace S3 string as unset (C0).

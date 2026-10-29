@@ -443,6 +443,14 @@ resource "aws_ecs_service" "worker" {
   desired_count   = var.worker_desired_count
   launch_type     = "FARGATE"
 
+  # LP-992 — STOP THE OLD WORKER BEFORE STARTING THE NEW ONE. Beat runs inside the worker, and
+  # ECS's defaults (200% max, 100% min healthy) start the new task while the old one still runs,
+  # so every deploy had two schedulers for a minute and every scheduled job fired twice. The cost
+  # is a short gap with no worker during a deploy: queued tasks wait in Redis and run when the new
+  # task is up, and a beat tick that falls in the gap is skipped, not doubled.
+  deployment_maximum_percent         = 100
+  deployment_minimum_healthy_percent = 0
+
   enable_execute_command = var.enable_execute_command
 
   network_configuration {

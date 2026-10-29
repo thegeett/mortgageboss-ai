@@ -186,8 +186,9 @@ server:
 
 ```bash
 cd backend
-uv run celery -A app.tasks.celery_app worker --loglevel=info
+uv run celery -A app.tasks.celery_app worker --loglevel=info -B --schedule=/tmp/celerybeat-schedule
 # macOS/Colima: add --pool=solo if the default prefork pool misbehaves
+# -B runs the scheduler inside the worker (LP-992): run ONE worker, so stop the Compose one first
 ```
 
 Or as a **container** — the `worker` service starts **by default** (LP-73), so a

@@ -93,6 +93,13 @@ celery_app.conf.update(
     #
     # The heartbeat only proves the scheduler is alive. LP-995 adds the delivery-events job.
     beat_schedule={
-        "heartbeat": {"task": "health.heartbeat", "schedule": 300.0},
+        # `expires`: a heartbeat not started within 300s is dropped, not run late. It shares the
+        # default queue with verification runs of up to 20 minutes; without this, heartbeats queue
+        # behind them and log in a burst, which can look like a live scheduler after it has died.
+        "heartbeat": {
+            "task": "health.heartbeat",
+            "schedule": 300.0,
+            "options": {"expires": 300},
+        },
     },
 )

@@ -57,14 +57,20 @@ def get_storage_backend() -> StorageBackend:
         # someone ever patches the setting past the validator (as the tests do).
         if settings.s3_bucket is None:
             raise ValueError('storage_backend is "s3" but s3_bucket is not set')
-        return S3StorageBackend(
-            bucket=settings.s3_bucket,
-            region=settings.s3_region,
-            endpoint_url=settings.s3_endpoint_url,
-            kms_key_id=settings.s3_kms_key_id,
-            presign_expiry=settings.s3_presign_expiry_seconds,
-        )
+        return _s3_backend(bucket=settings.s3_bucket, kms_key_id=settings.s3_kms_key_id)
     raise ValueError(f"Unknown storage backend: {settings.storage_backend!r}")
+
+
+def _s3_backend(*, bucket: str, kms_key_id: str | None) -> S3StorageBackend:
+    """The one S3 constructor call, shared by documents and mail so a new argument cannot reach
+    one and miss the other. They differ only in bucket and key."""
+    return S3StorageBackend(
+        bucket=bucket,
+        region=settings.s3_region,
+        endpoint_url=settings.s3_endpoint_url,
+        kms_key_id=kms_key_id,
+        presign_expiry=settings.s3_presign_expiry_seconds,
+    )
 
 
 def get_mail_storage() -> StorageBackend:
@@ -74,33 +80,40 @@ def get_mail_storage() -> StorageBackend:
     by the worker from LP-994) and ``inbound/<id>`` (what SES writes). Use ``save_at`` / ``read`` /
     ``delete`` with those keys; ``save`` would build a document-shaped tenant path instead.
 
-    ``"s3"`` → the existing S3 backend on ``settings.mail_bucket``, refusing loudly when it is
-    unset. ``"local"`` → the existing local backend rooted at ``<storage_local_path>/mail``.
-
-    ENCRYPTION: it sends ``s3_kms_key_id``, the documents key. In staging that is the SAME CMK as
-    the mail bucket's default (`module.secrets.kms_key_arn` feeds both; `infra/envs/staging/
-    main.tf`), and the worker's `MailKey` statement allows GenerateDataKey on it. If the two keys
-    are ever split, this must send the mail key instead, or the write is refused by KMS.
+    ``"s3"`` → the existing S3 backend on ``settings.mail_bucket`` with ``settings.mail_kms_key_id``
+    (the mail bucket's own key, not the documents key), refusing loudly when either is unset.
+    ``"local"`` → the existing local backend rooted at ``<storage_local_path>/mail``.
 
     WHAT THE WORKER MAY DO with it in staging (LP-986 IAM): PutObject under ``outbound/`` and
     GetObject under ``inbound/``. Reading back or deleting an ``outbound/`` object is AccessDenied
     there, by design: a sent-mail copy is a record.
 
-    Not cached, unlike :func:`get_storage_backend`: building either backend is cheap, and the
-    setting is read on each call.
+    Cached per configuration, like :func:`get_storage_backend`: the local backend resolves and
+    creates its root in ``__init__``, blocking calls that should not run once per message.
     """
-    if settings.storage_backend == "s3":
-        if not settings.mail_bucket:
+    return _mail_storage(
+        settings.storage_backend,
+        settings.mail_bucket,
+        settings.mail_kms_key_id,
+        settings.storage_local_path,
+    )
+
+
+@lru_cache(maxsize=4)
+def _mail_storage(
+    backend: str, bucket: str | None, kms_key_id: str | None, local_path: str
+) -> StorageBackend:
+    """Keyed on the settings it reads, so a changed setting gets a new backend, not a stale one."""
+    if backend == "s3":
+        if not bucket:
             raise ValueError(
                 'storage_backend is "s3" but MAIL_BUCKET is not set; raw email has nowhere to go'
             )
-        return S3StorageBackend(
-            bucket=settings.mail_bucket,
-            region=settings.s3_region,
-            endpoint_url=settings.s3_endpoint_url,
-            kms_key_id=settings.s3_kms_key_id,
-            presign_expiry=settings.s3_presign_expiry_seconds,
-        )
-    if settings.storage_backend == "local":
-        return LocalStorageBackend(Path(settings.storage_local_path) / "mail")
-    raise ValueError(f"Unknown storage backend: {settings.storage_backend!r}")
+        if not kms_key_id:
+            raise ValueError(
+                'storage_backend is "s3" but MAIL_KMS_KEY_ID is not set; KMS would refuse the write'
+            )
+        return _s3_backend(bucket=bucket, kms_key_id=kms_key_id)
+    if backend == "local":
+        return LocalStorageBackend(Path(local_path) / "mail")
+    raise ValueError(f"Unknown storage backend: {backend!r}")

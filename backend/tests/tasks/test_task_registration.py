@@ -78,4 +78,5 @@ def test_the_beat_schedule_names_only_registered_tasks() -> None:
     assert not unregistered, (
         f"beat_schedule names tasks the worker does not register: {unregistered}"
     )
-    assert schedule["heartbeat"] == {"task": "health.heartbeat", "schedule": 300.0}
+    assert schedule["heartbeat"]["task"] == "health.heartbeat"
+    assert schedule["heartbeat"]["schedule"] == 300.0

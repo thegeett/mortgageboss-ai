@@ -7,6 +7,13 @@ output "bucket_arn" {
   value = aws_s3_bucket.this.arn
 }
 
+# LP-992 — read from the bucket's own default-encryption rule, so the app's MAIL_KMS_KEY_ID is
+# this bucket's key by construction rather than by two inputs happening to match.
+output "kms_key_arn" {
+  description = "The CMK the bucket's default encryption uses; writers send it as SSEKMSKeyId."
+  value       = one(aws_s3_bucket_server_side_encryption_configuration.this.rule).apply_server_side_encryption_by_default[0].kms_master_key_id
+}
+
 output "inbound_prefix" {
   description = "Key prefix SES writes received mail under."
   value       = local.object_prefix

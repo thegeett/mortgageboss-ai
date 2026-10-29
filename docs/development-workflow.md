@@ -230,7 +230,8 @@ docker compose up -d            # postgres, redis, mailhog — AND the worker (d
   the volume is what makes them one. (Object storage, S3/MinIO, is the production answer;
   the **S3 backend is not yet implemented** — Phase 7.)
 - Alternative: run the worker **on the host** (`cd backend && uv run celery -A
-  app.tasks.celery_app worker --loglevel=info`) so it shares the host filesystem directly
+  app.tasks.celery_app worker --loglevel=info -B --schedule=/tmp/celerybeat-schedule`, and stop
+  the Compose worker: `-B` puts the scheduler inside it, so two workers schedule twice — LP-992) so it shares the host filesystem directly
   (no volume needed). Pick one model; don't mix host-API + Docker-worker without the
   shared volume.
 

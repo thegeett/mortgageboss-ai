@@ -139,6 +139,16 @@ variable "worker_desired_count" {
     first.
   EOT
   type        = number
+
+  # LP-992 — here, next to `worker_command` in main.tf, which is what creates the limit: Celery
+  # beat runs inside the worker (`-B`) in every environment, so a second worker task would run
+  # every scheduled job twice. 0 is allowed (the overnight stop). This covers only what
+  # Terraform sets; `scripts/deploy` checks the same tfvar before scaling up, and a hand-run
+  # `aws ecs update-service --desired-count 2` bypasses both.
+  validation {
+    condition     = var.worker_desired_count >= 0 && var.worker_desired_count <= 1
+    error_message = "worker_desired_count must be 0 or 1: Celery beat runs inside the worker (-B), so two workers would run every scheduled job twice. Move beat to its own service before adding workers."
+  }
 }
 
 variable "worker_concurrency" {

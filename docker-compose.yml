@@ -72,7 +72,8 @@ services:
   # required settings, e.g. ANTHROPIC_API_KEY). After a code change, rebuild it:
   #   docker compose up -d --build worker
   # (locally you can instead run, from backend/:
-  #   uv run celery -A app.tasks.celery_app worker --loglevel=info
+  #   uv run celery -A app.tasks.celery_app worker --loglevel=info -B --schedule=/tmp/celerybeat-schedule
+  #   (stop the compose worker first: two workers on one Redis means two schedulers)
   #   # on macOS/Colima add --pool=solo if the prefork pool misbehaves)
   worker:
     build: ./backend

@@ -80,4 +80,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD uv run celery -A app.tasks.celery_app inspect ping -d celery@$HOSTNAME || exit 1
 
 # Default command: run the Celery worker (overridable by the compose service).
-CMD ["uv", "run", "celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info"]
+# LP-992 — with beat inside it (`-B`), the same as every real launch (ECS worker_command, both
+# compose files). A default without it would be a worker that silently never schedules anything.
+# Beat inside the worker means exactly ONE worker per environment.
+CMD ["uv", "run", "celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info", "-B", "--schedule=/tmp/celerybeat-schedule"]

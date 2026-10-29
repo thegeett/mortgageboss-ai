@@ -3386,7 +3386,18 @@ rds_status() {
 # defaulting to 1 would put the two out of step in exactly the direction that is
 # hard to notice.
 service_desired_from_tfvars() {
-  tfvar_required "$TFVARS" "${1}_desired_count"
+  local count
+  count=$(tfvar_required "$TFVARS" "${1}_desired_count") || exit 1
+  # LP-992 — Celery beat runs inside the worker, so two workers run every scheduled job
+  # twice. `up` is what sets the live count (Terraform ignores desired_count after create),
+  # so the limit is checked here as well as in the module's variable validation. Read
+  # before anything is started, because `stage_up` prints this before it starts RDS.
+  if [ "$1" = "worker" ] && [ "$count" != "0" ] && [ "$count" != "1" ]; then
+    die "worker_desired_count is $count in $TFVARS; it must be 0 or 1." \
+      "Celery beat runs inside the worker (-B), so two workers would run every" \
+      "scheduled job twice. Move beat to its own service before adding workers."
+  fi
+  printf '%s' "$count"
 }
 
 ecs_service_desired() {
@@ -3635,6 +3646,9 @@ stage_up() {
   require_identity "$ACCOUNT_ID"
   require_shutdown_environment
   require_outputs "$ENV_DIR"
+  # LP-992 — refuse a worker count above 1 BEFORE starting anything. Called directly, not in
+  # `$(...)`, so its `die` ends this script rather than a subshell.
+  service_desired_from_tfvars worker >/dev/null
 
   local cluster db status svc
   cluster=$(out ecs_cluster_name)

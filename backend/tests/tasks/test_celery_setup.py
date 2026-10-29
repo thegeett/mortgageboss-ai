@@ -83,6 +83,14 @@ def test_heartbeat_logs_one_line() -> None:
     assert "health.heartbeat" in celery_app.tasks
 
 
+def test_a_late_heartbeat_is_dropped_not_run() -> None:
+    """LP-992 review — heartbeats share the default queue with 20-minute verification runs. One that
+    has waited a whole interval is dropped, so a burst of stale heartbeats cannot look like a live
+    scheduler."""
+    entry = celery_app.conf.beat_schedule["heartbeat"]
+    assert entry["options"]["expires"] <= entry["schedule"]
+
+
 def test_ping_task_returns_pong() -> None:
     # Direct call runs the task body in-process (no broker needed).
     assert ping() == "pong"
