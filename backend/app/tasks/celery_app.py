@@ -86,4 +86,13 @@ celery_app.conf.update(
     # document that takes longer than today's.
     task_soft_time_limit=120,
     task_time_limit=180,
+    # LP-992 — THE SCHEDULE. Beat runs inside the worker (`-B` on the worker command in
+    # infra/modules/compute/main.tf and both compose files), so the worker must run exactly one
+    # task: with two, every entry here runs twice. Move beat to its own service before adding
+    # workers. Every entry names a registered task (tests/tasks/test_task_registration.py).
+    #
+    # The heartbeat only proves the scheduler is alive. LP-995 adds the delivery-events job.
+    beat_schedule={
+        "heartbeat": {"task": "health.heartbeat", "schedule": 300.0},
+    },
 )

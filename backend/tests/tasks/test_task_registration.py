@@ -61,3 +61,21 @@ def test_known_tasks_are_registered_on_the_app() -> None:
         "documents.process_document",
     ):
         assert name in celery_app.tasks, f"task not registered with the worker: {name}"
+
+
+def test_the_beat_schedule_names_only_registered_tasks() -> None:
+    """LP-992 — a schedule entry naming an unregistered task is the LP-78 seam again: beat sends
+    the message, and the worker discards it. Silent, on a timer."""
+    for module in _TASK_MODULES:
+        __import__(module)
+    schedule = celery_app.conf.beat_schedule
+    assert schedule, "beat_schedule is empty; the loop below would assert nothing"
+    unregistered = {
+        name: entry["task"]
+        for name, entry in schedule.items()
+        if entry["task"] not in celery_app.tasks
+    }
+    assert not unregistered, (
+        f"beat_schedule names tasks the worker does not register: {unregistered}"
+    )
+    assert schedule["heartbeat"] == {"task": "health.heartbeat", "schedule": 300.0}

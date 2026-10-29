@@ -387,7 +387,12 @@ class Settings(BaseSettings):
     # Where SES writes a received message, and where the ingest task is told about it. All three are
     # None until INFRA-1 applies; nothing reads them before LP-803, and a None here is the honest
     # state of an environment with no inbound pipeline rather than a misconfiguration.
-    inbound_bucket: str | None = None
+    #
+    # LP-992 — `mail_bucket` (was `inbound_bucket`, which nothing read): ONE bucket for raw mail,
+    # `inbound/` (SES writes received messages) and `outbound/` (the worker writes a copy of each
+    # sent message). Read through `app.storage.get_mail_storage`. None in local dev, which uses a
+    # folder under `storage_local_path` instead.
+    mail_bucket: str | None = None
     inbound_queue_url: str | None = None
     inbound_kms_key_arn: str | None = None
 

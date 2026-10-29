@@ -6,6 +6,7 @@ cares whether bytes live on the local filesystem (dev) or S3 (production).
 """
 
 from functools import lru_cache
+from pathlib import Path
 
 from app.core.config import settings
 from app.storage.base import (
@@ -22,6 +23,7 @@ __all__ = [
     "StorageBackend",
     "StorageError",
     "build_storage_path",
+    "get_mail_storage",
     "get_storage_backend",
 ]
 
@@ -62,4 +64,43 @@ def get_storage_backend() -> StorageBackend:
             kms_key_id=settings.s3_kms_key_id,
             presign_expiry=settings.s3_presign_expiry_seconds,
         )
+    raise ValueError(f"Unknown storage backend: {settings.storage_backend!r}")
+
+
+def get_mail_storage() -> StorageBackend:
+    """Raw email files: the mail bucket on S3, a folder in local dev (LP-992).
+
+    The same keys in both: ``outbound/<communication_id>.eml`` (a copy of each sent message, written
+    by the worker from LP-994) and ``inbound/<id>`` (what SES writes). Use ``save_at`` / ``read`` /
+    ``delete`` with those keys; ``save`` would build a document-shaped tenant path instead.
+
+    ``"s3"`` → the existing S3 backend on ``settings.mail_bucket``, refusing loudly when it is
+    unset. ``"local"`` → the existing local backend rooted at ``<storage_local_path>/mail``.
+
+    ENCRYPTION: it sends ``s3_kms_key_id``, the documents key. In staging that is the SAME CMK as
+    the mail bucket's default (`module.secrets.kms_key_arn` feeds both; `infra/envs/staging/
+    main.tf`), and the worker's `MailKey` statement allows GenerateDataKey on it. If the two keys
+    are ever split, this must send the mail key instead, or the write is refused by KMS.
+
+    WHAT THE WORKER MAY DO with it in staging (LP-986 IAM): PutObject under ``outbound/`` and
+    GetObject under ``inbound/``. Reading back or deleting an ``outbound/`` object is AccessDenied
+    there, by design: a sent-mail copy is a record.
+
+    Not cached, unlike :func:`get_storage_backend`: building either backend is cheap, and the
+    setting is read on each call.
+    """
+    if settings.storage_backend == "s3":
+        if not settings.mail_bucket:
+            raise ValueError(
+                'storage_backend is "s3" but MAIL_BUCKET is not set; raw email has nowhere to go'
+            )
+        return S3StorageBackend(
+            bucket=settings.mail_bucket,
+            region=settings.s3_region,
+            endpoint_url=settings.s3_endpoint_url,
+            kms_key_id=settings.s3_kms_key_id,
+            presign_expiry=settings.s3_presign_expiry_seconds,
+        )
+    if settings.storage_backend == "local":
+        return LocalStorageBackend(Path(settings.storage_local_path) / "mail")
     raise ValueError(f"Unknown storage backend: {settings.storage_backend!r}")

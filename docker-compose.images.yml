@@ -71,7 +71,8 @@ services:
     image: mbai-api:test
     container_name: mbai-images-worker
     restart: unless-stopped
-    command: ["uv", "run", "celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info"]
+    # LP-992 — beat (`-B`) runs inside this worker, so run exactly one of it.
+    command: ["uv", "run", "celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info", "-B", "--schedule=/tmp/celerybeat-schedule"]
     env_file:
       - ./backend/.env
     environment:

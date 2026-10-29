@@ -310,6 +310,12 @@ the count at creation and is ignored by every apply after that — scaling is
 by the new count.** That limiter is per-process: N tasks pace at N × the value,
 against an account quota of 10 RPM.
 
+**The worker runs exactly one task (LP-992).** Celery beat, the scheduler, runs inside
+the worker (`-B` in `worker_command`), so two worker tasks run every scheduled job
+twice. Staging's `worker_desired_count` refuses values above 1. Before adding workers,
+move beat to its own one-task service. Note that `aws ecs update-service
+--desired-count 2` by hand bypasses that check.
+
 ---
 
 ## Populating the secrets

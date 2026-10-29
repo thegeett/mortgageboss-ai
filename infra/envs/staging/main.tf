@@ -567,12 +567,16 @@ module "compute" {
       REDIS_URL = "rediss://${module.data.redis_primary_endpoint}:6379/0?ssl_cert_reqs=required"
     },
     # LP-988 — email resource names, set only when their stack exists (a disabled stack sets nothing,
-    # so the settings stay None). INBOUND_BUCKET / INBOUND_QUEUE_URL: the raw-mail bucket and the
+    # so the settings stay None). MAIL_BUCKET / INBOUND_QUEUE_URL: the raw-mail bucket and the
     # queue `inbound.poll_queue` drains (not on the beat schedule). EVENTS_QUEUE_URL,
     # SES_CONFIGURATION_SET and MAIL_TRANSPORT are for step 2 and not read yet; settings ignore
     # unknown variables (`extra="ignore"`).
+    #
+    # LP-992 — MAIL_BUCKET was INBOUND_BUCKET (nothing read it). One bucket: `inbound/` (SES writes)
+    # and `outbound/` (the worker writes a copy of each sent message, from LP-994), read through
+    # `app.storage.get_mail_storage`.
     var.inbound_mail_enabled ? {
-      INBOUND_BUCKET    = module.inbound_mail[0].bucket_name
+      MAIL_BUCKET       = module.inbound_mail[0].bucket_name
       INBOUND_QUEUE_URL = module.inbound_mail[0].queue_url
     } : {},
     var.outbound_mail_enabled ? {

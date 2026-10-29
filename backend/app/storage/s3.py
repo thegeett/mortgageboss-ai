@@ -103,6 +103,8 @@ _CONTENT_TYPES: dict[str, str] = {
     "tif": "image/tiff",
     "tiff": "image/tiff",
     "heic": "image/heic",
+    # LP-992 — raw email in the mail bucket (`outbound/<id>.eml`).
+    "eml": "message/rfc822",
 }
 _DEFAULT_CONTENT_TYPE = "application/octet-stream"
 

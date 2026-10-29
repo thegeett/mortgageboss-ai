@@ -7,6 +7,7 @@ dispatching through Celery. Full broker→worker dispatch is validated **manuall
 (see ``app/tasks/health.py`` for the commands); it needs a live Redis/worker.
 """
 
+import structlog.testing
 from app.tasks import health
 from app.tasks.base import run_async, task_session
 from app.tasks.celery_app import celery_app
@@ -68,6 +69,18 @@ def test_run_async_runs_a_coroutine_to_completion() -> None:
         return x * 2
 
     assert run_async(_double(21)) == 42
+
+
+def test_heartbeat_logs_one_line() -> None:
+    """LP-992 — the beat schedule's proof of life. Run in-process; no broker."""
+    from app.tasks.health import heartbeat
+
+    with structlog.testing.capture_logs() as logs:
+        assert heartbeat() is None
+
+    # BaseTask adds its own task_started / task_finished lines around it.
+    assert [entry["event"] for entry in logs].count("beat_heartbeat") == 1
+    assert "health.heartbeat" in celery_app.tasks
 
 
 def test_ping_task_returns_pong() -> None:

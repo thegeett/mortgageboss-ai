@@ -14,10 +14,13 @@ Validate manually with a running worker::
     db_ping.delay().get(timeout=10)  # -> "db-ok"
 """
 
+import structlog
 from sqlalchemy import text
 
 from app.tasks.base import BaseTask, run_async, task_session
 from app.tasks.celery_app import celery_app
+
+logger = structlog.get_logger(__name__)
 
 
 @celery_app.task(base=BaseTask, name="health.ping")  # type: ignore[untyped-decorator]
@@ -42,3 +45,10 @@ async def _db_ping() -> str:
 def db_ping() -> str:
     """Run the async ``SELECT 1`` from a sync task via the bridge."""
     return run_async(_db_ping())
+
+
+@celery_app.task(base=BaseTask, name="health.heartbeat")  # type: ignore[untyped-decorator]
+def heartbeat() -> None:
+    """LP-992 — one log line from the beat schedule every 5 minutes, so the scheduler is visibly
+    alive. No database, no network."""
+    logger.info("beat_heartbeat")

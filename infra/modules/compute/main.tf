@@ -87,9 +87,16 @@ locals {
   # extraction, verification run and needs update in the environment queued behind each
   # other. Measured before the fix: six documents from one upload took 2m53s of strictly
   # serial work against a ~35s critical path.
+  #
+  # LP-992 — `-B` runs Celery beat (the scheduler) INSIDE the worker, so the worker service
+  # must run EXACTLY ONE task: with two, every scheduled job runs twice. Before adding
+  # workers, move beat to its own service. `--schedule` points beat's state file at /tmp,
+  # which is writable (no read-only root filesystem on this task definition, and the image
+  # runs as root).
   worker_command = [
     "uv", "run", "celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info",
     "--concurrency=${var.worker_concurrency}",
+    "-B", "--schedule=/tmp/celerybeat-schedule",
   ]
 
   migration_command = ["uv", "run", "alembic", "upgrade", "head"]

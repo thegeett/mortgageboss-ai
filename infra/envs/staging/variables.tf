@@ -310,6 +310,13 @@ variable "worker_desired_count" {
     A task is the expensive way to add parallelism; concurrency is the free way.
   EOT
   type        = number
+
+  # LP-992 — Celery beat runs inside the worker (`-B`), so a second worker task would run
+  # every scheduled job twice. 0 is allowed (the overnight stop).
+  validation {
+    condition     = var.worker_desired_count >= 0 && var.worker_desired_count <= 1
+    error_message = "worker_desired_count must be 0 or 1: Celery beat runs inside the worker (-B), so two workers would run every scheduled job twice. Move beat to its own service before adding workers."
+  }
 }
 
 variable "worker_concurrency" {
