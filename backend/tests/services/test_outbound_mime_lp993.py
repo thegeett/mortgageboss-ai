@@ -107,6 +107,41 @@ def test_an_html_body_is_text_then_html() -> None:
 def test_html_to_text_decodes_entities_and_breaks() -> None:
     # A non-breaking space reads as a space; script contents are dropped.
     assert html_to_text("<p>A &amp; B<br>C&nbsp;D</p><script>x()</script>") == "A & B\nC D\n"
+    assert html_to_text("<p>a<br><br>b</p>") == "a\n\nb\n"
+
+
+# The editor's real shape: Tiptap wraps every list item's text in a <p>.
+def test_html_to_text_lists_in_the_editor_shape_are_single_spaced() -> None:
+    html = (
+        "<p>Send:</p><ul><li><p>Bank statements</p></li><li><p>Pay stubs</p></li></ul><p>Thanks</p>"
+    )
+    assert html_to_text(html) == "Send:\n\n- Bank statements\n- Pay stubs\n\nThanks\n"
+
+
+def test_html_to_text_numbers_ordered_lists_and_indents_nested_ones() -> None:
+    html = "<ol><li><p>One</p><ul><li><p>Sub</p></li></ul></li><li><p>Two</p></li></ol>"
+    assert html_to_text(html) == "1. One\n    - Sub\n2. Two\n"
+
+
+def test_html_to_text_second_paragraph_in_an_item_stays_under_it() -> None:
+    assert html_to_text("<ul><li><p>Item</p><p>more</p></li></ul>") == "- Item\n  more\n"
+
+
+def test_html_to_text_marks_quotes() -> None:
+    html = "<p>Hi <strong>John</strong>,</p><blockquote><p>one</p><p>two</p></blockquote><p>end</p>"
+    assert html_to_text(html) == "Hi John,\n\n> one\n>\n> two\n\nend\n"
+
+
+def test_html_to_text_keeps_the_space_between_inline_tags() -> None:
+    assert html_to_text("<p>Hi <em>there</em> <u>you</u></p>") == "Hi there you\n"
+
+
+def test_html_to_text_writes_a_link_target_once() -> None:
+    html = (
+        '<p><a href="mailto:p@x.test">p@x.test</a>, <a href="https://u.test/a">https://u.test/a</a>'
+        ', <a href="https://u.test/b">Upload</a></p>'
+    )
+    assert html_to_text(html) == "p@x.test, https://u.test/a, Upload (https://u.test/b)\n"
 
 
 def test_non_ascii_name_and_subject_are_encoded() -> None:
@@ -143,8 +178,31 @@ def test_no_recipient_is_refused(to: Any) -> None:
 
 @pytest.mark.parametrize("from_address", ["lf-y36e", "@mb-mail.test", "lf-y36e@"])
 def test_a_from_address_without_a_domain_is_refused(from_address: str) -> None:
-    with pytest.raises(ValueError, match="from_address is not an email address"):
+    with pytest.raises(ValueError, match="from_address is not one email address"):
         build_mime(**(_BASE | {"from_address": from_address}))
+
+
+@pytest.mark.parametrize("field", ["to", "cc", "reply_to"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "a@x.test, b@y.test",  # a list in one item: two recipients in the header
+        "a@x.test; b@y.test",
+        "a@x.test b@y.test",
+        "a@b@c.test",
+        "John <john@x.test>",  # a display name: addresses only
+        "john",
+    ],
+)
+def test_an_address_item_must_be_exactly_one_address(field: str, value: str) -> None:
+    with pytest.raises(ValueError, match=f"{field} is not one email address"):
+        build_mime(**(_BASE | {field: value}))
+
+
+def test_a_list_of_addresses_is_each_its_own_recipient() -> None:
+    _, msg = _wire(to=["a@x.test", "b@y.test"], cc=[" c@z.test "])
+    assert [a.addr_spec for a in msg["To"].addresses] == ["a@x.test", "b@y.test"]
+    assert [a.addr_spec for a in msg["Cc"].addresses] == ["c@z.test"]
 
 
 @pytest.mark.parametrize("name", ["Bcc", "bcc", "From", "Message-ID", "X Bad"])

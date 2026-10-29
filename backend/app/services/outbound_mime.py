@@ -66,7 +66,8 @@ def build_mime(
     headers: Mapping[str, str] | None = None,
 ) -> EmailMessage:
     """The complete message. Raises `ValueError` on a header value with CR/LF, an empty `to`, an
-    address without `@`, or a `headers` entry that names a header this function owns.
+    address item that is not exactly one bare `local@domain`, or a `headers` entry that names a
+    header this function owns.
 
     `body` is the draft as stored: plain text, or the sanitised HTML an authored draft holds
     (`html=True`). An HTML body goes out as multipart/alternative with a plain-text part first.
@@ -84,13 +85,10 @@ def build_mime(
 
     _no_newline("from_name", from_name)
     _no_newline("subject", subject)
-    for label, address in [
-        ("from_address", from_address),
-        *(("to", a) for a in recipients),
-        *(("cc", a) for a in copies),
-        *([("reply_to", reply_to)] if reply_to is not None else []),
-    ]:
-        _check_address(label, address)
+    sender = _address("from_address", from_address)
+    to_addresses = [_address("to", a) for a in recipients]
+    cc_addresses = [_address("cc", a) for a in copies]
+    reply_address = _address("reply_to", reply_to) if reply_to is not None else None
     if in_reply_to is not None:
         _no_newline("in_reply_to", in_reply_to)
     for ref in references or []:
@@ -101,17 +99,17 @@ def build_mime(
     message = EmailMessage(policy=policy.SMTP)
     # `Address` quotes a display name with a comma ("Priya Thaker, ABC Mortgage") and encodes a
     # non-ASCII one; formatting it by hand is how a comma becomes two recipients.
-    message["From"] = Address(display_name=from_name, addr_spec=from_address)
-    message["To"] = ", ".join(recipients)
-    if copies:
-        message["Cc"] = ", ".join(copies)
-    if reply_to is not None:
-        message["Reply-To"] = reply_to
+    message["From"] = Address(display_name=from_name, addr_spec=sender.addr_spec)
+    message["To"] = to_addresses
+    if cc_addresses:
+        message["Cc"] = cc_addresses
+    if reply_address is not None:
+        message["Reply-To"] = reply_address
     message["Subject"] = subject
     message["Date"] = format_datetime(datetime.now(UTC))
     # Our own id on the sending domain. SES may replace it with its own; LP-998 records which one
     # actually arrives, and threading of replies reads what arrived.
-    message["Message-ID"] = make_msgid(domain=from_address.rsplit("@", 1)[1])
+    message["Message-ID"] = make_msgid(domain=sender.domain)
     if in_reply_to:
         message["In-Reply-To"] = in_reply_to
     if references:
@@ -140,10 +138,20 @@ def _no_newline(label: str, value: str) -> None:
         raise ValueError(f"{label} contains a line break; refusing to build the header.")
 
 
-def _check_address(label: str, address: str) -> None:
+def _address(label: str, address: str) -> Address:
+    """Exactly one bare address (`local@domain`), or `ValueError`.
+
+    ONE ADDRESS PER ITEM, PARSED. Checking for an `@` let `"a@x, b@y"` through as one item, and the
+    header then named two recipients: an extra borrower from a stored field, or a real address
+    past the test script's simulator check. `Address(addr_spec=…)` refuses a list, a display name,
+    a second `@`, and a missing local part or domain.
+    """
     _no_newline(label, address)
-    if "@" not in address or address.startswith("@") or address.endswith("@"):
-        raise ValueError(f"{label} is not an email address.")
+    try:
+        # Raises on a missing local part or domain as well; no separate check is needed.
+        return Address(addr_spec=address.strip())
+    except Exception as exc:  # HeaderParseError is not a ValueError; one message for every shape
+        raise ValueError(f"{label} is not one email address.") from exc
 
 
 def _is_header_name(name: str) -> bool:
@@ -152,25 +160,83 @@ def _is_header_name(name: str) -> bool:
 
 
 class _PlainText(HTMLParser):
-    """The text of an HTML body, with paragraphs, line breaks, bullets and link targets kept."""
+    """The text of an HTML body: paragraphs, line breaks, lists, quotes and link targets kept.
 
-    _BLOCK_END = frozenset({"p", "div", "blockquote", "ul", "ol", "tr", "h1", "h2", "h3"})
-    _DROP = frozenset({"script", "style", "head", "title"})
+    Built for the editor's real shape (Tiptap): every `<li>` wraps its text in a `<p>`, so a
+    paragraph inside a list item is a line, not a blank-line-separated block. Bullets are `- ` as in
+    `from-html.ts`; a numbered list keeps its numbers; a nested item is indented four spaces per level;
+    a quote is prefixed `> `.
+
+    Output is written through `_text`, which owes the pending line breaks (`self.breaks`) and the
+    line prefix (quote marks, indent, the item marker) before the first word on each line.
+    """
+
+    _BLOCK = frozenset({"p", "div", "tr", "h1", "h2", "h3", "h4", "h5", "h6"})
+    _DROP = frozenset({"script", "style", "head", "title", "textarea", "noscript"})
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.out: list[str] = []
         self.muted = 0
+        self.breaks = 0  # line breaks owed before the next word
+        self.line_start = True
+        self.lists: list[list[int | str]] = []  # [kind, next number] per open list
+        self.marker: str | None = None  # the item marker owed to the next line
+        self.quote = 0
         self.href: str | None = None
         self.link_text: list[str] = []
+
+    def _break(self, count: int) -> None:
+        # Never at the very top or on a line already fresh (just after a quote's breaks were
+        # written), and a paragraph break inside a list is one line, not two.
+        if self.out and not self.line_start:
+            self.breaks = max(self.breaks, 1 if self.lists else count)
+
+    def _flush_breaks(self) -> None:
+        # A blank line inside a quote carries the quote mark; one outside it does not, so the
+        # breaks owed at a quote's start are written before the quote level goes up.
+        if self.breaks:
+            quote_blank = ("> " * self.quote).rstrip()
+            self.out.append("\n" + (quote_blank + "\n") * (self.breaks - 1))
+            self.breaks = 0
+            self.line_start = True
+
+    def _text(self, text: str) -> None:
+        self._flush_breaks()
+        if self.line_start:
+            text = text.lstrip()
+            if not text:
+                return
+            indent = "    " * max(len(self.lists) - 1, 0)
+            lead = self.marker if self.marker is not None else ("  " if self.lists else "")
+            self.out.append("> " * self.quote + indent + lead)
+            self.marker = None
+            self.line_start = False
+        self.out.append(text)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in self._DROP:
             self.muted += 1
+        elif self.muted:
+            return
         elif tag == "br":
-            self.out.append("\n")
+            if self.out:
+                self.breaks += 1
+        elif tag in ("ul", "ol"):
+            self._break(2)
+            self.lists.append([tag, 1])
         elif tag == "li":
-            self.out.append("\n- ")
+            self._break(1)
+            if self.lists:
+                kind, number = self.lists[-1]
+                self.marker = "- " if kind == "ul" else f"{number}. "
+                self.lists[-1][1] = int(number) + 1
+        elif tag == "blockquote":
+            self._break(2)
+            self._flush_breaks()
+            self.quote += 1
+        elif tag in self._BLOCK:
+            self._break(2)
         elif tag == "a":
             self.href = dict(attrs).get("href")
             self.link_text = []
@@ -178,14 +244,27 @@ class _PlainText(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         if tag in self._DROP:
             self.muted = max(self.muted - 1, 0)
-        elif tag in self._BLOCK_END:
-            self.out.append("\n\n")
+        elif self.muted:
+            return
+        elif tag in ("ul", "ol"):
+            if self.lists:
+                self.lists.pop()
+            self._break(2)
+        elif tag == "li":
+            self.marker = None
+        elif tag == "blockquote":
+            self.quote = max(self.quote - 1, 0)
+            self._break(2)
+        elif tag in self._BLOCK:
+            self._break(2)
         elif tag == "a":
             # A text-only reader cannot click, so the address goes in the text. The upload link is
-            # the one a borrower needs, and its text alone ("Upload securely") is no use.
+            # the one a borrower needs, and its text alone ("Upload securely") is no use. A link
+            # whose text already IS its target (a URL, or the address of a `mailto:`) says it once.
             text = "".join(self.link_text).strip()
-            if self.href and self.href != text:
-                self.out.append(f" ({self.href})")
+            href = self.href
+            if href and text not in (href, href.removeprefix("mailto:")):
+                self._text(f" ({href})")
             self.href = None
 
     def handle_data(self, data: str) -> None:
@@ -196,7 +275,12 @@ class _PlainText(HTMLParser):
             collapsed = " " + collapsed
         if data[-1:].isspace() and collapsed:
             collapsed += " "
-        self.out.append(collapsed)
+        if not collapsed:
+            # Whitespace alone between two inline tags (`<em>a</em> <u>b</u>`) is still a word gap.
+            if data and not self.line_start and not self.breaks and not self.out[-1].endswith(" "):
+                self.out.append(" ")
+            return
+        self._text(collapsed)
         if self.href is not None:
             self.link_text.append(data)
 
@@ -211,11 +295,8 @@ def html_to_text(html: str) -> str:
     parser = _PlainText()
     parser.feed(html)
     parser.close()
-    lines = [" ".join(line.split()) for line in "".join(parser.out).split("\n")]
-    text = "\n".join(lines)
-    while "\n\n\n" in text:
-        text = text.replace("\n\n\n", "\n\n")
-    return text.strip() + "\n"
+    lines = [line.rstrip() for line in "".join(parser.out).split("\n")]
+    return "\n".join(lines).strip("\n") + "\n"
 
 
 __all__ = ["build_mime", "html_to_text"]

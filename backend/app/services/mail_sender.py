@@ -25,12 +25,20 @@ import smtplib
 from abc import ABC, abstractmethod
 from email.message import EmailMessage
 from email.utils import parseaddr
-from typing import Any
+from typing import Any, NoReturn
 
 import boto3
 import structlog
 from botocore.config import Config
-from botocore.exceptions import BotoCoreError, ClientError, ConnectionClosedError, ReadTimeoutError
+from botocore.exceptions import (
+    BotoCoreError,
+    ClientError,
+    ConnectTimeoutError,
+    EndpointConnectionError,
+    HTTPClientError,
+    ProxyConnectionError,
+)
+from botocore.exceptions import ConnectionError as BotoConnectionError
 
 from app.core.config import settings
 from app.services.mail_transport import TransportError
@@ -63,8 +71,26 @@ class MailSender(ABC):
         """Hand `message` to the provider. Returns the provider's message id. Raises `SendError`."""
 
 
-#: A network failure after the request was written: SES may have accepted it.
-_MAYBE_SENT: tuple[type[Exception], ...] = (ReadTimeoutError, ConnectionClosedError)
+#: Network failures that happen BEFORE the request is written: no connection was ever made, so
+#: SES cannot have the email. Every other network failure is outcome-unknown.
+#:
+#: LISTED BY WHAT IS SAFE, NOT BY WHAT IS RISKY. botocore turns a read timeout, a dropped connection,
+#: an SSL error, and ANY OTHER exception during the request (a bare `HTTPClientError`) into its own
+#: types; a list of the risky ones missed that catch-all and called it a clean failure. A new or
+#: unlisted error now lands on "not confirmed", the side where a person checks before a resend.
+_NOT_SENT: tuple[type[Exception], ...] = (
+    EndpointConnectionError,
+    ConnectTimeoutError,
+    ProxyConnectionError,
+)
+
+
+def _outcome_unknown(exc: BotoCoreError) -> bool:
+    """True when the request may have reached SES. A non-network error (no credentials, a bad
+    parameter) is raised before anything is sent."""
+    if isinstance(exc, _NOT_SENT):
+        return False
+    return isinstance(exc, HTTPClientError | BotoConnectionError)
 
 
 class SesMailSender(MailSender):
@@ -109,24 +135,44 @@ class SesMailSender(MailSender):
             raise SendError(code) from exc
         except BotoCoreError as exc:
             code = type(exc).__name__
-            unknown = isinstance(exc, _MAYBE_SENT)
+            unknown = _outcome_unknown(exc)
             logger.warning("ses_send_failed", error_code=code, outcome_unknown=unknown)
             raise SendError(code, outcome_unknown=unknown) from exc
         return str(response["MessageId"])
 
 
 class SmtpMailSender(MailSender):
-    """MailHog in dev. Returns the message's own Message-ID, the only id SMTP gives back."""
+    """MailHog in dev. Returns the message's own Message-ID, the only id SMTP gives back.
+
+    `outcome_unknown` means what it means for SES. A failure to connect, or a reply refusing the
+    sender, a recipient or the data, is a clean failure. A timeout or a dropped connection once the
+    message is being handed over is not: the server may have taken it.
+    """
 
     def send(self, message: EmailMessage) -> str:
         try:
-            with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as smtp:
-                smtp.send_message(message)
+            smtp = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10)
         except (smtplib.SMTPException, OSError) as exc:
-            code = type(exc).__name__
-            logger.warning("smtp_send_failed", error_code=code)
-            raise SendError(code) from exc
+            self._fail(exc, outcome_unknown=False)
+        try:
+            smtp.send_message(message)
+        except (smtplib.SMTPResponseException, smtplib.SMTPRecipientsRefused) as exc:
+            self._fail(exc, outcome_unknown=False)
+        except (smtplib.SMTPException, OSError) as exc:
+            self._fail(exc, outcome_unknown=True)
+        finally:
+            # The message is handed over (or not) by now; a failed QUIT changes neither.
+            try:
+                smtp.quit()
+            except (smtplib.SMTPException, OSError):
+                smtp.close()
         return str(message["Message-ID"])
+
+    @staticmethod
+    def _fail(exc: Exception, *, outcome_unknown: bool) -> NoReturn:
+        code = type(exc).__name__
+        logger.warning("smtp_send_failed", error_code=code, outcome_unknown=outcome_unknown)
+        raise SendError(code, outcome_unknown=outcome_unknown) from exc
 
 
 def get_mail_sender() -> MailSender | None:

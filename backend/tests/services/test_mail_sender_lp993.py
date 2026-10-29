@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import smtplib
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -17,7 +18,17 @@ from app.services.mail_sender import (
 )
 from app.services.mail_transport import TransportError
 from app.services.outbound_mime import build_mime
-from botocore.exceptions import EndpointConnectionError, ReadTimeoutError
+from botocore.exceptions import (
+    BotoCoreError,
+    ConnectionClosedError,
+    ConnectTimeoutError,
+    EndpointConnectionError,
+    HTTPClientError,
+    NoCredentialsError,
+    ProxyConnectionError,
+    ReadTimeoutError,
+    SSLError,
+)
 from botocore.stub import Stubber
 
 
@@ -116,6 +127,34 @@ def test_a_lost_answer_is_outcome_unknown_and_a_failed_connect_is_not() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("error", "unknown"),
+    [
+        # The request may have been written: SES may have the email.
+        (ReadTimeoutError(endpoint_url="https://ses"), True),
+        (ConnectionClosedError(endpoint_url="https://ses"), True),
+        (SSLError(endpoint_url="https://ses", error="eof"), True),
+        # botocore's catch-all for any other exception mid-request: the case a list of the risky
+        # errors missed.
+        (HTTPClientError(error="boom"), True),
+        # No connection was ever made, or nothing was sent at all.
+        (EndpointConnectionError(endpoint_url="https://ses"), False),
+        (ConnectTimeoutError(endpoint_url="https://ses"), False),
+        (ProxyConnectionError(proxy_url="https://proxy"), False),
+        (NoCredentialsError(), False),
+    ],
+    ids=lambda v: type(v).__name__ if isinstance(v, BotoCoreError) else str(v),
+)
+def test_ses_network_failures_are_unknown_unless_nothing_was_sent(
+    error: BotoCoreError, unknown: bool
+) -> None:
+    sender = SesMailSender(client=MagicMock())
+    sender._client.send_email.side_effect = error
+    with pytest.raises(SendError) as caught:
+        sender.send(_message())
+    assert (caught.value.code, caught.value.outcome_unknown) == (type(error).__name__, unknown)
+
+
 def test_ses_refuses_without_a_configuration_set(monkeypatch: pytest.MonkeyPatch) -> None:
     client = MagicMock()
     monkeypatch.setattr(settings, "ses_configuration_set", None)
@@ -147,15 +186,53 @@ def test_smtp_sends_once_and_returns_the_message_id(monkeypatch: pytest.MonkeyPa
 
     assert SmtpMailSender().send(message) == message["Message-ID"]
     smtp.assert_called_once_with("mailhog", 1025, timeout=10)
-    smtp.return_value.__enter__.return_value.send_message.assert_called_once_with(message)
+    smtp.return_value.send_message.assert_called_once_with(message)
+    smtp.return_value.quit.assert_called_once_with()
 
 
-def test_an_smtp_failure_is_a_transport_error(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_smtp_connect_failure_is_a_clean_transport_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     smtp = MagicMock(side_effect=ConnectionRefusedError())
     monkeypatch.setattr(mail_sender.smtplib, "SMTP", smtp)
     with pytest.raises(SendError) as caught:
         SmtpMailSender().send(_message())
-    assert caught.value.code == "ConnectionRefusedError"
+    assert isinstance(caught.value, TransportError)
+    assert (caught.value.code, caught.value.outcome_unknown) == ("ConnectionRefusedError", False)
+
+
+@pytest.mark.parametrize(
+    ("error", "unknown"),
+    [
+        # The server answered with a refusal: it did not take the message.
+        (smtplib.SMTPRecipientsRefused({"b@x.test": (550, b"no")}), False),
+        (smtplib.SMTPDataError(554, b"rejected"), False),
+        (smtplib.SMTPSenderRefused(550, b"no", "lf@x.test"), False),
+        # The connection went quiet or away while the message was being handed over.
+        (TimeoutError(), True),
+        (smtplib.SMTPServerDisconnected(), True),
+        (ConnectionResetError(), True),
+    ],
+    ids=lambda v: type(v).__name__ if isinstance(v, Exception) else str(v),
+)
+def test_an_smtp_failure_mid_send_is_unknown_unless_refused(
+    error: Exception, unknown: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    smtp = MagicMock()
+    smtp.return_value.send_message.side_effect = error
+    monkeypatch.setattr(mail_sender.smtplib, "SMTP", smtp)
+    with pytest.raises(SendError) as caught:
+        SmtpMailSender().send(_message())
+    assert (caught.value.code, caught.value.outcome_unknown) == (type(error).__name__, unknown)
+
+
+def test_a_failed_smtp_quit_after_a_send_is_still_sent(monkeypatch: pytest.MonkeyPatch) -> None:
+    smtp = MagicMock()
+    smtp.return_value.quit.side_effect = smtplib.SMTPServerDisconnected()
+    monkeypatch.setattr(mail_sender.smtplib, "SMTP", smtp)
+    message = _message()
+    assert SmtpMailSender().send(message) == message["Message-ID"]
+    smtp.return_value.close.assert_called_once_with()
 
 
 @pytest.mark.parametrize(
@@ -199,6 +276,11 @@ def test_the_script_sends_only_to_the_simulator_through_ses(
     monkeypatch.setattr(send_test_email, "get_mail_sender", _Recording)
 
     assert send_test_email.main(["--to", "someone@gmail.com"]) == 1
+    assert sent == []
+    # A list ending in a simulator address passes the suffix check; build_mime refuses it as more
+    # than one address, so nothing is sent.
+    with pytest.raises(ValueError, match="not one email address"):
+        send_test_email.main(["--to", "someone@gmail.com, x@simulator.amazonses.com"])
     assert sent == []
     # The control: the simulator address goes through.
     assert send_test_email.main(["--to", "success@simulator.amazonses.com"]) == 0
