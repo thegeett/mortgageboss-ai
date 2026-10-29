@@ -45,6 +45,7 @@ services:
       # existing worker service uses.
       DATABASE_URL: postgresql+asyncpg://mortgageboss:mortgageboss_dev_password@postgres:5432/mortgageboss_dev  # pragma: allowlist secret
       REDIS_URL: redis://redis:6379/0
+      SMTP_HOST: mailhog  # LP-993 — MailHog on the shared network, not localhost
       # The browser loads the frontend from the host, so its origin is localhost:3102.
       CORS_ALLOWED_ORIGINS: '["http://localhost:3102"]'
     ports:
@@ -78,6 +79,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://mortgageboss:mortgageboss_dev_password@postgres:5432/mortgageboss_dev  # pragma: allowlist secret
       REDIS_URL: redis://redis:6379/0
+      SMTP_HOST: mailhog  # LP-993 — MailHog on the shared network, not localhost
     # NO storage bind mount — that is the point of this rehearsal. On Fargate the API
     # and worker have no shared filesystem, so with STORAGE_BACKEND=local the worker
     # cannot see the API's uploads and document PROCESSING fails at the storage read

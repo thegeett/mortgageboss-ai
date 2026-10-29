@@ -30,6 +30,13 @@ second implementation on this side would be two answers to one question, which i
 thing the backend reads the body's LENGTH for is the `mailto:` ceiling, and an HTML body is longer
 than the text it renders to, so that gate stays conservative rather than wrong.
 
+LP-993 — ONE BACKEND DERIVATION NOW EXISTS, for a different question. `services/outbound_mime.
+html_to_text` writes the text/plain part of a sent HTML email, which a text-only mail client shows
+instead of the HTML. It only has to be readable (it keeps link targets, which `mailto:` text does
+not need), never converts back, and is never what the processor sees or copies. It can differ from
+`from-html.ts` in small ways (bullet marks, spacing); the HTML part, which almost every client shows,
+is the message.
+
 `text_lines` IS NOT THAT FUNCTION, and the distinction is worth stating because it looks like it.
 It produces the lines of a body for a HUMAN TO READ IN A WARNING — LP-851 quotes a processor's own
 sentence back at them. It is never the message, never stored, never sent, and nothing round-trips

@@ -401,6 +401,14 @@ class Settings(BaseSettings):
     inbound_queue_url: str | None = None
     inbound_kms_key_arn: str | None = None
 
+    # LP-993 — which provider sends an approved email (`services/mail_sender.get_mail_sender`).
+    # "ses" in staging (set by LP-988), "smtp" for MailHog in dev, None = nothing transmits and the
+    # processor copies the message out herself. Read only by `get_mail_sender`.
+    mail_transport: Literal["ses", "smtp"] | None = None
+    # The SES configuration set every send names, so delivery, bounce and complaint events come back
+    # (LP-983, LP-995). The SES sender refuses to send without it.
+    ses_configuration_set: str | None = None
+
     # Email (SMTP)
     smtp_host: str = "localhost"
     smtp_port: int = 1025  # MailHog default
@@ -477,6 +485,8 @@ class Settings(BaseSettings):
         "s3_kms_key_id",
         "mail_bucket",
         "mail_kms_key_id",
+        "mail_transport",
+        "ses_configuration_set",
         mode="before",
     )
     @classmethod

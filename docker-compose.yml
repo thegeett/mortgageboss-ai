@@ -88,6 +88,9 @@ services:
       # reaches Postgres/Redis over the Compose network, not localhost).
       DATABASE_URL: postgresql+asyncpg://mortgageboss:mortgageboss_dev_password@postgres:5432/mortgageboss_dev  # pragma: allowlist secret
       REDIS_URL: redis://redis:6379/0
+      # LP-993 — MailHog by service name. backend/.env says localhost, which inside this container
+      # is the container itself, so a dev send would fail to connect.
+      SMTP_HOST: mailhog
     volumes:
       # SHARED STORAGE — the API runs on the HOST and writes uploaded files to
       # backend/storage (STORAGE_LOCAL_PATH=./storage). The worker runs here in the
