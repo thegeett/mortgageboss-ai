@@ -2,7 +2,7 @@
 
 Everything about email in MortgageBoss lives here. Add new sections at the bottom; keep the decisions table current.
 
-Started 2026-10-17. Last updated 2026-10-21.
+Started 2026-10-17. Last updated 2026-10-26.
 
 ---
 
@@ -35,7 +35,7 @@ Each loan file gets its own email address on the customer's domain. MortgageBoss
 
 | Topic | Decision | Date |
 |---|---|---|
-| Address format | `lf-<display_id lowercase>@<tenant subdomain>`, e.g. `lf-y36e@mb-mail.abcmortgage.com`. Replaces the 128-bit `inbox_token` address. `get_inbox_address()`, the resolver and its `lower()` index move to `display_id`; ADR-397 amended. Old token addresses keep resolving for existing files during a grace period. The authenticated-sender gate, not address secrecy, is the defence | 10-19 |
+| Address format | `lf-<display_id lowercase>@<tenant subdomain>`, e.g. `lf-y36e@mb-mail.abcmortgage.com`. Replaces the 128-bit `inbox_token` address. `get_inbox_address()`, the resolver and its `lower()` index move to `display_id`; ADR-397 amended. ~~Old token addresses keep resolving for existing files during a grace period.~~ *(Changed 10-26: no grace period — token addresses never received mail. Address built by `file_address()` since LP-991; resolver moves in step 4.)* The authenticated-sender gate, not address secrecy, is the defence | 10-19 |
 | No active subdomain | No file address at all. Drafts only (copy into own mail client). No inbound | 10-19 |
 | SES region | us-east-1 — staging and dev are both there and it supports receiving. Nothing cross-region | 10-19 |
 | Pilot environment | No production account yet. **Staging is the pilot environment.** Its data is treated as production: backups on, no destroy/reset, access limited, test tenants separate from the pilot company. Moving to a production account later recreates tenant zones with new nameservers, so each customer updates their NS record once; nameservers are stored per tenant to make that a scripted list | 10-19 |
@@ -75,6 +75,14 @@ Each loan file gets its own email address on the customer's domain. MortgageBoss
 | Secure upload link | In every document request; attachments remain the fallback | 10-17 |
 | Sequencing | AWS resources first, then business logic | 10-17 |
 | Ticket numbering | Continues the existing series: LP-981 onward | 10-19 |
+| Step 2 sender | Only a **test company** sends from `mail.staging.mortgageboss.ai`. Every other company, the pilot included, stays on copy-and-send until its own domain is active (step 3) and replies are visible (step 4). Reason: a real borrower's reply would sit unread until step 4, an unknown domain looks like phishing, and the address would change in step 3 | 10-26 |
+| Who is CC'd | The processor who clicks Send (the approver) | 10-26 |
+| Scheduler | Celery beat runs **inside the worker** (`-B`). Safe only while the worker runs one task; moves to its own service if that changes. Nothing ran on a schedule before step 2 | 10-26 |
+| Old token addresses | **No grace period.** The `imbox` domains never received mail, so no borrower has a working token address | 10-26 |
+| Inbound resolver on `display_id` | Moved to **step 4**, where inbound is first read and it can be tested | 10-26 |
+| Automatic replies to inbound (LP-815 `QUEUED` rows) | **Not sent in step 2.** The worker sends only emails a person approved and handed to it; it never sweeps `QUEUED` rows. Revisit in step 4 | 10-26 |
+| Complaint status | **No new status.** A complaint blocks the address and is logged on the file; the email stays `delivered`. A bounce uses the existing `failed`. FR-19 adjusted | 10-26 |
+| "I've sent it" vs Send | Two different actions. "I've sent it" (processor sent from her own mail app) only records; it never transmits. Send transmits. `send_draft` takes an explicit `transmit` flag, default false | 10-26 |
 | Not in v1 | Reading the processor's inbox (OAuth), automatic AI replies, automatic DNS tools (Entri / Domain Connect), lender portal integration, SES tenant management (revisit at ~10 tenants) | 10-17 |
 
 ## 4. Environments and addresses
@@ -145,7 +153,8 @@ An emailed attachment therefore exists twice: inside the raw email (evidence of 
 | LP-981 — inbound module → shared plumbing, `mbai-staging-mail` | ✅ **Done** 2026-10-20 (code) on `infra/lp-981-mail-bucket`; applied 2026-10-21 in LP-989. Ticket file `docs/tickets/LP-981.md` |
 | Step 1 — LP-982–989 | ✅ **Done** 2026-10-21. Receiving activated in staging (rule set `mbai-inbound`, 2026-10-21 00:20 ET). One real email proven end to end, except scan-result events (→ LP-990). Details in §15 and `docs/tickets/LP-98*.md` |
 | LP-990 — scan-result delivery fix | ✅ **Done** 2026-10-21. Scan results now reach their queue; failures go to the DLQ and alarm |
-| Steps 2–6 | Not started |
+| Step 2 — Send | Groomed 2026-10-26 into LP-991–998 (§15a). Not started |
+| Steps 3–6 | Not started |
 
 **Until LP-989 and step 2 are done:** the staging account can deliver real mail to anyone (production access is account-wide). Send test mail only to own inboxes or `success@ / bounce@ / complaint@simulator.amazonses.com`. No real borrower addresses.
 
@@ -232,7 +241,7 @@ Found while grooming step 1 (2026-10-20): the receipt rule set `kms_key_arn` on 
 - ✅ Let EventBridge deliver scan results to the encrypted queue; dead-letter and alarm on failure — LP-990.
 
 **2. Send**
-- `SesTransport(MailTransport)` (`sesv2 send_email`, config set), registered for `TOKEN_ADDRESS`; `SmtpTransport` for dev.
+- `SesTransport(MailTransport)` (`sesv2 send_email`, config set), registered for `TOKEN_ADDRESS`; `SmtpTransport` for dev. *(Changed 10-26: chosen by the company's active mail domain, not by a mailbox connection — LP-991, LP-993.)*
 - `send_draft` queues a Celery task; the worker sends. Outbox `queued → sending → sent`; MessageId persisted on return; stuck `sending` never blind-retried.
 - Worker writes the exact MIME to `outbound/<communication_id>.eml` before calling SES; path stored on `Communication`.
 - Pre-send content check next to the suppression check.
@@ -240,9 +249,11 @@ Found while grooming step 1 (2026-10-20): the receipt rule set `kms_key_arn` on 
 - Events consumer updating `Communication.status`; bounces on the thread.
 - Suppressed addresses are never silent. A send to an address on SES's account suppression list is **accepted by the API** (MessageId returned) and only reported afterwards as a Bounce event with `bounceSubType = OnAccountSuppressionList`. The events consumer marks that email "Not delivered: this address bounced or complained before" on the thread, so the processor can ask for another address.
 - Our own suppression table is fed from Bounce (permanent) and Complaint events, and the existing suppression check in `send_draft` refuses those addresses **before** calling SES, with the same clear message. SES's account list stays as the backstop.
-- `get_inbox_address()` → `lf-<display_id>@<tenant active domain>` or none; resolver and index on `display_id`; grace period for token addresses; ADR-397 amendment; remove `PRODUCTION_INBOX_DOMAIN` guard and `inbox_domain` setting.
+- `get_inbox_address()` → `lf-<display_id>@<tenant active domain>` or none; resolver and index on `display_id`; grace period for token addresses; ADR-397 amendment; remove `PRODUCTION_INBOX_DOMAIN` guard and `inbox_domain` setting. *(Changed 10-26: no grace period — token addresses never worked; resolver moves to step 4 — LP-991.)*
 - Frontend: Send primary; "Copy & open" only without an active domain.
 - Test: Send → simulator recipient → delivered event lands; `.eml` present in `outbound/`; kill worker between SES return and commit → no duplicate.
+- *(Added 10-26, found in grooming)* Worker scheduler (nothing periodic runs today); `MAIL_BUCKET` rename and a mail-bucket helper; "I've sent it" must never transmit; auto-reply `QUEUED` rows must never be swept — LP-992, LP-994.
+- Tickets: LP-991–998 (§15a).
 
 **3. Tenant domain**
 - Route 53 VPC endpoint: network module passes through entries starting with `com.amazonaws.` unchanged; add `"com.amazonaws.route53"` to `interface_endpoint_services` (~$7.30/month).
@@ -330,7 +341,7 @@ Every AI draft, sent or edited, is logged with its edit diff — the evidence fo
 - FR-16 Every outbound: From file address with processor display name, Reply-To file address, CC processor.
 - FR-17 Every document request includes a signed, scoped, 14-day upload link.
 - FR-18 Deterministic content check on every outbound; blocked sends show the reason; override needs a note and is logged.
-- FR-19 Outbound status `queued → sending → sent → delivered / bounced / complained`; bounces shown on thread and file.
+- FR-19 Outbound status `queued → sending → sent → delivered / failed`; bounces shown on thread and file; a complaint blocks the address and is logged on the file (no separate status, decided 10-26).
 - FR-20 Every outbound records template id + version, policy version, recipient authorization, delivery status.
 - FR-21 Requirement states `requested → received → validating → satisfied | rejected`; reminders key off state.
 - FR-22 `requested_at` recorded on send.
@@ -523,12 +534,117 @@ Everything after this is app code. AWS risks (permissions, encryption, network r
 - Email-sourced documents: S3 metadata + source label (FR-31).
 - Hide `FORWARDED_ALIAS` connection UI; mark Route B docs/ADRs superseded by this doc.
 
+## 15a. Step 2 tickets — Send
+
+Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each ticket writes `docs/tickets/LP-xxx.md` in plain words. Only the test company sends (§3).
+
+### Outcome of step 2
+
+**In one line:** a processor on the test company clicks **Send**, the borrower (your own Gmail) receives the email from `lf-…@mail.staging.mortgageboss.ai` with the processor CC'd, and the thread shows delivered or bounced. **First demo.**
+
+**Not yet:** replies show on the file and get forwarded (step 4); customer domains (step 3); reminders (step 5). Every other company stays on copy-and-send.
+
+### Found while grooming (2026-10-26)
+
+**Already built:** bounce parsing, address suppression and unwinding the reminder clock on a hard bounce (`services/bounce_handling.py`, nothing feeds it yet); suppression check, 3-per-day rate limit, approver and evidence record in `send_draft`; columns for the email's own id and the id it replies to; no attachments, links only.
+
+**Gaps:**
+1. **Nothing runs on a schedule.** No Celery beat anywhere (worker, infra, compose).
+2. **Double-send risk.** "I've sent it" (`_mark_sent`) calls the same `send_draft` that transmits. With SES on, it would send the email a second time.
+3. **Auto-reply risk.** LP-815 stores automatic replies as `QUEUED`, "for a transport to pick up". A worker that sent everything queued would send them unapproved.
+4. **Transport is chosen by mailbox connection,** but SES sending depends on the company's mail domain, which doesn't exist until step 3.
+5. **No `sending` status** and no column for the `.eml` path.
+6. **No pre-send content check** anywhere (rule 5).
+7. `MAIL_TRANSPORT`, `EVENTS_QUEUE_URL`, `SES_CONFIGURATION_SET` are set on the tasks but not read.
+
+### LP-991 — Company mail domain and file address — ✅ Done
+- New table `company_mail_domain`: `company_id` (unique), `domain` (unique, lowercase), `status` (`active` / `inactive`). Step 3 adds onboarding columns (zone, nameservers, identity) and states to the same table.
+- Script `set_company_mail_domain <company> <domain>` links one company to a domain; dev seed links the dev company to `mb-mail.localhost`. Staging's test company is linked when step 2 is deployed (LP-998); LP-991 is code, migration, tests and dev only.
+- One async function gives a file's address: `lf-<display_id lowercase>@<company's active domain>` (display_id already starts with `LF-` and is globally unique), or **None** when the company has no active domain. It replaces `LoanFile.get_inbox_address()` at every caller: `build_outbound`, the draft templates, the timeline API, dev seed.
+- No address → nothing shown: no Reply-To, no suggested BCC, and templates drop the "or send them to …" phrase (new template versions; old versions untouched). Today those templates tell borrowers to email a token address that has never received mail; this stops that.
+- Remove the `PRODUCTION_INBOX_DOMAIN` guard from the address code (the domain now comes from the company's own row).
+- ADR-397 amendment: address on `display_id`; the authenticated-sender gate, not address secrecy, is the defence. No grace period for token addresses.
+- **Moved to step 4 (found while writing the prompt, 10-26):** removing the `inbox_domain` setting and `INBOX_DOMAIN` env. The inbound resolver (`inbound_routing.py`) and Route B (`mailbox_connections.py`) still read it, and both are rewritten or removed with step 4's resolver. So LP-991 needs no infra apply.
+- **Done when:** in dev, a file of the linked company shows `lf-xxxx@mb-mail.localhost`; a file of an unlinked company shows no address anywhere (draft, timeline, templates); tests cover both.
+- **Result:** table `company_mail_domains` (migration `6e1f6b5aa190`, readonly view for staging queries); `services/mail_domain.py` (`file_address`, `active_mail_domain`, `set_company_mail_domain`); `get_inbox_address()` and its guard deleted. Templates: `initial_documentation_request` v5, `reminder_follow_up` v3, `condition_response_request` v3 — the address phrase renders whole or not at all; old versions unchanged. Frontend hides the address line and the "forward the lender's email" card when there is no address; mailto has no `bcc=null`. Dev: Summit → `lf-hwkm@mb-mail.localhost`; a company with no domain shows none. Tests: backend 9344 passed, frontend 2399 passed, lint and types clean. Open: unsent **HTML** drafts made from v1–v4 are not re-rendered and may still contain an `imbox…` address — counted and fixed in LP-998. Staging test company not yet known — found or created in LP-998. Details: `docs/tickets/LP-991.md`.
+
+### LP-992 — Worker scheduler and mail bucket
+- Worker command gets embedded Celery beat (`-B --schedule /tmp/celerybeat-schedule`). Comment and README: the worker must stay at one task while beat runs inside it.
+- `beat_schedule` in `celery_app.py`, empty except a heartbeat log task every 5 minutes so the scheduler is visibly alive.
+- Rename setting `inbound_bucket` → `mail_bucket` and env `INBOUND_BUCKET` → `MAIL_BUCKET` together (nothing reads the old one).
+- `services/mail_store.py`: `put_raw(key, bytes)` and `get_raw(key)` against the mail bucket (local folder in dev). Step 2 writes `outbound/`; step 4 reuses `get_raw` for the mail-bucket reader bug.
+- **Done when:** after deploy, the worker log shows the heartbeat every 5 minutes; `mail_store` round-trips a test object in dev.
+
+### LP-993 — Build and send the email
+- `build_mime(...)` makes the real email with Python's `email` library:
+  - From `"<approver name>, <company name>" <lf-…@domain>`; To the recipient; **Cc the approver**; Reply-To the file address.
+  - `In-Reply-To` and `References` when replying in a thread.
+  - HTML bodies as multipart/alternative with a plain-text part; plain bodies as text. Footer tag already in the body.
+  - No attachments (unchanged rule).
+- Transport interface takes the finished MIME: `send_raw(mime_bytes, sender, recipients) -> SentResult`.
+- `SesTransport`: `sesv2.send_email(Content.Raw, ConfigurationSetName)`, returns SES's MessageId. `SmtpTransport` to MailHog for dev. Chosen by `MAIL_TRANSPORT` (now read).
+- Unit tests only; nothing wired to the Send button yet.
+- **Done when:** tests cover headers, CC, threading, HTML/text; a dev script sends one email to MailHog.
+
+### LP-994 — Sending runs in the worker
+- `send_draft(..., transmit=False)`. Default false = today's record-only behaviour ("I've sent it" and every existing caller). `transmit=True` is allowed only when the company has an active mail domain; otherwise refused with a clear message.
+- With `transmit=True`: all guards run, status → `queued`, commit, then enqueue `send_communication(id)` **after** the commit.
+- New status `sending` and new column `raw_storage_path` (migration).
+- Worker task `send_communication(id)`:
+  - Locks the row. Acts only if it is `queued` **and** has an approver/evidence row; never sweeps `QUEUED` rows, so LP-815 auto-replies are never sent.
+  - Writes `sending`, commits.
+  - Builds the MIME (LP-993), saves it to `outbound/<communication_id>.eml`, stores the path.
+  - Calls the transport; stores SES's MessageId in `external_message_id`; status `sent`; commits.
+  - Transport error → `failed`, `error_detail`, and the needs it asked for go back to pending (reuse `_unwind_requests`).
+  - If it finds the row already `sending` (a crash or redelivery): **does not send again**; logs it and leaves it for a person.
+- Rows in `sending` for more than 15 minutes show "Sending not confirmed — check before resending" (LP-997).
+- **Done when:** a test-company Send ends `sent` with an `.eml` in `outbound/`; "I've sent it" never transmits; killing the worker between SES returning and the commit leaves one email, not two.
+
+### LP-995 — Delivery events
+- Beat task every minute reads the events queue (`EVENTS_QUEUE_URL`, now read), up to 10 messages, deletes each one after it is handled.
+- Event types the config set publishes: `Delivery`, `Bounce`, `Complaint`, `Reject`, `RenderingFailure`.
+  - `Delivery` for the To recipient → `delivered`.
+  - `Bounce` → existing `parse_ses_bounce` + `record_delivery_failure`. `bounceSubType = OnAccountSuppressionList` → message on the thread: "Not delivered: this address bounced or complained before."
+  - `Complaint` → suppress the address (`COMPLAINT`), log on the file; status stays `delivered`.
+  - `Reject`, `RenderingFailure` → `failed`.
+  - Events about the CC'd processor never change the email's status.
+  - Unknown MessageId → logged and deleted. A message that can't be parsed is left to fail into the DLQ (3 tries, alarmed).
+- Fix the suppression message in `send_draft` so it covers complaints, not only bounces.
+- **Done when:** simulator `success@`, `bounce@`, `complaint@` and a suppressed address each show the right status or message on the thread.
+
+### LP-996 — Pre-send content check
+- Deterministic, in `send_draft`, for `transmit=True` sends: blocks interest rates and APRs, approval/denial wording ("approved", "denied", "clear to close"), and account or routing numbers (long digit runs, 9-digit routing numbers).
+- Blocked → clear reason shown. Override needs a note; the note goes on the evidence record and the activity log.
+- Every existing template is run through it in a test: none may be blocked.
+- **Done when:** each blocked category has a test; all templates pass; an override is logged with its note.
+
+### LP-997 — Send button
+- Message dialog and condition-draft dialog:
+  - Company has an active domain → **Send** is the main button, with "From lf-…@… · CC you". Copy and "I've sent it" hidden.
+  - No domain → unchanged (copy, open in mail app, "I've sent it").
+- Status on the thread: queued, sending, sent, delivered, failed (with the reason), and "Sending not confirmed" after 15 minutes.
+- Content-check block shown with its reason and an override-with-note option.
+- **Done when:** both dialogs show the right buttons for test and pilot companies; each status renders.
+
+### LP-998 — Prove step 2
+- Deploy to staging. Test company only; recipients are your own Gmail and SES simulator addresses.
+- Find the staging test company (`./scripts/deploy staging query … readonly.companies`), or create one with `./scripts/deploy staging add-company`; never the pilot company. Link it with the one-off command in `docs/tickets/LP-991.md`, then confirm in `readonly.company_mail_domains`.
+- Count unsent HTML drafts made from template v1–v4 (query in `LP-991.md`); any found are re-rendered or deleted so no draft points at an `imbox…` address.
+- Send to your Gmail: check From, To, CC, Reply-To in "Show original"; DKIM, SPF and DMARC pass; the `.eml` in `outbound/` matches.
+- Record SES's real `Message-ID` header format (SES replaces ours). Step 4 needs it to match replies.
+- Reply from Gmail: the reply lands in the inbound queue for `lf-…@mail.staging…` (shown on the file only in step 4); purge it after.
+- Simulator bounce, complaint and a suppressed address: right status or message on the thread.
+- Content check blocks a rate; override works and is logged.
+- Kill the worker mid-send: no duplicate.
+- Alarms all OK, DLQs empty.
+- **Done when:** every check passes. **First demo.**
+
 ## 16. Diagrams
 
 - **Loan Email Architecture** — three straight flows (in, out, domain setup); for customer conversations.
 - **Loan Email AWS Detail** — every AWS resource, VPC, numbered flows, resource change table; for implementation.
 
-PNG exports sent in chat 2026-10-19. Both still show the dropped platform inbox, the old bucket name and alarm thresholds of 5% / 0.1%; regenerate after step 1.
+Regenerated 2026-10-26 after step 1: plain boxes are live in staging, tinted boxes are still to build. PNGs committed in the repo at `docs/email-communication/loan-email-architecture.png` and `loan-email-aws-detail.png`. Regenerate after each step.
 
 ## 17. After v1, in order
 
@@ -536,6 +652,9 @@ Legal hold + retention schedule → AI reply tier 2 → M365 mailbox connector (
 
 ## 18. Log
 
+- 2026-10-26 — LP-991 ✅: file address `lf-<display_id>@<company domain>` or none; `company_mail_domains` table; new template versions. §3 address row updated (no grace period). LP-998 gained: find or create the staging test company; clean up old HTML drafts.
+- 2026-10-26 — LP-991 refined: `inbox_domain` / `INBOX_DOMAIN` removal moved to step 4 (inbound resolver and Route B still read it); staging test company linked at LP-998 deploy; templates drop the address phrase when there is none (they currently point borrowers at a token address that never received mail).
+- 2026-10-26 — Step 2 groomed into LP-991–998 (§15a). Decisions: test company only on `mail.staging.mortgageboss.ai`; CC the approver; Celery beat inside the worker; no grace period for token addresses; inbound resolver moved to step 4; auto-replies not sent in step 2; no complaint status (FR-19 adjusted); "I've sent it" never transmits. Found: no scheduler, double-send and auto-reply risks, no content check. Diagrams regenerated and committed as PNG.
 - 2026-10-21 — LP-990 ✅: EventBridge key grant, DLQ on the scan rule, `scan-results-rule-failed` alarm. Scan results now reach their queue. All AWS work for step 1 closed.
 - 2026-10-21 — Step 1 done. LP-982–989 ✅. Receiving activated in staging; one real email proven end to end. Gap found: EventBridge can't write scan results to the encrypted queue (no key grant) → LP-990. Retention corrected to match the infra: Glacier IR after 90 days, no expiry, until legal hold exists. Pilot question 7 added (TLS-required receiving).
 - 2026-10-20 — LP-988 scoped: existing setting names kept (`INBOUND_BUCKET`), step-2 values set early, `DOMAIN_PROVIDER` deferred to step 3, `INBOUND_KMS_KEY_ARN` not set. Poller stays unscheduled until step 4.
