@@ -568,12 +568,13 @@ Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each tick
 - **Done when:** in dev, a file of the linked company shows `lf-xxxx@mb-mail.localhost`; a file of an unlinked company shows no address anywhere (draft, timeline, templates); tests cover both.
 - **Result:** table `company_mail_domains` (migration `6e1f6b5aa190`, readonly view for staging queries); `services/mail_domain.py` (`file_address`, `active_mail_domain`, `set_company_mail_domain`); `get_inbox_address()` and its guard deleted. Templates: `initial_documentation_request` v5, `reminder_follow_up` v3, `condition_response_request` v3 — the address phrase renders whole or not at all; old versions unchanged. Frontend hides the address line and the "forward the lender's email" card when there is no address; mailto has no `bcc=null`. Dev: Summit → `lf-hwkm@mb-mail.localhost`; a company with no domain shows none. Tests: backend 9344 passed, frontend 2399 passed, lint and types clean. Open: unsent **HTML** drafts made from v1–v4 are not re-rendered and may still contain an `imbox…` address — counted and fixed in LP-998. Staging test company not yet known — found or created in LP-998. Details: `docs/tickets/LP-991.md`.
 
-### LP-992 — Worker scheduler and mail bucket
+### LP-992 — Worker scheduler and mail bucket — ✅ Done (second apply `lp992b` pending)
 - Worker command gets embedded Celery beat (`-B --schedule /tmp/celerybeat-schedule`). Comment and README: the worker must stay at one task while beat runs inside it.
 - `beat_schedule` in `celery_app.py`, empty except a heartbeat log task every 5 minutes so the scheduler is visibly alive.
 - Rename setting `inbound_bucket` → `mail_bucket` and env `INBOUND_BUCKET` → `MAIL_BUCKET` together (nothing reads the old one).
 - `services/mail_store.py`: `put_raw(key, bytes)` and `get_raw(key)` against the mail bucket (local folder in dev). Step 2 writes `outbound/`; step 4 reuses `get_raw` for the mail-bucket reader bug.
-- **Done when:** after deploy, the worker log shows the heartbeat every 5 minutes; `mail_store` round-trips a test object in dev.
+- **Done when:** in dev (docker compose) the worker log shows the heartbeat every 5 minutes and the mail store round-trips a test object; staging task definitions carry `-B` and `MAIL_BUCKET` (Terraform applied). The staging heartbeat is checked in LP-998, once the new code is deployed.
+- **Result:** beat runs inside the worker (`-B --schedule=/tmp/celerybeat-schedule`) in ECS, both compose files and the image CMD; `health.heartbeat` every 5 minutes, dropped if late (`expires: 300`); dev log shows it every 5 minutes. **One-worker rule enforced:** validation in the compute module (0 or 1), the same check in `scripts/deploy`, and the worker service stops the old task before starting the new one on deploy (max 100%, min healthy 0%) so two schedulers never overlap. Only a hand-run `update-service` can break the rule. Mail storage is `get_mail_storage()` next to `get_storage_backend()` (not a separate `mail_store.py`), S3 on `MAIL_BUCKET` with its own key `MAIL_KMS_KEY_ID` taken from the bucket's encryption rule (leaving the key out would have stored mail as SSE-S3); local folder `storage/mail` in dev. Worker may write `outbound/` and read `inbound/` only (LP-986), which is all LP-994 needs. Tests 9359 passed. Applied: api/worker/migrate `:107` with `MAIL_BUCKET` and `-B`. **Pending:** `lp992b.tfplan` adds `MAIL_KMS_KEY_ID` and the worker deployment percentages. Details: `docs/tickets/LP-992.md`.
 
 ### LP-993 — Build and send the email
 - `build_mime(...)` makes the real email with Python's `email` library:
@@ -629,6 +630,7 @@ Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each tick
 ### LP-998 — Prove step 2
 - Deploy to staging. Test company only; recipients are your own Gmail and SES simulator addresses.
 - Find the staging test company (`./scripts/deploy staging query … readonly.companies`), or create one with `./scripts/deploy staging add-company`; never the pilot company. Link it with the one-off command in `docs/tickets/LP-991.md`, then confirm in `readonly.company_mail_domains`.
+- Worker log in staging shows the beat heartbeat every 5 minutes (LP-992).
 - Count unsent HTML drafts made from template v1–v4 (query in `LP-991.md`); any found are re-rendered or deleted so no draft points at an `imbox…` address.
 - Send to your Gmail: check From, To, CC, Reply-To in "Show original"; DKIM, SPF and DMARC pass; the `.eml` in `outbound/` matches.
 - Record SES's real `Message-ID` header format (SES replaces ours). Step 4 needs it to match replies.
@@ -652,6 +654,7 @@ Legal hold + retention schedule → AI reply tier 2 → M365 mailbox connector (
 
 ## 18. Log
 
+- 2026-10-28 — LP-992 ✅ (code; first apply done, `lp992b` pending): Celery beat inside the worker, one-worker rule enforced in Terraform, deploy script and ECS deployment settings; `get_mail_storage()` with its own `MAIL_KMS_KEY_ID`; `INBOUND_BUCKET` → `MAIL_BUCKET`.
 - 2026-10-26 — LP-991 ✅: file address `lf-<display_id>@<company domain>` or none; `company_mail_domains` table; new template versions. §3 address row updated (no grace period). LP-998 gained: find or create the staging test company; clean up old HTML drafts.
 - 2026-10-26 — LP-991 refined: `inbox_domain` / `INBOX_DOMAIN` removal moved to step 4 (inbound resolver and Route B still read it); staging test company linked at LP-998 deploy; templates drop the address phrase when there is none (they currently point borrowers at a token address that never received mail).
 - 2026-10-26 — Step 2 groomed into LP-991–998 (§15a). Decisions: test company only on `mail.staging.mortgageboss.ai`; CC the approver; Celery beat inside the worker; no grace period for token addresses; inbound resolver moved to step 4; auto-replies not sent in step 2; no complaint status (FR-19 adjusted); "I've sent it" never transmits. Found: no scheduler, double-send and auto-reply risks, no content check. Diagrams regenerated and committed as PNG.
