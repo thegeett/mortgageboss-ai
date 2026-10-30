@@ -247,25 +247,6 @@ def regulatory_grounds(text: str) -> set[str]:
     return found
 
 
-#: LP-996 — the grounds the pre-send check applies to an email a PERSON is sending (rule 5).
-#:
-#: THREE OF THE EIGHT, AND THE SAME COMPILED PATTERNS, not copies: a second list is the thing that
-#: drifts (see `regulatory_refusal`). The other five stay drafter-only. `money_amount`,
-#: `triggering_term`, `settlement_service`, `invented_instruction` and `identifier` exist to stop the
-#: MODEL inventing content; on a processor's own words or a catalog document list they refuse ordinary
-#: text — "the $10,000 deposit", "down payment", "all pages", the `[LF-XXXX]` footer.
-_SEND_CHECK_GROUNDS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("rate", _RATE),
-    ("commitment", _COMMITMENT),
-    ("payment_routing", _ROUTING),
-)
-
-
-def send_check_grounds(text: str) -> set[str]:
-    """The LP-996 grounds this plain text trips: a subset of `rate`, `commitment`, `payment_routing`."""
-    return {name for name, pattern in _SEND_CHECK_GROUNDS if pattern.search(text)}
-
-
 def regulatory_refusal(text: str) -> str | None:
     """Why this text must not reach a borrower, on the grounds that do not depend on the facts.
 
@@ -422,5 +403,4 @@ __all__ = [
     "DraftFacts",
     "compose",
     "rejection_reason",
-    "send_check_grounds",
 ]

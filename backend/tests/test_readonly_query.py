@@ -496,19 +496,8 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # a borrower's mail in the analytics path. What IS exposed answers "how much was sent, under
     # which template, with what firing, and was it edited" — the last as a boolean derived in the
     # view, so "was it edited" is answerable without either body.
-    # LP-996 adds `content_check_override_note`: a processor's own words about why one email went
-    # out anyway, free text like the bodies beside it. `content_check_grounds` is exposed: a fixed
-    # vocabulary (`rate`, `commitment`, `payment_routing`) that names nobody.
     "communication_evidence": frozenset(
-        {
-            "sender",
-            "recipient",
-            "subject",
-            "body_as_sent",
-            "body_composed",
-            "attachment_manifest",
-            "content_check_override_note",
-        }
+        {"sender", "recipient", "subject", "body_as_sent", "body_composed", "attachment_manifest"}
     ),
     # LP-818 adds `in_reply_to_message_id`: a sender-written `Message-ID`, which identifies one
     # message from one person. `external_message_id` beside it is already exposed for dedup
@@ -592,8 +581,6 @@ EXCLUDED: dict[str, frozenset[str]] = {
 #: assertion over the whole migration text rather than per table.
 NEVER_EXPOSED: tuple[tuple[str, str], ...] = (
     ("documents", "full_text"),
-    # LP-996 — free text a processor typed; it can name the borrower, which the scrub cannot match.
-    ("communication_evidence", "content_check_override_note"),
     # LP-636. Listing it in EXCLUDED only RECORDS the decision: a later migration that adds
     # it to a view would pass both drift tests and silently turn that entry into a stale
     # comment. This asserts absence from every view, so the decision cannot be undone

@@ -33,7 +33,6 @@ from app.schemas.communication import (
     SendDraftRequest,
     SentCommunicationPublic,
 )
-from app.services.content_check import OVERRIDE_NOTE_MIN_CHARS, reason_items
 from app.services.email_draft import (
     DraftDecisionRequired,
     DraftIsAuthored,
@@ -56,12 +55,7 @@ from app.services.email_reply import (
     reply_context,
     set_important,
 )
-from app.services.email_send import (
-    CannotSendError,
-    ContentCheckError,
-    build_outbound,
-    send_draft,
-)
+from app.services.email_send import CannotSendError, build_outbound, send_draft
 from app.services.mail_domain import file_address
 from app.services.message_detail import message_detail
 
@@ -357,23 +351,7 @@ async def send_draft_endpoint(
             subject=payload.subject,
             approver_user_id=current_user.id,
             transmit=payload.transmit,
-            override_note=payload.override_note,
         )
-    except ContentCheckError as exc:
-        # LP-996 — structured, so LP-997 can list the reasons and offer the note box. A dict detail
-        # travels as the envelope's `error.data` (`core/errors.http_exception_handler`).
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            detail={
-                "code": "content_check",
-                "message": exc.message,
-                "reasons": reason_items(exc.grounds),
-                "override_allowed": True,
-                # True when a note was given but is under the minimum; False when there was none.
-                "note_too_short": exc.note_too_short,
-                "min_note_length": OVERRIDE_NOTE_MIN_CHARS,
-            },
-        ) from exc
     except CannotSendError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     needs = await _needs_in_draft(db, draft=sent)

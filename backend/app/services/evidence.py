@@ -111,8 +111,6 @@ async def record_sent(
     guardrail_fired: str | None = None,
     model_id: str | None = None,
     prompt_version: str | None = None,
-    content_check_grounds: list[str] | None = None,
-    content_check_override_note: str | None = None,
 ) -> CommunicationEvidence:
     """Record that a message went out, as it went out. ``flush`` only; the caller commits.
 
@@ -138,8 +136,6 @@ async def record_sent(
         guardrail_fired=guardrail_fired,
         model_id=model_id,
         prompt_version=prompt_version,
-        content_check_grounds=",".join(content_check_grounds) if content_check_grounds else None,
-        content_check_override_note=content_check_override_note,
         auth_verdicts={},
     )
     db.add(row)

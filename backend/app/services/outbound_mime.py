@@ -174,9 +174,8 @@ class _PlainText(HTMLParser):
     _BLOCK = frozenset({"p", "div", "tr", "h1", "h2", "h3", "h4", "h5", "h6"})
     _DROP = frozenset({"script", "style", "head", "title", "textarea", "noscript"})
 
-    def __init__(self, *, keep_link_targets: bool = True) -> None:
+    def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
-        self.keep_link_targets = keep_link_targets
         self.out: list[str] = []
         self.muted = 0
         self.breaks = 0  # line breaks owed before the next word
@@ -264,7 +263,7 @@ class _PlainText(HTMLParser):
             # whose text already IS its target (a URL, or the address of a `mailto:`) says it once.
             text = "".join(self.link_text).strip()
             href = self.href
-            if self.keep_link_targets and href and text not in (href, href.removeprefix("mailto:")):
+            if href and text not in (href, href.removeprefix("mailto:")):
                 self._text(f" ({href})")
             self.href = None
 
@@ -286,17 +285,14 @@ class _PlainText(HTMLParser):
             self.link_text.append(data)
 
 
-def html_to_text(html: str, *, keep_link_targets: bool = True) -> str:
+def html_to_text(html: str) -> str:
     """Readable plain text for the text/plain part of an HTML email.
 
     A FALLBACK FOR TEXT-ONLY READERS, not the message: almost every client shows the HTML part. It is
     not the plain text `mailto:` uses (`frontend/lib/markdown/from-html.ts`, which must round-trip
     back into the editor); this one only needs to be readable. See `communications/sanitise.py`.
-
-    LP-996 — `keep_link_targets=False` leaves out the `(href)` a hidden link target would add: the
-    content check reads what the borrower reads, and that is the link's text, not its address.
     """
-    parser = _PlainText(keep_link_targets=keep_link_targets)
+    parser = _PlainText()
     parser.feed(html)
     parser.close()
     lines = [line.rstrip() for line in "".join(parser.out).split("\n")]
