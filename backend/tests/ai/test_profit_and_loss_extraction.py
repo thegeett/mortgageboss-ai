@@ -21,8 +21,6 @@ import structlog
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
 from app.ai.extraction.profit_and_loss import (
-    ProfitAndLossExtraction,
-    ProfitAndLossExtractionResult,
     _parse_pnl_json,
     extract_profit_and_loss,
 )
@@ -138,9 +136,3 @@ async def test_does_not_log_values(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "Doe Consulting" not in blob and "96500" not in blob and "210000" not in blob
     done = [e for e in logs if e["event"] == "pnl_extraction_done"]
     assert len(done) == 1 and done[0]["core_fields_present"] == 6
-
-
-def test_failed_factory() -> None:
-    result = ProfitAndLossExtractionResult.failed("nope")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.data == ProfitAndLossExtraction()

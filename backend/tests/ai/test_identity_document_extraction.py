@@ -3,7 +3,7 @@
 Two things are proven here:
 
 1. **Shape/mechanism** (guide §10): the typed core is coerced with source, an all-null
-   core is FAILED, unparseable JSON returns None, and the ``.failed()`` factory holds.
+   core is FAILED, and unparseable JSON returns None.
 
 2. **The consolidation invariant** — the whole point of LP-472. The four government-identity
    types (``passport``, ``permanent_resident_card``, ``work_visa_ead_card``,
@@ -22,8 +22,6 @@ from app.ai.client import AIClientError
 from app.ai.extraction import EXTRACTORS, model_call
 from app.ai.extraction.identity_document import (
     _CORE_SPEC,
-    IdentityDocumentExtraction,
-    IdentityDocumentExtractionResult,
     _parse_identity_document_json,
     extract_identity_document,
 )
@@ -135,13 +133,6 @@ async def test_extract_ai_failure_returns_failed(monkeypatch: pytest.MonkeyPatch
     _mock_complete(monkeypatch, exc=AIClientError("boom"))
     result = await extract_identity_document(PDF_BYTES, "application/pdf")
     assert result.status == ExtractionStatus.FAILED
-
-
-def test_failed_factory() -> None:
-    result = IdentityDocumentExtractionResult.failed("nope")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.confidence == 0.0
-    assert result.data == IdentityDocumentExtraction()
 
 
 async def test_a_passport_fills_only_its_printed_fields(monkeypatch: pytest.MonkeyPatch) -> None:

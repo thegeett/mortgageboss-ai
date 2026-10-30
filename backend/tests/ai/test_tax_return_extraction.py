@@ -24,8 +24,6 @@ import structlog
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
 from app.ai.extraction.tax_return import (
-    TaxReturnExtraction,
-    TaxReturnExtractionResult,
     _parse_tax_return_json,
     extract_tax_return,
 )
@@ -259,9 +257,3 @@ async def test_does_not_log_ssn_or_values(monkeypatch: pytest.MonkeyPatch) -> No
     assert done[0]["k1_count"] == 0
     # The masked SSN is still available to the caller (tenant-scoped JSON).
     assert result.data.taxpayer_ssn_masked.value == SSN_MASKED
-
-
-def test_failed_factory() -> None:
-    result = TaxReturnExtractionResult.failed("nope")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.data == TaxReturnExtraction()

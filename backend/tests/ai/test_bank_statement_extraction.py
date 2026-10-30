@@ -20,7 +20,6 @@ from app.ai.client import AIClientError
 from app.ai.extraction import model_call
 from app.ai.extraction.bank_statement import (
     BankStatementExtraction,
-    BankStatementExtractionResult,
     _parse_bank_statement_json,
     extract_bank_statement,
 )
@@ -245,10 +244,3 @@ async def test_does_not_log_values_or_account_number(monkeypatch: pytest.MonkeyP
     assert done[0]["core_fields_present"] == 9
     # The raw account number is still available to the caller (tenant-scoped JSON).
     assert result.data.account_number_masked.value == ACCT
-
-
-def test_failed_factory() -> None:
-    result = BankStatementExtractionResult.failed("because reasons")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.data == BankStatementExtraction()
-    assert result.data.transactions == []

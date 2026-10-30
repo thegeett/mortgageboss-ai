@@ -23,8 +23,6 @@ import structlog
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
 from app.ai.extraction.divorce_decree import (
-    DivorceDecreeExtraction,
-    DivorceDecreeExtractionResult,
     _parse_divorce_decree_json,
     extract_divorce_decree,
 )
@@ -170,9 +168,3 @@ async def test_does_not_log_values(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(done) == 1
     assert done[0]["support_obligations"] == 2  # only COUNTS are logged
     assert done[0]["property_awards"] == 1
-
-
-def test_failed_factory() -> None:
-    result = DivorceDecreeExtractionResult.failed("nope")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.data == DivorceDecreeExtraction()

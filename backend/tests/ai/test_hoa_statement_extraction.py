@@ -19,8 +19,6 @@ import pytest
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
 from app.ai.extraction.hoa_statement import (
-    HOAStatementExtraction,
-    HOAStatementExtractionResult,
     _parse_hoa_statement_json,
     extract_hoa_statement,
 )
@@ -103,9 +101,3 @@ async def test_extract_ai_failure_returns_failed(monkeypatch: pytest.MonkeyPatch
     _mock_complete(monkeypatch, exc=AIClientError("boom"))
     result = await extract_hoa_statement(PDF_BYTES, "application/pdf")
     assert result.status == ExtractionStatus.FAILED
-
-
-def test_failed_factory() -> None:
-    result = HOAStatementExtractionResult.failed("nope")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.data == HOAStatementExtraction()

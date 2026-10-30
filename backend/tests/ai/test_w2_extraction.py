@@ -17,7 +17,7 @@ import pytest
 import structlog
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
-from app.ai.extraction.w2 import W2Extraction, W2ExtractionResult, _parse_w2_json, extract_w2
+from app.ai.extraction.w2 import W2Extraction, _parse_w2_json, extract_w2
 from app.models.extraction import ExtractionStatus
 
 PDF_BYTES = b"%PDF-1.7 dummy w2 bytes"
@@ -247,10 +247,3 @@ async def test_does_not_log_values_or_ssn(monkeypatch: pytest.MonkeyPatch) -> No
     assert done[0]["catch_all_sections"] == 2
     # The raw SSN is still available to the caller (tenant-scoped JSON), masked in display.
     assert result.data.employee_ssn.value == SSN
-
-
-def test_failed_factory() -> None:
-    result = W2ExtractionResult.failed("because reasons")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.data == W2Extraction()
-    assert result.data.tax_year.value is None

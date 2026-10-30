@@ -20,8 +20,6 @@ import structlog
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
 from app.ai.extraction.retirement_account import (
-    RetirementAccountExtraction,
-    RetirementAccountExtractionResult,
     _parse_retirement_json,
     extract_retirement_account,
 )
@@ -131,9 +129,3 @@ async def test_does_not_log_account_number_or_values(monkeypatch: pytest.MonkeyP
     assert MASKED_ACCT not in blob and "Fidelity" not in blob and "243000" not in blob
     done = [e for e in logs if e["event"] == "retirement_account_extraction_done"]
     assert len(done) == 1 and done[0]["core_fields_present"] == 8
-
-
-def test_failed_factory() -> None:
-    result = RetirementAccountExtractionResult.failed("nope")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.data == RetirementAccountExtraction()

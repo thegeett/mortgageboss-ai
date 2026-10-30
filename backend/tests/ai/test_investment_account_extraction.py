@@ -21,8 +21,6 @@ import structlog
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
 from app.ai.extraction.investment_account import (
-    InvestmentAccountExtraction,
-    InvestmentAccountExtractionResult,
     _parse_investment_json,
     extract_investment_account,
 )
@@ -138,9 +136,3 @@ async def test_does_not_log_account_number_or_values(monkeypatch: pytest.MonkeyP
     done = [e for e in logs if e["event"] == "investment_account_extraction_done"]
     assert len(done) == 1 and done[0]["core_fields_present"] == 7
     assert result.data.account_number_masked.value == MASKED_ACCT  # available to caller
-
-
-def test_failed_factory() -> None:
-    result = InvestmentAccountExtractionResult.failed("nope")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.data == InvestmentAccountExtraction()

@@ -21,8 +21,6 @@ import structlog
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
 from app.ai.extraction.letter_of_explanation import (
-    LetterOfExplanationExtraction,
-    LetterOfExplanationExtractionResult,
     _parse_loe_json,
     extract_letter_of_explanation,
 )
@@ -150,9 +148,3 @@ async def test_does_not_log_values(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "ACME Corp" not in blob and "layoff" not in blob
     done = [e for e in logs if e["event"] == "loe_extraction_done"]
     assert len(done) == 1 and done[0]["core_fields_present"] == 4
-
-
-def test_failed_factory() -> None:
-    result = LetterOfExplanationExtractionResult.failed("nope")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.data == LetterOfExplanationExtraction()

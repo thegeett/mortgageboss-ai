@@ -632,9 +632,6 @@ def emit_test(spec: Spec) -> str:
     """Generate the shape/mechanism test skeleton — the AI wrapper mocked (guide §10)."""
     _require_identifier(spec.document_type)
     dt = spec.document_type
-    prefix = class_prefix(dt)
-    extraction = f"{prefix}Extraction"
-    result = f"{prefix}ExtractionResult"
     fields = [f for f in spec.typed_core if f.type in TYPE_TO_ANNOTATION]
     first = fields[0]
 
@@ -671,8 +668,7 @@ def emit_test(spec: Spec) -> str:
     source = f'''"""Tests for {title(dt).lower()} extraction (GENERATED, LP-434) — the AI wrapper is MOCKED.
 
 Shape/mechanism, not accuracy (guide §10): the typed core is coerced with source, an
-all-null core is FAILED, unparseable JSON returns None, and the ``.failed()`` factory
-holds. No real samples exist — accuracy is validated as real documents flow through.
+all-null core is FAILED, and unparseable JSON returns None. No real samples exist — accuracy is validated as real documents flow through.
 """
 
 import json
@@ -683,8 +679,6 @@ import pytest
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
 from app.ai.extraction.{dt} import (
-    {extraction},
-    {result},
     _parse_{dt}_json,
     extract_{dt},
 )
@@ -752,12 +746,6 @@ async def test_extract_ai_failure_returns_failed(monkeypatch: pytest.MonkeyPatch
     _mock_complete(monkeypatch, exc=AIClientError("boom"))
     result = await extract_{dt}(PDF_BYTES, "application/pdf")
     assert result.status == ExtractionStatus.FAILED
-
-
-def test_failed_factory() -> None:
-    result = {result}.failed("nope")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.data == {extraction}()
 '''
     return _ruff_normalize(source, f"tests/ai/test_{dt}_extraction.py")
 

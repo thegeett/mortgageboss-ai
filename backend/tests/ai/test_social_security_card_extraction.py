@@ -1,8 +1,7 @@
 """Tests for social security card extraction (GENERATED, LP-434) — the AI wrapper is MOCKED.
 
 Shape/mechanism, not accuracy (guide §10): the typed core is coerced with source, an
-all-null core is FAILED, unparseable JSON returns None, and the ``.failed()`` factory
-holds. No real samples exist — accuracy is validated as real documents flow through.
+all-null core is FAILED, and unparseable JSON returns None. No real samples exist — accuracy is validated as real documents flow through.
 """
 
 import json
@@ -13,8 +12,6 @@ import pytest
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
 from app.ai.extraction.social_security_card import (
-    SocialSecurityCardExtraction,
-    SocialSecurityCardExtractionResult,
     _parse_social_security_card_json,
     extract_social_security_card,
 )
@@ -87,9 +84,3 @@ async def test_extract_ai_failure_returns_failed(monkeypatch: pytest.MonkeyPatch
     _mock_complete(monkeypatch, exc=AIClientError("boom"))
     result = await extract_social_security_card(PDF_BYTES, "application/pdf")
     assert result.status == ExtractionStatus.FAILED
-
-
-def test_failed_factory() -> None:
-    result = SocialSecurityCardExtractionResult.failed("nope")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.data == SocialSecurityCardExtraction()

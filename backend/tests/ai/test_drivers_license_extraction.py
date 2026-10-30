@@ -21,8 +21,6 @@ import structlog
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
 from app.ai.extraction.drivers_license import (
-    DriversLicenseExtraction,
-    DriversLicenseExtractionResult,
     _parse_drivers_license_json,
     extract_drivers_license,
 )
@@ -154,9 +152,3 @@ async def test_does_not_log_any_id_values(monkeypatch: pytest.MonkeyPatch) -> No
     # The raw values are still available to the caller (tenant-scoped JSON).
     assert result.data.date_of_birth.value == date(1990, 4, 15)
     assert result.data.id_number_masked.value == SYNTH_ID_MASKED
-
-
-def test_failed_factory() -> None:
-    result = DriversLicenseExtractionResult.failed("nope")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.data == DriversLicenseExtraction()

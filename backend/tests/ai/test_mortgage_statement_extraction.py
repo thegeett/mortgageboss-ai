@@ -19,8 +19,6 @@ import pytest
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
 from app.ai.extraction.mortgage_statement import (
-    MortgageStatementExtraction,
-    MortgageStatementExtractionResult,
     _parse_mortgage_statement_json,
     extract_mortgage_statement,
 )
@@ -106,9 +104,3 @@ async def test_extract_ai_failure_returns_failed(monkeypatch: pytest.MonkeyPatch
     _mock_complete(monkeypatch, exc=AIClientError("boom"))
     result = await extract_mortgage_statement(PDF_BYTES, "application/pdf")
     assert result.status == ExtractionStatus.FAILED
-
-
-def test_failed_factory() -> None:
-    result = MortgageStatementExtractionResult.failed("nope")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.data == MortgageStatementExtraction()

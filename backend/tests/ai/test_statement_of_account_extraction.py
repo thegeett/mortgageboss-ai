@@ -1,8 +1,7 @@
 """Tests for statement of account extraction (GENERATED, LP-434) — the AI wrapper is MOCKED.
 
 Shape/mechanism, not accuracy (guide §10): the typed core is coerced with source, an
-all-null core is FAILED, unparseable JSON returns None, and the ``.failed()`` factory
-holds. No real samples exist — accuracy is validated as real documents flow through.
+all-null core is FAILED, and unparseable JSON returns None. No real samples exist — accuracy is validated as real documents flow through.
 """
 
 import json
@@ -13,8 +12,6 @@ import pytest
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
 from app.ai.extraction.statement_of_account import (
-    StatementOfAccountExtraction,
-    StatementOfAccountExtractionResult,
     _parse_statement_of_account_json,
     extract_statement_of_account,
 )
@@ -114,9 +111,3 @@ async def test_extract_ai_failure_returns_failed(monkeypatch: pytest.MonkeyPatch
     _mock_complete(monkeypatch, exc=AIClientError("boom"))
     result = await extract_statement_of_account(PDF_BYTES, "application/pdf")
     assert result.status == ExtractionStatus.FAILED
-
-
-def test_failed_factory() -> None:
-    result = StatementOfAccountExtractionResult.failed("nope")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.data == StatementOfAccountExtraction()

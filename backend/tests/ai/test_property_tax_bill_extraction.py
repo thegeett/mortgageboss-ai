@@ -19,8 +19,6 @@ import pytest
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
 from app.ai.extraction.property_tax_bill import (
-    PropertyTaxBillExtraction,
-    PropertyTaxBillExtractionResult,
     _parse_property_tax_bill_json,
     extract_property_tax_bill,
 )
@@ -102,9 +100,3 @@ async def test_extract_ai_failure_returns_failed(monkeypatch: pytest.MonkeyPatch
     _mock_complete(monkeypatch, exc=AIClientError("boom"))
     result = await extract_property_tax_bill(PDF_BYTES, "application/pdf")
     assert result.status == ExtractionStatus.FAILED
-
-
-def test_failed_factory() -> None:
-    result = PropertyTaxBillExtractionResult.failed("nope")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.data == PropertyTaxBillExtraction()

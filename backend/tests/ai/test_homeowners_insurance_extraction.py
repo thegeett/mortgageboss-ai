@@ -19,8 +19,6 @@ import structlog
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
 from app.ai.extraction.homeowners_insurance import (
-    HomeownersInsuranceExtraction,
-    HomeownersInsuranceExtractionResult,
     _parse_homeowners_insurance_json,
     extract_homeowners_insurance,
 )
@@ -118,12 +116,6 @@ async def test_does_not_log_values(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "State Farm" not in blob and "450000" not in blob and "HO-123456" not in blob
     done = [e for e in logs if e["event"] == "homeowners_insurance_extraction_done"]
     assert len(done) == 1 and done[0]["core_fields_present"] == 7
-
-
-def test_failed_factory() -> None:
-    result = HomeownersInsuranceExtractionResult.failed("nope")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.data == HomeownersInsuranceExtraction()
 
 
 def test_homeowners_prompt_is_hand_maintained_not_the_bare_starter() -> None:

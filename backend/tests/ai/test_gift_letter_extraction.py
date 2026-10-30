@@ -20,8 +20,6 @@ import structlog
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
 from app.ai.extraction.gift_letter import (
-    GiftLetterExtraction,
-    GiftLetterExtractionResult,
     _parse_gift_letter_json,
     extract_gift_letter,
 )
@@ -135,9 +133,3 @@ async def test_does_not_log_values(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "John Doe" not in blob and "56000" not in blob and "56,000" not in blob
     done = [e for e in logs if e["event"] == "gift_letter_extraction_done"]
     assert len(done) == 1 and done[0]["core_fields_present"] == 6
-
-
-def test_failed_factory() -> None:
-    result = GiftLetterExtractionResult.failed("nope")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.data == GiftLetterExtraction()

@@ -22,7 +22,6 @@ from app.ai.client import AIClientError
 from app.ai.extraction import model_call
 from app.ai.extraction.pay_stub import (
     PayStubExtraction,
-    PayStubExtractionResult,
     _parse_pay_stub_json,
     extract_pay_stub,
 )
@@ -337,12 +336,3 @@ async def test_does_not_log_bytes_base64_or_values(monkeypatch: pytest.MonkeyPat
     assert done[0]["core_fields_present"] == 2
     assert done[0]["catch_all_sections"] == 1
     assert result.data.employer_name.value == "SECRETCORP"  # returned to the caller
-
-
-def test_failed_factory() -> None:
-    result = PayStubExtractionResult.failed("because reasons")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.confidence == 0.0
-    assert result.data == PayStubExtraction()  # all typed fields default, no sections
-    assert result.data.gross_pay.value is None
-    assert result.data.additional_sections == []

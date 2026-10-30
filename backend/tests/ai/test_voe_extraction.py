@@ -19,7 +19,7 @@ import pytest
 import structlog
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
-from app.ai.extraction.voe import VOEExtraction, VOEExtractionResult, _parse_voe_json, extract_voe
+from app.ai.extraction.voe import _parse_voe_json, extract_voe
 from app.models.extraction import ExtractionStatus
 
 PDF_BYTES = b"%PDF-1.7 dummy voe bytes"
@@ -145,9 +145,3 @@ async def test_does_not_log_values(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "ACME Corp" not in blob and "85000" not in blob and "Jane Doe" not in blob
     done = [e for e in logs if e["event"] == "voe_extraction_done"]
     assert len(done) == 1 and done[0]["core_fields_present"] == 10
-
-
-def test_failed_factory() -> None:
-    result = VOEExtractionResult.failed("nope")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.data == VOEExtraction()

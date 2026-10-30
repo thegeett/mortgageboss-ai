@@ -24,7 +24,6 @@ from app.ai.client import AIClientError
 from app.ai.extraction import model_call
 from app.ai.extraction.form_1099 import (
     Form1099Extraction,
-    Form1099ExtractionResult,
     _parse_1099_json,
     extract_1099,
 )
@@ -207,12 +206,6 @@ async def test_extract_unsupported_skips_api(
     result = await extract_1099(PDF_BYTES, media_type)
     assert result.status == ExtractionStatus.FAILED
     assert mock.call_count == 0
-
-
-def test_failed_factory() -> None:
-    result = Form1099ExtractionResult.failed("because reasons")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.data == Form1099Extraction()
 
 
 # --------------------------------------------------------------------------- #

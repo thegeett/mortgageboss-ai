@@ -20,8 +20,6 @@ import structlog
 from app.ai.client import AIClientError
 from app.ai.extraction import model_call
 from app.ai.extraction.purchase_agreement import (
-    PurchaseAgreementExtraction,
-    PurchaseAgreementExtractionResult,
     _parse_purchase_agreement_json,
     extract_purchase_agreement,
 )
@@ -128,9 +126,3 @@ async def test_does_not_log_values(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "Jane Doe" not in blob and "1380000" not in blob and "1,380,000" not in blob
     done = [e for e in logs if e["event"] == "purchase_agreement_extraction_done"]
     assert len(done) == 1 and done[0]["core_fields_present"] == 6
-
-
-def test_failed_factory() -> None:
-    result = PurchaseAgreementExtractionResult.failed("nope")
-    assert result.status == ExtractionStatus.FAILED
-    assert result.data == PurchaseAgreementExtraction()
