@@ -508,6 +508,8 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # secret already inside `body` one entry along.
     # LP-991 adds `rendered_file_address`: names no person, excluded only to avoid rebuilding the view
     # for a column no query uses yet.
+    # LP-994 adds `raw_storage_path`: where the copy of the whole sent email is (body, upload link).
+    # Excluded for the reason `inbound_messages.raw_storage_path` is. `send_requested_at` is exposed.
     "communications": frozenset(
         {
             "sender",
@@ -517,6 +519,7 @@ EXCLUDED: dict[str, frozenset[str]] = {
             "in_reply_to_message_id",
             "upload_link_url",
             "rendered_file_address",
+            "raw_storage_path",
         }
     ),
     # LP-822 — a processor's writing voice. `greeting`, `closing` and `signature_block` are typed by
@@ -1390,3 +1393,13 @@ def test_the_items_view_never_selects_name() -> None:
     above cannot name it. So this checks the one view's select list."""
     body = _view_bodies()["condition_items"]
     assert re.search(r"\bname\b", body.split("FROM")[0]) is None
+
+
+def test_the_sent_email_copy_path_is_not_in_the_communications_view() -> None:
+    """LP-994 REVIEW — `communications.raw_storage_path` points at the whole sent email (body,
+    upload link). EXCLUDED records that; this enforces it, since a later view could add it and pass
+    both drift tests. Not in NEVER_EXPOSED: that check matches the name in every view, and
+    `readonly.inbound_messages` derives `has_raw_stored` from its own column of the same name."""
+    body = _view_bodies()["communications"]
+    assert "send_requested_at" in body  # the positive control: this is LP-994's definition
+    assert "raw_storage_path" not in body

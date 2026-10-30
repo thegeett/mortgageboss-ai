@@ -13,6 +13,7 @@ before anything else runs, exactly as needs/borrowers/property do. Nothing in th
 from datetime import datetime
 from uuid import UUID
 
+import structlog
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
 
@@ -57,6 +58,8 @@ from app.services.email_reply import (
 from app.services.email_send import CannotSendError, build_outbound, send_draft
 from app.services.mail_domain import file_address
 from app.services.message_detail import message_detail
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/loan-files/{file_identifier}/outbound", tags=["communications"])
 
@@ -301,6 +304,21 @@ async def polish_draft_endpoint(
     return PolishPublic(polished=outcome.text, refusal=outcome.refusal)
 
 
+def _enqueue_send(communication_id: UUID) -> None:
+    """LP-994 — hand a queued Send to the worker, AFTER the commit, so the worker finds the row.
+
+    The row is committed `queued`, so a broker that is down must not fail the request: the
+    `communications.requeue_stale` job finds it within minutes. Logged and moved on, like
+    `documents._enqueue_processing`.
+    """
+    from app.tasks.outbound import send_communication
+
+    try:
+        send_communication.delay(str(communication_id))
+    except Exception:
+        logger.warning("send_enqueue_failed", communication_id=str(communication_id))
+
+
 @router.post("/draft/{draft_id}/send", response_model=SentCommunicationPublic)
 async def send_draft_endpoint(
     draft_id: UUID,
@@ -332,11 +350,14 @@ async def send_draft_endpoint(
             body=payload.body,
             subject=payload.subject,
             approver_user_id=current_user.id,
+            transmit=payload.transmit,
         )
     except CannotSendError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     needs = await _needs_in_draft(db, draft=sent)
     await db.commit()
+    if sent.status is CommunicationStatus.QUEUED:
+        _enqueue_send(sent.id)
     return SentCommunicationPublic(
         id=sent.id,
         status=sent.status.value,

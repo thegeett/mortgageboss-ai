@@ -86,7 +86,7 @@ class BodyFormat(StrEnum):
 
 
 class CommunicationStatus(StrEnum):
-    """Delivery state. DRAFT/QUEUED/SENT/DELIVERED/FAILED are outbound; RECEIVED inbound."""
+    """Delivery state. DRAFT/QUEUED/SENDING/SENT/DELIVERED/FAILED are outbound; RECEIVED inbound."""
 
     DRAFT = "draft"  # outbound, not yet sent
     # LP-815 — composed and awaiting a transport, with no human left to approve it.
@@ -96,11 +96,20 @@ class CommunicationStatus(StrEnum):
     # (file, template) and `get_open_draft` reads by that status. An automatic reply parked as a
     # DRAFT would be a second thing on the file waiting for a person who is never asked, and would
     # sit in a state whose whole meaning is "somebody still has to look at this".
-    QUEUED = "queued"  # outbound, composed automatically, waiting to be transmitted
+    QUEUED = "queued"  # outbound, waiting for the worker (LP-815 auto-reply, or LP-994 Send)
+    # LP-994 — the worker has claimed it and may be calling the mail provider. Written BEFORE the
+    # call, so a crash leaves this, never a second email. A row left here is "not confirmed": a
+    # person checks before sending again.
+    SENDING = "sending"
     SENT = "sent"  # outbound, sent
     DELIVERED = "delivered"  # outbound, delivery confirmed (if known)
     FAILED = "failed"  # outbound, send failed
     RECEIVED = "received"  # inbound
+
+
+#: LP-994 — how `error_detail` begins on a row left `sending` because the provider's answer was lost:
+#: the email may have gone. Written by the worker, read by the timeline.
+NOT_CONFIRMED_PREFIX = "Not confirmed: "
 
 
 class Communication(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
@@ -255,6 +264,15 @@ class Communication(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     rendered_file_address: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: LP-994 — when a person clicked Send with `transmit=true`. The worker sends ONLY rows that have
+    #: it, so LP-815's automatic replies (`queued`, requested by nobody) can never go out. Never set
+    #: by "I've sent it" or any other record-only path.
+    send_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    #: LP-994 — the exact copy of the sent email in the mail storage (`outbound/<id>.eml`), written
+    #: before the provider is called.
+    raw_storage_path: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     #: LP-834 — the secure upload link this draft carries, as the borrower would click it.
     #:

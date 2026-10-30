@@ -663,6 +663,17 @@ describe("when it happened (LP-838)", () => {
     expect(screen.queryByText(/^Draft$|^Draft · /)).toBeNull();
   });
 
+  it("calls a message the worker is sending queued, not created", () => {
+    // LP-994 — `sending` is new; without its own branch it fell through to LP-838's "Created".
+    loaded([
+      { ...MESSAGE, id: "s1", direction: "outbound", status: "sending", body_edited: false },
+    ]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+
+    expect(screen.getByText("Queued")).toBeTruthy();
+    expect(screen.queryByText(/^Created/)).toBeNull();
+  });
+
   it("still calls a draft a draft", () => {
     // THE POSITIVE CONTROL for the assertion above. Without it, `queryByText(/^Draft/)` being null
     // is also satisfied by a build where no status line renders at all.

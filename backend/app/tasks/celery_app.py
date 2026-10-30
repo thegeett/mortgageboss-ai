@@ -30,6 +30,7 @@ _TASK_MODULES = [
     "app.tasks.inbound",  # LP-803 — inbound mail ingest + the SQS poller
     "app.tasks.email_draft",  # LP-809 review — draft prose, off the request path
     "app.tasks.conditions",  # LP-905 — reading an arrived condition sheet
+    "app.tasks.outbound",  # LP-994 — the worker sends a person's approved email
 ]
 
 celery_app = Celery(
@@ -91,13 +92,22 @@ celery_app.conf.update(
     # task: with two, every entry here runs twice. Move beat to its own service before adding
     # workers. Every entry names a registered task (tests/tasks/test_task_registration.py).
     #
-    # The heartbeat only proves the scheduler is alive. LP-995 adds the delivery-events job.
+    # The heartbeat only proves the scheduler is alive. LP-994 adds the re-enqueue of stale Sends;
+    # LP-995 adds the delivery-events job.
     beat_schedule={
         # `expires`: a heartbeat not started within 300s is dropped, not run late. It shares the
         # default queue with verification runs of up to 20 minutes; without this, heartbeats queue
         # behind them and log in a burst, which can look like a live scheduler after it has died.
         "heartbeat": {
             "task": "health.heartbeat",
+            "schedule": 300.0,
+            "options": {"expires": 300},
+        },
+        # LP-994 — a person's Send that never reached the worker (broker down at enqueue, worker
+        # stopped). Re-enqueues only `queued` rows with `send_requested_at`; the atomic claim in
+        # `tasks/outbound.py` makes a duplicate harmless. Dropped if late, like the heartbeat.
+        "requeue-stale-sends": {
+            "task": "communications.requeue_stale",
             "schedule": 300.0,
             "options": {"expires": 300},
         },

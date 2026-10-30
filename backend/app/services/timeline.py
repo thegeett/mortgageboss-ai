@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.documents.catalog import ResponsibleParty
 from app.models.activity_log import ActivityType
 from app.models.communication import (
+    NOT_CONFIRMED_PREFIX,
     BodyFormat,
     Communication,
     CommunicationDirection,
@@ -331,7 +332,17 @@ def _summarise(message: Communication, *, nothing_written: bool = False) -> str:
         if nothing_written:
             return "Nothing written yet"
         return "A document request is being prepared"
-    if message.status is CommunicationStatus.QUEUED:
+    # LP-994 — A PERSON'S SEND IS ALSO `queued` (and then `sending`) until the worker sends it. Only
+    # a row with `send_requested_at` came from a person; an LP-815 automatic reply never has it.
+    if message.status in (CommunicationStatus.QUEUED, CommunicationStatus.SENDING):
+        if message.send_requested_at is not None:
+            # LP-994 REVIEW — A ROW THE WORKER LEFT `sending` WITH "Not confirmed" MAY HAVE GONE, and
+            # "being sent" told her to wait for it. It says what she has to do instead.
+            if message.status is CommunicationStatus.SENDING and (
+                message.error_detail or ""
+            ).startswith(NOT_CONFIRMED_PREFIX):
+                return "Sending was not confirmed; check before sending again"
+            return "A message is being sent"
         return "An automatic reply is queued"
     if message.status is CommunicationStatus.FAILED:
         return "A message could not be delivered"
@@ -469,6 +480,8 @@ def _matches(entry: TimelineEntry, wanted: TimelineFilter) -> bool:
         return entry.status in {
             CommunicationStatus.DRAFT.value,
             CommunicationStatus.QUEUED.value,
+            # LP-994 — not gone yet either, like `queued`.
+            CommunicationStatus.SENDING.value,
         }
     # SENT: outbound and gone. A draft is outbound and has not gone, and showing it under "sent"
     # would tell a processor they had already asked for something they have not.

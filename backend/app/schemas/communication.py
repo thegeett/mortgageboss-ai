@@ -70,6 +70,9 @@ class SendDraftRequest(BaseModel):
     #: somebody edits it, and a caller that omits it is saying "the one already on the draft", which
     #: is a complete and true answer.
     subject: str | None = Field(default=None, max_length=256)
+    #: LP-994 — True: the app sends it (the worker, from the file address). False, the default: "I've
+    #: sent it", the processor sent it herself and this only records it.
+    transmit: bool = False
 
 
 class SaveDraftBodyRequest(BaseModel):

@@ -182,6 +182,30 @@ def build_outbound(
 
 logger = structlog.get_logger(__name__)
 
+#: LP-994 — WHAT THE RATE LIMIT COUNTS. A transmit Send is `queued` until the worker sends it, so
+#: counting only `sent` let a second click through while the first was still in the queue: two
+#: emails to one borrower inside a minute. `delivered` is a sent email that SES confirmed (LP-995).
+#: Timed by `sent_at`, or by `send_requested_at` while it has not gone yet. An LP-815 automatic reply
+#: has neither, so it is not counted, as before. A clean failure (`failed`) is not counted: nothing
+#: went, and the processor may send again at once.
+_COUNTED_STATUSES = (
+    CommunicationStatus.QUEUED,
+    CommunicationStatus.SENDING,
+    CommunicationStatus.SENT,
+    CommunicationStatus.DELIVERED,
+)
+_sent_or_requested_at = func.coalesce(Communication.sent_at, Communication.send_requested_at)
+
+#: LP-994 REVIEW — ONE MAILBOX, HOWEVER IT WAS TYPED. The limit matched the stored string exactly, so
+#: `Borrower@x.com` or ` borrower@x.com` a minute after `borrower@x.com` counted as a new address,
+#: while suppression and the transmit check both strip and lower-case it. Harmless while nothing
+#: transmitted; with the worker sending, it was two real emails to one borrower.
+_stored_recipient = func.lower(func.trim(Communication.recipient))
+
+
+def _mailbox(recipient: str) -> str:
+    return recipient.strip().lower()
+
 
 async def _recent_sends(
     db: AsyncSession, *, company_id: UUID, recipient: str, since_hours: int
@@ -193,10 +217,10 @@ async def _recent_sends(
             .join(LoanFile, LoanFile.id == Communication.loan_file_id)
             .where(
                 LoanFile.company_id == company_id,
-                Communication.recipient == recipient,
-                Communication.status == CommunicationStatus.SENT,
+                _stored_recipient == _mailbox(recipient),
+                Communication.status.in_(_COUNTED_STATUSES),
                 Communication.direction == CommunicationDirection.OUTBOUND,
-                Communication.sent_at >= utcnow() - timedelta(hours=since_hours),
+                _sent_or_requested_at >= utcnow() - timedelta(hours=since_hours),
             )
         )
         or 0
@@ -219,12 +243,12 @@ async def _refuse_if_rate_limited(db: AsyncSession, *, company_id: UUID, recipie
     able to stall another's mail by writing to the same address.
     """
     last = await db.scalar(
-        select(func.max(Communication.sent_at))
+        select(func.max(_sent_or_requested_at))
         .join(LoanFile, LoanFile.id == Communication.loan_file_id)
         .where(
             LoanFile.company_id == company_id,
-            Communication.recipient == recipient,
-            Communication.status == CommunicationStatus.SENT,
+            _stored_recipient == _mailbox(recipient),
+            Communication.status.in_(_COUNTED_STATUSES),
             Communication.direction == CommunicationDirection.OUTBOUND,
         )
     )
@@ -251,8 +275,15 @@ async def send_draft(
     body: str,
     approver_user_id: UUID,
     subject: str | None = None,
+    transmit: bool = False,
 ) -> Communication:
     """Record that ``draft_id`` was sent, and start the clock on everything it asked for.
+
+    LP-994 — ``transmit`` IS THE DIFFERENCE BETWEEN "I'VE SENT IT" AND SEND. False (the default, and
+    every caller but the Send endpoint): the processor sent it from her own mail app, and this only
+    records it, status `sent`. True: the app sends it. Everything below is recorded the same way, but
+    the row is `queued` with `send_requested_at`, `sent_at` stays empty, and the caller hands the id
+    to the worker AFTER its commit (`tasks/outbound.py`). This function never sends (rule 8).
 
     ``body`` is what the processor is actually sending — their edit of the draft, not the draft as
     composed. It replaces the stored body, because the record of an outbound message must be what
@@ -270,6 +301,8 @@ async def send_draft(
         raise CannotSendError(f"this message is already {draft.status.value}")
     if not (body or "").strip():
         raise CannotSendError("an empty message cannot be sent")
+    if transmit:
+        await _refuse_if_cannot_transmit(db, loan_file=loan_file, recipient=recipient)
     # LP-968 — A CONDITION DRAFT WAITS FOR ITS PLAN. Drafts are made when a plan is ready, before she
     # confirms it, and "nothing is sent until you confirm" has to stay true. Here rather than in the
     # conditions' Mark sent, because this is the one function every send passes through: the general
@@ -295,11 +328,13 @@ async def send_draft(
     # dead" is actionable, "wait five minutes" is not.
     # LP-847 — BOTH GUARDS ARE ABOUT A SPECIFIC ADDRESS, so neither has anything to say when there
     # is none. Skipped rather than fed an empty string, and the rate limiter is the reason this is a
-    # decision rather than tidiness: it matches on `Communication.recipient == recipient`, so EVERY
+    # decision rather than tidiness: it matches on the recipient (`_stored_recipient`), so EVERY
     # empty-recipient send shares the key "". The second one — a title company after a lender,
     # entirely unrelated — would be refused with "was emailed less than N minutes ago" about a
     # mailbox that does not exist. Two blanks are not the same mailbox.
-    if recipient:
+    # LP-994 REVIEW — "blank" after stripping, now that the limit compares stripped addresses: "  "
+    # would otherwise share the key "" with every other blank-recipient send.
+    if recipient.strip():
         if await is_suppressed(db, company_id=loan_file.company_id, address=recipient):
             raise CannotSendError(
                 f"{recipient} is suppressed — an earlier message to it bounced permanently. "
@@ -400,8 +435,12 @@ async def send_draft(
     draft.body = sanitise_html(outbound.body) if authored else outbound.body
     draft.subject = outbound.subject
     draft.recipient = recipient
-    draft.status = CommunicationStatus.SENT
-    draft.sent_at = utcnow()
+    if transmit:
+        draft.status = CommunicationStatus.QUEUED
+        draft.send_requested_at = utcnow()
+    else:
+        draft.status = CommunicationStatus.SENT
+        draft.sent_at = utcnow()
 
     # THE CLOCK. Every need this message asked for moves to REQUESTED and gets `requested_at`, which
     # is what LP-814's reminders read. Before this line, that column was NULL on every row that has
@@ -456,10 +495,36 @@ async def send_draft(
     # NONE IS THE ORDINARY ANSWER TODAY. §5 says build the interface and no provider, so
     # `transport_for` returns None for every connection and this stays copy-and-send: the record
     # above is the whole of what happened, exactly as it was before this ticket.
-    await _transmit_if_possible(db, loan_file=loan_file, draft=draft)
+    #
+    # LP-994 — THE COMPANY-DOMAIN PATH IS THE ONE IN USE: a transmit send is queued above and the
+    # worker sends it (`tasks/outbound.py`). This mailbox-connection path is left as it was and has
+    # no registered transport, so it does nothing; a transmit send skips it.
+    if not transmit:
+        await _transmit_if_possible(db, loan_file=loan_file, draft=draft)
 
     await db.flush()
     return draft
+
+
+async def _refuse_if_cannot_transmit(
+    db: AsyncSession, *, loan_file: LoanFile, recipient: str
+) -> None:
+    """LP-994 — the app can send this only from the company's own domain, through a configured
+    sender, to exactly one valid address. Checked before the other guards, so the refusal names the
+    thing that is actually missing."""
+    from app.services.mail_sender import get_mail_sender
+    from app.services.outbound_mime import _address
+
+    if await file_address(db, loan_file) is None:
+        raise CannotSendError("This company can't send email from the app yet.")
+    if get_mail_sender() is None:
+        raise CannotSendError("Sending email is not set up here.")
+    if not recipient.strip():
+        raise CannotSendError("Add the recipient's email address before sending.")
+    try:
+        _address("To", recipient)
+    except ValueError as exc:
+        raise CannotSendError("The recipient must be one email address.") from exc
 
 
 async def _transmit_if_possible(

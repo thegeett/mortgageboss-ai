@@ -30,11 +30,12 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -178,6 +179,12 @@ async def _unwind_requests(db: AsyncSession, *, communication: Communication) ->
 
     Only needs still in ``REQUESTED`` are touched: one that has since been satisfied by a document
     arriving another way must not be dragged backwards.
+
+    LP-994 REVIEW — AND ONLY WHAT THIS MESSAGE ALONE ASKED FOR. A need can be in two emails: asked
+    in #1, which went out, and asked again in #2, which bounced or failed. #2's failure does not
+    un-ask #1, so such a need stays ``REQUESTED`` and gets back the time #1 asked for it (``send_draft``
+    overwrote ``requested_at`` with #2's). "Went out" is any other outbound email linked to the need
+    that is `sending`, `sent`, `delivered`, or a person's Send still `queued`.
     """
     from app.models.communication_needs_item import CommunicationNeedsItem
 
@@ -198,12 +205,56 @@ async def _unwind_requests(db: AsyncSession, *, communication: Communication) ->
         .scalars()
         .all()
     )
+    asked_elsewhere = await _asked_by_another_email(
+        db, communication=communication, need_ids=[need.id for need in needs]
+    )
+    unwound = []
     for need in needs:
+        earlier = asked_elsewhere.get(need.id)
+        if earlier is not None:
+            need.requested_at = earlier
+            continue
         need.status = NeedsItemStatus.PENDING
         need.requested_at = None
+        unwound.append(need)
 
-    await _clear_finding_markers(db, communication=communication, needs=needs)
-    return len(needs)
+    await _clear_finding_markers(db, communication=communication, needs=unwound)
+    return len(unwound)
+
+
+async def _asked_by_another_email(
+    db: AsyncSession, *, communication: Communication, need_ids: Sequence[UUID]
+) -> dict[UUID, datetime]:
+    """`{need id: when the latest OTHER email that went out asked for it}`, for those that have one."""
+    from app.models.communication_needs_item import CommunicationNeedsItem
+
+    if not need_ids:
+        return {}
+    asked_at = func.coalesce(Communication.sent_at, Communication.send_requested_at)
+    rows = await db.execute(
+        select(CommunicationNeedsItem.needs_item_id, func.max(asked_at))
+        .join(Communication, Communication.id == CommunicationNeedsItem.communication_id)
+        .where(
+            CommunicationNeedsItem.needs_item_id.in_(need_ids),
+            Communication.id != communication.id,
+            Communication.deleted_at.is_(None),
+            or_(
+                Communication.status.in_(
+                    [
+                        CommunicationStatus.SENDING,
+                        CommunicationStatus.SENT,
+                        CommunicationStatus.DELIVERED,
+                    ]
+                ),
+                and_(
+                    Communication.status == CommunicationStatus.QUEUED,
+                    Communication.send_requested_at.is_not(None),
+                ),
+            ),
+        )
+        .group_by(CommunicationNeedsItem.needs_item_id)
+    )
+    return {need_id: at for need_id, at in rows.tuples() if at is not None}
 
 
 async def _clear_finding_markers(

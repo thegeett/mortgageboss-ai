@@ -208,7 +208,9 @@ function stateWord(entry: TimelineEntry): string {
   // of the things this epic's fence puts in the next phase — which is also when it comes back and
   // this becomes a live mislabel with nothing to catch it. Before LP-852 the fall-through said
   // "Created", which is vague and true; grouping it with `draft` made it specific and false.
-  if (entry.status === "queued") {
+  // LP-994 — `sending` is the worker's claim on a queued Send: still not gone, so the same word.
+  // Its own wording ("not confirmed") is LP-997's.
+  if (entry.status === "queued" || entry.status === "sending") {
     return "Queued";
   }
   if (entry.status === "sent" || entry.status === "delivered") {
