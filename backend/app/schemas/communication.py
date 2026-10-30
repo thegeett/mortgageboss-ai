@@ -73,6 +73,9 @@ class SendDraftRequest(BaseModel):
     #: LP-994 — True: the app sends it (the worker, from the file address). False, the default: "I've
     #: sent it", the processor sent it herself and this only records it.
     transmit: bool = False
+    #: LP-996 — "send anyway" after the content check refused: the processor's reason, at least ten
+    #: characters once trimmed. Ignored when the check finds nothing, and on a record-only send.
+    override_note: str | None = Field(default=None, max_length=2000)
 
 
 class SaveDraftBodyRequest(BaseModel):

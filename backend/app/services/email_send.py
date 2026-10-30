@@ -36,6 +36,11 @@ from app.models.loan_file import LoanFile
 from app.models.user import User
 from app.services.activity_log import log_activity
 from app.services.bounce_handling import is_suppressed
+from app.services.content_check import (
+    OVERRIDE_NOTE_MIN_CHARS,
+    content_check_grounds,
+    reasons_for,
+)
 from app.services.email_draft import (
     _needs_in_draft,
     finalise_draft_body,
@@ -79,6 +84,23 @@ _FOOTER_TAG = re.compile(r"\[(LF-[A-Za-z0-9]+)\]")
 
 class CannotSendError(Exception):
     """The draft cannot be sent. Always tells the caller which rule stopped it."""
+
+
+class ContentCheckError(CannotSendError):
+    """LP-996 — the pre-send content check found something (`services/content_check.py`).
+
+    A `CannotSendError`, so every existing handler still refuses the send; the API reads `grounds`
+    to answer with the structured body LP-997's screen shows.
+    """
+
+    MESSAGE = "This email can't be sent as written."
+    NOTE_TOO_SHORT = f"Add a note of at least {OVERRIDE_NOTE_MIN_CHARS} characters to send anyway."
+
+    def __init__(self, grounds: list[str], *, note_too_short: bool = False) -> None:
+        self.grounds = grounds
+        self.note_too_short = note_too_short
+        self.message = f"{self.MESSAGE} {self.NOTE_TOO_SHORT}" if note_too_short else self.MESSAGE
+        super().__init__(f"{self.message} {'; '.join(reasons_for(grounds))}.")
 
 
 #: LP-815 — OUTBOUND MAIL CARRIES NO ATTACHMENTS, AND THAT IS ENFORCED HERE RATHER THAN ASSUMED.
@@ -276,6 +298,7 @@ async def send_draft(
     approver_user_id: UUID,
     subject: str | None = None,
     transmit: bool = False,
+    override_note: str | None = None,
 ) -> Communication:
     """Record that ``draft_id`` was sent, and start the clock on everything it asked for.
 
@@ -289,6 +312,11 @@ async def send_draft(
     composed. It replaces the stored body, because the record of an outbound message must be what
     went out; LP-821 builds the full three-way evidence record (composed / edited / as sent) and is
     where the composed version gets its own field.
+
+    LP-996 — ``override_note``: a transmit Send whose final text trips the content check is refused
+    with `ContentCheckError` unless the processor gives a note of at least
+    `OVERRIDE_NOTE_MIN_CHARS` characters; then it goes, and the reasons and the note are recorded.
+    Ignored when nothing was found, and on a record-only send, which is not checked.
 
     NO BULK SEND, by construction: this takes one ``draft_id``. The plan says so and the reason is
     the rate limit above — a bulk path would either bypass it or fail halfway through a list with no
@@ -433,7 +461,23 @@ async def send_draft(
     #
     # The plain path is untouched: a plain row is escaped by `emailBodyToHtml` at render, which is
     # LP-844's escape-first argument and does not depend on this.
-    draft.body = sanitise_html(outbound.body) if authored else outbound.body
+    body_as_sent = sanitise_html(outbound.body) if authored else outbound.body
+
+    # LP-996 — THE CONTENT CHECK, on exactly what the worker will send (the stored body it reads),
+    # after every other guard and before anything is recorded: a refusal leaves the draft as it was.
+    # Transmit only: "I've sent it" records an email that has already gone from her own mail app.
+    override_grounds: list[str] = []
+    note = (override_note or "").strip()
+    if transmit:
+        grounds = content_check_grounds(outbound.subject, body_as_sent, html=authored)
+        if grounds:
+            if not note:
+                raise ContentCheckError(grounds)
+            if len(note) < OVERRIDE_NOTE_MIN_CHARS:
+                raise ContentCheckError(grounds, note_too_short=True)
+            override_grounds = grounds
+
+    draft.body = body_as_sent
     draft.subject = outbound.subject
     draft.recipient = recipient
     if transmit:
@@ -458,19 +502,33 @@ async def send_draft(
         if need.status in AWAITING_COLLECTION:
             await request_needs_item(db, needs_item=need)
 
+    summary = f"Sent a document request for {len(needs)} item(s)"
+    detail: dict[str, object] = {
+        "communication_id": str(draft.id),
+        "needs_item_ids": [str(need.id) for need in needs],
+        "template_key": draft.template_key,
+        "template_version": draft.template_version,
+    }
+    if override_grounds:
+        # LP-996 — ON THIS ROW, NOT A SECOND ONE: one email, one "sent" line (a second row also
+        # invited `condition_drafts._name_the_send`, which rewrites every row with this id).
+        # THE NOTE IS NOT HERE. `readonly.activity_logs` exposes summary and detail with only
+        # identifier shapes scrubbed, and a note can name the borrower; it is on the evidence row,
+        # which that view excludes. Never logged either.
+        # Fits the 256-character column with all three reasons (a test checks the worst case).
+        summary = (
+            f"{summary}. Sent despite the content check: "
+            f"{'; '.join(reasons_for(override_grounds))}."
+        )
+        detail["content_check_grounds"] = override_grounds
     await log_activity(
         db,
         loan_file_id=loan_file.id,
         activity_type=ActivityType.COMMUNICATION_SENT,
-        summary=f"Sent a document request for {len(needs)} item(s)",
+        summary=summary,
         actor_user_id=approver_user_id,
         # Metadata only — never the subject, the body, or the recipient's address.
-        detail={
-            "communication_id": str(draft.id),
-            "needs_item_ids": [str(need.id) for need in needs],
-            "template_key": draft.template_key,
-            "template_version": draft.template_version,
-        },
+        detail=detail,
     )
     # THE EVIDENCE ROW (LP-821). Written here rather than by the endpoint, so every caller of
     # `send_draft` produces one — an evidence record that depends on a route remembering to ask for
@@ -483,6 +541,8 @@ async def send_draft(
         communication=draft,
         approver_user_id=approver_user_id,
         body_composed=body_composed,
+        content_check_grounds=override_grounds or None,
+        content_check_override_note=note if override_grounds else None,
     )
 
     # LP-816 — TRANSMIT, IF THERE IS ANYTHING TO TRANSMIT THROUGH.
@@ -630,6 +690,7 @@ __all__ = [
     "AUTO_REPLY_SUPPRESSION_HEADERS",
     "MAILTO_MAX_CHARS",
     "CannotSendError",
+    "ContentCheckError",
     "OutboundMessage",
     "build_outbound",
     "footer_tag",

@@ -143,6 +143,13 @@ class CommunicationEvidence(Base, UUIDMixin):
     #: the model or the AI System Disclosure, as a compliance guard having fired. One column, two
     #: meanings, in the record that exists to be read by somebody who was not here.
     failure_reason: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
+    #: LP-996 — the pre-send content check's grounds (`rate`, `commitment`, `payment_routing`,
+    #: comma-separated) when the processor SENT ANYWAY, and her note saying why.
+    #:
+    #: NOT `guardrail_fired`, which is the AI drafter's guard (above). Null on every other row: a
+    #: clean Send, a record-only send (never checked) and every send before LP-996 alike.
+    content_check_grounds: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_check_override_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     model_id: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
     prompt_version: Mapped[str | None] = mapped_column(String(SHORT_STRING), nullable=True)
 

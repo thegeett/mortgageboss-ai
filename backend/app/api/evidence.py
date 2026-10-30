@@ -57,6 +57,10 @@ class EvidencePublic(BaseModel):
     was_edited: bool
     #: False on every row written before LP-821 — the composed version is gone, not merely absent.
     has_composed_draft: bool
+    #: LP-996 — when the processor sent despite the pre-send content check: its grounds
+    #: (`rate`, `commitment`, `payment_routing`) and her note. Empty on every other row.
+    content_check_grounds: list[str]
+    content_check_override_note: str | None
 
     @classmethod
     def of(cls, row: CommunicationEvidence) -> "EvidencePublic":
@@ -75,6 +79,10 @@ class EvidencePublic(BaseModel):
             attachment_count=len(row.attachment_manifest or []),
             was_edited=(row.body_composed is not None and row.body_as_sent != row.body_composed),
             has_composed_draft=row.body_composed is not None,
+            content_check_grounds=(
+                row.content_check_grounds.split(",") if row.content_check_grounds else []
+            ),
+            content_check_override_note=row.content_check_override_note,
         )
 
 
