@@ -80,7 +80,7 @@ Each loan file gets its own email address on the customer's domain. MortgageBoss
 | Scheduler | Celery beat runs **inside the worker** (`-B`). Safe only while the worker runs one task; moves to its own service if that changes. Nothing ran on a schedule before step 2 | 10-26 |
 | Old token addresses | **No grace period.** The `imbox` domains never received mail, so no borrower has a working token address | 10-26 |
 | Inbound resolver on `display_id` | Moved to **step 4**, where inbound is first read and it can be tested | 10-26 |
-| Automatic replies to inbound (LP-815 `QUEUED` rows) | **Not sent in step 2.** The worker sends only emails a person approved and handed to it; it never sweeps `QUEUED` rows. Revisit in step 4 | 10-26 |
+| Automatic replies to inbound (LP-815 `QUEUED` rows) | **Not sent in step 2.** The worker sends only emails a person approved and handed to it; it never sweeps `QUEUED` rows. Revisit in step 4. *(Refined 10-30: a person's Send sets `send_requested_at`; the worker and its 5-minute re-enqueue only touch rows that have it.)* | 10-26 |
 | Complaint status | **No new status.** A complaint blocks the address and is logged on the file; the email stays `delivered`. A bounce uses the existing `failed`. FR-19 adjusted | 10-26 |
 | "I've sent it" vs Send | Two different actions. "I've sent it" (processor sent from her own mail app) only records; it never transmits. Send transmits. `send_draft` takes an explicit `transmit` flag, default false | 10-26 |
 | Not in v1 | Reading the processor's inbox (OAuth), automatic AI replies, automatic DNS tools (Entri / Domain Connect), lender portal integration, SES tenant management (revisit at ~10 tenants) | 10-17 |
@@ -576,7 +576,7 @@ Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each tick
 - **Done when:** in dev (docker compose) the worker log shows the heartbeat every 5 minutes and the mail store round-trips a test object; staging task definitions carry `-B` and `MAIL_BUCKET` (Terraform applied). The staging heartbeat is checked in LP-998, once the new code is deployed.
 - **Result:** beat runs inside the worker (`-B --schedule=/tmp/celerybeat-schedule`) in ECS, both compose files and the image CMD; `health.heartbeat` every 5 minutes, dropped if late (`expires: 300`); dev log shows it every 5 minutes. **One-worker rule enforced:** validation in the compute module (0 or 1), the same check in `scripts/deploy`, and the worker service stops the old task before starting the new one on deploy (max 100%, min healthy 0%) so two schedulers never overlap. Only a hand-run `update-service` can break the rule. Mail storage is `get_mail_storage()` next to `get_storage_backend()` (not a separate `mail_store.py`), S3 on `MAIL_BUCKET` with its own key `MAIL_KMS_KEY_ID` taken from the bucket's encryption rule (leaving the key out would have stored mail as SSE-S3); local folder `storage/mail` in dev. Worker may write `outbound/` and read `inbound/` only (LP-986), which is all LP-994 needs. Tests 9359 passed. Applied: api/worker/migrate `:107` with `MAIL_BUCKET` and `-B`. **Pending:** `lp992b.tfplan` adds `MAIL_KMS_KEY_ID` and the worker deployment percentages. Details: `docs/tickets/LP-992.md`.
 
-### LP-993 — Build and send the email
+### LP-993 — Build and send the email — ✅ Done
 - `build_mime(...)` makes the real email with Python's `email` library:
   - From `"<approver name>, <company name>" <lf-…@domain>`; To the recipient; **Cc the approver**; Reply-To the file address.
   - `In-Reply-To` and `References` when replying in a thread.
@@ -586,6 +586,7 @@ Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each tick
 - `SesTransport`: `sesv2.send_email(Content.Raw, ConfigurationSetName)`, returns SES's MessageId. `SmtpTransport` to MailHog for dev. Chosen by `MAIL_TRANSPORT` (now read).
 - Unit tests only; nothing wired to the Send button yet.
 - **Done when:** tests cover headers, CC, threading, HTML/text; a dev script sends one email to MailHog.
+- **Result:** `services/outbound_mime.build_mime` (From with quoted display name, To, Cc, Reply-To, Date, our Message-ID, threading, plain or multipart/alternative; refuses line breaks in headers and anything that isn't exactly one address) and `services/mail_sender` (`SesMailSender`, `SmtpMailSender`, `get_mail_sender()` by `MAIL_TRANSPORT`). **One attempt only** (`total_max_attempts: 1`; the brief's `max_attempts: 1` would have meant two sends). Failures raise `SendError` with `outcome_unknown`: a lost answer means "may have gone" and must never be treated as a clean failure. A small backend HTML-to-text converter for the plain part (a second derivation beside the frontend's; accepted). MailHog check passed; one real SES send to `success@simulator` produced a matching `Delivery` event. Not changed: a provider error message (which can name the recipient) stays in the exception chain, so LP-994 must store it on the row and log only the code. Details: `docs/tickets/LP-993.md`.
 
 ### LP-994 — Sending runs in the worker
 - `send_draft(..., transmit=False)`. Default false = today's record-only behaviour ("I've sent it" and every existing caller). `transmit=True` is allowed only when the company has an active mail domain; otherwise refused with a clear message.
@@ -600,9 +601,16 @@ Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each tick
   - If it finds the row already `sending` (a crash or redelivery): **does not send again**; logs it and leaves it for a person.
 - Rows in `sending` for more than 15 minutes show "Sending not confirmed — check before resending" (LP-997).
 - **Done when:** a test-company Send ends `sent` with an `.eml` in `outbound/`; "I've sent it" never transmits; killing the worker between SES returning and the commit leaves one email, not two.
+- **Refined 2026-10-30 (prompt written), keeping the bullets above:**
+  - New column `send_requested_at`, set only when a person clicks Send. The worker acts only on rows that have it, so LP-815 auto-replies (`QUEUED`, no `send_requested_at`) are never sent.
+  - The worker claims a row with one atomic update (`queued` → `sending` where still `queued`), so a duplicate task or a re-enqueue can never send twice.
+  - A beat job every 5 minutes re-enqueues `queued` rows with `send_requested_at` older than 5 minutes (a lost task or a failed enqueue). Safe because of the atomic claim; never touches auto-replies.
+  - Clean failure (SES refused, no domain, bad data; nothing left) → `failed`, needs unwound, "Not sent: …" on the file. **No "Send again" in step 2:** the needs go back to pending, so the next request picks them up. Outcome unknown (`SendError.outcome_unknown`, or a crash after the SES call) → stays `sending` with "not confirmed"; no unwind, no retry; a person decides.
+  - Rate limit now counts `queued`, `sending`, `sent` and `delivered` (it counted only `sent`, so two quick Sends both passed, and LP-995's `delivered` rows would have dropped out).
+  - The provider's error text is stored in `error_detail` only; logs carry the error code.
 
 ### LP-995 — Delivery events
-- Beat task every minute reads the events queue (`EVENTS_QUEUE_URL`, now read), up to 10 messages, deletes each one after it is handled.
+- Beat task every minute reads the events queue (`EVENTS_QUEUE_URL`, now read), up to 50 messages per run (5 batches of 10), deletes each one after it is committed.
 - Event types the config set publishes: `Delivery`, `Bounce`, `Complaint`, `Reject`, `RenderingFailure`.
   - `Delivery` for the To recipient → `delivered`.
   - `Bounce` → existing `parse_ses_bounce` + `record_delivery_failure`. `bounceSubType = OnAccountSuppressionList` → message on the thread: "Not delivered: this address bounced or complained before."
@@ -654,6 +662,7 @@ Legal hold + retention schedule → AI reply tier 2 → M365 mailbox connector (
 
 ## 18. Log
 
+- 2026-10-30 — LP-993 ✅ (build_mime, SES/SMTP sender, one attempt only, `outcome_unknown`; SES simulator send proved). LP-994 refined: `send_requested_at` marker, atomic claim, safe 5-minute re-enqueue, no Send-again in step 2, rate limit counts queued/sending/delivered.
 - 2026-10-28 — LP-992 ✅ (code; first apply done, `lp992b` pending): Celery beat inside the worker, one-worker rule enforced in Terraform, deploy script and ECS deployment settings; `get_mail_storage()` with its own `MAIL_KMS_KEY_ID`; `INBOUND_BUCKET` → `MAIL_BUCKET`.
 - 2026-10-26 — LP-991 ✅: file address `lf-<display_id>@<company domain>` or none; `company_mail_domains` table; new template versions. §3 address row updated (no grace period). LP-998 gained: find or create the staging test company; clean up old HTML drafts.
 - 2026-10-26 — LP-991 refined: `inbox_domain` / `INBOX_DOMAIN` removal moved to step 4 (inbound resolver and Route B still read it); staging test company linked at LP-998 deploy; templates drop the address phrase when there is none (they currently point borrowers at a token address that never received mail).
