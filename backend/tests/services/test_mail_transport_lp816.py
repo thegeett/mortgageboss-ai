@@ -253,7 +253,7 @@ async def test_a_suppressed_address_reaches_no_transport(
         reason=SuppressionReason.HARD_BOUNCE,
     )
 
-    with pytest.raises(CannotSendError, match="suppressed"):
+    with pytest.raises(CannotSendError, match="is blocked"):
         await send_draft(
             db_session,
             loan_file=loan_file,

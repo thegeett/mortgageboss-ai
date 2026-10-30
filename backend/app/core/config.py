@@ -408,6 +408,10 @@ class Settings(BaseSettings):
     # The SES configuration set every send names, so delivery, bounce and complaint events come back
     # (LP-983, LP-995). The SES sender refuses to send without it.
     ses_configuration_set: str | None = None
+    # LP-995 — the SQS queue SES's delivery events land in (LP-983, raw delivery). Read every minute
+    # by `communications.read_delivery_events`. None locally: there is no SQS in dev, and the job
+    # returns without calling anything.
+    events_queue_url: str | None = None
 
     # Email (SMTP)
     smtp_host: str = "localhost"
@@ -487,6 +491,7 @@ class Settings(BaseSettings):
         "mail_kms_key_id",
         "mail_transport",
         "ses_configuration_set",
+        "events_queue_url",
         mode="before",
     )
     @classmethod

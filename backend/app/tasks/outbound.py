@@ -18,21 +18,26 @@ THE SAFETY RULES, each enforced here rather than assumed:
   `outcome_unknown`, or anything unexpected during the call) the row stays `sending` with a note,
   and nothing is unwound: the borrower may have it.
 
+LP-995 — `read_delivery_events` reads what SES reported about each sent email from the events queue
+and applies it with `services.delivery_events.apply_delivery_event`.
+
 LOGS CARRY IDS AND ERROR CODES ONLY. Never a recipient, subject, body, or the provider's own message,
 which can quote the recipient. `SendError` is caught explicitly, so its chained provider exception
 never reaches a traceback.
 """
 
 import asyncio
+import json
 from datetime import timedelta
 from email.message import EmailMessage
+from typing import Any
 from uuid import UUID
 
 import structlog
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.activity_log import ActivityType
+from app.core.config import settings
 from app.models.base import utcnow
 from app.models.communication import (
     NOT_CONFIRMED_PREFIX,
@@ -44,8 +49,8 @@ from app.models.communication_evidence import CommunicationEvidence, EvidenceEve
 from app.models.company import Company
 from app.models.loan_file import LoanFile
 from app.models.user import User
-from app.services.activity_log import log_activity
-from app.services.bounce_handling import _unwind_requests
+from app.services.bounce_handling import record_not_sent
+from app.services.delivery_events import apply_delivery_event
 from app.services.mail_domain import file_address
 from app.services.mail_sender import MailSender, SendError, get_mail_sender
 from app.services.outbound_mime import build_mime
@@ -130,20 +135,7 @@ async def _build(db: AsyncSession, row: Communication) -> tuple[EmailMessage, Ma
 
 async def _fail(db: AsyncSession, row: Communication, *, reason: str, code: str) -> None:
     """Clean failure: nothing went. The needs go back to pending so the next request asks again."""
-    row.status = CommunicationStatus.FAILED
-    row.error_detail = f"Not sent: {reason}."
-    unwound = await _unwind_requests(db, communication=row)
-    await log_activity(
-        db,
-        loan_file_id=row.loan_file_id,
-        activity_type=ActivityType.COMMUNICATION_FAILED,
-        summary="Not sent",
-        detail={
-            "communication_id": str(row.id),
-            "error_code": code,
-            "needs_items_unwound": unwound,
-        },
-    )
+    await record_not_sent(db, communication=row, reason=reason, code=code)
     await db.commit()
     logger.warning("send_failed", communication_id=str(row.id), error_code=code)
 
@@ -207,7 +199,9 @@ async def _send_communication(db: AsyncSession, communication_id: str) -> str:
 
     # A CRASH BETWEEN HERE AND THE COMMIT leaves the row `sending` with no MessageId. That is the
     # "not confirmed" case by design: the claim is already committed, so no later task can send it
-    # again, and a person checks (LP-995's delivery event, or LP-997's "not confirmed" notice).
+    # again, and a person checks (LP-997's "not confirmed" notice). LP-995's delivery events cannot
+    # settle it: they match on the MessageId, which this crash never stored, so they come back
+    # `unmatched`.
     row.external_message_id = provider_id
     row.status = CommunicationStatus.SENT
     row.sent_at = utcnow()
@@ -268,3 +262,91 @@ async def _run_requeue() -> list[str]:
 def requeue_stale() -> int:
     """Beat, every 5 minutes: hand stale queued Sends to the worker again."""
     return len(run_async(_run_requeue()))
+
+
+#: LP-995 — the events queue is read in batches of ten (the SQS maximum), at most five per run, so
+#: one run handles up to 50 events and finishes well inside its one-minute interval.
+EVENTS_BATCH = 10
+EVENTS_MAX_BATCHES = 5
+
+
+def _events_client() -> Any:
+    import boto3
+    from botocore.config import Config
+
+    return boto3.client(
+        "sqs",
+        region_name=settings.s3_region,
+        config=Config(connect_timeout=5, read_timeout=10, retries={"total_max_attempts": 2}),
+    )
+
+
+async def _read_delivery_events(db: AsyncSession, client: Any, queue_url: str) -> int:
+    """Apply each event and delete it; leave anything that fails for SQS to redeliver.
+
+    COMMIT, THEN DELETE. A crash between the two redelivers an event already applied, and the
+    handler answers `duplicate`. The other order would lose an event.
+
+    NOT DELETED: a body that is not JSON, and any event the handler raises on. Each is rolled back
+    and logged by id and error class, and the rest of the batch goes on. After three receives SQS
+    moves it to the dead-letter queue, which alarms (LP-987). `unmatched`, `ignored` and `duplicate`
+    are handled, so they are deleted.
+
+    AN SQS ERROR DOES NOT END THE BATCH. A failed delete is logged and the next message handled: the
+    event is committed, so its redelivery answers `duplicate`. A failed receive ends the run; the
+    next one, a minute later, tries again.
+    """
+    handled = 0
+    for _ in range(EVENTS_MAX_BATCHES):
+        try:
+            received = await asyncio.to_thread(
+                client.receive_message,
+                QueueUrl=queue_url,
+                MaxNumberOfMessages=EVENTS_BATCH,
+                WaitTimeSeconds=1,
+            )
+        except Exception as exc:
+            logger.warning("delivery_events_receive_failed", error=type(exc).__name__)
+            break
+        messages = received.get("Messages") or []
+        for message in messages:
+            sqs_id = message.get("MessageId")
+            try:
+                await apply_delivery_event(db, json.loads(message["Body"]))
+                await db.commit()
+            except Exception as exc:
+                await db.rollback()
+                logger.warning(
+                    "delivery_event_failed", sqs_message_id=sqs_id, error=type(exc).__name__
+                )
+                continue
+            try:
+                await asyncio.to_thread(
+                    client.delete_message,
+                    QueueUrl=queue_url,
+                    ReceiptHandle=message["ReceiptHandle"],
+                )
+            except Exception as exc:
+                logger.warning(
+                    "delivery_event_delete_failed", sqs_message_id=sqs_id, error=type(exc).__name__
+                )
+                continue
+            handled += 1
+        if len(messages) < EVENTS_BATCH:
+            break
+    return handled
+
+
+async def _run_read_delivery_events(queue_url: str) -> int:
+    async with task_session() as db:
+        return await _read_delivery_events(db, _events_client(), queue_url)
+
+
+@celery_app.task(base=BaseTask, name="communications.read_delivery_events")  # type: ignore[untyped-decorator]
+def read_delivery_events() -> int:
+    """Beat, every minute: apply what SES reported about sent emails (LP-995)."""
+    queue_url = settings.events_queue_url
+    if not queue_url:
+        logger.debug("delivery_events_not_configured")
+        return 0
+    return run_async(_run_read_delivery_events(queue_url))

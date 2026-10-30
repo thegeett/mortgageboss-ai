@@ -1,0 +1,74 @@
+{
+  "eventType": "Bounce",
+  "mail": {
+    "timestamp": "2026-10-21T02:56:11.091Z",
+    "source": "lf-hwkm@mail.staging.mortgageboss.ai",
+    "sourceArn": "arn:aws:ses:us-east-1:123456789012:identity/mail.staging.mortgageboss.ai",
+    "sendingAccountId": "123456789012",
+    "messageId": "MESSAGE_ID",
+    "destination": [
+      "TO_ADDRESS",
+      "CC_ADDRESS"
+    ],
+    "headersTruncated": false,
+    "headers": [
+      {
+        "name": "From",
+        "value": "\"Pat Processor, Summit\" <lf-hwkm@mail.staging.mortgageboss.ai>"
+      },
+      {
+        "name": "To",
+        "value": "TO_ADDRESS"
+      },
+      {
+        "name": "Cc",
+        "value": "CC_ADDRESS"
+      },
+      {
+        "name": "Subject",
+        "value": "SUBJECT_TEXT"
+      }
+    ],
+    "commonHeaders": {
+      "from": [
+        "\"Pat Processor, Summit\" <lf-hwkm@mail.staging.mortgageboss.ai>"
+      ],
+      "to": [
+        "TO_ADDRESS"
+      ],
+      "cc": [
+        "CC_ADDRESS"
+      ],
+      "messageId": "MESSAGE_ID",
+      "subject": "SUBJECT_TEXT"
+    },
+    "tags": {
+      "ses:configuration-set": [
+        "mbai-staging-outbound"
+      ],
+      "ses:source-ip": [
+        "10.0.0.1"
+      ],
+      "ses:from-domain": [
+        "mail.staging.mortgageboss.ai"
+      ],
+      "ses:caller-identity": [
+        "mbai-staging-worker"
+      ]
+    }
+  },
+  "bounce": {
+    "feedbackId": "0100019a0b0c0d0e-feedback-000000",
+    "bounceType": "Permanent",
+    "bounceSubType": "OnAccountSuppressionList",
+    "bouncedRecipients": [
+      {
+        "emailAddress": "RECIPIENT",
+        "action": "failed",
+        "diagnosticCode": "Amazon SES did not send the message to this address because it is on the suppression list for your account. For more information about removing addresses from the suppression list, see the Amazon SES Developer Guide at https://docs.aws.amazon.com/ses/latest/DeveloperGuide/sending-email-suppression-list.html"
+      }
+    ],
+    "timestamp": "2026-10-21T02:56:12.219Z",
+    "reportingMTA": "dns; amazonses.com"
+  }
+}

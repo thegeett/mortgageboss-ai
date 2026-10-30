@@ -172,9 +172,10 @@ async def test_a_hard_bounce_unwinds_the_request(db_session: AsyncSession) -> No
     assert need.status is NeedsItemStatus.PENDING
 
 
-async def test_a_soft_bounce_does_not_unwind(db_session: AsyncSession) -> None:
-    """The control, and the reason the class matters. A full mailbox will accept mail later; clearing
-    the clock would make the system ask again immediately and forget it had ever asked."""
+async def test_a_soft_bounce_unwinds_too(db_session: AsyncSession) -> None:
+    """LP-995 — changed from "does not unwind". SES reports a temporary bounce only after its own
+    retries, so nothing will try again: the borrower never got the request, and the clock must not
+    run against it. The class still decides the BLOCK (`test_a_soft_bounce_does_not_suppress`)."""
     _company, _loan_file, _actor, need, _sent = await _file_with_sent_request(db_session)
 
     failure = parse_ses_bounce(
@@ -187,8 +188,8 @@ async def test_a_soft_bounce_does_not_unwind(db_session: AsyncSession) -> None:
     )[0]
     await record_delivery_failure(db_session, failure=failure)
 
-    assert need.requested_at is not None
-    assert need.status is NeedsItemStatus.REQUESTED
+    assert need.requested_at is None
+    assert need.status is NeedsItemStatus.PENDING
 
 
 async def test_a_need_satisfied_another_way_is_not_dragged_backwards(
@@ -400,7 +401,7 @@ async def test_sending_to_a_suppressed_address_is_refused(db_session: AsyncSessi
         db_session, loan_file=loan_file, needs=[second_need], actor_user_id=actor
     )
 
-    with pytest.raises(CannotSendError, match="suppressed"):
+    with pytest.raises(CannotSendError, match="is blocked"):
         await send_draft(
             db_session,
             loan_file=loan_file,
@@ -487,9 +488,10 @@ async def test_a_hard_bounce_also_unwinds_the_finding_that_asked(db_session: Asy
     assert "docs_requested" not in (finding.details or {})  # and so was the finding
 
 
-async def test_a_soft_bounce_leaves_both_records_alone(db_session: AsyncSession) -> None:
-    """The control. A fix that cleared markers unconditionally would satisfy the test above while
-    erasing the request record every time a mailbox was briefly full."""
+async def test_a_soft_bounce_unwinds_both_records(db_session: AsyncSession) -> None:
+    """LP-995 — changed from "leaves both records alone": a soft bounce now unwinds, and the two
+    records must still agree. The control against clearing markers unconditionally is
+    `test_a_marker_for_another_need_is_not_cleared`."""
     _company, loan_file, actor, need, _sent = await _file_with_sent_request(db_session)
 
     finding = Finding(
@@ -520,8 +522,8 @@ async def test_a_soft_bounce_leaves_both_records_alone(db_session: AsyncSession)
 
     await db_session.refresh(need)
     await db_session.refresh(finding)
-    assert need.status is NeedsItemStatus.REQUESTED
-    assert "docs_requested" in (finding.details or {})
+    assert need.status is NeedsItemStatus.PENDING
+    assert "docs_requested" not in (finding.details or {})
 
 
 async def test_a_marker_for_another_need_is_not_cleared(db_session: AsyncSession) -> None:

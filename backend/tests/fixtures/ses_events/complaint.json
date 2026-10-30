@@ -1,0 +1,73 @@
+{
+  "eventType": "Complaint",
+  "mail": {
+    "timestamp": "2026-10-21T02:56:11.091Z",
+    "source": "lf-hwkm@mail.staging.mortgageboss.ai",
+    "sourceArn": "arn:aws:ses:us-east-1:123456789012:identity/mail.staging.mortgageboss.ai",
+    "sendingAccountId": "123456789012",
+    "messageId": "MESSAGE_ID",
+    "destination": [
+      "TO_ADDRESS",
+      "CC_ADDRESS"
+    ],
+    "headersTruncated": false,
+    "headers": [
+      {
+        "name": "From",
+        "value": "\"Pat Processor, Summit\" <lf-hwkm@mail.staging.mortgageboss.ai>"
+      },
+      {
+        "name": "To",
+        "value": "TO_ADDRESS"
+      },
+      {
+        "name": "Cc",
+        "value": "CC_ADDRESS"
+      },
+      {
+        "name": "Subject",
+        "value": "SUBJECT_TEXT"
+      }
+    ],
+    "commonHeaders": {
+      "from": [
+        "\"Pat Processor, Summit\" <lf-hwkm@mail.staging.mortgageboss.ai>"
+      ],
+      "to": [
+        "TO_ADDRESS"
+      ],
+      "cc": [
+        "CC_ADDRESS"
+      ],
+      "messageId": "MESSAGE_ID",
+      "subject": "SUBJECT_TEXT"
+    },
+    "tags": {
+      "ses:configuration-set": [
+        "mbai-staging-outbound"
+      ],
+      "ses:source-ip": [
+        "10.0.0.1"
+      ],
+      "ses:from-domain": [
+        "mail.staging.mortgageboss.ai"
+      ],
+      "ses:caller-identity": [
+        "mbai-staging-worker"
+      ]
+    }
+  },
+  "complaint": {
+    "feedbackId": "0100019a0b0c0d0e-complaint-000000",
+    "complaintSubType": null,
+    "complainedRecipients": [
+      {
+        "emailAddress": "RECIPIENT"
+      }
+    ],
+    "timestamp": "2026-10-21T03:10:00.000Z",
+    "userAgent": "Mozilla/5.0",
+    "complaintFeedbackType": "abuse",
+    "arrivalDate": "2026-10-21T03:09:58.000Z"
+  }
+}

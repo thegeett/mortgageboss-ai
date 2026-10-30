@@ -337,7 +337,8 @@ async def send_draft(
     if recipient.strip():
         if await is_suppressed(db, company_id=loan_file.company_id, address=recipient):
             raise CannotSendError(
-                f"{recipient} is suppressed — an earlier message to it bounced permanently. "
+                # LP-995 — one message for both reasons: a complaint blocks the address too.
+                f"{recipient} is blocked: an earlier email to it bounced or was marked as spam. "
                 "Confirm the address with the borrower before sending again."
             )
         await _refuse_if_rate_limited(db, company_id=loan_file.company_id, recipient=recipient)

@@ -155,7 +155,7 @@ async def test_refused_for_a_suppressed_address(db_session: AsyncSession) -> Non
         address=TO,
         reason=SuppressionReason.HARD_BOUNCE,
     )
-    with pytest.raises(CannotSendError, match="suppressed"):
+    with pytest.raises(CannotSendError, match="is blocked"):
         await _send(db_session, ready, transmit=True)
 
 

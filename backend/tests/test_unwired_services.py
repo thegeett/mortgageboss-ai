@@ -78,8 +78,6 @@ KNOWN_UNWIRED = {
     "create_communication",
     # Phase 4 inbound/bounce handling: reached once SES is out of the sandbox and the webhook is
     # wired, which INFRA-2/3 gate on a human.
-    "parse_ses_bounce",
-    "record_delivery_failure",
     "record_auto_reply",
     "record_received",
     "record_delivery_failed",

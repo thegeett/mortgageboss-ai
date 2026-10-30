@@ -111,5 +111,12 @@ celery_app.conf.update(
             "schedule": 300.0,
             "options": {"expires": 300},
         },
+        # LP-995 — what SES reported about sent emails (delivered, bounced, complained, rejected).
+        # Dropped if late: the next run reads the same queue.
+        "read-delivery-events": {
+            "task": "communications.read_delivery_events",
+            "schedule": 60.0,
+            "options": {"expires": 60},
+        },
     },
 )

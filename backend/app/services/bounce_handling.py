@@ -15,7 +15,8 @@ Codes", read 2026-09-07:
     5.XXX.XXX  Permanent Failure — "not likely to be resolved by resending the message in the
                current form."
 
-So a `5.x.x` suppresses the address and a `4.x.x` does not. Getting that backwards either abandons a
+So a `5.x.x` suppresses the address and a `4.x.x` does not. (LP-995: both unwind the request; see
+`record_delivery_failure`.) Getting that backwards either abandons a
 borrower over a full mailbox or hammers a dead one forever.
 
 AND THE SUPPRESSION HAS TO REACH THE REMINDER CLOCK. This is the failure the plan names: LP-814
@@ -95,16 +96,26 @@ def classify_status(status: str | None, *, diagnostic: str | None = None) -> Bou
     return BounceClass.UNKNOWN
 
 
+#: LP-995 — SES's own verdict, `bounce.bounceType`, read before any status code. `Undetermined`
+#: (or no type) is absent on purpose: it falls back to `classify_status`.
+_SES_BOUNCE_TYPE = {"Permanent": BounceClass.PERMANENT, "Transient": BounceClass.TRANSIENT}
+
+
 def parse_ses_bounce(event: dict[str, Any]) -> tuple[DeliveryFailure, ...]:
     """Every failed recipient in one SES bounce notification.
 
     ONE EVENT CAN CARRY SEVERAL RECIPIENTS, each with its own status. Taking only the first would
     silently leave the others un-suppressed — and they are the ones a second send would bounce off
     again.
+
+    LP-995 — THE CLASS COMES FROM SES'S `bounceType` FIRST, the status code only when SES says
+    `Undetermined`. An `OnAccountSuppressionList` bounce carries no usable status code, so reading
+    the code alone left it UNKNOWN and the address unblocked; SES calls it `Permanent`.
     """
     bounce = event.get("bounce") or {}
     mail = event.get("mail") or {}
     message_id = mail.get("messageId")
+    ses_class = _SES_BOUNCE_TYPE.get(bounce.get("bounceType") or "")
     failures: list[DeliveryFailure] = []
     for recipient in bounce.get("bouncedRecipients") or []:
         address = (recipient.get("emailAddress") or "").strip().lower()
@@ -118,7 +129,7 @@ def parse_ses_bounce(event: dict[str, Any]) -> tuple[DeliveryFailure, ...]:
                 recipient=address,
                 status_code=status,
                 diagnostic=diagnostic,
-                bounce_class=classify_status(status, diagnostic=diagnostic),
+                bounce_class=ses_class or classify_status(status, diagnostic=diagnostic),
             )
         )
     return tuple(failures)
@@ -298,19 +309,69 @@ async def _clear_finding_markers(
             finding.details = details
 
 
+async def record_not_sent(
+    db: AsyncSession, *, communication: Communication, reason: str, code: str
+) -> int:
+    """A clean failure: the email never left. ``flush`` only; returns how many needs were unwound.
+
+    Shared by LP-994's worker (the provider refused it before sending) and LP-995's `Reject` and
+    `Rendering Failure` events (SES refused it after accepting the call). Both mean the borrower
+    never received anything, so the needs go back to pending and the next request asks again.
+    """
+    communication.status = CommunicationStatus.FAILED
+    communication.error_detail = f"Not sent: {reason}."
+    unwound = await _unwind_requests(db, communication=communication)
+    await log_activity(
+        db,
+        loan_file_id=communication.loan_file_id,
+        activity_type=ActivityType.COMMUNICATION_FAILED,
+        summary="Not sent",
+        detail={
+            "communication_id": str(communication.id),
+            "error_code": code,
+            "needs_items_unwound": unwound,
+        },
+    )
+    return unwound
+
+
+#: What the file's activity says for each bounce class. LP-995: SES retries a temporary failure
+#: itself before reporting it, so by the time we hear of it nothing will be retried.
+_BOUNCE_SUMMARY = {
+    BounceClass.PERMANENT: "A document request did not reach the borrower",
+    BounceClass.TRANSIENT: (
+        "A document request was not delivered because of a temporary problem at the recipient's "
+        "mail server"
+    ),
+    BounceClass.UNKNOWN: (
+        "A document request was not delivered, for a reason the mail server did not make clear"
+    ),
+}
+
+
 async def record_delivery_failure(
-    db: AsyncSession, *, failure: DeliveryFailure
+    db: AsyncSession, *, failure: DeliveryFailure, communication: Communication | None = None
 ) -> Communication | None:
     """Apply one provider report. Returns the communication it was about, or None.
 
     Returns None rather than raising when the message is unknown to us — SES publishes events for
     everything sent through the configuration set, and an event we cannot match is not an error.
+
+    LP-995 — ``communication``: the row the caller already matched (outbound, not deleted). Given,
+    it is used as is, so the failure lands on the email the caller checked.
+
+    LP-995 — EVERY BOUNCE UNWINDS; ONLY A PERMANENT ONE BLOCKS THE ADDRESS. LP-819 left a temporary
+    bounce's request in place because "a full mailbox will accept mail later". SES has already
+    retried by the time it reports one, so nothing will try again: the borrower never got the
+    request, and leaving `requested_at` set runs the reminder clock against it. The address stays
+    usable, since the mailbox may work for the next request.
     """
-    if not failure.message_id:
-        return None
-    communication = await db.scalar(
-        select(Communication).where(Communication.external_message_id == failure.message_id)
-    )
+    if communication is None:
+        if not failure.message_id:
+            return None
+        communication = await db.scalar(
+            select(Communication).where(Communication.external_message_id == failure.message_id)
+        )
     if communication is None:
         logger.info("delivery_event_unmatched", bounce_class=failure.bounce_class.value)
         return None
@@ -321,7 +382,6 @@ async def record_delivery_failure(
     # never logged, and the readonly view already drops it.
     communication.error_detail = failure.diagnostic or failure.status_code
 
-    unwound = 0
     if failure.bounce_class is BounceClass.PERMANENT and communication.loan_file_id:
         loan_file = await db.get(LoanFile, communication.loan_file_id)
         if loan_file is not None:
@@ -333,17 +393,13 @@ async def record_delivery_failure(
                 status_code=failure.status_code,
                 diagnostic=failure.diagnostic,
             )
-        unwound = await _unwind_requests(db, communication=communication)
+    unwound = await _unwind_requests(db, communication=communication)
 
     await log_activity(
         db,
         loan_file_id=communication.loan_file_id,
         activity_type=ActivityType.COMMUNICATION_FAILED,
-        summary=(
-            "A document request did not reach the borrower"
-            if failure.bounce_class is BounceClass.PERMANENT
-            else "A document request was delayed and will be retried"
-        ),
+        summary=_BOUNCE_SUMMARY[failure.bounce_class],
         detail={
             "communication_id": str(communication.id),
             "bounce_class": failure.bounce_class.value,
@@ -362,5 +418,6 @@ __all__ = [
     "is_suppressed",
     "parse_ses_bounce",
     "record_delivery_failure",
+    "record_not_sent",
     "suppress_address",
 ]
