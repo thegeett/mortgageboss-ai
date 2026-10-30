@@ -582,7 +582,7 @@ Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each tick
   - `In-Reply-To` and `References` when replying in a thread.
   - HTML bodies as multipart/alternative with a plain-text part; plain bodies as text. Footer tag already in the body.
   - No attachments (unchanged rule).
-- Transport interface takes the finished MIME: `send_raw(mime_bytes, sender, recipients) -> SentResult`.
+- Transport interface takes the finished MIME: `send_raw(mime_bytes, sender, recipients) -> SentResult`. *(Refined 10-28: a separate small sender — `send(message) -> provider message id`, picked by `MAIL_TRANSPORT` — so the old mailbox-connection registry is left alone until LP-994 rewires the send path. No automatic retries in the SES call, so a send is never repeated silently.)*
 - `SesTransport`: `sesv2.send_email(Content.Raw, ConfigurationSetName)`, returns SES's MessageId. `SmtpTransport` to MailHog for dev. Chosen by `MAIL_TRANSPORT` (now read).
 - Unit tests only; nothing wired to the Send button yet.
 - **Done when:** tests cover headers, CC, threading, HTML/text; a dev script sends one email to MailHog.
