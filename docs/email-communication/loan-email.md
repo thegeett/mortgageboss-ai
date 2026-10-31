@@ -26,7 +26,7 @@ Each loan file gets its own email address on the customer's domain. MortgageBoss
 2. Every inbound message is shown on the file. Nothing is acted on silently.
 3. Attachments go through the existing document intake, same as a manual upload.
 4. Customer's root domain is never touched. One NS record delegates a subdomain to us.
-5. Pre-send check on every outbound — template, human or AI: no rates, APRs, approval/denial wording, account or routing numbers. Blocks with a reason; override needs a note.
+5. ~~Pre-send check on every outbound — template, human or AI: no rates, APRs, approval/denial wording, account or routing numbers. Blocks with a reason; override needs a note.~~ **Changed 2026-10-30: deferred to a later iteration — no app check on what a processor writes in v1.** Step 2 ships sending first and adds safeguards iteratively. For now she sends whatever she writes, as she would from her own mail app, and is responsible for it. What stays: AI-written text still passes the drafter's own deterministic guard (`ai/email_draft.py`) before a processor ever sees it; templates are fixed text reviewed in code; every send records the exact text and the approver (evidence record, `.eml` copy).
 6. The AI never has a tool that sends, changes document status, or reads another file. It returns a structured suggestion; code decides.
 7. Inbound routing uses the SES envelope recipients (`receipt.recipients`), never the To/Cc headers.
 8. Only the worker sends mail. The API queues a send; it never calls SES itself.
@@ -83,6 +83,7 @@ Each loan file gets its own email address on the customer's domain. MortgageBoss
 | Automatic replies to inbound (LP-815 `QUEUED` rows) | **Not sent in step 2.** The worker sends only emails a person approved and handed to it; it never sweeps `QUEUED` rows. Revisit in step 4. *(Refined 10-30: a person's Send sets `send_requested_at`; the worker and its 5-minute re-enqueue only touch rows that have it.)* | 10-26 |
 | Complaint status | **No new status.** A complaint blocks the address and is logged on the file; the email stays `delivered`. A bounce uses the existing `failed`. FR-19 adjusted | 10-26 |
 | "I've sent it" vs Send | Two different actions. "I've sent it" (processor sent from her own mail app) only records; it never transmits. Send transmits. `send_draft` takes an explicit `transmit` flag, default false | 10-26 |
+| Pre-send content check | **Deferred to a later iteration (2026-10-30)** — not rejected; v1 ships sending first and adds safeguards iteratively. Built in LP-996 and reverted. Measured, it blocked ordinary requests: every bank, investment or retirement statement request (catalog text says "the account number"), every borrower condition email ("The lender approved your loan with a few conditions"), title-commitment and wire-instruction requests to title companies, and any percentage ("100% of the gift funds"). For v1 the processor sends what she writes; AI drafts keep the drafter's guard. When it comes back, start from `docs/tickets/LP-996.md` (code, measurement and the misfire list) and fix the misfires first, or ship it as a warning rather than a block | 10-30 |
 | Not in v1 | Reading the processor's inbox (OAuth), automatic AI replies, automatic DNS tools (Entri / Domain Connect), lender portal integration, SES tenant management (revisit at ~10 tenants) | 10-17 |
 
 ## 4. Environments and addresses
@@ -204,7 +205,7 @@ Shared reputation: all tenants send through one SES account; one tenant's bounce
 
 **Forward of a plain reply** — From "John Smith via ABC Mortgage" `<lf-y36e@…>`, To `priya@abcmortgage.com`, subject unchanged, original body and attachments, Reply-To = John + file address, one-line header: "Reply from John Smith on LF-Y36E — reply normally, or open the file."
 
-None contain rates, amounts, approval language or account numbers — they pass the pre-send check by construction.
+None contain rates, amounts or account numbers. *(The pre-send check was dropped 10-30; see rule 5.)*
 
 ## 9. What already exists in the repo (checked 2026-10-19)
 
@@ -244,7 +245,7 @@ Found while grooming step 1 (2026-10-20): the receipt rule set `kms_key_arn` on 
 - `SesTransport(MailTransport)` (`sesv2 send_email`, config set), registered for `TOKEN_ADDRESS`; `SmtpTransport` for dev. *(Changed 10-26: chosen by the company's active mail domain, not by a mailbox connection — LP-991, LP-993.)*
 - `send_draft` queues a Celery task; the worker sends. Outbox `queued → sending → sent`; MessageId persisted on return; stuck `sending` never blind-retried.
 - Worker writes the exact MIME to `outbound/<communication_id>.eml` before calling SES; path stored on `Communication`.
-- Pre-send content check next to the suppression check.
+- Pre-send content check next to the suppression check. *(Deferred 10-30 to a later iteration — LP-996 reverted; see rule 5.)*
 - CC processor, Reply-To file address, threading headers in `build_outbound`.
 - Events consumer updating `Communication.status`; bounces on the thread.
 - Suppressed addresses are never silent. A send to an address on SES's account suppression list is **accepted by the API** (MessageId returned) and only reported afterwards as a Bounce event with `bounceSubType = OnAccountSuppressionList`. The events consumer marks that email "Not delivered: this address bounced or complained before" on the thread, so the processor can ask for another address.
@@ -296,7 +297,7 @@ Demo after step 2. ~5–6 weeks solo for the functional pilot.
 |---|---|---|---|
 | 1 | Reminders, "we received your X", upload-link resend | Template, automatic | v1 |
 | 2 | Routine borrower question → AI drafts from a tenant-approved known-answers list | AI drafts; processor taps **Send** (one click, from the forwarded email or the app) | v1.5 |
-| 3 | Same as tier 2, sent automatically on a high-confidence match that passes the content check | AI, automatic | After tier 2 shows ≥ 95% of drafts sent unchanged over 4–6 weeks, per tenant; tenant admin turns it on |
+| 3 | Same as tier 2, sent automatically on a high-confidence match that passes the drafter's deterministic guard | AI, automatic | After tier 2 shows ≥ 95% of drafts sent unchanged over 4–6 weeks, per tenant; tenant admin turns it on |
 | 4 | Status, timelines, lender decisions, rates, amounts, eligibility | Human only | Never automatic |
 
 Every AI draft, sent or edited, is logged with its edit diff — the evidence for the tier-3 gate. Pausing a file pauses tier 3 on that file. Tier-3 replies carry the automated footer.
@@ -316,7 +317,7 @@ Every AI draft, sent or edited, is logged with its edit diff — the evidence fo
 
 ## 13. Email injection — risks and mitigations
 
-**Prompt injection:** the AI has no tool that sends, mutates state or reads other files (rule 6) — the control that matters. PDFs rasterized before extraction. Content passed as labelled untrusted data. Outbound content check on every send including AI drafts. Red-team test in step 6, repeated after any prompt change.
+**Prompt injection:** the AI has no tool that sends, mutates state or reads other files (rule 6) — the control that matters. PDFs rasterized before extraction. Content passed as labelled untrusted data. AI drafts pass the drafter's deterministic guard (rates, amounts, approval wording, routing details) before a processor sees them; there is no check on what a processor writes herself (rule 5, changed 10-30). Red-team test in step 6, repeated after any prompt change.
 
 **Sender spoofing:** SPF/DKIM/DMARC verdicts stored and shown as a badge. Known-contact matching and processor-forward detection use the authenticated sender. A forged processor forward failing DMARC is treated as unknown. Unknown-sender attachments never enter intake without a click. Routing uses envelope recipients, so a forged `To:` cannot steer a message onto another loan.
 
@@ -340,7 +341,7 @@ Every AI draft, sent or edited, is logged with its edit diff — the evidence fo
 - FR-15 Reply on any thread message stays in the thread.
 - FR-16 Every outbound: From file address with processor display name, Reply-To file address, CC processor.
 - FR-17 Every document request includes a signed, scoped, 14-day upload link.
-- FR-18 Deterministic content check on every outbound; blocked sends show the reason; override needs a note and is logged.
+- FR-18 ~~Deterministic content check on every outbound; blocked sends show the reason; override needs a note and is logged.~~ Deferred 10-30 to a later iteration (rule 5). AI-composed text keeps the drafter's guard.
 - FR-19 Outbound status `queued → sending → sent → delivered / failed`; bounces shown on thread and file; a complaint blocks the address and is logged on the file (no separate status, decided 10-26).
 - FR-20 Every outbound records template id + version, policy version, recipient authorization, delivery status.
 - FR-21 Requirement states `requested → received → validating → satisfied | rejected`; reminders key off state.
@@ -554,7 +555,7 @@ Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each tick
 3. **Auto-reply risk.** LP-815 stores automatic replies as `QUEUED`, "for a transport to pick up". A worker that sent everything queued would send them unapproved.
 4. **Transport is chosen by mailbox connection,** but SES sending depends on the company's mail domain, which doesn't exist until step 3.
 5. **No `sending` status** and no column for the `.eml` path.
-6. **No pre-send content check** anywhere (rule 5).
+6. **No pre-send content check** anywhere (rule 5). *(Resolved 10-30 by dropping the check; see rule 5.)*
 7. `MAIL_TRANSPORT`, `EVENTS_QUEUE_URL`, `SES_CONFIGURATION_SET` are set on the tasks but not read.
 
 ### LP-991 — Company mail domain and file address — ✅ Done
@@ -610,8 +611,8 @@ Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each tick
   - The provider's error text is stored in `error_detail` only; logs carry the error code.
 - **Result:** migration `4b7e2c9d1a63` (`sending`, `send_requested_at`, `raw_storage_path`); `send_draft(transmit=…)`; worker tasks `communications.send` and `communications.requeue_stale` (beat, 5 min). Dev: one Send → one email in MailHog with the right headers and the `.eml` saved; "I've sent it" sends nothing; a company without a domain is refused; worker stopped then started → sent exactly once. Review fixes: unwinding skips needs another sent email also asked for (bounce path too); any unexpected error before the SES call is a clean failure, not "not confirmed"; rate limit compares addresses case- and space-insensitively; `raw_storage_path` kept out of the readonly view; "Sending was not confirmed" shown on the timeline. **Found:** `FILE_ADDRESSES_ENABLED` (added in LP-991's review) is off everywhere, and while it is off no file has an address, so every Send is refused — LP-998 turns it on in staging. Left for LP-997: condition-draft screens read only `sent`, so a queued or delivered condition email shows as "draft". Design point kept: the activity log says "Sent a document request" at queue time. Details: `docs/tickets/LP-994.md`.
 
-### LP-995 — Delivery events
-- Beat task every minute reads the events queue (`EVENTS_QUEUE_URL`, now read), up to 10 messages, deletes each one after it is handled.
+### LP-995 — Delivery events — ✅ Done
+- Beat task every minute reads the events queue (`EVENTS_QUEUE_URL`, now read), up to 50 messages per run (5 batches of 10), deletes each one after it is committed.
 - Event types the config set publishes: `Delivery`, `Bounce`, `Complaint`, `Reject`, `RenderingFailure`.
   - `Delivery` for the To recipient → `delivered`.
   - `Bounce` → existing `parse_ses_bounce` + `record_delivery_failure`. `bounceSubType = OnAccountSuppressionList` → message on the thread: "Not delivered: this address bounced or complained before."
@@ -628,19 +629,28 @@ Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each tick
   - Handling the same event twice changes nothing (SQS can deliver twice). A late Delivery never turns a `failed` email back into `delivered`.
   - `Reject` and `Rendering Failure` mean SES did not send it: clean failure, like LP-994's.
   - Dev has no SQS: a dev script feeds a sample event into the same handler. The real queue is proven in LP-998.
+- **Result:** `services/delivery_events.apply_delivery_event` + beat job `communications.read_delivery_events` (every minute, up to 50 messages). Delivered, permanent bounce (blocked, needs back), `OnAccountSuppressionList` (clear message, blocked), temporary bounce (failed, not blocked, needs back), complaint (blocked, status unchanged), Reject/Rendering Failure (failed). To recipient only; duplicates change nothing; a Delivery after a temporary bounce turns it `delivered` (needs stay pending, noted on the file); a permanent bounce is never undone. A message with no `eventType` is left for the DLQ (so the alarm fires) instead of being dropped. Dev script refuses to run outside development. Tests 9437 passed. Details: `docs/tickets/LP-995.md`.
 
-### LP-996 — Pre-send content check
+### LP-996 — Pre-send content check — ⏸ Deferred (built, then reverted 2026-10-30; later iteration)
 - Deterministic, in `send_draft`, for `transmit=True` sends: blocks interest rates and APRs, approval/denial wording ("approved", "denied", "clear to close"), and account or routing numbers (long digit runs, 9-digit routing numbers).
 - Blocked → clear reason shown. Override needs a note; the note goes on the evidence record and the activity log.
 - Every existing template is run through it in a test: none may be blocked.
 - **Done when:** each blocked category has a test; all templates pass; an override is logged with its note.
+- **Refined 2026-10-30 (prompt written), keeping the bullets above:**
+  - **Reuse, don't rewrite.** The AI drafter already has a deterministic list (`ai/email_draft.py`, `regulatory_grounds`). The send check uses the three grounds rule 5 names, imported from there: `rate`, `commitment` (approved, denied, cleared to close…) and `payment_routing` (9-digit routing numbers, "account number", "wire instructions").
+  - Not used for human sends: money amounts, Reg Z triggering terms, settlement-service recommendations, "invented instruction" and internal identifiers. They exist to stop the AI inventing things; on a processor's own email or a document list they would block ordinary sentences ("the $10,000 deposit", "gift letter for the down payment", "all pages").
+  - Checks the final subject and body (HTML read as text) of `transmit=true` sends only.
+  - Blocked → a structured refusal listing each reason in plain words. Override = the same Send with a note (at least 10 characters), recorded on the evidence record (two new columns) and the activity log.
+  - Measure before trusting it: run the check over every existing draft and sent email in dev and report how many would be blocked and why. Condition emails quote the lender's wording ("prior to approval"), so `commitment` may fire there; the numbers decide, not a guess.
+- **Result: reverted.** Built and tested (commit `cfabef52`, then reverted in full; dev database downgraded to `4b7e2c9d1a63`). The measurement showed it would block ordinary emails: every bank/investment/retirement statement request (`payment_routing` on the catalog's "account number"), every borrower condition email (`commitment` on "The lender approved your loan with a few conditions"), title-commitment and wire-instruction requests to title companies, the DI-01 condition ("approved list"), and any percentage. Decision: deferred to a later iteration, so step 2 ships sending first (rule 5 changed for v1). `docs/tickets/LP-996.md` keeps the record, including the misfire list, for anyone who revisits this.
+- **Side finding kept open:** processor free text (finding notes, the legal-hold reason) already reaches `readonly.activity_logs` through activity `detail`. Worth its own ticket.
 
 ### LP-997 — Send button
 - Message dialog and condition-draft dialog:
   - Company has an active domain → **Send** is the main button, with "From lf-…@… · CC you". Copy and "I've sent it" hidden.
   - No domain → unchanged (copy, open in mail app, "I've sent it").
 - Status on the thread: queued, sending, sent, delivered, failed (with the reason), and "Sending not confirmed" after 15 minutes.
-- Content-check block shown with its reason and an override-with-note option.
+- ~~Content-check block shown with its reason and an override-with-note option.~~ *(Deferred with LP-996.)*
 - **Done when:** both dialogs show the right buttons for test and pilot companies; each status renders.
 
 ### LP-998 — Prove step 2
@@ -653,7 +663,7 @@ Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each tick
 - Record SES's real `Message-ID` header format (SES replaces ours). Step 4 needs it to match replies.
 - Reply from Gmail: the reply lands in the inbound queue for `lf-…@mail.staging…` (shown on the file only in step 4); purge it after.
 - Simulator bounce, complaint and a suppressed address: right status or message on the thread.
-- Content check blocks a rate; override works and is logged.
+- ~~Content check blocks a rate; override works and is logged.~~ *(Deferred with LP-996.)*
 - Kill the worker mid-send: no duplicate.
 - Alarms all OK, DLQs empty.
 - **Done when:** every check passes. **First demo.**
@@ -667,10 +677,12 @@ Regenerated 2026-10-26 after step 1: plain boxes are live in staging, tinted box
 
 ## 17. After v1, in order
 
-Legal hold + retention schedule → AI reply tier 2 → M365 mailbox connector (if the customer is on M365) → AI reply tier 3 once gated → SES tenant management (per-tenant reputation and pause) → Domain Connect for GoDaddy-type DNS → production AWS account (repeat production access; re-delegate tenant NS).
+Pre-send content check, revisited from `LP-996.md` (fix the misfires, or warn instead of block) → Legal hold + retention schedule → AI reply tier 2 → M365 mailbox connector (if the customer is on M365) → AI reply tier 3 once gated → SES tenant management (per-tenant reputation and pause) → Domain Connect for GoDaddy-type DNS → production AWS account (repeat production access; re-delegate tenant NS).
 
 ## 18. Log
 
+- 2026-10-30 — **Pre-send content check deferred to a later iteration** (iterative rollout: sending first, safeguards after; added to §17). LP-996 built, measured and reverted: it blocked bank-statement requests, every borrower condition email, title-company requests and any percentage. Rule 5, FR-18, §3, §11, §13 updated: the processor sends what she writes; AI drafts keep the drafter's guard. LP-997 and LP-998 lose their content-check items.
+- 2026-10-30 — LP-995 ✅ (delivery events). LP-996 refined: reuse the drafter's deterministic list, but only rule 5's three grounds (rate, approval wording, account/routing/wire) for human sends; override with a note on the evidence record; measure false positives on existing emails first.
 - 2026-10-30 — LP-994 ✅ (worker sends; atomic claim; re-enqueue; rate-limit fixes). Found `FILE_ADDRESSES_ENABLED` off everywhere → LP-998 turns it on in staging. LP-995 refined (SES `bounceType` first, temporary bounce is final, To-recipient only, idempotent).
 - 2026-10-30 — LP-993 ✅ (build_mime, SES/SMTP sender, one attempt only, `outcome_unknown`; SES simulator send proved). LP-994 refined: `send_requested_at` marker, atomic claim, safe 5-minute re-enqueue, no Send-again in step 2, rate limit counts queued/sending/delivered.
 - 2026-10-28 — LP-992 ✅ (code; first apply done, `lp992b` pending): Celery beat inside the worker, one-worker rule enforced in Terraform, deploy script and ECS deployment settings; `get_mail_storage()` with its own `MAIL_KMS_KEY_ID`; `INBOUND_BUCKET` → `MAIL_BUCKET`.
