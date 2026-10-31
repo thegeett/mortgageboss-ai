@@ -38,14 +38,15 @@ describe("sendStatusLabel (LP-997)", () => {
     expect(sendStatusLabel(send({ status, errorDetail }), T0 + 1_000)).toBe(label);
   });
 
-  it("reads Not confirmed once a Send has been with the worker for 1.5 minutes", () => {
+  it("reads Still sending, never Not confirmed, once a Send has been with the worker 1.5 minutes", () => {
+    // LP-998 — a queued email may still go, so "check before sending again" could make a duplicate.
     // The positive control: the same Send a moment earlier is still Queued.
     expect(sendStatusLabel(send({}), T0 + CONFIRM_WINDOW_MS - 1)).toBe("Queued");
     expect(sendStatusLabel(send({}), T0 + CONFIRM_WINDOW_MS)).toBe(
-      "Not confirmed: check before sending again",
+      "Still sending: check back in a few minutes",
     );
     expect(sendStatusLabel(send({ status: "sending" }), T0 + CONFIRM_WINDOW_MS)).toBe(
-      "Not confirmed: check before sending again",
+      "Still sending: check back in a few minutes",
     );
   });
 

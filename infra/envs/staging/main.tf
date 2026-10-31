@@ -580,6 +580,8 @@ module "compute" {
       MAIL_BUCKET       = module.inbound_mail[0].bucket_name
       MAIL_KMS_KEY_ID   = module.inbound_mail[0].kms_key_arn
       INBOUND_QUEUE_URL = module.inbound_mail[0].queue_url
+      # LP-998 — only companies with an active mail domain get a file address; in staging that is only the test company.
+      FILE_ADDRESSES_ENABLED = "true"
     } : {},
     var.outbound_mail_enabled ? {
       EVENTS_QUEUE_URL      = module.outbound_mail[0].events_queue_url

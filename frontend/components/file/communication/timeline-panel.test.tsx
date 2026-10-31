@@ -1127,7 +1127,7 @@ describe("a sent email's status (LP-997)", () => {
     expect(inRows(/^Sent$/)).toHaveLength(0);
   });
 
-  it("says Not confirmed for a Send still queued 1.5 minutes after it was pressed", () => {
+  it("says Still sending for a Send still queued 1.5 minutes after it was pressed", () => {
     loaded([
       {
         ...sendRow("queued"),
@@ -1135,11 +1135,12 @@ describe("a sent email's status (LP-997)", () => {
       },
     ]);
     render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
-    expect(inRows("Not confirmed: check before sending again")).toHaveLength(1);
+    expect(inRows("Still sending: check back in a few minutes")).toHaveLength(1);
+    expect(inRows(/Not confirmed/)).toHaveLength(0);
     expect(inRows("Queued")).toHaveLength(0);
   });
 
-  it("turns Not confirmed when the window ends, with no new data from the server", () => {
+  it("turns Still sending when the window ends, with no new data from the server", () => {
     // THE BUG THIS PINS: the last re-check returns the same (still queued) data, nothing re-renders,
     // and "Queued" stayed on screen past the window. The clock has to move the label by itself.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
@@ -1155,7 +1156,7 @@ describe("a sent email's status (LP-997)", () => {
       act(() => {
         vi.advanceTimersByTime(11_000);
       });
-      expect(inRows("Not confirmed: check before sending again")).toHaveLength(1);
+      expect(inRows("Still sending: check back in a few minutes")).toHaveLength(1);
     } finally {
       vi.useRealTimers();
     }

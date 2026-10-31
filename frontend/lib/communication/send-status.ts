@@ -17,12 +17,20 @@ export const CHECK_EVERY_MS = 30_000;
 
 /**
  * How long after Send the screen keeps checking: three checks, 30 seconds apart. A Send still queued
- * or sending after this reads "Not confirmed" and the checking stops. Nothing is changed on the
+ * or sending after this reads "Still sending" and the checking stops. Nothing is changed on the
  * server: if the worker finishes it later, the next load shows the real status.
  */
 export const CONFIRM_WINDOW_MS = 3 * CHECK_EVERY_MS;
 
 const NOT_CONFIRMED_LABEL = "Not confirmed: check before sending again";
+
+/**
+ * LP-998 — A SEND STILL WITH THE WORKER AFTER THE WINDOW IS NOT "NOT CONFIRMED". A merely queued
+ * email may still be sent by the worker (its re-enqueue runs every 5 minutes), so telling the
+ * processor to "check before sending again" can make her send a duplicate from her own mail. Only
+ * the server's own unknown outcome (`NOT_CONFIRMED_PREFIX`) says that.
+ */
+const STILL_SENDING_LABEL = "Still sending: check back in a few minutes";
 
 /** Reasons that already read as a status on their own (LP-994 `record_not_sent`, LP-995 bounces). */
 const SAYS_ITSELF = ["Not sent", "Not delivered"];
@@ -69,15 +77,15 @@ export function checkInterval(sends: SendState[], now: number = Date.now()): num
  * The label for an outbound email that has left the draft state, or null for any other status
  * (`draft`, `received`), which keeps its existing wording.
  *
- * "Not confirmed" when the worker said so (LP-994's prefix), or when a Send is still queued or
- * sending once the window has passed.
+ * "Not confirmed" only when the worker said so (LP-994's prefix); "Still sending" when a Send is
+ * still queued or sending once the window has passed.
  */
 export function sendStatusLabel(send: SendState, now: number = Date.now()): string | null {
   const { status, errorDetail } = send;
   if ((errorDetail ?? "").startsWith(NOT_CONFIRMED_PREFIX)) return NOT_CONFIRMED_LABEL;
   if (IN_FLIGHT_STATUSES.has(status ?? "")) {
     const elapsed = sinceSend(send.requestedAt, now);
-    if (elapsed !== null && elapsed >= CONFIRM_WINDOW_MS) return NOT_CONFIRMED_LABEL;
+    if (elapsed !== null && elapsed >= CONFIRM_WINDOW_MS) return STILL_SENDING_LABEL;
   }
   switch (status) {
     case "queued":

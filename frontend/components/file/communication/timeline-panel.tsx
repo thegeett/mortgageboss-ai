@@ -210,8 +210,8 @@ function stateWord(entry: TimelineEntry, now: number): string {
   // this becomes a live mislabel with nothing to catch it. Before LP-852 the fall-through said
   // "Created", which is vague and true; grouping it with `draft` made it specific and false.
   // LP-997 — A SEND FROM THE APP SAYS WHERE THE WORKER IS: Queued, Sending, Sent, Delivered,
-  // "Failed: <reason>", or "Not confirmed" once it has been with the worker for 1.5 minutes or the
-  // worker said so (LP-994). A failed row with no Send behind it keeps "Failed" (below), never a raw
+  // "Failed: <reason>", "Still sending" once it has been with the worker for 1.5 minutes (LP-998),
+  // or "Not confirmed" only when the worker said so (LP-994). A failed row with no Send behind it keeps "Failed" (below), never a raw
   // error string.
   const send = entrySendState(entry);
   if (send.requestedAt !== null) {
@@ -455,7 +455,7 @@ export function TimelinePanel({
   // send a colleague.
 
   const entries = data?.entries ?? [];
-  // LP-997 — re-renders when a Send's 1.5-minute window ends, so "Not confirmed" appears on time.
+  // LP-997 — re-renders when a Send's 1.5-minute window ends, so "Still sending" appears on time.
   const now = useSendClock(entries.map(entrySendState));
   // LP-852 — ONE LIST, IN ONE TIME ORDER. There is no party axis any more: it was a strip of tabs,
   // and a tab is a region a processor can leave unclicked, which is how a draft to the title

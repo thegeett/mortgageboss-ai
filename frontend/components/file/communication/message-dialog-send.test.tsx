@@ -208,12 +208,13 @@ describe("message dialog: Send (LP-997)", () => {
     },
   );
 
-  it("says Not confirmed for a Send still queued 1.5 minutes after it was pressed", () => {
+  it("says Still sending for a Send still queued 1.5 minutes after it was pressed", () => {
     const pressed = new Date(Date.now() - 91_000).toISOString();
     mockUseMessageDetail.mockReturnValue(
       draft({ status: "queued", send_requested_at: pressed, is_editable: false }),
     );
     render(<DraftPane fileId="LF-AB12" messageId="m1" onClose={vi.fn()} />);
-    expect(screen.getByText("Not confirmed: check before sending again")).toBeTruthy();
+    expect(screen.getByText("Still sending: check back in a few minutes")).toBeTruthy();
+    expect(screen.queryByText(/Not confirmed/)).toBeNull();
   });
 });
