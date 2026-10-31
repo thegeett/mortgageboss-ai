@@ -83,6 +83,7 @@ Each loan file gets its own email address on the customer's domain. MortgageBoss
 | Automatic replies to inbound (LP-815 `QUEUED` rows) | **Not sent in step 2.** The worker sends only emails a person approved and handed to it; it never sweeps `QUEUED` rows. Revisit in step 4. *(Refined 10-30: a person's Send sets `send_requested_at`; the worker and its 5-minute re-enqueue only touch rows that have it.)* | 10-26 |
 | Complaint status | **No new status.** A complaint blocks the address and is logged on the file; the email stays `delivered`. A bounce uses the existing `failed`. FR-19 adjusted | 10-26 |
 | "I've sent it" vs Send | Two different actions. "I've sent it" (processor sent from her own mail app) only records; it never transmits. Send transmits. `send_draft` takes an explicit `transmit` flag, default false | 10-26 |
+| Turning a company on for email | Two steps once its domain is active: link the domain (`set_company_mail_domain`), then switch sending on (`set_email_sending … on`). Both are commands in v1 (no admin screen). Step 3 folds this into onboarding | 10-31 |
 | Pre-send content check | **Deferred to a later iteration (2026-10-30)** — not rejected; v1 ships sending first and adds safeguards iteratively. Built in LP-996 and reverted. Measured, it blocked ordinary requests: every bank, investment or retirement statement request (catalog text says "the account number"), every borrower condition email ("The lender approved your loan with a few conditions"), title-commitment and wire-instruction requests to title companies, and any percentage ("100% of the gift funds"). For v1 the processor sends what she writes; AI drafts keep the drafter's guard. When it comes back, start from `docs/tickets/LP-996.md` (code, measurement and the misfire list) and fix the misfires first, or ship it as a warning rather than a block | 10-30 |
 | Not in v1 | Reading the processor's inbox (OAuth), automatic AI replies, automatic DNS tools (Entri / Domain Connect), lender portal integration, SES tenant management (revisit at ~10 tenants) | 10-17 |
 
@@ -600,7 +601,7 @@ Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each tick
   - Calls the transport; stores SES's MessageId in `external_message_id`; status `sent`; commits.
   - Transport error → `failed`, `error_detail`, and the needs it asked for go back to pending (reuse `_unwind_requests`).
   - If it finds the row already `sending` (a crash or redelivery): **does not send again**; logs it and leaves it for a person.
-- Rows in `sending` for more than 15 minutes show "Sending not confirmed — check before resending" (LP-997).
+- Rows in `sending` for more than 15 minutes show "Sending not confirmed — check before resending" (LP-997). *(Changed in LP-997: the screen checks 3 times, 30 seconds apart, after a Send; nothing is marked on the server.)*
 - **Done when:** a test-company Send ends `sent` with an `.eml` in `outbound/`; "I've sent it" never transmits; killing the worker between SES returning and the commit leaves one email, not two.
 - **Refined 2026-10-30 (prompt written), keeping the bullets above:**
   - New column `send_requested_at`, set only when a person clicks Send. The worker acts only on rows that have it, so LP-815 auto-replies (`QUEUED`, no `send_requested_at`) are never sent.
@@ -645,16 +646,21 @@ Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each tick
 - **Result: reverted.** Built and tested (commit `cfabef52`, then reverted in full; dev database downgraded to `4b7e2c9d1a63`). The measurement showed it would block ordinary emails: every bank/investment/retirement statement request (`payment_routing` on the catalog's "account number"), every borrower condition email (`commitment` on "The lender approved your loan with a few conditions"), title-commitment and wire-instruction requests to title companies, the DI-01 condition ("approved list"), and any percentage. Decision: deferred to a later iteration, so step 2 ships sending first (rule 5 changed for v1). `docs/tickets/LP-996.md` keeps the record, including the misfire list, for anyone who revisits this.
 - **Side finding kept open:** processor free text (finding notes, the legal-hold reason) already reaches `readonly.activity_logs` through activity `detail`. Worth its own ticket.
 
-### LP-997 — Send button
+### LP-997 — Send button — ✅ Done (Communication tab only)
 - Message dialog and condition-draft dialog:
   - Company has an active domain → **Send** is the main button, with "From lf-…@… · CC you". Copy and "I've sent it" hidden.
   - No domain → unchanged (copy, open in mail app, "I've sent it").
 - Status on the thread: queued, sending, sent, delivered, failed (with the reason), and "Sending not confirmed" after 15 minutes.
 - ~~Content-check block shown with its reason and an override-with-note option.~~ *(Deferred with LP-996.)*
 - **Done when:** both dialogs show the right buttons for test and pilot companies; each status renders.
+- **Result:** Send in the Communication tab's message dialog, "From lf-…@… · CC you"; a refused Send shows the server's sentence. Status in plain words on the timeline and in the message: Queued, Sending, Sent, Delivered, "Failed: <reason>", "Not confirmed". After a Send the timeline re-checks every 30 seconds, three times. **Send shows only when all of these hold:** the file has an address (active domain and `FILE_ADDRESSES_ENABLED`), the company's new **sending switch** is on (`company_mail_domains.sending_enabled`, off by default, set with `app.scripts.set_email_sending <company> on`), the server has a mail sender (`MAIL_TRANSPORT`), and it is not a condition draft. **Condition page left out:** condition drafts keep "Mark as sent", and the API refuses a Send of one; it comes back as its own ticket. Dev check passed (Queued → Sent with no reload, Delivered, Failed with the reason, rate-limit refusal shown, Demo keeps the old buttons). Tests: frontend 2448, backend 9453. Details: `docs/tickets/LP-997.md`.
+- **Open (review, 2026-10-31):**
+  - **The 1.5-minute "Not confirmed: check before sending again" label can invite a duplicate.** It is shown for any Send still `queued` or `sending` after 1.5 minutes, although the worker may still send it (re-enqueue every 5 minutes; the worker is off overnight). The rate limit blocks a resend for 5 minutes only. Fix: for a row that is merely still queued, say "Still sending — check back in a few minutes"; keep "Not confirmed: check before sending again" only for the server's own `Not confirmed` (an unknown SES outcome). One wording change.
+  - **Four things now gate Send** (domain status, `FILE_ADDRESSES_ENABLED`, `sending_enabled`, `MAIL_TRANSPORT`). The domain row already has `status` (`active`/`inactive`), which was meant to say whether a company sends; the new switch overlaps it. Simplify when step 3 builds onboarding: one company-level state, one server setting.
 
 ### LP-998 — Prove step 2
 - Deploy to staging. Test company only; recipients are your own Gmail and SES simulator addresses.
+- After linking the test company's domain, switch it on for sending: `set_email_sending <company> on` (one-off ECS task, same way as `set_company_mail_domain`). Without it every file shows "Mark as sent" (LP-997).
 - Turn on `FILE_ADDRESSES_ENABLED` in staging (task env). While it is off no file has an address and every Send is refused (LP-994). Only the test company has a domain, so only its files get addresses.
 - Find the staging test company (`./scripts/deploy staging query … readonly.companies`), or create one with `./scripts/deploy staging add-company`; never the pilot company. Link it with the one-off command in `docs/tickets/LP-991.md`, then confirm in `readonly.company_mail_domains`.
 - Worker log in staging shows the beat heartbeat every 5 minutes (LP-992).
@@ -681,6 +687,7 @@ Pre-send content check, revisited from `LP-996.md` (fix the misfires, or warn in
 
 ## 18. Log
 
+- 2026-10-31 — LP-997 ✅ (Send in the Communication tab; per-company sending switch; status labels; 1.5-minute screen check). Condition page left out. Open: the "Not confirmed" wording on a merely-queued Send can invite a duplicate; four switches gate Send.
 - 2026-10-30 — **Pre-send content check deferred to a later iteration** (iterative rollout: sending first, safeguards after; added to §17). LP-996 built, measured and reverted: it blocked bank-statement requests, every borrower condition email, title-company requests and any percentage. Rule 5, FR-18, §3, §11, §13 updated: the processor sends what she writes; AI drafts keep the drafter's guard. LP-997 and LP-998 lose their content-check items.
 - 2026-10-30 — LP-995 ✅ (delivery events). LP-996 refined: reuse the drafter's deterministic list, but only rule 5's three grounds (rate, approval wording, account/routing/wire) for human sends; override with a note on the evidence record; measure false positives on existing emails first.
 - 2026-10-30 — LP-994 ✅ (worker sends; atomic claim; re-enqueue; rate-limit fixes). Found `FILE_ADDRESSES_ENABLED` off everywhere → LP-998 turns it on in staging. LP-995 refined (SES `bounceType` first, temporary bounce is final, To-recipient only, idempotent).
