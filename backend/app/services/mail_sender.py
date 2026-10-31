@@ -24,7 +24,7 @@ from __future__ import annotations
 import smtplib
 from abc import ABC, abstractmethod
 from email.message import EmailMessage
-from email.utils import parseaddr
+from email.utils import formataddr
 from typing import Any, NoReturn
 
 import boto3
@@ -122,10 +122,15 @@ class SesMailSender(MailSender):
             # Without it no delivery, bounce or complaint event comes back, and a bounce would
             # never suppress the address. Refused before anything is sent.
             raise SendError("ConfigurationSetMissing")
-        from_address = parseaddr(str(message["From"]))[1]
+        # LP-999 — THE FULL FROM, NAME INCLUDED. SES writes `FromEmailAddress` over the raw From
+        # header; passing the bare address dropped the processor's name, so the borrower saw
+        # `lf-afcw@…`, not "Geet Thaker, MortgageBoss". `formataddr` quotes a comma in the name and
+        # encodes a non-ASCII one, which SES requires.
+        sender_address = message["From"].addresses[0]
+        from_header = formataddr((sender_address.display_name, sender_address.addr_spec))
         try:
             response = self._client.send_email(
-                FromEmailAddress=from_address,
+                FromEmailAddress=from_header,
                 Content={"Raw": {"Data": message.as_bytes()}},
                 ConfigurationSetName=configuration_set,
             )

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import smtplib
+from email import message_from_bytes, policy
+from email.headerregistry import Address
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -62,14 +64,38 @@ def test_ses_sends_the_raw_message_with_the_configuration_set() -> None:
         stub.add_response(
             "send_email",
             {"MessageId": "0100018f-abc"},
+            # LP-999 — the full From, name included: SES writes it over the raw From header.
             expected_params={
-                "FromEmailAddress": "lf-y36e@mb-mail.abcmortgage.test",
+                "FromEmailAddress": '"Priya Thaker, ABC Mortgage" <lf-y36e@mb-mail.abcmortgage.test>',
                 "Content": {"Raw": {"Data": message.as_bytes()}},
                 "ConfigurationSetName": "mbai-test-outbound",
             },
         )
         assert sender.send(message) == "0100018f-abc"
         stub.assert_no_pending_responses()
+
+
+@pytest.mark.parametrize("name", ["Priya Thaker, ABC Mortgage", "Zoë Müller, Hypothek GmbH"])
+def test_the_sent_from_header_keeps_the_processors_name(name: str) -> None:
+    """LP-999 — what SES receives names the processor, in the raw data and in the From it writes."""
+    sender = SesMailSender()
+    calls: list[dict[str, Any]] = []
+    sender._client.meta.events.register(
+        "provide-client-params.sesv2.SendEmail", lambda params, **_: calls.append(params)
+    )
+    message = _message()
+    message.replace_header("From", Address(name, addr_spec="lf-y36e@mb-mail.abcmortgage.test"))
+    with Stubber(sender._client) as stub:
+        stub.add_response("send_email", {"MessageId": "0100018f-abc"})
+        sender.send(message)
+    (params,) = calls
+    from_ses = params["FromEmailAddress"]
+    assert from_ses.isascii()  # a non-ASCII name goes encoded
+    raw = message_from_bytes(params["Content"]["Raw"]["Data"], policy=policy.default)
+    for header in (policy.default.header_factory("From", from_ses), raw["From"]):
+        (address,) = header.addresses
+        assert address.display_name == name
+        assert address.addr_spec == "lf-y36e@mb-mail.abcmortgage.test"
 
 
 def test_ses_makes_exactly_one_attempt() -> None:
