@@ -48,8 +48,8 @@ from app.services.email_draft import (
     draft_for_reading,
     party_for_draft_template,
 )
-from app.services.email_send import MAILTO_MAX_CHARS, build_outbound
-from app.services.mail_domain import file_address
+from app.services.email_send import MAILTO_MAX_CHARS, build_outbound, transmit_blocker
+from app.services.mail_domain import file_address_and_sending
 from app.services.timeline import TimelineAttachment, _attachment_manifest, _inbound_senders
 
 
@@ -116,6 +116,13 @@ class MessageDetail:
     suggested_bcc: str | None
     mailto_available: bool
     mailto_max_chars: int
+    #: LP-997 — the dialog offers Send (instead of copy / mail app / "Mark as sent"). An editable
+    #: draft the app can send itself: `email_send.transmit_blocker` found nothing, which is the same
+    #: check the Send endpoint refuses on. False on everything else.
+    can_send: bool = False
+    #: LP-997 — when a person pressed Send (LP-994's `send_requested_at`). The dialog re-checks for
+    #: a while after it and then says "Not confirmed"; None for anything not sent from the app.
+    send_requested_at: datetime | None = None
 
 
 async def message_detail(
@@ -191,9 +198,11 @@ async def message_detail(
 
     # LP-831 REVIEW — over the RESOLVED body, which is what a processor copies. Computing it from
     # the stored one would answer about text nobody sees.
+    # LP-997 — one read of the company's mail-domain row, for the address and the Send check.
+    address_and_sending = await file_address_and_sending(db, loan_file)
     outbound = build_outbound(
         loan_file,
-        address=await file_address(db, loan_file),
+        address=address_and_sending[0],
         subject=message.subject or "",
         body=body,
     )
@@ -214,6 +223,17 @@ async def message_detail(
             await _inbound_senders(db, [message.inbound_message_id])
         ).get(message.inbound_message_id)
 
+    is_editable = (
+        message.direction is CommunicationDirection.OUTBOUND
+        and message.status is CommunicationStatus.DRAFT
+    )
+    can_send = (
+        is_editable
+        and await transmit_blocker(
+            db, loan_file=loan_file, draft=message, address_and_sending=address_and_sending
+        )
+        is None
+    )
     return MessageDetail(
         id=message.id,
         direction=message.direction.value,
@@ -235,15 +255,14 @@ async def message_detail(
         documents=documents,
         attachments=attachments,
         is_open_draft=is_open_draft,
-        is_editable=(
-            message.direction is CommunicationDirection.OUTBOUND
-            and message.status is CommunicationStatus.DRAFT
-        ),
+        is_editable=is_editable,
         suggested_recipient=suggested_recipient,
         party=_party_of_draft(message),
         suggested_bcc=outbound.suggested_bcc,
         mailto_available=outbound.mailto_available,
         mailto_max_chars=MAILTO_MAX_CHARS,
+        can_send=can_send,
+        send_requested_at=message.send_requested_at,
     )
 
 

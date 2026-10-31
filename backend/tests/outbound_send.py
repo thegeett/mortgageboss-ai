@@ -1,7 +1,7 @@
 """Helpers for LP-994's send tests: a file ready to send, and fakes for the sender and storage.
 
-`ready_to_send` builds a company with an active mail domain, a processor, a loan file and a draft
-asking for one need. The caller turns file addresses on (`file_addresses_on`) and sets
+`ready_to_send` builds a company with an active mail domain (sending switched on, LP-997), a
+processor, a loan file and a draft asking for one need. The caller turns file addresses on (`file_addresses_on`) and sets
 `settings.mail_transport`, as a deployment that sends would.
 """
 
@@ -17,6 +17,7 @@ from app.models.loan_file import LoanFile
 from app.models.needs_item import NeedsItem, NeedsItemOrigin
 from app.services.email_draft import add_needs_to_draft
 from app.services.loan_files import create_loan_file
+from app.services.mail_domain import set_email_sending
 from app.services.mail_sender import MailSender
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.mail_address import link_mail_domain
@@ -47,6 +48,9 @@ async def ready_to_send(db: AsyncSession, *, with_domain: bool = True) -> Ready:
     db.add(user)
     await db.flush()
     domain = await link_mail_domain(db, company.id) if with_domain else ""
+    if with_domain:
+        # LP-997 — a company ready to send has sending switched on too (off by default).
+        await set_email_sending(db, company_id=company.id, enabled=True)
     loan_file = await create_loan_file(
         db, company_id=company.id, loan_program=LoanProgram.CONVENTIONAL
     )

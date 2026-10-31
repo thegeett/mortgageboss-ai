@@ -8,12 +8,12 @@ from app.models.company_mail_domain import MailDomainStatus
 from app.services.loan_files import create_loan_file
 from app.services.mail_domain import (
     MailDomainError,
-    active_mail_domain,
     file_address,
     normalise_domain,
     set_company_mail_domain,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.mail_address import active_mail_domain
 from tests.models.conftest_helpers import make_company
 
 # Every test here is about what the address is when addresses are shown at all; the two flag tests

@@ -42,7 +42,7 @@ from app.services.email_draft import (
     get_open_draft,
     greeting_name_for,
 )
-from app.services.mail_domain import file_address
+from app.services.mail_domain import file_address, file_address_and_sending
 from app.services.needs_items import AWAITING_COLLECTION, request_needs_item
 
 #: `mailto:` is truncated somewhere around 2,000 characters in several mail clients, and a truncated
@@ -302,7 +302,7 @@ async def send_draft(
     if not (body or "").strip():
         raise CannotSendError("an empty message cannot be sent")
     if transmit:
-        await _refuse_if_cannot_transmit(db, loan_file=loan_file, recipient=recipient)
+        await _refuse_if_cannot_transmit(db, loan_file=loan_file, draft=draft, recipient=recipient)
     # LP-968 — A CONDITION DRAFT WAITS FOR ITS PLAN. Drafts are made when a plan is ready, before she
     # confirms it, and "nothing is sent until you confirm" has to stay true. Here rather than in the
     # conditions' Mark sent, because this is the one function every send passes through: the general
@@ -507,19 +507,55 @@ async def send_draft(
     return draft
 
 
-async def _refuse_if_cannot_transmit(
-    db: AsyncSession, *, loan_file: LoanFile, recipient: str
-) -> None:
-    """LP-994 — the app can send this only from the company's own domain, through a configured
-    sender, to exactly one valid address. Checked before the other guards, so the refusal names the
-    thing that is actually missing."""
+async def transmit_blocker(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    draft: Communication,
+    address_and_sending: tuple[str | None, bool] | None = None,
+) -> str | None:
+    """Why the app cannot send this draft itself, or None when it can.
+
+    ONE ANSWER FOR THE BUTTON AND THE REFUSAL (LP-997): `message_detail.can_send` offers Send only
+    when this is None, and `_refuse_if_cannot_transmit` refuses with the same sentence, so the screen
+    never shows a Send the API will turn down for one of these reasons.
+
+    - A file address: the company's active domain, with `FILE_ADDRESSES_ENABLED` on (LP-991, LP-994).
+    - The company switched on for sending (`company_mail_domains.sending_enabled`, LP-997): off by
+      default; turned on once its domain is onboarded for sending.
+    - A mail sender configured on this server (`MAIL_TRANSPORT`, LP-993).
+    - Not a condition draft: those are sent from her own mail and marked sent on the Conditions page,
+      whose "Mark as sent" also moves the conditions to Waiting on … (LP-922).
+
+    `address_and_sending` is `mail_domain.file_address_and_sending` when the caller has already read
+    it (the message detail has, for `build_outbound`); otherwise it is read here.
+    """
+    from app.services.condition_drafts import TEMPLATE_ASK, TEMPLATE_QUESTION
     from app.services.mail_sender import get_mail_sender
+
+    address, sending = address_and_sending or await file_address_and_sending(db, loan_file)
+    if address is None:
+        return "This company can't send email from the app yet."
+    if not sending:
+        return "Sending email from the app isn't switched on for this company yet."
+    if get_mail_sender() is None:
+        return "Sending email is not set up here."
+    if draft.template_key in (TEMPLATE_ASK, TEMPLATE_QUESTION):
+        return "Condition emails can't be sent from the app yet. Send it from your own mail."
+    return None
+
+
+async def _refuse_if_cannot_transmit(
+    db: AsyncSession, *, loan_file: LoanFile, draft: Communication, recipient: str
+) -> None:
+    """LP-994 — the app can send this only when `transmit_blocker` finds nothing, to exactly one valid
+    address. Checked before the other guards, so the refusal names the thing that is actually
+    missing."""
     from app.services.outbound_mime import _address
 
-    if await file_address(db, loan_file) is None:
-        raise CannotSendError("This company can't send email from the app yet.")
-    if get_mail_sender() is None:
-        raise CannotSendError("Sending email is not set up here.")
+    blocker = await transmit_blocker(db, loan_file=loan_file, draft=draft)
+    if blocker is not None:
+        raise CannotSendError(blocker)
     if not recipient.strip():
         raise CannotSendError("Add the recipient's email address before sending.")
     try:
@@ -636,4 +672,5 @@ __all__ = [
     "loan_reference_in",
     "open_draft_preview",
     "send_draft",
+    "transmit_blocker",
 ]

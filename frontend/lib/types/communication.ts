@@ -105,4 +105,10 @@ export interface MessageDetail {
    * company — the same reason the timeline's `party` comes from the server.
    */
   party: string | null;
+  /** LP-997 — offer Send instead of copy / mail app / "Mark as sent": an editable draft the app can
+   * send itself (file address, company switched on for sending, a mail sender here, not a condition
+   * draft). The same check the Send endpoint refuses on. */
+  can_send: boolean;
+  /** LP-997 — when a person pressed Send; null for anything not sent from the app. */
+  send_requested_at: string | null;
 }

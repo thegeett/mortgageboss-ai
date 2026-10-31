@@ -20,6 +20,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { fetchReplyContext, useMarkRead, useReply, useSetImportant } from "@/lib/api/messages";
 import { useTimeline } from "@/lib/api/timeline";
 import { isNewSince, readLastSeen, writeLastSeen } from "@/lib/communication/last-seen";
+import { entrySendState, sendStatusLabel, useSendClock } from "@/lib/communication/send-status";
 import { messageTimeLabel, messageTimeShort } from "@/lib/message-time";
 import type { TimelineEntry, TimelineFilter } from "@/lib/types/timeline";
 import { Check, Copy, Mail, MailOpen, PenLine, Reply, Star, TriangleAlert } from "lucide-react";
@@ -171,7 +172,7 @@ function insideLine(entry: TimelineEntry): string {
  * it was left stranded above `isOutboundDraft`, where it read as that function's documentation. Its
  * one stale line was the format example `Draft · edited · 2m`, which §2 split across two lines.
  */
-function stateWord(entry: TimelineEntry): string {
+function stateWord(entry: TimelineEntry, now: number): string {
   if (entry.status === "draft") {
     // LP-857 — CANNOT BE SENT YET, AND THE ROW SAYS SO. A party draft is created even when the file
     // has no address for that party (LP-841 — "the message is the part a processor wants"), and
@@ -208,11 +209,21 @@ function stateWord(entry: TimelineEntry): string {
   // of the things this epic's fence puts in the next phase — which is also when it comes back and
   // this becomes a live mislabel with nothing to catch it. Before LP-852 the fall-through said
   // "Created", which is vague and true; grouping it with `draft` made it specific and false.
-  // LP-994 — `sending` is the worker's claim on a queued Send: still not gone, so the same word.
-  // Its own wording ("not confirmed") is LP-997's.
+  // LP-997 — A SEND FROM THE APP SAYS WHERE THE WORKER IS: Queued, Sending, Sent, Delivered,
+  // "Failed: <reason>", or "Not confirmed" once it has been with the worker for 1.5 minutes or the
+  // worker said so (LP-994). A failed row with no Send behind it keeps "Failed" (below), never a raw
+  // error string.
+  const send = entrySendState(entry);
+  if (send.requestedAt !== null) {
+    const label = sendStatusLabel(send, now);
+    if (label !== null) return label;
+  }
+  // An automatic reply (LP-815) is queued with no person's Send behind it.
   if (entry.status === "queued" || entry.status === "sending") {
     return "Queued";
   }
+  // "I'VE SENT IT" STAYS ATTRIBUTED (LP-852): nothing observed that send, so the record is a person's
+  // claim and the person belongs in it.
   if (entry.status === "sent" || entry.status === "delivered") {
     return entry.actor_name ? `Marked sent by ${entry.actor_name}` : "Marked sent";
   }
@@ -444,6 +455,8 @@ export function TimelinePanel({
   // send a colleague.
 
   const entries = data?.entries ?? [];
+  // LP-997 — re-renders when a Send's 1.5-minute window ends, so "Not confirmed" appears on time.
+  const now = useSendClock(entries.map(entrySendState));
   // LP-852 — ONE LIST, IN ONE TIME ORDER. There is no party axis any more: it was a strip of tabs,
   // and a tab is a region a processor can leave unclicked, which is how a draft to the title
   // company came to exist behind one. The party is a column on every row instead.
@@ -691,7 +704,7 @@ export function TimelinePanel({
                       aria-label="New since you last looked"
                     />
                   ) : null}
-                  {stateWord(entry)}
+                  {stateWord(entry, now)}
                 </span>
 
                 {/* LINE 3 — WHAT IS INSIDE, and the most specific thing the row has. LP-852 added

@@ -244,6 +244,8 @@ export interface SendDraftInput {
   /** LP-831 — omitted means "the subject already on the draft", which the server treats as a
    * complete answer. Only the modal sends one, because only the modal offers a subject field. */
   subject?: string;
+  /** LP-997 — true is the Send button: the worker sends it. Omitted is "Mark as sent". */
+  transmit?: boolean;
 }
 
 /**
@@ -253,12 +255,13 @@ export interface SendDraftInput {
 export function useSendDraft(fileId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ draftId, recipient, body, subject }: SendDraftInput) =>
+    mutationFn: async ({ draftId, recipient, body, subject, transmit }: SendDraftInput) =>
       (
         await apiClient.post<SentCommunication>(`${outboundPath(fileId)}/draft/${draftId}/send`, {
           recipient,
           body,
           subject,
+          ...(transmit ? { transmit: true } : {}),
         })
       ).data,
     onSuccess: (_sent, variables) => {

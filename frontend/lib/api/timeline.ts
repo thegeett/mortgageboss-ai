@@ -7,6 +7,7 @@
  * showing drafts and tell a processor they had already asked for something they had not.
  */
 import { apiClient } from "@/lib/api/client";
+import { checkInterval, entrySendState } from "@/lib/communication/send-status";
 import type { Timeline, TimelineFilter } from "@/lib/types/timeline";
 import { useQuery } from "@tanstack/react-query";
 
@@ -39,5 +40,15 @@ export function useTimeline(fileId: string, filter: TimelineFilter) {
     // The cost is one request when the tab is focused, on the one screen whose job is to show what
     // has happened since you last looked.
     refetchOnWindowFocus: "always",
+    refetchInterval: (query) => sendInFlightInterval(query.state.data),
   });
+}
+
+/**
+ * LP-997 — RE-CHECK EVERY 30 SECONDS FOR 1.5 MINUTES AFTER A SEND, so Sent appears without a reload,
+ * then stop: a Send still with the worker by then reads "Not confirmed" (`send-status.ts`). Only a
+ * person's Send has a send time, so an automatic reply that sits `queued` never starts this.
+ */
+export function sendInFlightInterval(data: Timeline | undefined): number | false {
+  return checkInterval((data?.entries ?? []).map(entrySendState));
 }

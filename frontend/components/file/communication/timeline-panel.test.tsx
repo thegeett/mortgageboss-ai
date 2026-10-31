@@ -12,7 +12,7 @@
  * to keep.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -1058,5 +1058,106 @@ describe("the since-you-last-looked dot", () => {
 
     expect(screen.getByText("Documents we need")).toBeTruthy();
     expect(screen.queryByLabelText("New since you last looked")).toBeNull();
+  });
+});
+
+/**
+ * LP-997 — a Send from the app (`detail.send_requested_at`) says where the worker is. "I've sent it"
+ * keeps its attribution, and an automatic reply stays "Queued".
+ */
+/** The status word inside the rows, not the Sent / Drafts filter pills above them. */
+function inRows(text: string | RegExp): HTMLElement[] {
+  return screen.queryAllByText(text).filter((element) => element.closest("li") !== null);
+}
+
+describe("a sent email's status (LP-997)", () => {
+  function sendRow(status: string, error_detail: string | null = null): TimelineEntry {
+    return {
+      ...MESSAGE,
+      id: `s-${status}`,
+      direction: "outbound",
+      status,
+      actor_name: "Priya",
+      // Pressed a few seconds ago: inside the 1.5-minute window.
+      detail: { send_requested_at: new Date(Date.now() - 5_000).toISOString(), error_detail },
+    };
+  }
+
+  it.each([
+    ["queued", null, "Queued"],
+    ["sending", null, "Sending"],
+    ["sent", null, "Sent"],
+    ["delivered", null, "Delivered"],
+    ["failed", "smtp; 550 5.1.1 user unknown", "Failed: smtp; 550 5.1.1 user unknown"],
+    ["sending", "Not confirmed: TimeoutError", "Not confirmed: check before sending again"],
+  ])("a Send that is %s reads %j", (status, detail, label) => {
+    loaded([sendRow(status, detail)]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+    expect(inRows(label)).toHaveLength(1);
+    expect(inRows(/Marked sent/)).toHaveLength(0);
+  });
+
+  it("shows a Send's reason that already says what happened on its own", () => {
+    loaded([sendRow("failed", "Not sent: SES refused it (Bad content).")]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+    expect(inRows("Not sent: SES refused it (Bad content).")).toHaveLength(1);
+    expect(inRows(/Failed: Not sent/)).toHaveLength(0);
+  });
+
+  it("reads Failed, not a raw error, on a failed row with no Send behind it", () => {
+    loaded([
+      {
+        ...sendRow("failed"),
+        detail: { send_requested_at: null, error_detail: "ConnectionRefusedError: [Errno 61]" },
+      },
+    ]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+    expect(inRows("Failed")).toHaveLength(1);
+    expect(inRows(/Errno/)).toHaveLength(0);
+  });
+
+  it('keeps "I\'ve sent it" attributed, and an automatic reply Queued', () => {
+    loaded([
+      { ...sendRow("sent"), id: "m1", detail: { send_requested_at: null, error_detail: null } },
+      { ...sendRow("queued"), id: "a1", actor_name: null, detail: { send_requested_at: null } },
+    ]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+    expect(screen.getByText("Marked sent by Priya")).toBeTruthy();
+    expect(inRows("Queued")).toHaveLength(1);
+    expect(inRows(/^Sent$/)).toHaveLength(0);
+  });
+
+  it("says Not confirmed for a Send still queued 1.5 minutes after it was pressed", () => {
+    loaded([
+      {
+        ...sendRow("queued"),
+        detail: { send_requested_at: new Date(Date.now() - 91_000).toISOString() },
+      },
+    ]);
+    render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+    expect(inRows("Not confirmed: check before sending again")).toHaveLength(1);
+    expect(inRows("Queued")).toHaveLength(0);
+  });
+
+  it("turns Not confirmed when the window ends, with no new data from the server", () => {
+    // THE BUG THIS PINS: the last re-check returns the same (still queued) data, nothing re-renders,
+    // and "Queued" stayed on screen past the window. The clock has to move the label by itself.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      loaded([
+        {
+          ...sendRow("queued"),
+          detail: { send_requested_at: new Date(Date.now() - 80_000).toISOString() },
+        },
+      ]);
+      render(<TimelinePanel fileId="LF-JR4T" />, { wrapper });
+      expect(inRows("Queued")).toHaveLength(1);
+      act(() => {
+        vi.advanceTimersByTime(11_000);
+      });
+      expect(inRows("Not confirmed: check before sending again")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

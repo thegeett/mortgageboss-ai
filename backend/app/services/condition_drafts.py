@@ -1483,6 +1483,15 @@ async def _link_needs(
 # --------------------------------------------------------------------------------------------- #
 
 
+#: Why "Mark as sent" is refused, by where the email already is (LP-997 review).
+_ALREADY_GONE = {
+    CommunicationStatus.QUEUED: "This email is already being sent from the app.",
+    CommunicationStatus.SENDING: "This email is already being sent from the app.",
+    CommunicationStatus.DELIVERED: "This email was already sent and delivered.",
+    CommunicationStatus.FAILED: "This email was sent from the app and could not be delivered.",
+}
+
+
 async def mark_sent(
     db: AsyncSession,
     *,
@@ -1501,7 +1510,9 @@ async def mark_sent(
     if message is None or message.deleted_at is not None:
         raise DraftRefused("This draft was deleted.")
     if message.status is not CommunicationStatus.DRAFT:
-        raise DraftRefused("This email was already marked sent.")
+        # LP-997 REVIEW — SAY WHAT ACTUALLY HAPPENED TO IT. "Marked sent" was the only way out of
+        # DRAFT when this was written; a Send from the app can also leave it queued, sending or failed.
+        raise DraftRefused(_ALREADY_GONE.get(message.status, "This email was already marked sent."))
     address = _address_of(message.recipient)
     if not address:
         raise DraftRefused("Add an email address for this draft before marking it sent.")

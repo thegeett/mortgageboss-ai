@@ -26,6 +26,7 @@ import { copyMessage } from "@/lib/markdown/copy-rich";
 import { emailBodyToHtml } from "@/lib/markdown/email-body";
 import { htmlToEmailBody } from "@/lib/markdown/from-html";
 import { notifyError, notifySuccess } from "@/lib/toast";
+import type { MessageDetail } from "@/lib/types/communication";
 import type { ResponsibleParty } from "@/lib/types/party-request";
 import dynamic from "next/dynamic";
 
@@ -66,8 +67,18 @@ const MessageEditor = dynamic(
 
 const BODY_PROSE =
   "[&_p]:mb-3 [&_p:last-child]:mb-0 [&_ul]:mb-3 [&_ul]:ml-5 [&_ul]:list-disc [&_li]:mb-1.5 [&_strong]:font-semibold";
+import { sendStatusLabel } from "@/lib/communication/send-status";
 import { messageInstant, messageTimeFull, messageTimeLabel } from "@/lib/message-time";
-import { Check, Copy, ExternalLink, Link as LinkIcon, Sparkles, Trash2, X } from "lucide-react";
+import {
+  Check,
+  Copy,
+  ExternalLink,
+  Link as LinkIcon,
+  Send,
+  Sparkles,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
@@ -193,6 +204,12 @@ export function DraftPane({
   // to an address they know and have never typed in here. A body is still required: there is no
   // message to have sent without one.
   const canSend = bodyPlain.trim().length > 0 && !send.isPending;
+  // LP-997 — THE FILE'S OWN ADDRESS WHEN THE APP CAN SEND THIS DRAFT, OR NULL. `can_send` is the
+  // server's answer (file address, company switched on for sending, a mail sender here, not a
+  // condition draft) and the same check its Send refuses on; `suggested_bcc` is the file address
+  // the email goes From. With it, Send is the button; without it, the processor sends from her own
+  // mail as before.
+  const fileAddress = data?.can_send ? data.suggested_bcc : null;
 
   // LP-855 — WHERE THIS PROCESSOR WRITES THEIR EMAIL, and the picker that asks once.
   //
@@ -715,14 +732,17 @@ export function DraftPane({
                       </div>
                     </div>
                   )}
-                  <p className="text-xs text-muted-foreground">
-                    {/* WHICH ROUTE KEEPS THE FORMATTING. `mailto:` bodies are plain text by RFC
+                  {/* LP-997 — only beside the buttons it is about; Send replaces them. */}
+                  {fileAddress ? null : (
+                    <p className="text-xs text-muted-foreground">
+                      {/* WHICH ROUTE KEEPS THE FORMATTING. `mailto:` bodies are plain text by RFC
                         6068 — no client renders markup in one — so the two buttons below are not
                         equivalent and a processor should not have to discover that by sending a
                         flattened email. */}
-                    Formatting survives <span className="text-foreground">Copy message</span>; the
-                    mail-client link sends plain text.
-                  </p>
+                      Formatting survives <span className="text-foreground">Copy message</span>; the
+                      mail-client link sends plain text.
+                    </p>
+                  )}
                 </div>
               </div>
             ) : (
@@ -785,16 +805,15 @@ export function DraftPane({
               </div>
             ) : null}
 
-            {data.error_detail ? (
-              <p className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
-                Delivery failed: {data.error_detail}
-              </p>
-            ) : null}
-
             <dl className="grid gap-1 border-t border-border pt-3 text-xs text-muted-foreground">
               <div className="flex gap-2">
                 <dt className="font-medium text-foreground">Status</dt>
-                <dd>{data.status}</dd>
+                {/* LP-997 — the timeline's words for the same message: a Send from the app says where
+                    the worker is ("Failed: <reason>" replaces the separate "Delivery failed" box);
+                    "Mark as sent" stays a claim, never "Sent". */}
+                <dd className={data.status === "failed" ? "text-danger" : undefined}>
+                  {dialogStatus(data)}
+                </dd>
               </div>
               {data.template_key ? (
                 <div className="flex gap-2">
@@ -811,68 +830,91 @@ export function DraftPane({
                 {/* SCREEN 2's BUTTON BAR:
                       `Copy & open <client>` · `Copy message` · `Mark as sent` — spacer — `Delete`
 
-                    THERE IS NO SEND BUTTON, NOT EVEN DISABLED. `mail_transport` is an interface
-                    with no provider behind it, so a greyed-out Send would be a promise this version
-                    cannot keep and the first thing a processor would click. The absence is asserted
-                    in `message-dialog.test.tsx`, with a positive control naming the buttons that
-                    ARE here — a not-assertion over a whole screen otherwise passes on a screen that
-                    failed to render. */}
+                    LP-997 — A FILE WITH ITS OWN ADDRESS GETS `Send` INSTEAD OF THE FIRST THREE: the
+                    worker sends it From the file address with her in CC (LP-994). A file without
+                    one keeps the three, because the app cannot send for it. */}
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* THE WHOLE SEND PATH IN ONE CLICK. It copies the RICH body AND opens the
+                  {fileAddress ? (
+                    <Button
+                      type="button"
+                      className="gap-2"
+                      disabled={!canSend}
+                      onClick={() => {
+                        send.mutate(
+                          {
+                            draftId: data.id,
+                            recipient: recipient.trim(),
+                            subject,
+                            body: bodyForSend,
+                            transmit: true,
+                          },
+                          { onSuccess: onClose },
+                        );
+                      }}
+                    >
+                      <Send className="h-4 w-4" aria-hidden />{" "}
+                      {send.isPending ? "Sending…" : "Send"}
+                    </Button>
+                  ) : (
+                    <>
+                      {/* THE WHOLE SEND PATH IN ONE CLICK. It copies the RICH body AND opens the
                       compose window with To and Subject filled and the body EMPTY — every compose
                       route takes the body as plain text, so filling it would hand the processor a
                       message that looks finished and has quietly lost its structure. An empty body
                       is obviously unfinished, which is the point. */}
-                  <Button
-                    type="button"
-                    className="gap-2"
-                    disabled={!canSend}
-                    onClick={() => void copyAndOpen()}
-                  >
-                    <ExternalLink className="h-4 w-4" />
-                    {composeButtonLabel(activeClient)}
-                  </Button>
+                      <Button
+                        type="button"
+                        className="gap-2"
+                        disabled={!canSend}
+                        onClick={() => void copyAndOpen()}
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                        {composeButtonLabel(activeClient)}
+                      </Button>
 
-                  {/* KEPT FOR ANYBODY DOING IT THEIR OWN WAY — and it is the fallback when a popup
+                      {/* KEPT FOR ANYBODY DOING IT THEIR OWN WAY — and it is the fallback when a popup
                       blocker eats the compose window. */}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="gap-2"
-                    onClick={async () => {
-                      // LP-844 — BOTH FLAVOURS. This is the send path, so bold and bullets survive
-                      // here or nowhere.
-                      await copyMessage(bodyForSend, format);
-                      setCopied(true);
-                      window.setTimeout(() => setCopied(false), 2000);
-                    }}
-                  >
-                    {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                    {copied ? "Copied" : "Copy message"}
-                  </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="gap-2"
+                        onClick={async () => {
+                          // LP-844 — BOTH FLAVOURS. This is the send path, so bold and bullets survive
+                          // here or nowhere.
+                          await copyMessage(bodyForSend, format);
+                          setCopied(true);
+                          window.setTimeout(() => setCopied(false), 2000);
+                        }}
+                      >
+                        {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                        {copied ? "Copied" : "Copy message"}
+                      </Button>
 
-                  {/* THE CLAIM, ATTRIBUTED. Nothing observed a send, so what this records is that a
+                      {/* THE CLAIM, ATTRIBUTED. Nothing observed a send, so what this records is that a
                       processor says they sent it — `Marked sent by Priya · Tue 16:41` on the list.
                       It starts no clock, because there are no reminders in this version. */}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="gap-2"
-                    disabled={!canSend}
-                    onClick={() =>
-                      send.mutate(
-                        {
-                          draftId: data.id,
-                          recipient: recipient.trim(),
-                          subject,
-                          body: bodyForSend,
-                        },
-                        { onSuccess: onClose },
-                      )
-                    }
-                  >
-                    <Check className="h-4 w-4" /> {send.isPending ? "Recording…" : "Mark as sent"}
-                  </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="gap-2"
+                        disabled={!canSend}
+                        onClick={() => {
+                          send.mutate(
+                            {
+                              draftId: data.id,
+                              recipient: recipient.trim(),
+                              subject,
+                              body: bodyForSend,
+                            },
+                            { onSuccess: onClose },
+                          );
+                        }}
+                      >
+                        <Check className="h-4 w-4" />{" "}
+                        {send.isPending ? "Recording…" : "Mark as sent"}
+                      </Button>
+                    </>
+                  )}
 
                   {/* LP-834 — the secure link. LP-857 TAKES IT OFF WITH THE REST OF THE NEXT
                       PHASE, which this comment has been promising since LP-834.
@@ -932,20 +974,25 @@ export function DraftPane({
                   {/* NAMES WHAT FAILED AND OFFERS THE NEXT MOVE — the Ledger's rule 9, no
                         apologies and no "something went wrong". Each says which HALF is missing,
                         because the recovery is different for each. */}
-                  {opened === "copy-failed"
-                    ? "Your browser refused the copy — the compose window is open, so select the message above and copy it in yourself."
-                    : opened === "blocked"
-                      ? "Your browser blocked the compose window — the message is on your clipboard, so open your mail app and paste it."
-                      : opened === "opened"
-                        ? "Paste into the message — ⌘V."
-                        : "Records that you sent it. Nothing is transmitted from here."}
+                  {fileAddress
+                    ? `From ${fileAddress} · CC you`
+                    : opened === "copy-failed"
+                      ? "Your browser refused the copy — the compose window is open, so select the message above and copy it in yourself."
+                      : opened === "blocked"
+                        ? "Your browser blocked the compose window — the message is on your clipboard, so open your mail app and paste it."
+                        : opened === "opened"
+                          ? "Paste into the message — ⌘V."
+                          : "Records that you sent it. Nothing is transmitted from here."}
                 </p>
               </div>
             ) : null}
             {send.isError ? (
               <p className="text-sm text-danger">
-                This was not recorded as sent. It may already have been sent, or this address may
-                have been emailed too recently.
+                {/* LP-997 — A REFUSED SEND SAYS WHY, in the server's words (blocked address, no
+                    recipient, emailed too recently); the dialog stays open so she can fix it. */}
+                {fileAddress
+                  ? getErrorMessage(send.error)
+                  : "This was not recorded as sent. It may already have been sent, or this address may have been emailed too recently."}
               </p>
             ) : null}
           </div>
@@ -1005,6 +1052,25 @@ export function DraftPane({
  * Returns "" for a body with no readable line, which the dialog renders as an ellipsis rather than
  * as an empty quote block.
  */
+/**
+ * LP-997 — the Status line, by the timeline's rule. A Send from the app (`send_requested_at`) reads
+ * the plain label; anything else keeps its own word: "Marked sent" is her claim, not an observed
+ * send, and a failed row with no Send behind it reads "Failed" rather than a raw error.
+ */
+function dialogStatus(data: MessageDetail): string {
+  if (data.send_requested_at !== null) {
+    const label = sendStatusLabel({
+      status: data.status,
+      errorDetail: data.error_detail,
+      requestedAt: data.send_requested_at,
+    });
+    if (label !== null) return label;
+  }
+  if (data.status === "sent" || data.status === "delivered") return "Marked sent";
+  if (data.status === "failed") return "Failed";
+  return data.status;
+}
+
 export function firstLineOf(plain: string): string {
   for (const line of (plain ?? "").split("\n")) {
     const trimmed = line.trim();

@@ -50,15 +50,24 @@ def normalise_domain(domain: str) -> str:
     return cleaned
 
 
-async def active_mail_domain(db: AsyncSession, company_id: UUID) -> str | None:
-    """The company's domain if it is active, otherwise None."""
-    domain: str | None = await db.scalar(
-        select(CompanyMailDomain.domain).where(
-            CompanyMailDomain.company_id == company_id,
-            CompanyMailDomain.status == MailDomainStatus.ACTIVE,
+async def file_address_and_sending(
+    db: AsyncSession, loan_file: LoanFile
+) -> tuple[str | None, bool]:
+    """The file address (see `file_address`) and whether the company is switched on for sending
+    (LP-997), from one read of the company's row. `(None, False)` when there is no address."""
+    if not settings.file_addresses_enabled:
+        return None, False
+    row = (
+        await db.execute(
+            select(CompanyMailDomain.domain, CompanyMailDomain.sending_enabled).where(
+                CompanyMailDomain.company_id == loan_file.company_id,
+                CompanyMailDomain.status == MailDomainStatus.ACTIVE,
+            )
         )
-    )
-    return domain
+    ).first()
+    if row is None:
+        return None, False
+    return f"{loan_file.display_id.lower()}@{row.domain}", bool(row.sending_enabled)
 
 
 async def file_address(db: AsyncSession, loan_file: LoanFile) -> str | None:
@@ -67,12 +76,23 @@ async def file_address(db: AsyncSession, loan_file: LoanFile) -> str | None:
     None when the company has no active domain, and for every company while
     `settings.file_addresses_enabled` is off (nothing routes the address until step 4).
     """
-    if not settings.file_addresses_enabled:
-        return None
-    domain = await active_mail_domain(db, loan_file.company_id)
-    if domain is None:
-        return None
-    return f"{loan_file.display_id.lower()}@{domain}"
+    address, _ = await file_address_and_sending(db, loan_file)
+    return address
+
+
+async def set_email_sending(
+    db: AsyncSession, *, company_id: UUID, enabled: bool
+) -> CompanyMailDomain:
+    """LP-997 — switch real email from the app on or off. Refuses a company with no active domain:
+    the app sends From the file address, which needs one. Flushes; the caller commits."""
+    row = await db.scalar(
+        select(CompanyMailDomain).where(CompanyMailDomain.company_id == company_id)
+    )
+    if row is None or row.status is not MailDomainStatus.ACTIVE:
+        raise MailDomainError("This company has no active mail domain; link one first.")
+    row.sending_enabled = enabled
+    await db.flush()
+    return row
 
 
 async def set_company_mail_domain(
@@ -116,8 +136,9 @@ async def set_company_mail_domain(
 
 __all__ = [
     "MailDomainError",
-    "active_mail_domain",
     "file_address",
+    "file_address_and_sending",
     "normalise_domain",
     "set_company_mail_domain",
+    "set_email_sending",
 ]

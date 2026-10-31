@@ -5,9 +5,10 @@ from __future__ import annotations
 import pytest
 from app.models.company_mail_domain import CompanyMailDomain, MailDomainStatus
 from app.scripts.set_company_mail_domain import describe, run
-from app.services.mail_domain import MailDomainError, active_mail_domain
+from app.services.mail_domain import MailDomainError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.mail_address import active_mail_domain
 from tests.models.conftest_helpers import make_company
 
 

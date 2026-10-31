@@ -600,6 +600,12 @@ async def build_timeline(
                 "template_key": message.template_key,
                 "template_version": message.template_version,
                 "error_detail": message.error_detail,
+                # LP-997 — WHEN A PERSON PRESSED SEND (LP-994), or None: "I've sent it" and an
+                # automatic reply never have it. The row reads "Sent" rather than "Marked sent by …",
+                # and the screen re-checks for a while after it, then says "Not confirmed".
+                "send_requested_at": (
+                    message.send_requested_at.isoformat() if message.send_requested_at else None
+                ),
             },
         )
         for message in messages

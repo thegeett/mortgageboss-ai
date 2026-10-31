@@ -13,8 +13,10 @@ replaces it with `file_address`.
 from uuid import UUID, uuid4
 
 from app.core.config import settings
+from app.models.company_mail_domain import CompanyMailDomain, MailDomainStatus
 from app.models.loan_file import LoanFile
 from app.services.mail_domain import set_company_mail_domain
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -26,3 +28,26 @@ async def link_mail_domain(db: AsyncSession, company_id: UUID) -> str:
 
 def token_address(loan_file: LoanFile) -> str:
     return f"lf-{loan_file.inbox_token}@{settings.inbox_domain}"
+
+
+async def _active_row(db: AsyncSession, company_id: UUID) -> CompanyMailDomain | None:
+    row: CompanyMailDomain | None = await db.scalar(
+        select(CompanyMailDomain).where(
+            CompanyMailDomain.company_id == company_id,
+            CompanyMailDomain.status == MailDomainStatus.ACTIVE,
+        )
+    )
+    return row
+
+
+async def active_mail_domain(db: AsyncSession, company_id: UUID) -> str | None:
+    """The company's active domain, or None. (The app reads it with the sending switch, in one
+    query: `mail_domain.file_address_and_sending`, LP-997.)"""
+    row = await _active_row(db, company_id)
+    return row.domain if row else None
+
+
+async def sending_switched_on(db: AsyncSession, company_id: UUID) -> bool:
+    """LP-997 — the company's active domain has sending from the app switched on."""
+    row = await _active_row(db, company_id)
+    return bool(row and row.sending_enabled)

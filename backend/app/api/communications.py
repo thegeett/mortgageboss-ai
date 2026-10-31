@@ -492,6 +492,10 @@ class MessageDetailPublic(BaseModel):
     suggested_bcc: str | None
     mailto_available: bool
     mailto_max_chars: int
+    #: LP-997 — Send instead of copy / mail app / "Mark as sent"; see `MessageDetail.can_send`.
+    can_send: bool
+    #: LP-997 — when a person pressed Send; None for anything not sent from the app.
+    send_requested_at: datetime | None
 
 
 @message_router.post("/{communication_id}/upload-link", response_model=MessageDetailPublic)
@@ -593,6 +597,8 @@ async def read_message(
         suggested_bcc=detail.suggested_bcc,
         mailto_available=detail.mailto_available,
         mailto_max_chars=detail.mailto_max_chars,
+        can_send=detail.can_send,
+        send_requested_at=detail.send_requested_at,
     )
 
 

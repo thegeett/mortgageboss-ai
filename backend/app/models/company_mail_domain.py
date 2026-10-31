@@ -12,7 +12,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import Boolean, ForeignKey, String, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDMixin
@@ -44,8 +44,16 @@ class CompanyMailDomain(Base, UUIDMixin, TimestampMixin):
     )
     domain: Mapped[str] = mapped_column(String(MEDIUM_STRING), unique=True, nullable=False)
     status: Mapped[MailDomainStatus] = mapped_column(str_enum(MailDomainStatus), nullable=False)
+    #: LP-997 — real email from the app is switched on for this company. Off by default: the
+    #: processor sends from her own mail and records it ("Mark as sent"). Turned on with
+    #: `app.scripts.set_email_sending` once the company's domain is onboarded for sending; then the
+    #: screens offer Send and the API accepts it.
+    sending_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
 
     company: Mapped["Company"] = relationship()
 
     def __repr__(self) -> str:
-        return f"<CompanyMailDomain {self.domain} ({self.status})>"
+        sending = ", sending" if self.sending_enabled else ""
+        return f"<CompanyMailDomain {self.domain} ({self.status}{sending})>"
