@@ -588,7 +588,7 @@ Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each tick
 - **Done when:** tests cover headers, CC, threading, HTML/text; a dev script sends one email to MailHog.
 - **Result:** `services/outbound_mime.build_mime` (From with quoted display name, To, Cc, Reply-To, Date, our Message-ID, threading, plain or multipart/alternative; refuses line breaks in headers and anything that isn't exactly one address) and `services/mail_sender` (`SesMailSender`, `SmtpMailSender`, `get_mail_sender()` by `MAIL_TRANSPORT`). **One attempt only** (`total_max_attempts: 1`; the brief's `max_attempts: 1` would have meant two sends). Failures raise `SendError` with `outcome_unknown`: a lost answer means "may have gone" and must never be treated as a clean failure. A small backend HTML-to-text converter for the plain part (a second derivation beside the frontend's; accepted). MailHog check passed; one real SES send to `success@simulator` produced a matching `Delivery` event. Not changed: a provider error message (which can name the recipient) stays in the exception chain, so LP-994 must store it on the row and log only the code. Details: `docs/tickets/LP-993.md`.
 
-### LP-994 — Sending runs in the worker
+### LP-994 — Sending runs in the worker — ✅ Done
 - `send_draft(..., transmit=False)`. Default false = today's record-only behaviour ("I've sent it" and every existing caller). `transmit=True` is allowed only when the company has an active mail domain; otherwise refused with a clear message.
 - With `transmit=True`: all guards run, status → `queued`, commit, then enqueue `send_communication(id)` **after** the commit.
 - New status `sending` and new column `raw_storage_path` (migration).
@@ -608,9 +608,10 @@ Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each tick
   - Clean failure (SES refused, no domain, bad data; nothing left) → `failed`, needs unwound, "Not sent: …" on the file. **No "Send again" in step 2:** the needs go back to pending, so the next request picks them up. Outcome unknown (`SendError.outcome_unknown`, or a crash after the SES call) → stays `sending` with "not confirmed"; no unwind, no retry; a person decides.
   - Rate limit now counts `queued`, `sending`, `sent` and `delivered` (it counted only `sent`, so two quick Sends both passed, and LP-995's `delivered` rows would have dropped out).
   - The provider's error text is stored in `error_detail` only; logs carry the error code.
+- **Result:** migration `4b7e2c9d1a63` (`sending`, `send_requested_at`, `raw_storage_path`); `send_draft(transmit=…)`; worker tasks `communications.send` and `communications.requeue_stale` (beat, 5 min). Dev: one Send → one email in MailHog with the right headers and the `.eml` saved; "I've sent it" sends nothing; a company without a domain is refused; worker stopped then started → sent exactly once. Review fixes: unwinding skips needs another sent email also asked for (bounce path too); any unexpected error before the SES call is a clean failure, not "not confirmed"; rate limit compares addresses case- and space-insensitively; `raw_storage_path` kept out of the readonly view; "Sending was not confirmed" shown on the timeline. **Found:** `FILE_ADDRESSES_ENABLED` (added in LP-991's review) is off everywhere, and while it is off no file has an address, so every Send is refused — LP-998 turns it on in staging. Left for LP-997: condition-draft screens read only `sent`, so a queued or delivered condition email shows as "draft". Design point kept: the activity log says "Sent a document request" at queue time. Details: `docs/tickets/LP-994.md`.
 
 ### LP-995 — Delivery events
-- Beat task every minute reads the events queue (`EVENTS_QUEUE_URL`, now read), up to 50 messages per run (5 batches of 10), deletes each one after it is committed.
+- Beat task every minute reads the events queue (`EVENTS_QUEUE_URL`, now read), up to 10 messages, deletes each one after it is handled.
 - Event types the config set publishes: `Delivery`, `Bounce`, `Complaint`, `Reject`, `RenderingFailure`.
   - `Delivery` for the To recipient → `delivered`.
   - `Bounce` → existing `parse_ses_bounce` + `record_delivery_failure`. `bounceSubType = OnAccountSuppressionList` → message on the thread: "Not delivered: this address bounced or complained before."
@@ -620,6 +621,13 @@ Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each tick
   - Unknown MessageId → logged and deleted. A message that can't be parsed is left to fail into the DLQ (3 tries, alarmed).
 - Fix the suppression message in `send_draft` so it covers complaints, not only bounces.
 - **Done when:** simulator `success@`, `bounce@`, `complaint@` and a suppressed address each show the right status or message on the thread.
+- **Refined 2026-10-30 (prompt written), keeping the bullets above:**
+  - Bounce type comes from SES's own `bounceType` first (Permanent → permanent, Transient → temporary), the status code only when it is Undetermined. `OnAccountSuppressionList` carries no usable status code, so this is what makes it permanent.
+  - A temporary bounce event from SES is final (SES already retried), so the email is `failed` and the old wording "will be retried" is corrected; the address is not blocked.
+  - Only events about the email's own To recipient change its status or block an address; the CC'd processor's events are ignored.
+  - Handling the same event twice changes nothing (SQS can deliver twice). A late Delivery never turns a `failed` email back into `delivered`.
+  - `Reject` and `Rendering Failure` mean SES did not send it: clean failure, like LP-994's.
+  - Dev has no SQS: a dev script feeds a sample event into the same handler. The real queue is proven in LP-998.
 
 ### LP-996 — Pre-send content check
 - Deterministic, in `send_draft`, for `transmit=True` sends: blocks interest rates and APRs, approval/denial wording ("approved", "denied", "clear to close"), and account or routing numbers (long digit runs, 9-digit routing numbers).
@@ -637,6 +645,7 @@ Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each tick
 
 ### LP-998 — Prove step 2
 - Deploy to staging. Test company only; recipients are your own Gmail and SES simulator addresses.
+- Turn on `FILE_ADDRESSES_ENABLED` in staging (task env). While it is off no file has an address and every Send is refused (LP-994). Only the test company has a domain, so only its files get addresses.
 - Find the staging test company (`./scripts/deploy staging query … readonly.companies`), or create one with `./scripts/deploy staging add-company`; never the pilot company. Link it with the one-off command in `docs/tickets/LP-991.md`, then confirm in `readonly.company_mail_domains`.
 - Worker log in staging shows the beat heartbeat every 5 minutes (LP-992).
 - Count unsent HTML drafts made from template v1–v4 (query in `LP-991.md`); any found are re-rendered or deleted so no draft points at an `imbox…` address.
@@ -662,6 +671,7 @@ Legal hold + retention schedule → AI reply tier 2 → M365 mailbox connector (
 
 ## 18. Log
 
+- 2026-10-30 — LP-994 ✅ (worker sends; atomic claim; re-enqueue; rate-limit fixes). Found `FILE_ADDRESSES_ENABLED` off everywhere → LP-998 turns it on in staging. LP-995 refined (SES `bounceType` first, temporary bounce is final, To-recipient only, idempotent).
 - 2026-10-30 — LP-993 ✅ (build_mime, SES/SMTP sender, one attempt only, `outcome_unknown`; SES simulator send proved). LP-994 refined: `send_requested_at` marker, atomic claim, safe 5-minute re-enqueue, no Send-again in step 2, rate limit counts queued/sending/delivered.
 - 2026-10-28 — LP-992 ✅ (code; first apply done, `lp992b` pending): Celery beat inside the worker, one-worker rule enforced in Terraform, deploy script and ECS deployment settings; `get_mail_storage()` with its own `MAIL_KMS_KEY_ID`; `INBOUND_BUCKET` → `MAIL_BUCKET`.
 - 2026-10-26 — LP-991 ✅: file address `lf-<display_id>@<company domain>` or none; `company_mail_domains` table; new template versions. §3 address row updated (no grace period). LP-998 gained: find or create the staging test company; clean up old HTML drafts.
