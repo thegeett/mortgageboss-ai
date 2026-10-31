@@ -84,6 +84,7 @@ Each loan file gets its own email address on the customer's domain. MortgageBoss
 | Complaint status | **No new status.** A complaint blocks the address and is logged on the file; the email stays `delivered`. A bounce uses the existing `failed`. FR-19 adjusted | 10-26 |
 | "I've sent it" vs Send | Two different actions. "I've sent it" (processor sent from her own mail app) only records; it never transmits. Send transmits. `send_draft` takes an explicit `transmit` flag, default false | 10-26 |
 | Turning a company on for email | Two steps once its domain is active: link the domain (`set_company_mail_domain`), then switch sending on (`set_email_sending … on`). Both are commands in v1 (no admin screen). Step 3 folds this into onboarding | 10-31 |
+| SES Message-ID | SES replaces our Message-ID with `<{SES MessageId}@email.amazonses.com>`; the id part equals `Communication.external_message_id`. Step 4's reply threading matches `In-Reply-To` / `References` on this, not on the id in the stored `.eml` (found in LP-998) | 10-31 |
 | Pre-send content check | **Deferred to a later iteration (2026-10-30)** — not rejected; v1 ships sending first and adds safeguards iteratively. Built in LP-996 and reverted. Measured, it blocked ordinary requests: every bank, investment or retirement statement request (catalog text says "the account number"), every borrower condition email ("The lender approved your loan with a few conditions"), title-commitment and wire-instruction requests to title companies, and any percentage ("100% of the gift funds"). For v1 the processor sends what she writes; AI drafts keep the drafter's guard. When it comes back, start from `docs/tickets/LP-996.md` (code, measurement and the misfire list) and fix the misfires first, or ship it as a warning rather than a block | 10-30 |
 | Not in v1 | Reading the processor's inbox (OAuth), automatic AI replies, automatic DNS tools (Entri / Domain Connect), lender portal integration, SES tenant management (revisit at ~10 tenants) | 10-17 |
 
@@ -155,7 +156,7 @@ An emailed attachment therefore exists twice: inside the raw email (evidence of 
 | LP-981 — inbound module → shared plumbing, `mbai-staging-mail` | ✅ **Done** 2026-10-20 (code) on `infra/lp-981-mail-bucket`; applied 2026-10-21 in LP-989. Ticket file `docs/tickets/LP-981.md` |
 | Step 1 — LP-982–989 | ✅ **Done** 2026-10-21. Receiving activated in staging (rule set `mbai-inbound`, 2026-10-21 00:20 ET). One real email proven end to end, except scan-result events (→ LP-990). Details in §15 and `docs/tickets/LP-98*.md` |
 | LP-990 — scan-result delivery fix | ✅ **Done** 2026-10-21. Scan results now reach their queue; failures go to the DLQ and alarm |
-| Step 2 — Send | Groomed 2026-10-26 into LP-991–998 (§15a). Not started |
+| Step 2 — Send | ✅ **Done** 2026-10-31. Proven in staging (LP-998): the test company MortgageBoss sends from `lf-…@mail.staging.mortgageboss.ai`; delivered and bounced show on the file. One fix open: SES drops the From display name (LP-999) |
 | Steps 3–6 | Not started |
 
 **Until LP-989 and step 2 are done:** the staging account can deliver real mail to anyone (production access is account-wide). Send test mail only to own inboxes or `success@ / bounce@ / complaint@simulator.amazonses.com`. No real borrower addresses.
@@ -658,7 +659,7 @@ Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each tick
   - **The 1.5-minute "Not confirmed: check before sending again" label can invite a duplicate.** It is shown for any Send still `queued` or `sending` after 1.5 minutes, although the worker may still send it (re-enqueue every 5 minutes; the worker is off overnight). The rate limit blocks a resend for 5 minutes only. Fix: for a row that is merely still queued, say "Still sending — check back in a few minutes"; keep "Not confirmed: check before sending again" only for the server's own `Not confirmed` (an unknown SES outcome). One wording change.
   - **Four things now gate Send** (domain status, `FILE_ADDRESSES_ENABLED`, `sending_enabled`, `MAIL_TRANSPORT`). The domain row already has `status` (`active`/`inactive`), which was meant to say whether a company sends; the new switch overlaps it. Simplify when step 3 builds onboarding: one company-level state, one server setting.
 
-### LP-998 — Prove step 2
+### LP-998 — Prove step 2 — ✅ Done
 - Deploy to staging. Test company only; recipients are your own Gmail and SES simulator addresses.
 - After linking the test company's domain, switch it on for sending: `set_email_sending <company> on` (one-off ECS task, same way as `set_company_mail_domain`). Without it every file shows "Mark as sent" (LP-997).
 - Turn on `FILE_ADDRESSES_ENABLED` in staging (task env). While it is off no file has an address and every Send is refused (LP-994). Only the test company has a domain, so only its files get addresses.
@@ -673,6 +674,13 @@ Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each tick
 - Kill the worker mid-send: no duplicate.
 - Alarms all OK, DLQs empty.
 - **Done when:** every check passes. **First demo.**
+- **Result (2026-10-31):** staging on image `staging-4b8534b2` with `FILE_ADDRESSES_ENABLED=true` and LP-992's pending change applied. Test company **MortgageBoss** linked to `mail.staging.mortgageboss.ai` and switched on for sending; the other company untouched; old-drafts count 0. Beat heartbeat in the worker log. **Gmail send (LF-AFCW):** sent in 1 second, then delivered; `.eml` in `outbound/` (SSE-KMS); SPF, DKIM and DMARC pass; Cc the processor; Reply-To the file address; the screen showed Delivered. **Reply** from Gmail landed in `inbound/` (shows on the file in step 4). **Bounce** to the simulator: `failed` with SES's reason, address blocked, shown on screen. All 6 alarms OK, DLQs 0. Label fix shipped: a still-queued Send reads "Still sending: check back in a few minutes"; "Not confirmed" only for the worker's unknown outcome. Skipped on purpose (covered by automated tests): complaint and kill-the-worker tests. Details: `docs/tickets/LP-998.md`.
+- **Findings:** (1) **SES drops the From display name** — the borrower sees `lf-afcw@mail.staging.mortgageboss.ai`, not "Geet Thaker, MortgageBoss" → LP-999. (2) The bounce reason is shown raw ("smtp; 550 5.1.1 As requested: user unknown…"); a plain sentence would read better — later. (3) `mbai-staging-scheduler-dlq` holds 5 messages (the US-hours start/stop schedule, not mail; no alarm) — look at separately.
+
+### LP-999 — Keep the processor's name in From (found in LP-998)
+- `services/mail_sender.py` passes `FromEmailAddress=<bare address>` to SES, and SES rewrites the From header with it, so the display name is lost.
+- Fix: for raw content, leave `FromEmailAddress` out so SES uses the email's own From header (the domain is a verified identity), or pass the full From header. Pick the simpler one that keeps the name; one test; resend to Gmail and check the name shows.
+- **Done when:** Gmail shows "<processor>, <company>" as the sender.
 
 ## 16. Diagrams
 
@@ -687,6 +695,7 @@ Pre-send content check, revisited from `LP-996.md` (fix the misfires, or warn in
 
 ## 18. Log
 
+- 2026-10-31 — **Step 2 done.** LP-998 ✅: real email from staging to Gmail delivered (SPF/DKIM/DMARC pass), reply received into `inbound/`, simulator bounce failed and blocked, alarms calm. Message-ID format recorded (§3). Found: SES drops the From display name → LP-999.
 - 2026-10-31 — LP-997 ✅ (Send in the Communication tab; per-company sending switch; status labels; 1.5-minute screen check). Condition page left out. Open: the "Not confirmed" wording on a merely-queued Send can invite a duplicate; four switches gate Send.
 - 2026-10-30 — **Pre-send content check deferred to a later iteration** (iterative rollout: sending first, safeguards after; added to §17). LP-996 built, measured and reverted: it blocked bank-statement requests, every borrower condition email, title-company requests and any percentage. Rule 5, FR-18, §3, §11, §13 updated: the processor sends what she writes; AI drafts keep the drafter's guard. LP-997 and LP-998 lose their content-check items.
 - 2026-10-30 — LP-995 ✅ (delivery events). LP-996 refined: reuse the drafter's deterministic list, but only rule 5's three grounds (rate, approval wording, account/routing/wire) for human sends; override with a note on the evidence record; measure false positives on existing emails first.
