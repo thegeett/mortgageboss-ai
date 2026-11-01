@@ -42,6 +42,7 @@ dependencies = [
     # Celery concurrency. See app/storage/s3.py and decisions.md ADR-356.
     "aioboto3>=15.5.0",
     "pikepdf>=10.13.0.post1",
+    "dnspython>=2.8",
 ]
 
 [dependency-groups]

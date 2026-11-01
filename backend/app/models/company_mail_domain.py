@@ -12,7 +12,8 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Boolean, ForeignKey, String, false
+from sqlalchemy import Boolean, ForeignKey, String, Text, false
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDMixin
@@ -24,13 +25,17 @@ if TYPE_CHECKING:
 
 
 class MailDomainStatus(StrEnum):
-    """Whether files of this company get an address on the domain.
+    """Whether files of this company get an address on the domain. Only ACTIVE gives one.
 
-    Step 3 adds the onboarding states (and the zone, nameserver and SES identity columns) to this
-    same table.
+    LP-1005 — the onboarding states `set_up_mail_domain` moves a new domain through:
+    PENDING_NS (our zone exists; waiting for the customer's NS record) → VERIFYING (SES identity
+    and records written; waiting for AWS) → ACTIVE. PROBLEM is set by the hourly check (LP-1006).
     """
 
+    PENDING_NS = "pending_ns"
+    VERIFYING = "verifying"
     ACTIVE = "active"
+    PROBLEM = "problem"
     INACTIVE = "inactive"
 
 
@@ -51,6 +56,12 @@ class CompanyMailDomain(Base, UUIDMixin, TimestampMixin):
     sending_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=false()
     )
+
+    #: LP-1005 — the Route 53 hosted zone `set_up_mail_domain` created for the domain (bare id,
+    #: `Z…`) and its four nameservers, which the customer's NS record points at. Both None for a
+    #: domain linked by hand (LP-991), whose DNS is not ours to manage here.
+    zone_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nameservers: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
 
     company: Mapped["Company"] = relationship()
 
