@@ -702,10 +702,11 @@ Order: LP-1004 → 1005 → 1006 → 1007. Each ticket writes `docs/tickets/LP-x
 
 **Before starting:** ask the pilot customer who runs their DNS (pilot question 1). Register our own test domain at a non-AWS DNS provider (Namecheap or Cloudflare) for LP-1007.
 
-### LP-1004 — AWS access for domain setup
+### LP-1004 — AWS access for domain setup — ✅ Done
 - Route 53 private endpoint: the network module passes through names that already start with `com.amazonaws.`; add `com.amazonaws.route53` to `interface_endpoint_services` (~$7.30/month).
 - IAM: the role that runs setup (api / one-off task) may create and read hosted zones and records, and create, read and configure SES identities (DKIM, MAIL FROM). The worker may read zones, records and identities, for the hourly check. Nothing else.
 - **Done when:** from a one-off task in the VPC, Route 53 and SES identity calls reach AWS (OK or AccessDenied as expected); `terraform plan` clean.
+- **Result (2026-11-01):** Route 53 endpoint `vpce-0baa1eb32ce1287ff` (~$7.30/month; 8 endpoints in staging now, ~$58/month); network module uses names that already start with `com.amazonaws.` as is. IAM behind `domain_setup_enabled` (on in staging): api role may create zones, change records and create/configure SES identities; worker may only read; **no delete anywhere** (removing a customer domain is manual); **explicit Deny** on our own zone `staging.mortgageboss.ai` and on MAIL FROM/DKIM of `mail.staging.mortgageboss.ai` (ARNs from Terraform outputs). Simulator: 12 of 12 as expected. Inside the VPC: Route 53 OK, SES OK, public DNS OK. Notes: a new endpoint's private DNS takes a few minutes (the first call 4 minutes after creation timed out); test public DNS with a name that has records (the bare `mortgageboss.ai` has none). When production gets its own zone and identity, add them to the Deny (`domain_setup_protected_*_arns`). Details: `docs/tickets/LP-1004.md`.
 
 ### LP-1005 — Domain setup command
 - `company_mail_domains` gains: `zone_id`, `nameservers`, and the states `pending_ns` → `verifying` → `active` → `problem` (`inactive` stays).
@@ -745,6 +746,7 @@ Pre-send content check, revisited from `LP-996.md` (fix the misfires, or warn in
 
 ## 18. Log
 
+- 2026-11-01 — LP-1004 ✅: Route 53 endpoint; domain-setup IAM (api creates, worker reads, no deletes, Deny on our own zone and identity).
 - 2026-10-31 — LP-999 ✅ (processor's name in From). Step 3 groomed into LP-1004–1007 (§15b): onboarding by command, hourly check finishes setup, no fallback unless the pilot needs it, no self-test, customer subdomains `p=reject` with no reports, active domain turns sending on.
 - 2026-10-31 — **Step 2 done.** LP-998 ✅: real email from staging to Gmail delivered (SPF/DKIM/DMARC pass), reply received into `inbound/`, simulator bounce failed and blocked, alarms calm. Message-ID format recorded (§3). Found: SES drops the From display name → LP-999.
 - 2026-10-31 — LP-997 ✅ (Send in the Communication tab; per-company sending switch; status labels; 1.5-minute screen check). Condition page left out. Open: the "Not confirmed" wording on a merely-queued Send can invite a duplicate; four switches gate Send.
