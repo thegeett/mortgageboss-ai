@@ -45,7 +45,7 @@ Each loan file gets its own email address on the customer's domain. MortgageBoss
 | Mail bucket | One bucket for raw mail in both directions, renamed from `mbai-staging-inbound-mail` to **`mbai-staging-mail`** (free now: never applied). Folders `inbound/` (SES writes, object named by SES message ID) and `outbound/` (worker writes `<communication_id>.eml` before calling SES). Flat — no tenant or loan folders, because inbound mail is stored before routing; Postgres holds the link. See §4a | 10-20 |
 | Email-sourced documents | Stay on the normal documents path. Source recorded in `Document.upload_source = BORROWER_INBOX` (exists) and traceable through `InboundAttachment.document_id` (exists). Added: S3 object metadata `source=email`, `inbound-message-id=<id>`; a visible "Email · from … · date" label on the document linking to the message. Source is never encoded in the S3 path | 10-20 |
 | SES production access | Requested by hand (CLI), not Terraform — it is a reviewed request, once per account. **Granted 2026-10-19 in staging, case 179246520300535.** Recorded in `infra/envs/staging/README.md`. Repeat in any new account | 10-19 |
-| DMARC reports | `rua=mailto:contact@mortgageboss.ai` for our domains. Must be on mortgageboss.ai (same organisation) — a Gmail address would be ignored. Customer subdomains also report to us, authorised by one wildcard record `*._report._dmarc.mortgageboss.ai TXT "v=DMARC1"` in the **apex** zone; customers may add their own address as a second `rua`. Policy starts at `p=none`; tighten to `quarantine` after a few weeks of clean reports | 10-19 |
+| DMARC reports | `rua=mailto:contact@mortgageboss.ai` for our domains. Must be on mortgageboss.ai (same organisation) — a Gmail address would be ignored. Customer subdomains also report to us, authorised by one wildcard record `*._report._dmarc.mortgageboss.ai TXT "v=DMARC1"` in the **apex** zone; customers may add their own address as a second `rua`. *(Changed 10-31: customer subdomains get `p=reject` and no `rua` in v1 — see "DMARC on customer subdomains".)* Policy starts at `p=none`; tighten to `quarantine` after a few weeks of clean reports | 10-19 |
 | Bounce (MAIL FROM) domain | Must be a **subdomain of the sending identity**. Staging: `bounces.mail.staging.mortgageboss.ai`. Tenants: `bounce.mb-mail.<customer>`. Enforced by a validation in `outbound_mail` so `plan` fails before SES does | 10-19 |
 | Account suppression list | SES account-level suppression on for `BOUNCE` and `COMPLAINT` — SES refuses to resend to hard-bounced or complaining addresses before our own suppression code exists. AWS sends no notice when an address is added; a later send to it still succeeds at the API and comes back as a Bounce event (`OnAccountSuppressionList`). Step 2 surfaces both and blocks known-bad addresses before calling SES | 10-20 |
 | Alarm thresholds | Bounce rate > **2.5%**, complaint rate > **0.05%**. AWS puts the account under review at 5% / 0.1%, so alarming there is too late | 10-20 |
@@ -84,6 +84,11 @@ Each loan file gets its own email address on the customer's domain. MortgageBoss
 | Complaint status | **No new status.** A complaint blocks the address and is logged on the file; the email stays `delivered`. A bounce uses the existing `failed`. FR-19 adjusted | 10-26 |
 | "I've sent it" vs Send | Two different actions. "I've sent it" (processor sent from her own mail app) only records; it never transmits. Send transmits. `send_draft` takes an explicit `transmit` flag, default false | 10-26 |
 | Turning a company on for email | Two steps once its domain is active: link the domain (`set_company_mail_domain`), then switch sending on (`set_email_sending … on`). Both are commands in v1 (no admin screen). Step 3 folds this into onboarding | 10-31 |
+| Step 3 onboarding | **A command, run by us during the customer call** — no Settings card until a second customer. An hourly check finishes setup on its own (marks the domain active once AWS confirms), so nobody re-runs the command while DNS spreads | 10-31 |
+| Manual-records fallback | **Not built unless the pilot needs it.** Ask pilot question 1 (who runs your DNS) first; build it only if their provider cannot add an NS record for a subdomain | 10-31 |
+| Domain self-test | **None.** "Active" = AWS has verified the domain (DKIM). The first real email is the test | 10-31 |
+| DMARC on customer subdomains | **`p=reject`, no report address (`rua`).** Every real email from the subdomain is ours and signed by SES, so it always passes; `p=reject` makes a forged `lf-…@mb-mail.<customer>` email (fake wire instructions) get refused, and never weakens a strict policy on the customer's own domain. No reports, so no extra record on `mortgageboss.ai`. Our own `mail.staging.mortgageboss.ai` is still `p=none`; tighten it later | 10-31 |
+| Company switches after step 3 | Domain **active** turns a company on: setup switches `sending_enabled` on automatically. The switch stays only as an emergency off for one company. A domain marked "problem" refuses Send whatever the switch says. `FILE_ADDRESSES_ENABLED` is removed in step 4 | 10-31 |
 | SES Message-ID | SES replaces our Message-ID with `<{SES MessageId}@email.amazonses.com>`; the id part equals `Communication.external_message_id`. Step 4's reply threading matches `In-Reply-To` / `References` on this, not on the id in the stored `.eml` (found in LP-998) | 10-31 |
 | Pre-send content check | **Deferred to a later iteration (2026-10-30)** — not rejected; v1 ships sending first and adds safeguards iteratively. Built in LP-996 and reverted. Measured, it blocked ordinary requests: every bank, investment or retirement statement request (catalog text says "the account number"), every borrower condition email ("The lender approved your loan with a few conditions"), title-commitment and wire-instruction requests to title companies, and any percentage ("100% of the gift funds"). For v1 the processor sends what she writes; AI drafts keep the drafter's guard. When it comes back, start from `docs/tickets/LP-996.md` (code, measurement and the misfire list) and fix the misfires first, or ship it as a warning rather than a block | 10-30 |
 | Not in v1 | Reading the processor's inbox (OAuth), automatic AI replies, automatic DNS tools (Entri / Domain Connect), lender portal integration, SES tenant management (revisit at ~10 tenants) | 10-17 |
@@ -156,8 +161,9 @@ An emailed attachment therefore exists twice: inside the raw email (evidence of 
 | LP-981 — inbound module → shared plumbing, `mbai-staging-mail` | ✅ **Done** 2026-10-20 (code) on `infra/lp-981-mail-bucket`; applied 2026-10-21 in LP-989. Ticket file `docs/tickets/LP-981.md` |
 | Step 1 — LP-982–989 | ✅ **Done** 2026-10-21. Receiving activated in staging (rule set `mbai-inbound`, 2026-10-21 00:20 ET). One real email proven end to end, except scan-result events (→ LP-990). Details in §15 and `docs/tickets/LP-98*.md` |
 | LP-990 — scan-result delivery fix | ✅ **Done** 2026-10-21. Scan results now reach their queue; failures go to the DLQ and alarm |
-| Step 2 — Send | ✅ **Done** 2026-10-31. Proven in staging (LP-998): the test company MortgageBoss sends from `lf-…@mail.staging.mortgageboss.ai`; delivered and bounced show on the file. One fix open: SES drops the From display name (LP-999) |
-| Steps 3–6 | Not started |
+| Step 2 — Send | ✅ **Done** 2026-10-31. Proven in staging (LP-998): the test company MortgageBoss sends from `lf-…@mail.staging.mortgageboss.ai`; delivered and bounced show on the file. From display name fixed in LP-999 |
+| Step 3 — Tenant domain | Groomed 2026-10-31 into LP-1004–1007 (§15b). Not started |
+| Steps 4–6 | Not started |
 
 **Until LP-989 and step 2 are done:** the staging account can deliver real mail to anyone (production access is account-wide). Send test mail only to own inboxes or `success@ / bounce@ / complaint@simulator.amazonses.com`. No real borrower addresses.
 
@@ -263,11 +269,12 @@ Found while grooming step 1 (2026-10-20): the receipt rule set `kms_key_arn` on 
 - IAM (moved from LP-986): api gets Route 53 zone/record create and change, SES identity create/get/put-mail-from/delete, `ses:GetAccount`; worker gets read-only `route53:ListResourceRecordSets` and `ses:GetEmailIdentity` for the daily health check.
 - `company_mail_domain` model (subdomain, zone_id, nameservers, identity, status).
 - `services/tenant_mail_domain.py` (boto3, `DOMAIN_PROVIDER=route53|fake`): create zone → show NS → verify → SES identity + DKIM + MAIL FROM `bounce.<subdomain>` → MX, DKIM, DMARC → check `ProductionAccessEnabled` → self-test → active.
-- Wildcard DMARC report authorisation in the apex zone.
-- Daily health task: records missing → degraded, stop sending, alert tenant admin + ops.
-- Settings page: subdomain pick, NS record, Check now, status, manual-records fallback.
+- Wildcard DMARC report authorisation in the apex zone. *(Dropped for v1, 10-31: no `rua` on customer subdomains.)*
+- Daily health task: records missing → degraded, stop sending, alert tenant admin + ops. *(Changed 10-31: hourly; also finishes setup; no alert emails in v1 — Send is refused with the reason.)*
+- Settings page: subdomain pick, NS record, Check now, status, manual-records fallback. *(Changed 10-31: a command for the pilot; Settings card and fallback later, if needed.)*
 - Hide the `FORWARDED_ALIAS` connection UI.
 - Test: test-tenant domain goes subdomain pick → NS record → active with no console work.
+- Tickets: LP-1004–1007 (§15b).
 
 **4. Receive completions**
 - **Mail-bucket reader (bug found in LP-986 grooming):** the app's storage backend points only at the documents bucket, but `_attachment_bytes()` reads the raw message through it. SES stores raw mail in `mbai-staging-mail`, so accepting an attachment would fail with "not found". Add a small reader for the mail bucket and use it wherever raw mail is read.
@@ -677,10 +684,53 @@ Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each tick
 - **Result (2026-10-31):** staging on image `staging-4b8534b2` with `FILE_ADDRESSES_ENABLED=true` and LP-992's pending change applied. Test company **MortgageBoss** linked to `mail.staging.mortgageboss.ai` and switched on for sending; the other company untouched; old-drafts count 0. Beat heartbeat in the worker log. **Gmail send (LF-AFCW):** sent in 1 second, then delivered; `.eml` in `outbound/` (SSE-KMS); SPF, DKIM and DMARC pass; Cc the processor; Reply-To the file address; the screen showed Delivered. **Reply** from Gmail landed in `inbound/` (shows on the file in step 4). **Bounce** to the simulator: `failed` with SES's reason, address blocked, shown on screen. All 6 alarms OK, DLQs 0. Label fix shipped: a still-queued Send reads "Still sending: check back in a few minutes"; "Not confirmed" only for the worker's unknown outcome. Skipped on purpose (covered by automated tests): complaint and kill-the-worker tests. Details: `docs/tickets/LP-998.md`.
 - **Findings:** (1) **SES drops the From display name** — the borrower sees `lf-afcw@mail.staging.mortgageboss.ai`, not "Geet Thaker, MortgageBoss" → LP-999. (2) The bounce reason is shown raw ("smtp; 550 5.1.1 As requested: user unknown…"); a plain sentence would read better — later. (3) `mbai-staging-scheduler-dlq` holds 5 messages (the US-hours start/stop schedule, not mail; no alarm) — look at separately.
 
-### LP-999 — Keep the processor's name in From (found in LP-998)
+### LP-999 — Keep the processor's name in From (found in LP-998) — ✅ Done
 - `services/mail_sender.py` passes `FromEmailAddress=<bare address>` to SES, and SES rewrites the From header with it, so the display name is lost.
 - Fix: for raw content, leave `FromEmailAddress` out so SES uses the email's own From header (the domain is a verified identity), or pass the full From header. Pick the simpler one that keeps the name; one test; resend to Gmail and check the name shows.
 - **Done when:** Gmail shows "<processor>, <company>" as the sender.
+- **Result:** `FromEmailAddress` now carries the full From (name and address, quoted and encoded with `formataddr`); SES writes it over the header, so it must never be the bare address. Gmail shows "Geet Thaker, MortgageBoss". Staging on `staging-ffab93a0`. Tests 9455 passed. Details: `docs/tickets/LP-999.md`.
+
+## 15b. Step 3 tickets — Tenant domain
+
+Order: LP-1004 → 1005 → 1006 → 1007. Each ticket writes `docs/tickets/LP-xxx.md` in plain words. Decisions in §3 (10-31).
+
+### Outcome of step 3
+
+**In one line:** in a 15-minute call, we run one command for a customer, they add one NS record, and within minutes (sometimes hours) their files send from `lf-…@mb-mail.<their domain>`.
+
+**Not yet:** a Settings card (later); the manual-records fallback (only if the pilot's DNS provider needs it); replies on the file (step 4).
+
+**Before starting:** ask the pilot customer who runs their DNS (pilot question 1). Register our own test domain at a non-AWS DNS provider (Namecheap or Cloudflare) for LP-1007.
+
+### LP-1004 — AWS access for domain setup
+- Route 53 private endpoint: the network module passes through names that already start with `com.amazonaws.`; add `com.amazonaws.route53` to `interface_endpoint_services` (~$7.30/month).
+- IAM: the role that runs setup (api / one-off task) may create and read hosted zones and records, and create, read and configure SES identities (DKIM, MAIL FROM). The worker may read zones, records and identities, for the hourly check. Nothing else.
+- **Done when:** from a one-off task in the VPC, Route 53 and SES identity calls reach AWS (OK or AccessDenied as expected); `terraform plan` clean.
+
+### LP-1005 — Domain setup command
+- `company_mail_domains` gains: `zone_id`, `nameservers`, and the states `pending_ns` → `verifying` → `active` → `problem` (`inactive` stays).
+- `set_up_mail_domain <company> <subdomain>`: refuse a subdomain another company has; create the Route 53 zone; save it; print the one NS record (name + four nameservers) to give the customer.
+- When NS points at us: create the SES identity (Easy DKIM), MAIL FROM `bounce.<subdomain>`, and write the DKIM CNAMEs, MX (`inbound-smtp`), MAIL FROM MX and SPF, and DMARC `v=DMARC1; p=reject` (no `rua`) into the zone → `verifying`.
+- Running it again is safe (picks up where it left off).
+- Dev: a fake provider marks the domain active at once (`DOMAIN_PROVIDER=fake`).
+- **Done when:** in dev with the fake provider, a company goes `pending_ns` → `active` and its files get addresses; unit tests cover each step against stubbed AWS.
+
+### LP-1006 — Hourly check
+- Beat job every hour over companies not `inactive`:
+  - `pending_ns`: NS now points at our zone → continue setup (LP-1005's next step).
+  - `verifying`: SES says DKIM verified → `active` and `sending_enabled` on.
+  - `active`: NS still delegated and SES identity still verified → nothing; otherwise `problem`.
+  - `problem`: fixed → back to `active`.
+- A `problem` domain refuses Send with a plain reason ("Email for this company is paused: its DNS setup changed. Contact support."). Files keep their address.
+- **Done when:** each transition has a test; a `problem` domain refuses Send.
+
+### LP-1007 — Prove step 3
+- Our test domain at a non-AWS DNS provider stands in for a customer, as its own company in staging.
+- Run the command, add the NS record at the provider, wait for the hourly check (or run it once by hand) → `active`.
+- Send from one of its files to your Gmail: sender name and `lf-…@mb-mail.<test domain>`; SPF, DKIM, DMARC pass; Delivered on screen.
+- Reply from Gmail lands in `inbound/` (shown on the file in step 4).
+- Remove the NS record → next check marks `problem` and Send is refused; put it back → `active`.
+- **Done when:** every check passes. Then onboard the pilot customer the same way.
 
 ## 16. Diagrams
 
@@ -695,6 +745,7 @@ Pre-send content check, revisited from `LP-996.md` (fix the misfires, or warn in
 
 ## 18. Log
 
+- 2026-10-31 — LP-999 ✅ (processor's name in From). Step 3 groomed into LP-1004–1007 (§15b): onboarding by command, hourly check finishes setup, no fallback unless the pilot needs it, no self-test, customer subdomains `p=reject` with no reports, active domain turns sending on.
 - 2026-10-31 — **Step 2 done.** LP-998 ✅: real email from staging to Gmail delivered (SPF/DKIM/DMARC pass), reply received into `inbound/`, simulator bounce failed and blocked, alarms calm. Message-ID format recorded (§3). Found: SES drops the From display name → LP-999.
 - 2026-10-31 — LP-997 ✅ (Send in the Communication tab; per-company sending switch; status labels; 1.5-minute screen check). Condition page left out. Open: the "Not confirmed" wording on a merely-queued Send can invite a duplicate; four switches gate Send.
 - 2026-10-30 — **Pre-send content check deferred to a later iteration** (iterative rollout: sending first, safeguards after; added to §17). LP-996 built, measured and reverted: it blocked bank-statement requests, every borrower condition email, title-company requests and any percentage. Rule 5, FR-18, §3, §11, §13 updated: the processor sends what she writes; AI drafts keep the drafter's guard. LP-997 and LP-998 lose their content-check items.
