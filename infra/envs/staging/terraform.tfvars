@@ -46,6 +46,8 @@ interface_endpoint_services = [
   # get credentials from the container metadata endpoint.
   "sqs",
   "email",
+  # LP-1004 — the Route 53 API, for creating tenant hosted zones (step 3). Its name has no region.
+  "com.amazonaws.route53",
 ]
 
 # --- DNS / TLS / auth -------------------------------------------------------- #

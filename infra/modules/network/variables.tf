@@ -98,7 +98,9 @@ variable "interface_endpoint_services" {
   description = <<-EOT
     Short service names for interface endpoints, e.g. "ecr.api". The full service
     name is built as com.amazonaws.<region>.<short name>, so this module never
-    contains a literal region.
+    contains a literal region. A name that already starts with "com.amazonaws."
+    is used as is, for the few services whose name has no region
+    ("com.amazonaws.route53").
 
     Supplied by the environment rather than hardcoded here so that a deployment
     which does not use Bedrock is not forced to create a Bedrock endpoint.

@@ -3,6 +3,11 @@ output "zone_id" {
   value       = aws_route53_zone.this.zone_id
 }
 
+output "zone_arn" {
+  description = "Hosted zone ARN. LP-1004 denies the app any record change in it."
+  value       = aws_route53_zone.this.arn
+}
+
 output "zone_name" {
   description = "Hosted zone name."
   value       = aws_route53_zone.this.name

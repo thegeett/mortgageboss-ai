@@ -640,6 +640,11 @@ module "compute" {
   ses_configuration_set_arn = var.outbound_mail_enabled ? module.outbound_mail[0].configuration_set_arn : ""
   ses_send_enabled          = var.outbound_mail_enabled
 
+  # LP-1004 — tenant domain setup (step 3); the app is denied changes to our own zone and identity.
+  domain_setup_enabled                 = var.outbound_mail_enabled
+  domain_setup_protected_zone_arns     = [module.dns.zone_arn]
+  domain_setup_protected_identity_arns = var.outbound_mail_enabled ? [module.outbound_mail[0].send_identity_arn] : []
+
   bedrock_foundation_model_arns  = local.bedrock_foundation_model_arns
   bedrock_inference_profile_arns = local.bedrock_inference_profile_arns
 

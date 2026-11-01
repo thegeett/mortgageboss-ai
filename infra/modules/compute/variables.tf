@@ -533,3 +533,30 @@ variable "ses_send_enabled" {
   type        = bool
   default     = false
 }
+
+variable "domain_setup_enabled" {
+  description = <<-EOT
+    LP-1004 — let the api role create tenant hosted zones and SES identities (step 3), and the
+    worker read them for the hourly check. Off means no Route 53 grant and no identity grant.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "domain_setup_protected_zone_arns" {
+  description = "Hosted zones Terraform manages. The api role is denied any record change in them."
+  type        = list(string)
+  default     = []
+
+  # Without a zone the Deny would not render, and the app could rewrite our own zone.
+  validation {
+    condition     = !var.domain_setup_enabled || length(var.domain_setup_protected_zone_arns) > 0
+    error_message = "domain_setup_enabled needs at least one protected zone ARN."
+  }
+}
+
+variable "domain_setup_protected_identity_arns" {
+  description = "SES identities Terraform manages. The api role is denied any change to their DKIM and MAIL FROM settings."
+  type        = list(string)
+  default     = []
+}

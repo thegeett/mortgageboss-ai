@@ -42,3 +42,8 @@ output "configuration_set_arn" {
   description = "ARN of the configuration set. SES send permissions are granted against it (LP-986)."
   value       = aws_ses_configuration_set.this.arn
 }
+
+output "send_identity_arn" {
+  description = "ARN of the SES identity for the From domain. LP-1004 denies the app any change to it."
+  value       = aws_ses_domain_identity.send.arn
+}

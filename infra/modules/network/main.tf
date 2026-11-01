@@ -324,14 +324,15 @@ resource "aws_vpc_security_group_ingress_rule" "vpce_https" {
 resource "aws_vpc_endpoint" "interface" {
   for_each = var.enable_vpc_endpoints ? toset(var.interface_endpoint_services) : toset([])
 
-  vpc_id              = aws_vpc.this.id
-  service_name        = "com.amazonaws.${var.aws_region}.${each.value}"
+  vpc_id = aws_vpc.this.id
+  # A full name is used as is: Route 53's endpoint is com.amazonaws.route53, with no region (LP-985).
+  service_name        = startswith(each.value, "com.amazonaws.") ? each.value : "com.amazonaws.${var.aws_region}.${each.value}"
   vpc_endpoint_type   = "Interface"
   subnet_ids          = local.endpoint_subnet_ids
   security_group_ids  = [aws_security_group.vpc_endpoints[0].id]
   private_dns_enabled = true
 
-  tags = merge(var.tags, { Name = "${var.name_prefix}-${replace(each.value, ".", "-")}" })
+  tags = merge(var.tags, { Name = "${var.name_prefix}-${replace(trimprefix(each.value, "com.amazonaws."), ".", "-")}" })
 }
 
 resource "aws_vpc_endpoint" "s3" {
