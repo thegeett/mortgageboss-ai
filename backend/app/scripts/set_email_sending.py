@@ -6,7 +6,8 @@ Usage::
 
 Run it once the company's mail domain is onboarded for sending (`set_company_mail_domain` first).
 While it is off, which is the default, the screens offer copy / open in mail app / "Mark as sent";
-once it is on they offer Send, and the API accepts it. Refuses a company with no active domain.
+once it is on they offer Send, and the API accepts it. Refuses a company with no active domain. A
+domain in `problem` (LP-1006) can only be switched off, and it stays off when the domain recovers.
 
 In staging this runs as a one-off ECS task, like `set_company_mail_domain` (`docs/tickets/LP-991.md`).
 """

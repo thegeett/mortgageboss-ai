@@ -536,8 +536,9 @@ variable "ses_send_enabled" {
 
 variable "domain_setup_enabled" {
   description = <<-EOT
-    LP-1004 — let the api role create tenant hosted zones and SES identities (step 3), and the
-    worker read them for the hourly check. Off means no Route 53 grant and no identity grant.
+    LP-1004, LP-1006 — let the api and worker roles create tenant hosted zones and SES identities
+    (step 3): the api role runs the command, and the worker's hourly check finishes setup. Off means
+    no Route 53 grant and no identity grant.
   EOT
   type        = bool
   default     = false

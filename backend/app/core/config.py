@@ -412,9 +412,9 @@ class Settings(BaseSettings):
     # by `communications.read_delivery_events`. None locally: there is no SQS in dev, and the job
     # returns without calling anything.
     events_queue_url: str | None = None
-    # LP-1005 — where `set_up_mail_domain` creates a customer's zone and SES identity
-    # (`services/domain_provider.get_domain_provider`). "fake" (dev, tests) succeeds at every stage
-    # at once and refuses to run in staging or production; "route53" is real AWS (staging, LP-1007).
+    # LP-1005 — where `set_up_mail_domain` and the hourly check (LP-1006) set up a customer's zone and
+    # SES identity (`services/domain_provider.get_domain_provider`). "fake" (dev, tests) succeeds at
+    # every stage at once and refuses to run in staging or production; "route53" is real AWS (staging).
     domain_provider: Literal["route53", "fake"] = "fake"
 
     # Email (SMTP)
