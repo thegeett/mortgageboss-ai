@@ -295,6 +295,7 @@ Found while grooming step 1 (2026-10-20): the receipt rule set `kms_key_arn` on 
 - Isolation, spoofed sender, injection, forwarding loop, crash recovery tests.
 - Reply-behaviour test on Outlook desktop, Outlook web, Gmail; onboarding note.
 - Offboarding export + delete.
+- Remove or change a customer's mail domain (found in LP-1005): turn it off so files lose their address, then delete its zone and SES identity by hand or with a delete permission scoped to customer zones.
 - "Sending paused" banner; retention wording in the customer agreement.
 - Pilot customer questions (§7); onboard their domain.
 
@@ -708,13 +709,25 @@ Order: LP-1004 → 1005 → 1006 → 1007. Each ticket writes `docs/tickets/LP-x
 - **Done when:** from a one-off task in the VPC, Route 53 and SES identity calls reach AWS (OK or AccessDenied as expected); `terraform plan` clean.
 - **Result (2026-11-01):** Route 53 endpoint `vpce-0baa1eb32ce1287ff` (~$7.30/month; 8 endpoints in staging now, ~$58/month); network module uses names that already start with `com.amazonaws.` as is. IAM behind `domain_setup_enabled` (on in staging): api role may create zones, change records and create/configure SES identities; worker may only read; **no delete anywhere** (removing a customer domain is manual); **explicit Deny** on our own zone `staging.mortgageboss.ai` and on MAIL FROM/DKIM of `mail.staging.mortgageboss.ai` (ARNs from Terraform outputs). Simulator: 12 of 12 as expected. Inside the VPC: Route 53 OK, SES OK, public DNS OK. Notes: a new endpoint's private DNS takes a few minutes (the first call 4 minutes after creation timed out); test public DNS with a name that has records (the bare `mortgageboss.ai` has none). When production gets its own zone and identity, add them to the Deny (`domain_setup_protected_*_arns`). Details: `docs/tickets/LP-1004.md`.
 
-### LP-1005 — Domain setup command
+### LP-1005 — Domain setup command — ✅ Done
 - `company_mail_domains` gains: `zone_id`, `nameservers`, and the states `pending_ns` → `verifying` → `active` → `problem` (`inactive` stays).
 - `set_up_mail_domain <company> <subdomain>`: refuse a subdomain another company has; create the Route 53 zone; save it; print the one NS record (name + four nameservers) to give the customer.
 - When NS points at us: create the SES identity (Easy DKIM), MAIL FROM `bounce.<subdomain>`, and write the DKIM CNAMEs, MX (`inbound-smtp`), MAIL FROM MX and SPF, and DMARC `v=DMARC1; p=reject` (no `rua`) into the zone → `verifying`.
 - Running it again is safe (picks up where it left off).
 - Dev: a fake provider marks the domain active at once (`DOMAIN_PROVIDER=fake`).
 - **Done when:** in dev with the fake provider, a company goes `pending_ns` → `active` and its files get addresses; unit tests cover each step against stubbed AWS.
+- **Result (2026-11-03):** `uv run python -m app.scripts.set_up_mail_domain <company> <subdomain>`; stages `pending_ns` → `verifying` → `active`, advanced by `advance_mail_domain` (LP-1006 reuses it). Migration `5c8e1a7d3b92` (states, `zone_id`, `nameservers`). `DOMAIN_PROVIDER=fake|route53`; the fake refuses outside development. Records written in one UPSERT batch, TTL 300:
+
+  | Name | Type | Value |
+  |---|---|---|
+  | `<token>._domainkey.<sub>` (×3) | CNAME | `<token>.dkim.amazonses.com` |
+  | `<sub>` | MX | `10 inbound-smtp.<region>.amazonaws.com` |
+  | `bounce.<sub>` | MX | `10 feedback-smtp.<region>.amazonses.com` |
+  | `bounce.<sub>` | TXT | `"v=spf1 include:amazonses.com ~all"` |
+  | `_dmarc.<sub>` | TXT | `"v=DMARC1; p=reject"` |
+
+  7 records (the brief's "8" was a miscount). Safe to re-run: fixed `CallerReference` `mb-<company id>-<subdomain>` (never a second zone), existing SES identity reused, UPSERT, commit per stage. Hand-linked rows (no zone, e.g. MortgageBoss on `mail.staging…`) are never touched, and the LP-991 hand-link command now refuses rows setup owns. Guards added in review: a root domain is refused (the NS record would move the customer's whole domain); a new subdomain needs the `mb-mail.` prefix or `--custom-subdomain`; `--replace` fixes a typo only at `pending_ns`; an error says whether running again helps. Receiving needs no per-customer step (the receipt rule has no recipient list). Dev check passed; tests 9517 passed. Staging one-off command in `docs/tickets/LP-1005.md` (sets `DOMAIN_PROVIDER=route53` on the task). Details: `docs/tickets/LP-1005.md`.
+- **Gap (found in LP-1005):** nothing changes a customer's domain after `pending_ns` or takes one out of use; `set_email_sending … off` stops sending but files keep their addresses, and the app has no delete permission. Planned with offboarding in step 6.
 
 ### LP-1006 — Hourly check
 - Beat job every hour over companies not `inactive`:
@@ -746,6 +759,7 @@ Pre-send content check, revisited from `LP-996.md` (fix the misfires, or warn in
 
 ## 18. Log
 
+- 2026-11-03 — LP-1005 ✅: `set_up_mail_domain` command (pending_ns → verifying → active), 7 DNS records, safe to re-run, root domains refused. Gap added to step 6: removing or changing a customer domain.
 - 2026-11-01 — LP-1004 ✅: Route 53 endpoint; domain-setup IAM (api creates, worker reads, no deletes, Deny on our own zone and identity).
 - 2026-10-31 — LP-999 ✅ (processor's name in From). Step 3 groomed into LP-1004–1007 (§15b): onboarding by command, hourly check finishes setup, no fallback unless the pilot needs it, no self-test, customer subdomains `p=reject` with no reports, active domain turns sending on.
 - 2026-10-31 — **Step 2 done.** LP-998 ✅: real email from staging to Gmail delivered (SPF/DKIM/DMARC pass), reply received into `inbound/`, simulator bounce failed and blocked, alarms calm. Message-ID format recorded (§3). Found: SES drops the From display name → LP-999.
