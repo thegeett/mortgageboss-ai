@@ -587,6 +587,8 @@ module "compute" {
       EVENTS_QUEUE_URL      = module.outbound_mail[0].events_queue_url
       SES_CONFIGURATION_SET = module.outbound_mail[0].configuration_set_name
       MAIL_TRANSPORT        = "ses"
+      # LP-1006 — the hourly check and the setup command use real Route 53 and SES.
+      DOMAIN_PROVIDER = "route53"
     } : {},
   )
 

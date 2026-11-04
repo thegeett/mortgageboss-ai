@@ -31,6 +31,7 @@ _TASK_MODULES = [
     "app.tasks.email_draft",  # LP-809 review — draft prose, off the request path
     "app.tasks.conditions",  # LP-905 — reading an arrived condition sheet
     "app.tasks.outbound",  # LP-994 — the worker sends a person's approved email
+    "app.tasks.mail_domains",  # LP-1006 — the hourly check of customer mail domains
 ]
 
 celery_app = Celery(
@@ -117,6 +118,13 @@ celery_app.conf.update(
             "task": "communications.read_delivery_events",
             "schedule": 60.0,
             "options": {"expires": 60},
+        },
+        # LP-1006 — finishes customer domain setup and catches a broken one. Dropped if late: the
+        # next hour checks the same domains.
+        "check-mail-domains": {
+            "task": "mail_domains.check_all",
+            "schedule": 3600.0,
+            "options": {"expires": 3600},
         },
     },
 )

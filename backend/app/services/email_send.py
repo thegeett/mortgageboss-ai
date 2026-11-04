@@ -42,7 +42,12 @@ from app.services.email_draft import (
     get_open_draft,
     greeting_name_for,
 )
-from app.services.mail_domain import file_address, file_address_and_sending
+from app.services.mail_domain import (
+    MAIL_DOMAIN_PAUSED,
+    file_address,
+    file_address_and_sending,
+    mail_domain_paused,
+)
 from app.services.needs_items import AWAITING_COLLECTION, request_needs_item
 
 #: `mailto:` is truncated somewhere around 2,000 characters in several mail clients, and a truncated
@@ -523,6 +528,7 @@ async def transmit_blocker(
     - A file address: the company's active domain, with `FILE_ADDRESSES_ENABLED` on (LP-991, LP-994).
     - The company switched on for sending (`company_mail_domains.sending_enabled`, LP-997): off by
       default; turned on once its domain is onboarded for sending.
+    - The company's domain not in `problem` (LP-1006): the hourly check found its setup broken.
     - A mail sender configured on this server (`MAIL_TRANSPORT`, LP-993).
     - Not a condition draft: those are sent from her own mail and marked sent on the Conditions page,
       whose "Mark as sent" also moves the conditions to Waiting on … (LP-922).
@@ -536,6 +542,8 @@ async def transmit_blocker(
     address, sending = address_and_sending or await file_address_and_sending(db, loan_file)
     if address is None:
         return "This company can't send email from the app yet."
+    if await mail_domain_paused(db, loan_file.company_id):
+        return MAIL_DOMAIN_PAUSED
     if not sending:
         return "Sending email from the app isn't switched on for this company yet."
     if get_mail_sender() is None:

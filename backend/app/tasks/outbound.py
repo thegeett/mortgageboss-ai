@@ -51,7 +51,7 @@ from app.models.loan_file import LoanFile
 from app.models.user import User
 from app.services.bounce_handling import record_not_sent
 from app.services.delivery_events import apply_delivery_event
-from app.services.mail_domain import file_address
+from app.services.mail_domain import MAIL_DOMAIN_PAUSED, file_address, mail_domain_paused
 from app.services.mail_sender import MailSender, SendError, get_mail_sender
 from app.services.outbound_mime import build_mime
 from app.storage import get_mail_storage
@@ -112,6 +112,9 @@ async def _build(db: AsyncSession, row: Communication) -> tuple[EmailMessage, Ma
     address = await file_address(db, loan_file)
     if address is None:
         raise _NotSent("this company can't send email from the app", "no_domain")
+    # LP-1006 — a domain with a problem keeps its address, so the address check above lets it through.
+    if await mail_domain_paused(db, loan_file.company_id):
+        raise _NotSent(MAIL_DOMAIN_PAUSED.removesuffix("."), "domain_problem")
     sender = get_mail_sender()
     if sender is None:
         raise _NotSent("sending email is not set up", "no_sender")

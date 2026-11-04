@@ -27,9 +27,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.company_mail_domain import CompanyMailDomain, MailDomainStatus
 from app.models.loan_file import LoanFile
-from app.services.domain_provider import DomainProvider
+from app.services.domain_provider import DomainProvider, DomainSetupError
 
 logger = structlog.get_logger(__name__)
+
+#: LP-1006 — why a company's email is paused: the Send screen, the API's refusal and the worker.
+MAIL_DOMAIN_PAUSED = "Email for this company is paused: its DNS setup changed. Contact support."
 
 #: Route 53 refuses a `CallerReference` longer than this.
 _CALLER_REFERENCE_MAX = 128
@@ -70,7 +73,8 @@ async def file_address_and_sending(
         await db.execute(
             select(CompanyMailDomain.domain, CompanyMailDomain.sending_enabled).where(
                 CompanyMailDomain.company_id == loan_file.company_id,
-                CompanyMailDomain.status == MailDomainStatus.ACTIVE,
+                # LP-1006 — a domain with a problem keeps its addresses, but doesn't send.
+                CompanyMailDomain.status.in_([MailDomainStatus.ACTIVE, MailDomainStatus.PROBLEM]),
             )
         )
     ).first()
@@ -83,21 +87,35 @@ async def file_address(db: AsyncSession, loan_file: LoanFile) -> str | None:
     """`lf-<display_id>@<domain>`, lowercase, or None.
 
     None when the company has no active domain, and for every company while
-    `settings.file_addresses_enabled` is off (nothing routes the address until step 4).
+    `settings.file_addresses_enabled` is off (nothing routes the address until step 4). A domain with
+    a problem keeps its addresses (LP-1006), so an address alone doesn't mean it may send.
     """
     address, _ = await file_address_and_sending(db, loan_file)
     return address
+
+
+async def mail_domain_paused(db: AsyncSession, company_id: UUID) -> bool:
+    """LP-1006 — the company's domain is in `problem`: the hourly check found its setup broken."""
+    status = await db.scalar(
+        select(CompanyMailDomain.status).where(CompanyMailDomain.company_id == company_id)
+    )
+    return status is MailDomainStatus.PROBLEM
 
 
 async def set_email_sending(
     db: AsyncSession, *, company_id: UUID, enabled: bool
 ) -> CompanyMailDomain:
     """LP-997 — switch real email from the app on or off. Refuses a company with no active domain:
-    the app sends From the file address, which needs one. Flushes; the caller commits."""
+    the app sends From the file address, which needs one. Flushes; the caller commits.
+
+    LP-1006 — a domain in `problem` can be switched off, so that it stays off when the domain
+    recovers (the emergency off). It can't be switched on until then."""
     row = await db.scalar(
         select(CompanyMailDomain).where(CompanyMailDomain.company_id == company_id)
     )
-    if row is None or row.status is not MailDomainStatus.ACTIVE:
+    if row is not None and row.status is MailDomainStatus.PROBLEM and enabled:
+        raise MailDomainError(MAIL_DOMAIN_PAUSED)
+    if row is None or row.status not in (MailDomainStatus.ACTIVE, MailDomainStatus.PROBLEM):
         raise MailDomainError("This company has no active mail domain; link one first.")
     row.sending_enabled = enabled
     await db.flush()
@@ -234,12 +252,82 @@ async def advance_mail_domain(
     return row.status
 
 
+async def lock_mail_domain(db: AsyncSession, row_id: UUID) -> CompanyMailDomain | None:
+    """LP-1006 — lock the row and read it fresh, or None when someone else holds it. Stops the command
+    and the hourly check working on one domain at once. The lock ends at the next commit or rollback,
+    so `advance_mail_domain`'s commit ends it; each stage locks again."""
+    row: CompanyMailDomain | None = await db.scalar(
+        select(CompanyMailDomain)
+        .where(CompanyMailDomain.id == row_id)
+        .with_for_update(skip_locked=True)
+        .execution_options(populate_existing=True)
+    )
+    return row
+
+
+async def _check_locked(db: AsyncSession, row: CompanyMailDomain, provider: DomainProvider) -> str:
+    if row.zone_id is None or row.status is MailDomainStatus.INACTIVE:
+        return "skipped"
+    if row.status in (MailDomainStatus.PENDING_NS, MailDomainStatus.VERIFYING):
+        return (await advance_mail_domain(db, row, provider)).value
+
+    delegation = await asyncio.to_thread(
+        provider.delegation_state, row.domain, row.nameservers or []
+    )
+    dkim = await asyncio.to_thread(provider.dkim_state, row.domain)
+    if row.status is MailDomainStatus.ACTIVE and (delegation == "wrong" or dkim == "failed"):
+        row.status = MailDomainStatus.PROBLEM
+        logger.warning("mail_domain_problem", domain=row.domain, delegation=delegation, dkim=dkim)
+        return MailDomainStatus.PROBLEM.value
+    if row.status is MailDomainStatus.PROBLEM and delegation == "ok" and dkim == "ok":
+        # `sending_enabled` stays as it is: someone may have switched it off on purpose.
+        row.status = MailDomainStatus.ACTIVE
+        logger.info("mail_domain_recovered", domain=row.domain)
+        return MailDomainStatus.ACTIVE.value
+    return "unchanged"
+
+
+async def check_mail_domain(
+    db: AsyncSession, row: CompanyMailDomain, provider: DomainProvider
+) -> str:
+    """LP-1006 — one domain's hourly check. Returns what happened, for the log.
+
+    - No zone (linked by hand) or `inactive`: `skipped`, never touched.
+    - `pending_ns`, `verifying`: `advance_mail_domain`; returns the new status.
+    - `active`: a CLEAR failure, in DNS or at SES → `problem`. Otherwise `unchanged`.
+    - `problem`: DNS and SES both fine → `active`. Otherwise `unchanged`.
+    - An error from AWS while advancing: `error`, nothing changed; the next hour tries again.
+    - Someone else holds the row (the command): `locked`, nothing changed.
+
+    A hiccup (`unknown`) never moves a domain, so a timeout can't pause a company's email.
+
+    COMMITS, which ends the lock.
+    """
+    domain = row.domain
+    locked = await lock_mail_domain(db, row.id)
+    if locked is None:
+        await db.commit()
+        return "locked"
+    try:
+        outcome = await _check_locked(db, locked, provider)
+    except DomainSetupError as exc:
+        await db.rollback()
+        logger.warning("mail_domain_check_failed", domain=domain, error_code=exc.code)
+        return "error"
+    await db.commit()
+    return outcome
+
+
 __all__ = [
+    "MAIL_DOMAIN_PAUSED",
     "MailDomainError",
     "advance_mail_domain",
     "caller_reference",
+    "check_mail_domain",
     "file_address",
     "file_address_and_sending",
+    "lock_mail_domain",
+    "mail_domain_paused",
     "normalise_domain",
     "replace_pending_domain",
     "set_company_mail_domain",

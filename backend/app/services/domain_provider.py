@@ -22,7 +22,7 @@ NOTHING HERE LOGS MORE THAN THE DOMAIN AND AWS'S ERROR CODE.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 import boto3
 import dns.exception
@@ -43,6 +43,13 @@ RECORD_TTL = 300
 DMARC_POLICY = "v=DMARC1; p=reject"
 SPF_POLICY = "v=spf1 include:amazonses.com ~all"
 
+
+#: `ok`: the NS answer is our nameservers. `wrong`: a clear answer that isn't. `unknown`: no clear
+#: answer (timeout, SERVFAIL); the hourly check changes nothing on this.
+DelegationState = Literal["ok", "wrong", "unknown"]
+#: `ok`: DKIM verified and the identity can send. `failed`: SES says DKIM failed. `unknown`: anything
+#: else, including an AWS error; the hourly check changes nothing on this.
+DkimState = Literal["ok", "failed", "unknown"]
 
 #: AWS error codes that pass on their own: AWS was busy or slow, not refusing the request.
 _RETRYABLE_CODES = frozenset(
@@ -86,6 +93,14 @@ class DomainProvider(ABC):
     @abstractmethod
     def is_delegated(self, subdomain: str, nameservers: list[str]) -> bool:
         """Public DNS answers the subdomain's NS query with exactly our nameservers."""
+
+    @abstractmethod
+    def delegation_state(self, subdomain: str, nameservers: list[str]) -> DelegationState:
+        """What public DNS clearly says about the delegation (LP-1006)."""
+
+    @abstractmethod
+    def dkim_state(self, subdomain: str) -> DkimState:
+        """What SES clearly says about the identity's DKIM (LP-1006)."""
 
     @abstractmethod
     def set_up_identity_and_records(self, subdomain: str, zone_id: str) -> None:
@@ -196,12 +211,31 @@ class Route53DomainProvider(DomainProvider):
         raise DomainSetupError("HostedZoneNotFoundForReference", subdomain)
 
     def is_delegated(self, subdomain: str, nameservers: list[str]) -> bool:
+        return self.delegation_state(subdomain, nameservers) == "ok"
+
+    def delegation_state(self, subdomain: str, nameservers: list[str]) -> DelegationState:
         try:
             answer = self._resolver.resolve(subdomain, "NS")
+        except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+            return "wrong"
         except dns.exception.DNSException:
-            return False
+            return "unknown"
         found = {_bare(str(item.target)) for item in answer}
-        return found == {_bare(name) for name in nameservers}
+        return "ok" if found == {_bare(name) for name in nameservers} else "wrong"
+
+    def dkim_state(self, subdomain: str) -> DkimState:
+        try:
+            identity = self._call(
+                subdomain, self._sesv2, "get_email_identity", EmailIdentity=subdomain
+            )
+        except DomainSetupError:
+            return "unknown"
+        status = identity.get("DkimAttributes", {}).get("Status")
+        if status == "FAILED":
+            return "failed"
+        if status == "SUCCESS" and identity.get("VerifiedForSendingStatus"):
+            return "ok"
+        return "unknown"
 
     def set_up_identity_and_records(self, subdomain: str, zone_id: str) -> None:
         try:
@@ -253,6 +287,12 @@ class FakeDomainProvider(DomainProvider):
 
     def is_delegated(self, subdomain: str, nameservers: list[str]) -> bool:
         return True
+
+    def delegation_state(self, subdomain: str, nameservers: list[str]) -> DelegationState:
+        return "ok"
+
+    def dkim_state(self, subdomain: str) -> DkimState:
+        return "ok"
 
     def set_up_identity_and_records(self, subdomain: str, zone_id: str) -> None:
         return None

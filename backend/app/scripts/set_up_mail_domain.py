@@ -51,6 +51,7 @@ from app.services.domain_provider import (
 from app.services.mail_domain import (
     MailDomainError,
     advance_mail_domain,
+    lock_mail_domain,
     normalise_domain,
     replace_pending_domain,
     set_company_mail_domain,
@@ -63,6 +64,14 @@ OUR_DOMAIN = "mortgageboss.ai"
 DEFAULT_PREFIX = "mb-mail."
 #: Zone, then verifying, then active.
 MAX_STEPS = 3
+
+
+async def _lock_or_refuse(db: AsyncSession, row: CompanyMailDomain) -> None:
+    """LP-1006 — the hourly check may be on this row right now. Also reads the row fresh."""
+    if await lock_mail_domain(db, row.id) is None:
+        raise MailDomainError(
+            f"The hourly check is working on {row.domain} right now; run this again in a moment."
+        )
 
 
 def _refuse_a_root_domain(cleaned: str, *, custom_subdomain: bool) -> None:
@@ -96,6 +105,10 @@ async def prepare(
     )
     if row is not None and row.domain == cleaned:
         return company, row, None
+    if row is not None and replace:
+        # Before the status check: the hourly check may have just moved it past pending_ns, and a
+        # replace over that would leave a `verifying` row with no zone, which nothing can pick up.
+        await _lock_or_refuse(db, row)
     if row is not None and row.status is not MailDomainStatus.PENDING_NS:
         raise MailDomainError(
             f"{company.name} already has the domain {row.domain} ({row.status.value}); changing a "
@@ -140,6 +153,7 @@ async def run(
     )
     zone_created = False
     for _ in range(MAX_STEPS):
+        await _lock_or_refuse(db, row)
         before = (row.status, row.zone_id)
         await advance_mail_domain(db, row, provider)
         if before[1] is None and row.zone_id is not None:

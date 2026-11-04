@@ -146,8 +146,71 @@ resource "aws_iam_role" "api_task" {
   tags               = merge(var.tags, { Name = "${var.name_prefix}-api-task" })
 }
 
+# --------------------------------------------------------------------------- #
+# Customer mail domain setup (LP-1004, LP-1006): one document, used by both roles.
+#
+# The api role runs the setup command (one-off tasks run on it). The worker needs the same, because
+# the hourly check finishes setup on its own: once a customer's NS record is live, it writes their
+# records and SES identity with nobody at a keyboard.
+# --------------------------------------------------------------------------- #
+
+data "aws_iam_policy_document" "domain_setup" {
+  count = var.domain_setup_enabled ? 1 : 0
+
+  # LP-1004 — create their hosted zone, write its records, and create and configure their SES
+  # identity. Create and List-by-name have no zone to scope to yet, so they take "*"; every
+  # other action is on zones and changes only. No delete of any kind: removing a customer's
+  # domain is rare and done by hand.
+  statement {
+    sid    = "DomainSetupCreate"
+    effect = "Allow"
+    actions = [
+      "route53:CreateHostedZone",
+      "route53:ListHostedZonesByName",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "DomainSetup"
+    effect = "Allow"
+    actions = [
+      "route53:GetHostedZone",
+      "route53:ChangeResourceRecordSets",
+      "route53:ListResourceRecordSets",
+      "route53:GetChange",
+      "ses:CreateEmailIdentity",
+      "ses:GetEmailIdentity",
+      "ses:PutEmailIdentityMailFromAttributes",
+      "ses:PutEmailIdentityDkimAttributes",
+    ]
+    resources = [
+      "arn:aws:route53:::hostedzone/*",
+      "arn:aws:route53:::change/*",
+      "arn:aws:ses:${var.aws_region}:${data.aws_caller_identity.current.account_id}:identity/*",
+    ]
+  }
+
+  # LP-1004 — the app must never change what Terraform owns: our own zone(s) and our own sending
+  # identity. An explicit Deny wins over the wildcards above, so a bug or a typo in a customer's
+  # domain cannot rewrite staging's DNS or its DKIM. ARNs come from Terraform, not typed by hand.
+  statement {
+    sid    = "DomainSetupProtectOurs"
+    effect = "Deny"
+    actions = [
+      "route53:ChangeResourceRecordSets",
+      "ses:PutEmailIdentityMailFromAttributes",
+      "ses:PutEmailIdentityDkimAttributes",
+    ]
+    resources = concat(var.domain_setup_protected_zone_arns, var.domain_setup_protected_identity_arns)
+  }
+}
+
 data "aws_iam_policy_document" "api_task" {
-  source_policy_documents = var.enable_execute_command ? [data.aws_iam_policy_document.exec_channels[0].json] : []
+  source_policy_documents = concat(
+    var.enable_execute_command ? [data.aws_iam_policy_document.exec_channels[0].json] : [],
+    data.aws_iam_policy_document.domain_setup[*].json,
+  )
 
   # C7 -- the read-only query path. The migrate task definition runs on THIS role, and the
   # query stage runs on that task definition, so the grant lands here rather than on a role
@@ -217,67 +280,6 @@ data "aws_iam_policy_document" "api_task" {
       resources = [var.mail_kms_key_arn]
     }
   }
-
-  # LP-1004 — setting up a customer's mail domain (step 3, run as a one-off command on this
-  # role): create their hosted zone, write its records, and create and configure their SES
-  # identity. Create and List-by-name have no zone to scope to yet, so they take "*"; every
-  # other action is on zones and changes only. No delete of any kind: removing a customer's
-  # domain is rare and done by hand.
-  dynamic "statement" {
-    for_each = var.domain_setup_enabled ? [1] : []
-
-    content {
-      sid    = "DomainSetupCreate"
-      effect = "Allow"
-      actions = [
-        "route53:CreateHostedZone",
-        "route53:ListHostedZonesByName",
-      ]
-      resources = ["*"]
-    }
-  }
-
-  dynamic "statement" {
-    for_each = var.domain_setup_enabled ? [1] : []
-
-    content {
-      sid    = "DomainSetup"
-      effect = "Allow"
-      actions = [
-        "route53:GetHostedZone",
-        "route53:ChangeResourceRecordSets",
-        "route53:ListResourceRecordSets",
-        "route53:GetChange",
-        "ses:CreateEmailIdentity",
-        "ses:GetEmailIdentity",
-        "ses:PutEmailIdentityMailFromAttributes",
-        "ses:PutEmailIdentityDkimAttributes",
-      ]
-      resources = [
-        "arn:aws:route53:::hostedzone/*",
-        "arn:aws:route53:::change/*",
-        "arn:aws:ses:${var.aws_region}:${data.aws_caller_identity.current.account_id}:identity/*",
-      ]
-    }
-  }
-
-  # LP-1004 — the app must never change what Terraform owns: our own zone(s) and our own sending
-  # identity. An explicit Deny wins over the wildcards above, so a bug or a typo in a customer's
-  # domain cannot rewrite staging's DNS or its DKIM. ARNs come from Terraform, not typed by hand.
-  dynamic "statement" {
-    for_each = var.domain_setup_enabled ? [1] : []
-
-    content {
-      sid    = "DomainSetupProtectOurs"
-      effect = "Deny"
-      actions = [
-        "route53:ChangeResourceRecordSets",
-        "ses:PutEmailIdentityMailFromAttributes",
-        "ses:PutEmailIdentityDkimAttributes",
-      ]
-      resources = concat(var.domain_setup_protected_zone_arns, var.domain_setup_protected_identity_arns)
-    }
-  }
 }
 
 resource "aws_iam_role_policy" "api_task" {
@@ -304,7 +306,10 @@ resource "aws_iam_role" "worker_task" {
 }
 
 data "aws_iam_policy_document" "worker_task" {
-  source_policy_documents = var.enable_execute_command ? [data.aws_iam_policy_document.exec_channels[0].json] : []
+  source_policy_documents = concat(
+    var.enable_execute_command ? [data.aws_iam_policy_document.exec_channels[0].json] : [],
+    data.aws_iam_policy_document.domain_setup[*].json,
+  )
 
   # Scoped to specific model and profile ARNs, never "*".
   #
@@ -405,26 +410,6 @@ data "aws_iam_policy_document" "worker_task" {
         "arn:aws:ses:${var.aws_region}:${data.aws_caller_identity.current.account_id}:identity/*",
         var.ses_configuration_set_arn,
       ])
-    }
-  }
-
-  # LP-1004 — the hourly check reads a customer's zone, records and SES identity to see whether
-  # setup has finished or broken. Read only: the worker never creates or changes a domain.
-  dynamic "statement" {
-    for_each = var.domain_setup_enabled ? [1] : []
-
-    content {
-      sid    = "DomainCheckRead"
-      effect = "Allow"
-      actions = [
-        "route53:GetHostedZone",
-        "route53:ListResourceRecordSets",
-        "ses:GetEmailIdentity",
-      ]
-      resources = [
-        "arn:aws:route53:::hostedzone/*",
-        "arn:aws:ses:${var.aws_region}:${data.aws_caller_identity.current.account_id}:identity/*",
-      ]
     }
   }
 
