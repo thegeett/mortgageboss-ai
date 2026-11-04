@@ -707,7 +707,7 @@ Order: LP-1004 → 1005 → 1006 → 1007. Each ticket writes `docs/tickets/LP-x
 - Route 53 private endpoint: the network module passes through names that already start with `com.amazonaws.`; add `com.amazonaws.route53` to `interface_endpoint_services` (~$7.30/month).
 - IAM: the role that runs setup (api / one-off task) may create and read hosted zones and records, and create, read and configure SES identities (DKIM, MAIL FROM). The worker may read zones, records and identities, for the hourly check. Nothing else.
 - **Done when:** from a one-off task in the VPC, Route 53 and SES identity calls reach AWS (OK or AccessDenied as expected); `terraform plan` clean.
-- **Result (2026-11-01):** Route 53 endpoint `vpce-0baa1eb32ce1287ff` (~$7.30/month; 8 endpoints in staging now, ~$58/month); network module uses names that already start with `com.amazonaws.` as is. IAM behind `domain_setup_enabled` (on in staging): api role may create zones, change records and create/configure SES identities; worker may only read; **no delete anywhere** (removing a customer domain is manual); **explicit Deny** on our own zone `staging.mortgageboss.ai` and on MAIL FROM/DKIM of `mail.staging.mortgageboss.ai` (ARNs from Terraform outputs). Simulator: 12 of 12 as expected. Inside the VPC: Route 53 OK, SES OK, public DNS OK. Notes: a new endpoint's private DNS takes a few minutes (the first call 4 minutes after creation timed out); test public DNS with a name that has records (the bare `mortgageboss.ai` has none). When production gets its own zone and identity, add them to the Deny (`domain_setup_protected_*_arns`). Details: `docs/tickets/LP-1004.md`.
+- **Result (2026-11-01):** Route 53 endpoint `vpce-0baa1eb32ce1287ff` (~$7.30/month; 8 endpoints in staging now, ~$58/month); network module uses names that already start with `com.amazonaws.` as is. IAM behind `domain_setup_enabled` (on in staging): api role may create zones, change records and create/configure SES identities; worker may only read *(widened in LP-1006: the worker now has the same setup permissions, because the hourly check finishes setup)*; **no delete anywhere** (removing a customer domain is manual); **explicit Deny** on our own zone `staging.mortgageboss.ai` and on MAIL FROM/DKIM of `mail.staging.mortgageboss.ai` (ARNs from Terraform outputs). Simulator: 12 of 12 as expected. Inside the VPC: Route 53 OK, SES OK, public DNS OK. Notes: a new endpoint's private DNS takes a few minutes (the first call 4 minutes after creation timed out); test public DNS with a name that has records (the bare `mortgageboss.ai` has none). When production gets its own zone and identity, add them to the Deny (`domain_setup_protected_*_arns`). Details: `docs/tickets/LP-1004.md`.
 
 ### LP-1005 — Domain setup command — ✅ Done
 - `company_mail_domains` gains: `zone_id`, `nameservers`, and the states `pending_ns` → `verifying` → `active` → `problem` (`inactive` stays).
@@ -729,7 +729,7 @@ Order: LP-1004 → 1005 → 1006 → 1007. Each ticket writes `docs/tickets/LP-x
   7 records (the brief's "8" was a miscount). Safe to re-run: fixed `CallerReference` `mb-<company id>-<subdomain>` (never a second zone), existing SES identity reused, UPSERT, commit per stage. Hand-linked rows (no zone, e.g. MortgageBoss on `mail.staging…`) are never touched, and the LP-991 hand-link command now refuses rows setup owns. Guards added in review: a root domain is refused (the NS record would move the customer's whole domain); a new subdomain needs the `mb-mail.` prefix or `--custom-subdomain`; `--replace` fixes a typo only at `pending_ns`; an error says whether running again helps. Receiving needs no per-customer step (the receipt rule has no recipient list). Dev check passed; tests 9517 passed. Staging one-off command in `docs/tickets/LP-1005.md` (sets `DOMAIN_PROVIDER=route53` on the task). Details: `docs/tickets/LP-1005.md`.
 - **Gap (found in LP-1005):** nothing changes a customer's domain after `pending_ns` or takes one out of use; `set_email_sending … off` stops sending but files keep their addresses, and the app has no delete permission. Planned with offboarding in step 6.
 
-### LP-1006 — Hourly check
+### LP-1006 — Hourly check — ✅ Done
 - Beat job every hour over companies not `inactive`:
   - `pending_ns`: NS now points at our zone → continue setup (LP-1005's next step).
   - `verifying`: SES says DKIM verified → `active` and `sending_enabled` on.
@@ -737,13 +737,23 @@ Order: LP-1004 → 1005 → 1006 → 1007. Each ticket writes `docs/tickets/LP-x
   - `problem`: fixed → back to `active`.
 - A `problem` domain refuses Send with a plain reason ("Email for this company is paused: its DNS setup changed. Contact support."). Files keep their address.
 - **Done when:** each transition has a test; a `problem` domain refuses Send.
+- **Result (2026-11-03):** beat job `mail_domains.check_all` (hourly) calls `check_mail_domain` on every setup-owned row (hand-linked rows skipped). `pending_ns`/`verifying` advance; `active` → `problem` only on a **clear** failure (NS answer wrong or missing, or DKIM `FAILED`); `problem` → `active` when both are fine; a timeout, DNS error or AWS hiccup changes nothing. A `problem` domain keeps file addresses but cannot send: Send hidden, API refuses ("Email for this company is paused: its DNS setup changed. Contact support."), and the worker also fails an email queued before the problem. Row lock (`SKIP LOCKED`) shared by the job and the command (including `--replace`). `set_email_sending … off` works during `problem` and stays off after recovery. Terraform: the domain-setup permissions are one shared policy used by both roles; staging task env has `DOMAIN_PROVIDER=route53`. Simulator 16/16. Tests 9581 passed. **Not live yet:** needs a deploy (LP-1007). Details: `docs/tickets/LP-1006.md`.
+- **Open (from LP-1006, not built):**
+  - **A removed NS record may take up to 2 days to notice,** and a customer who enters only some of the 4 nameservers still reads as fine. The check asks a normal resolver, which answers from our own zone (NS TTL 172800 s). LP-1007 measures both; fix after (short TTL on each customer zone's NS record, or ask the parent zone directly). Meanwhile a broken delegation still shows up as bounces (DKIM fails → DMARC `p=reject` → Failed on the file, LP-995).
+  - **Setup takes at least two hourly runs** (one stage per run). Running the command by hand during the call is still immediate. Small fix later: loop like the command.
+  - **Some permanent failures stay "unknown"** (SES identity deleted, permission error, dead nameservers): the domain stays active and nothing says so. Later: count `unknown` separately.
+  - **The screen doesn't say why Send is gone** for a `problem` domain (the API does). Later.
+  - **Worker permission trade-off:** the worker reads untrusted email and can now change any customer zone's records. Accepted for the pilot (it can already send as any identity); revisit by moving the hourly check's write step to the api role.
+  - Minor: the first check runs about an hour after the worker starts (and after each deploy); the job ignores its soft time limit in an outage; SERVFAIL only tested with a mock.
 
 ### LP-1007 — Prove step 3
 - Our test domain at a non-AWS DNS provider stands in for a customer, as its own company in staging.
 - Run the command, add the NS record at the provider, wait for the hourly check (or run it once by hand) → `active`.
 - Send from one of its files to your Gmail: sender name and `lf-…@mb-mail.<test domain>`; SPF, DKIM, DMARC pass; Delivered on screen.
 - Reply from Gmail lands in `inbound/` (shown on the file in step 4).
-- Remove the NS record → next check marks `problem` and Send is refused; put it back → `active`.
+- Remove the NS record → next check marks `problem` and Send is refused; put it back → `active`. *(Expect a delay: measure how long it really takes — LP-1006 Open.)*
+- Expect: deploy first (LP-1006 is not live until then); the first hourly check about an hour after the worker starts; at least two runs to finish setup, or run the command by hand.
+- Enter only 3 of the 4 nameservers on the test domain first, and record what the check says (LP-1006 Open).
 - **Done when:** every check passes. Then onboard the pilot customer the same way.
 
 ## 16. Diagrams
@@ -759,6 +769,7 @@ Pre-send content check, revisited from `LP-996.md` (fix the misfires, or warn in
 
 ## 18. Log
 
+- 2026-11-03 — LP-1006 ✅: hourly check finishes setup and catches a broken one (clear failures only); `problem` pauses sending; worker given the setup permissions; `DOMAIN_PROVIDER=route53` in staging. Open: removed-NS delay up to 2 days and partial-NS blind spot — LP-1007 measures them.
 - 2026-11-03 — LP-1005 ✅: `set_up_mail_domain` command (pending_ns → verifying → active), 7 DNS records, safe to re-run, root domains refused. Gap added to step 6: removing or changing a customer domain.
 - 2026-11-01 — LP-1004 ✅: Route 53 endpoint; domain-setup IAM (api creates, worker reads, no deletes, Deny on our own zone and identity).
 - 2026-10-31 — LP-999 ✅ (processor's name in From). Step 3 groomed into LP-1004–1007 (§15b): onboarding by command, hourly check finishes setup, no fallback unless the pilot needs it, no self-test, customer subdomains `p=reject` with no reports, active domain turns sending on.
