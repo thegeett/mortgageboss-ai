@@ -8,6 +8,9 @@ Creates or updates the company's `company_mail_domains` row and prints it. Refus
 company already has. While the row is active, every file of the company has the address
 `lf-<display_id>@<domain>`; `--inactive` (or no row) means no address at all.
 
+For a domain we manage ourselves. Refuses a domain `set_up_mail_domain` manages (LP-1005): writing
+over it would mark it active without AWS's check, and keep the old domain's zone.
+
 In staging this runs as a one-off ECS task; see `docs/tickets/LP-991.md` for the command.
 """
 

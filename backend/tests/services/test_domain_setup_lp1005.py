@@ -7,6 +7,7 @@
   nothing created twice, hand-linked rows untouched.
 - The command's refusals and what it prints, and what `_main` prints for each kind of stop.
 - The LP-991 hand-link refuses a row this setup owns (review #1).
+- `--replace` corrects a mistyped pending domain; a root domain is refused (second review #1, #2).
 """
 
 from __future__ import annotations
@@ -500,7 +501,7 @@ async def test_the_command_runs_to_active_and_prints_the_ns_record(
 ) -> None:
     ready = await ready_to_send(db_session, with_domain=False)
     provider = Recording()
-    company, row, created = await command.run(
+    company, row, created, _ = await command.run(
         db_session, company_ref=str(ready.company.id), subdomain=SUB.upper(), provider=provider
     )
     assert row.domain == SUB and row.status is MailDomainStatus.ACTIVE and created
@@ -510,7 +511,7 @@ async def test_the_command_runs_to_active_and_prints_the_ns_record(
     assert f"Active. Files of {company.name} now use lf-…@{SUB}." in text
 
     # Again: nothing created twice, and it says Active without the NS record.
-    company, row, created = await command.run(
+    company, row, created, _ = await command.run(
         db_session, company_ref=str(ready.company.id), subdomain=SUB, provider=provider
     )
     assert not created
@@ -523,7 +524,7 @@ async def test_the_command_stops_at_pending_ns_with_what_to_do(db_session: Async
     ready = await ready_to_send(db_session, with_domain=False)
     provider = Recording()
     provider.delegated = False
-    company, row, created = await command.run(
+    company, row, created, _ = await command.run(
         db_session, company_ref=str(ready.company.id), subdomain=SUB, provider=provider
     )
     lines = command.describe(company, row, zone_created=created)
@@ -547,7 +548,11 @@ async def test_the_command_refuses_another_companys_subdomain(db_session: AsyncS
     other = await ready_to_send(db_session, with_domain=False)
     with pytest.raises(MailDomainError, match="already belongs to another company"):
         await command.run(
-            db_session, company_ref=str(other.company.id), subdomain=taken, provider=Recording()
+            db_session,
+            company_ref=str(other.company.id),
+            subdomain=taken,
+            provider=Recording(),
+            custom_subdomain=True,
         )
 
 
@@ -556,7 +561,9 @@ async def test_the_command_refuses_a_company_with_a_different_domain(
 ) -> None:
     ready = await ready_to_send(db_session)
     provider = Recording()
-    with pytest.raises(MailDomainError, match="changing a domain is manual for now"):
+    with pytest.raises(
+        MailDomainError, match="changing a domain past pending_ns is manual for now"
+    ):
         await command.run(
             db_session, company_ref=str(ready.company.id), subdomain=SUB, provider=provider
         )
@@ -566,7 +573,7 @@ async def test_the_command_refuses_a_company_with_a_different_domain(
 # --------------------------------------------------------------------------------------------- #
 # What `_main` prints (review #2, #3)
 # --------------------------------------------------------------------------------------------- #
-_ARGS = argparse.Namespace(company="Any Co", subdomain=SUB)
+_ARGS = argparse.Namespace(company="Any Co", subdomain=SUB, replace=False, custom_subdomain=False)
 
 
 def _no_db() -> None:
@@ -637,11 +644,11 @@ async def test_the_hand_link_refuses_a_row_this_setup_owns(
         await advance_mail_domain(db_session, row, FakeDomainProvider())
     before = (row.domain, row.status, row.zone_id, row.nameservers)
 
-    with pytest.raises(MailDomainError, match="is being set up by set_up_mail_domain"):
+    with pytest.raises(MailDomainError, match="is managed by set_up_mail_domain"):
         await set_company_mail_domain(
             db_session, company_id=ready.company.id, domain="other-domain.example.test"
         )
-    with pytest.raises(MailDomainError, match="is being set up by set_up_mail_domain"):
+    with pytest.raises(MailDomainError, match="is managed by set_up_mail_domain"):
         await hand_link(db_session, company_ref=str(ready.company.id), domain=row.domain)
     await db_session.refresh(row)
     assert (row.domain, row.status, row.zone_id, row.nameservers) == before
@@ -655,3 +662,183 @@ async def test_the_hand_link_still_changes_a_hand_linked_row(db_session: AsyncSe
         db_session, company_ref=str(ready.company.id), domain="mail.relinked.test", inactive=True
     )
     assert (row.domain, row.status) == ("mail.relinked.test", MailDomainStatus.INACTIVE)
+
+
+# --------------------------------------------------------------------------------------------- #
+# Correcting a typo, and refusing a root domain (second review #1, #2)
+# --------------------------------------------------------------------------------------------- #
+TYPO = "mb-mail.abcmortage.test"
+
+
+def _args(company: Any, subdomain: str, **flags: bool) -> argparse.Namespace:
+    return argparse.Namespace(
+        company=str(company.id),
+        subdomain=subdomain,
+        replace=flags.get("replace", False),
+        custom_subdomain=flags.get("custom_subdomain", False),
+    )
+
+
+@pytest.fixture
+def real_main(monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession) -> Recording:
+    """`_main` on the test's session, with a provider that stops at pending_ns."""
+
+    @asynccontextmanager
+    async def session() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    provider = Recording()
+    provider.delegated = False
+    monkeypatch.setattr(command, "async_session_maker", session)
+    monkeypatch.setattr(command, "get_domain_provider", lambda: provider)
+    return provider
+
+
+async def test_a_typo_is_refused_then_replaced_with_what_to_clean_up(
+    db_session: AsyncSession, capsys: pytest.CaptureFixture[str], real_main: Recording
+) -> None:
+    ready = await ready_to_send(db_session, with_domain=False)
+    assert await command._main(_args(ready.company, TYPO)) == 0
+    row = await db_session.scalar(
+        select(CompanyMailDomain).where(CompanyMailDomain.company_id == ready.company.id)
+    )
+    assert row is not None
+    old_zone = row.zone_id
+    assert old_zone is not None
+    capsys.readouterr()
+
+    # Without the flag: refused, unchanged, and it says how.
+    assert await command._main(_args(ready.company, SUB)) == 1
+    assert "To correct it, run this again with --replace." in capsys.readouterr().err
+    assert (row.domain, row.zone_id) == (TYPO, old_zone)
+
+    assert await command._main(_args(ready.company, SUB, replace=True)) == 0
+    out = capsys.readouterr().out
+    assert f"Replaced {TYPO}; nothing uses it now." in out
+    assert f"Route 53 zone {old_zone}, and the SES identity {TYPO}" in out
+    assert f"Name: {SUB}   Type: NS" in out
+    assert row.domain == SUB and row.status is MailDomainStatus.PENDING_NS
+    assert row.zone_id is not None and row.zone_id != old_zone
+    assert real_main.calls.count("create_zone") == 2
+
+    # Running the corrected domain again replaces nothing.
+    assert await command._main(_args(ready.company, SUB, replace=True)) == 0
+    assert "Replaced" not in capsys.readouterr().out
+    assert real_main.calls.count("create_zone") == 2
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        MailDomainStatus.VERIFYING,
+        MailDomainStatus.ACTIVE,
+        MailDomainStatus.PROBLEM,
+        MailDomainStatus.INACTIVE,
+    ],
+)
+async def test_replace_refuses_past_pending_ns(
+    db_session: AsyncSession, status: MailDomainStatus
+) -> None:
+    ready, row = await _new_row(db_session)
+    await advance_mail_domain(db_session, row, FakeDomainProvider())
+    row.status = status
+    before = (row.domain, row.zone_id, row.nameservers)
+    with pytest.raises(MailDomainError, match="past pending_ns is manual"):
+        await command.run(
+            db_session,
+            company_ref=str(ready.company.id),
+            subdomain=SUB,
+            provider=Recording(),
+            replace=True,
+        )
+    assert (row.domain, row.zone_id, row.nameservers) == before
+
+
+async def test_replace_refuses_another_companys_domain(db_session: AsyncSession) -> None:
+    owner = await ready_to_send(db_session, with_domain=False)
+    await command.run(
+        db_session, company_ref=str(owner.company.id), subdomain=SUB, provider=Recording()
+    )
+    ready, row = await _new_row(db_session)
+    before = row.domain
+    with pytest.raises(MailDomainError, match="already belongs to another company"):
+        await command.run(
+            db_session,
+            company_ref=str(ready.company.id),
+            subdomain=SUB,
+            provider=Recording(),
+            replace=True,
+        )
+    assert row.domain == before
+
+
+@pytest.mark.parametrize(
+    "subdomain",
+    ["abcmortgage.test", "abcmortgage.co.uk", "co.uk", "mb-mail.com", "email.abcmortgage.test"],
+)
+async def test_a_root_domain_or_other_prefix_is_refused_before_any_aws_call(
+    db_session: AsyncSession, subdomain: str
+) -> None:
+    ready = await ready_to_send(db_session, with_domain=False)
+    provider = Recording()
+    with pytest.raises(MailDomainError, match="doesn't look like a subdomain"):
+        await command.run(
+            db_session, company_ref=str(ready.company.id), subdomain=subdomain, provider=provider
+        )
+    assert provider.calls == []
+    assert (
+        await db_session.scalar(
+            select(CompanyMailDomain).where(CompanyMailDomain.company_id == ready.company.id)
+        )
+        is None
+    )
+
+
+async def test_the_flag_allows_a_customers_prefix_but_never_two_labels(
+    db_session: AsyncSession,
+) -> None:
+    ready = await ready_to_send(db_session, with_domain=False)
+    with pytest.raises(MailDomainError, match="doesn't look like a subdomain"):
+        await command.run(
+            db_session,
+            company_ref=str(ready.company.id),
+            subdomain="abcmortgage.test",
+            provider=Recording(),
+            custom_subdomain=True,
+        )
+    # The control: the flag does let a customer's own prefix through.
+    _, row, _, _ = await command.run(
+        db_session,
+        company_ref=str(ready.company.id),
+        subdomain="email.abcmortgage.test",
+        provider=Recording(),
+        custom_subdomain=True,
+    )
+    assert row.domain == "email.abcmortgage.test"
+
+
+async def test_replace_also_refuses_a_root_domain(db_session: AsyncSession) -> None:
+    ready, row = await _new_row(db_session)
+    before = row.domain
+    with pytest.raises(MailDomainError, match="doesn't look like a subdomain"):
+        await command.run(
+            db_session,
+            company_ref=str(ready.company.id),
+            subdomain="abcmortgage.test",
+            provider=Recording(),
+            replace=True,
+        )
+    assert row.domain == before
+
+
+def test_the_flags_reach_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[argparse.Namespace] = []
+
+    async def fake_main(args: argparse.Namespace) -> int:
+        seen.append(args)
+        return 0
+
+    monkeypatch.setattr(command, "_main", fake_main)
+    assert command.main(["Co", SUB]) == 0
+    assert command.main(["Co", SUB, "--replace", "--custom-subdomain"]) == 0
+    assert [(a.replace, a.custom_subdomain) for a in seen] == [(False, False), (True, True)]

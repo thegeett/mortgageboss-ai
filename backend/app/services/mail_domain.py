@@ -132,7 +132,7 @@ async def set_company_mail_domain(
         or row.status in (MailDomainStatus.PENDING_NS, MailDomainStatus.VERIFYING)
     ):
         raise MailDomainError(
-            f"{row.domain} is being set up by set_up_mail_domain; use that command."
+            f"{row.domain} is managed by set_up_mail_domain; this command can't change it."
         )
     # The check above and this write are two statements, so a concurrent writer can take the domain
     # (or create this company's row) between them. The unique constraints refuse it; the savepoint
@@ -150,6 +150,30 @@ async def set_company_mail_domain(
             f"{cleaned} could not be set: another write took it or this company's row first."
         ) from exc
     return row
+
+
+async def replace_pending_domain(db: AsyncSession, *, row: CompanyMailDomain, domain: str) -> None:
+    """LP-1005 — correct a domain that is still waiting for its NS record. Nothing is live at that
+    stage, so the row simply starts again; later stages have real records and mail behind them, so
+    they are refused. Forgets the old zone: the caller tells the operator to delete it.
+
+    Flushes, does not commit: the caller owns the transaction.
+    """
+    if row.status is not MailDomainStatus.PENDING_NS:
+        raise MailDomainError(f"{row.domain} is {row.status.value}, past pending_ns.")
+    cleaned = normalise_domain(domain)
+    owner = await db.scalar(
+        select(CompanyMailDomain.company_id).where(CompanyMailDomain.domain == cleaned)
+    )
+    if owner is not None and owner != row.company_id:
+        raise MailDomainError(f"{cleaned} already belongs to another company ({owner}).")
+    try:
+        async with db.begin_nested():
+            row.domain = cleaned
+            row.zone_id = None
+            row.nameservers = None
+    except IntegrityError as exc:
+        raise MailDomainError(f"{cleaned} could not be set: another write took it first.") from exc
 
 
 def caller_reference(company_id: UUID, domain: str) -> str:
@@ -217,6 +241,7 @@ __all__ = [
     "file_address",
     "file_address_and_sending",
     "normalise_domain",
+    "replace_pending_domain",
     "set_company_mail_domain",
     "set_email_sending",
 ]
