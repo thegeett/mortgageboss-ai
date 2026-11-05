@@ -1,4 +1,4 @@
-"""Deciding which loan file an inbound message belongs to (LP-805).
+"""Deciding which loan file an inbound message belongs to (LP-805, LP-1008).
 
 THIS MODULE CONTAINS THE ONE INVERSION OF THE TENANCY INVARIANT IN THE CODEBASE.
 
@@ -13,14 +13,14 @@ company scoping happening before the query rather than after it.
 
 THREE PROPERTIES THE RESOLVER HAS, EACH FOR A REASON THAT IS NOT OBVIOUS:
 
-* **Unknown and expired behave identically**, and both behave like an address that was never valid.
-  A resolver that distinguished them is an oracle: send to a guessed token, and a different response
-  tells you whether that file exists.
+* **Unknown file, wrong domain and inactive domain behave identically**, and all behave like an
+  address that was never valid. A resolver that distinguished them is an oracle: send to a guessed
+  address, and a different response tells you whether that file exists.
 * **The lookup is case-insensitive.** Mail clients and relays rewrite case in the local part freely,
   and a case-sensitive lookup sends a borrower's documents to triage because their phone capitalised
   the first letter.
-* **The domain is part of the credential.** Matching the local part alone would let a token lifted
-  from one environment's address resolve against another's — staging tokens opening production files.
+* **The domain is part of the match.** Display ids are short and not secret, so the local part alone
+  proves nothing: the file must belong to the company that owns the domain the mail was sent to.
 """
 
 from __future__ import annotations
@@ -33,33 +33,36 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.core.logging import get_logger
+from app.models.company_mail_domain import CompanyMailDomain, MailDomainStatus
 from app.models.helpers import only_active
 from app.models.inbound_message import InboundMessage
 from app.models.loan_file import LoanFile
 
 logger = get_logger(__name__)
 
-#: `lf-<token>@<domain>`. The token is what `services/loan_file_ids.py` mints; the prefix is what
-#: `LoanFile.get_inbox_address` wrote until LP-991. Step 4 moves this to `display_id`.
-_INBOX_LOCAL_PART = re.compile(r"^lf-(?P<token>[A-Za-z0-9_-]+)$")
+#: `lf-<code>`, lowercased: the file's `display_id` (`LF-XXXX`, `services/loan_file_ids.py`) as
+#: `services/mail_domain.file_address` writes it.
+_FILE_ADDRESS_LOCAL_PART = re.compile(r"^lf-[a-z0-9]+$")
+
+#: The domain states a file address still receives on. See `resolve_loan_file_by_address`.
+_RECEIVING_STATUSES = (MailDomainStatus.ACTIVE, MailDomainStatus.PROBLEM)
 
 
 class RoutingSignal(StrEnum):
     """Which rung of the ladder matched. Stored, not discarded — a processor deciding whether to
     trust an auto-routed message needs to know what it was routed ON."""
 
-    INBOX_TOKEN = "inbox_token"  # rung 1
+    # Rung 1. The value predates LP-1008 (it now means the file address); the Communication tab
+    # labels it "Sent to this file's address".
+    INBOX_TOKEN = "inbox_token"
     THREAD_REFERENCE = "thread_reference"  # rung 2
     FOOTER_TAG = "footer_tag"  # rung 3 (LP-808)
     PARTICIPANT = "participant"  # rung 4 (LP-808)
     SUBJECT_REFERENCE = "subject_reference"  # rung 5 (LP-808)
 
 
-#: Rung confidences, from `phase4.md` §2.2. Stored so that CONFIDENCE GATES AUTO-ACCEPTANCE, NEVER
-#: VISIBILITY: an unrouted message is always visible to its company's processors, it is simply not
-#: attached to a file until somebody says so.
+#: Rung confidences, from `phase4.md` §2.2. Stored so that confidence gates auto-acceptance.
 _CONFIDENCE = {
     RoutingSignal.INBOX_TOKEN: 1.0,
     RoutingSignal.THREAD_REFERENCE: 1.0,
@@ -87,21 +90,14 @@ class RoutingOutcome:
         return self.loan_file is not None
 
 
-def inbox_token_in(address: str | None) -> str | None:
-    """The inbox token an address carries, or None.
-
-    Checks BOTH halves. The local part must be `lf-<token>` and the domain must be this
-    environment's `settings.inbox_domain` — see the module docstring on why the domain is part of the
-    credential rather than decoration.
-    """
+def _file_address_parts(address: str | None) -> tuple[str, str] | None:
+    """``(local part, domain)`` of a well-formed file address, lowercased, or None."""
     if not address:
         return None
-    candidate = address.strip().strip("<>").lower()
-    local, separator, domain = candidate.partition("@")
-    if not separator or domain != settings.inbox_domain.lower():
+    local, separator, domain = address.strip().strip("<>").lower().partition("@")
+    if not separator or not domain or not _FILE_ADDRESS_LOCAL_PART.match(local):
         return None
-    found = _INBOX_LOCAL_PART.match(local)
-    return found.group("token") if found else None
+    return local, domain
 
 
 async def resolve_loan_file_by_address(db: AsyncSession, *, address: str | None) -> LoanFile | None:
@@ -110,53 +106,67 @@ async def resolve_loan_file_by_address(db: AsyncSession, *, address: str | None)
     The ONE place in this codebase permitted to derive a company from something a stranger sent.
     Callers read `company_id` off the returned file; nothing else here produces one.
 
-    Returns None for an unknown token, an expired one, a soft-deleted file, a well-formed address on
-    the wrong domain, and a malformed address — deliberately indistinguishable, so the response
-    cannot be used to probe which files exist.
-    """
-    token = inbox_token_in(address)
-    if token is None:
-        return None
+    `lf-<display_id>@<domain>` finds the active file with that `display_id` whose company has that
+    domain, status active or problem. A `problem` domain still receives: the hourly check found its
+    DNS broken, which pauses Send, and mail already on its way must still reach the file.
 
-    # LOWER() ON BOTH SIDES rather than a normalised column: `inbox_token` is minted from
-    # `secrets.token_urlsafe`, which is case-SIGNIFICANT, so two distinct tokens can differ only in
-    # case. Comparing case-insensitively is therefore a deliberate narrowing of the token's entropy
-    # — accepted because a mail relay may rewrite the local part and a borrower whose documents
-    # vanish is a worse outcome than the ~1 bit per alphabetic character this costs against an
-    # attacker who already has to guess 128 bits.
-    resolved = (
-        await db.execute(
-            only_active(select(LoanFile).where(func.lower(LoanFile.inbox_token) == token), LoanFile)
-        )
-    ).scalar_one_or_none()
+    Returns None for an unknown file, a soft-deleted file, the wrong company's domain, an inactive
+    domain and a malformed address — deliberately indistinguishable, so the response cannot be used
+    to probe which files exist.
+    """
+    parts = _file_address_parts(address)
+    resolved: LoanFile | None = None
+    if parts is not None:
+        local, domain = parts
+        # `display_id` is globally unique, so this is one row at most.
+        resolved = (
+            await db.execute(
+                only_active(
+                    select(LoanFile)
+                    .join(CompanyMailDomain, CompanyMailDomain.company_id == LoanFile.company_id)
+                    .where(
+                        func.lower(LoanFile.display_id) == local,
+                        CompanyMailDomain.domain == domain,
+                        CompanyMailDomain.status.in_(_RECEIVING_STATUSES),
+                    ),
+                    LoanFile,
+                )
+            )
+        ).scalar_one_or_none()
 
     if resolved is None:
-        # METADATA ONLY — never the address, which is the token itself and therefore a capability.
-        logger.info("inbound_token_unresolved")
-        return None
+        # METADATA ONLY — never the address, which names a borrower's file.
+        logger.info("inbound_address_unresolved")
     return resolved
 
 
 def _recipient_addresses(message: InboundMessage) -> tuple[str, ...]:
-    """Every address the message was delivered to.
+    """The addresses in the message's own headers. Route B only: routing never reads these (rule 7).
 
-    `to_addresses` is populated at ingest from `To` and `Delivered-To`. Cc, Bcc and
-    `X-Gm-Original-To` are named by `phase4.md` §2.2 rung 1 and are NOT here — LP-803 does not
-    collect them. Recorded rather than silently narrowed: a borrower who Ccs the file address instead
-    of To-ing it currently goes to triage.
+    `to_addresses` is populated at ingest from `To` and `Delivered-To`, which the sender writes.
     """
     return tuple(message.to_addresses or ())
 
 
-async def _route_by_token(db: AsyncSession, message: InboundMessage) -> RoutingOutcome | None:
-    """Rung 1 — a recipient carries the file's inbox token. Certain."""
-    for address in _recipient_addresses(message):
+async def _route_by_address(db: AsyncSession, message: InboundMessage) -> RoutingOutcome | None:
+    """Rung 1 — the envelope recipients name exactly one file. Certain.
+
+    THE ENVELOPE, NEVER To/Cc (rule 7). Headers are text the sender wrote; `receipt.recipients` is
+    where SES actually delivered. Two addresses of one file are one file. Two files mean a person
+    decides (decision 11-04), so that is no match, the same as none.
+    """
+    matched: dict[UUID, LoanFile] = {}
+    for address in message.envelope_recipients or ():
         resolved = await resolve_loan_file_by_address(db, address=address)
         if resolved is not None:
-            return RoutingOutcome(
-                resolved, RoutingSignal.INBOX_TOKEN, _CONFIDENCE[RoutingSignal.INBOX_TOKEN]
-            )
-    return None
+            matched[resolved.id] = resolved
+    if len(matched) != 1:
+        return None
+    return RoutingOutcome(
+        next(iter(matched.values())),
+        RoutingSignal.INBOX_TOKEN,
+        _CONFIDENCE[RoutingSignal.INBOX_TOKEN],
+    )
 
 
 async def _route_by_thread(db: AsyncSession, message: InboundMessage) -> RoutingOutcome | None:
@@ -199,10 +209,9 @@ async def _route_by_thread(db: AsyncSession, message: InboundMessage) -> Routing
 async def _scoped_files(db: AsyncSession, company_id: UUID | None) -> list[LoanFile]:
     """Active loan files for one company, or nothing when the company is unknown.
 
-    RUNGS 3-5 ARE COMPANY-SCOPED AND RUNGS 1-2 ARE NOT, and that asymmetry is the point. The first
-    two match on something unguessable — a 128-bit token, or a message id we generated — so the
-    match itself proves which company. The last three match on a display id, a sender address or a
-    subject line, none of which is unguessable, so scoping is the only thing stopping
+    RUNGS 3-5 ARE COMPANY-SCOPED. Rung 1 gets its company from the address's domain and rung 2 from a
+    message id we generated. The last three match on a display id, a sender address or a subject
+    line, none of which is unguessable, so scoping is the only thing stopping
     `[LF-7K3M]` in a stranger's subject line from reaching whichever company happens to hold that id.
 
     NO COMPANY MEANS NO CANDIDATES. A message with no `company_id` reached us at an address nobody
@@ -351,30 +360,13 @@ async def _stored_body(message: InboundMessage) -> str | None:
 
 
 async def route_message(db: AsyncSession, *, message: InboundMessage) -> RoutingOutcome:
-    """Run the ladder. First hit wins; the confidence is stored, not discarded.
+    """Rung 1 only: the file named by the envelope recipients, or unrouted.
 
-    RUNGS 1-5. LP-805 built 1 and 2; LP-808 adds 3, 4 and 5. Rung 6 is an AI SUGGESTION that never
-    auto-accepts and is not built — ADR-388's "flag, never close", and the standing rule that the
-    model may classify and extract but may not decide.
-
-    RUNGS 3-5 ARE COMPANY-SCOPED AND 1-2 ARE NOT. See `_scoped_files`: the first two match on
-    something unguessable, so the match proves the company; the last three match on strings anybody
-    can write, so scoping is the only thing between them and another tenant's file.
-
-    NO MATCH IS NOT AN ERROR. An unrouted message goes to its company's triage queue and is visible
-    there; confidence gates auto-acceptance, never visibility.
+    NO MATCH IS NOT AN ERROR. An unrouted message has no company, so no company sees it (LP-1008).
     """
-    for rung in (
-        _route_by_token,
-        _route_by_thread,
-        _route_by_footer_tag,
-        _route_by_participant,
-        _route_by_subject,
-    ):
-        outcome = await rung(db, message)
-        if outcome is not None:
-            return outcome
-    return RoutingOutcome(None, None, None)
+    # Rungs 2-5 are off by decision 11-04 (address only); their code stays, uncalled.
+    outcome = await _route_by_address(db, message)
+    return outcome if outcome is not None else RoutingOutcome(None, None, None)
 
 
 class Disposition(StrEnum):
@@ -530,9 +522,7 @@ async def attach_route_b_company(db: AsyncSession, *, message: InboundMessage) -
     return False
 
 
-async def apply_routing(
-    db: AsyncSession, *, message: InboundMessage, raw: bytes | None = None
-) -> RoutingOutcome:
+async def apply_routing(db: AsyncSession, *, message: InboundMessage) -> RoutingOutcome:
     """Route one message, record what happened, and open the correspondence record. ``flush`` only.
 
     THE COMPANY IS READ OFF THE RESOLVED FILE. That is the invariant this whole module exists to keep
@@ -548,16 +538,7 @@ async def apply_routing(
     from app.models.inbound_message import InboundRoutingState
     from app.services.activity_log import log_activity
 
-    # ROUTE B FIRST. The alias says which company; the ladder then says which file, with rungs 3-5
-    # scoped to that company. Without this a forwarded message has no company and those rungs have
-    # nothing to search.
-    forwarded = await attach_route_b_company(db, message=message)
-    if forwarded:
-        # BEFORE `decide_disposition`, which is what reads the verdicts. §2.3's auto-accept condition
-        # is "dmarc_verdict == PASS (or, for a forward, original-hop DMARC pass via ARC/DKIM)", and a
-        # forward's own SES DMARC verdict always describes the forwarder.
-        record_original_hop(message, raw=raw)
-
+    # Route B (`attach_route_b_company`, `record_original_hop`) is off by decision 11-04, address only.
     outcome = await route_message(db, message=message)
     disposition, reason = await decide_disposition(db, message=message, outcome=outcome)
 
@@ -565,18 +546,14 @@ async def apply_routing(
     message.routing_confidence = outcome.confidence
 
     if outcome.loan_file is None:
-        # `company_id` MAY ALREADY BE SET, by Route B above. That is not the derivation this module
-        # confines — it came from a connection this company minted, not from a sender or a header —
-        # and leaving it is what puts an unroutable forwarded message in the RIGHT company's triage
-        # queue instead of the global unclaimed pile.
         message.routing_state = (
             InboundRoutingState.REJECTED
             if disposition is Disposition.REJECT
             else InboundRoutingState.UNROUTED
         )
         # NO company_id. An unrouted message belongs to nobody yet, and guessing one from the sender
-        # is exactly the derivation this module exists to confine. LP-806's triage queue is
-        # per-company and reads only routed-or-quarantined rows for that reason.
+        # is exactly the derivation this module exists to confine. No company's queue returns it
+        # (LP-1008).
         await db.flush()
         return outcome
 
@@ -632,7 +609,6 @@ __all__ = [
     "apply_routing",
     "attach_route_b_company",
     "decide_disposition",
-    "inbox_token_in",
     "record_original_hop",
     "resolve_loan_file_by_address",
     "route_message",

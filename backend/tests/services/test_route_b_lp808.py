@@ -25,7 +25,13 @@ from app.models.base import utcnow
 from app.models.inbound_message import InboundMessage, InboundRoutingState
 from app.models.loan_file_participant import LoanFileParticipant, ParticipantRole
 from app.models.mailbox_connection import MailboxConnectionStatus, MailboxVerification
-from app.services.inbound_routing import RoutingSignal, attach_route_b_company, route_message
+from app.services.inbound_routing import (
+    RoutingSignal,
+    _route_by_footer_tag,
+    _route_by_participant,
+    _route_by_subject,
+    attach_route_b_company,
+)
 from app.services.mailbox_connections import (
     create_connection,
     is_stale,
@@ -34,7 +40,7 @@ from app.services.mailbox_connections import (
     revoke_connection,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
-from tests.mail_address import token_address
+from tests.mail_address import file_mail_address
 
 
 async def _company(db: AsyncSession, slug: str) -> Company:
@@ -137,7 +143,9 @@ async def test_a_file_address_does_not_resolve_as_a_connection(db_session: Async
     loan_file = await _file(db_session, company)
 
     assert (
-        await resolve_connection_by_address(db_session, address=token_address(loan_file))
+        await resolve_connection_by_address(
+            db_session, address=await file_mail_address(db_session, loan_file)
+        )
     ) is None
 
 
@@ -208,8 +216,9 @@ async def test_a_footer_tag_routes_within_the_company(db_session: AsyncSession) 
     message.company_id = company.id
     await db_session.flush()
 
-    outcome = await route_message(db_session, message=message)
+    outcome = await _route_by_footer_tag(db_session, message)
 
+    assert outcome is not None
     assert outcome.loan_file is not None
     assert outcome.loan_file.id == loan_file.id
     assert outcome.signal is RoutingSignal.FOOTER_TAG
@@ -231,9 +240,7 @@ async def test_a_footer_tag_does_not_reach_another_companys_file(
     message.company_id = mine.id
     await db_session.flush()
 
-    outcome = await route_message(db_session, message=message)
-
-    assert outcome.loan_file is None
+    assert await _route_by_footer_tag(db_session, message) is None
 
 
 async def test_a_message_with_no_company_matches_no_file_on_rungs_three_to_five(
@@ -245,7 +252,9 @@ async def test_a_message_with_no_company_matches_no_file_on_rungs_three_to_five(
     loan_file = await _file(db_session, company)
     message = await _arrived(db_session, to=["x@y.example"], subject=f"[{loan_file.display_id}]")
 
-    assert (await route_message(db_session, message=message)).loan_file is None
+    assert await _route_by_footer_tag(db_session, message) is None
+    assert await _route_by_participant(db_session, message) is None
+    assert await _route_by_subject(db_session, message) is None
 
 
 async def test_a_participant_routes_when_exactly_one_file_matches(
@@ -265,8 +274,9 @@ async def test_a_participant_routes_when_exactly_one_file_matches(
     message.company_id = company.id
     await db_session.flush()
 
-    outcome = await route_message(db_session, message=message)
+    outcome = await _route_by_participant(db_session, message)
 
+    assert outcome is not None
     assert outcome.signal is RoutingSignal.PARTICIPANT
     assert outcome.loan_file is not None
     assert outcome.loan_file.id == loan_file.id
@@ -290,7 +300,7 @@ async def test_a_participant_on_two_files_goes_to_triage(db_session: AsyncSessio
     message.company_id = company.id
     await db_session.flush()
 
-    assert (await route_message(db_session, message=message)).loan_file is None
+    assert await _route_by_participant(db_session, message) is None
 
 
 async def test_a_bare_display_id_in_the_subject_routes_as_a_weaker_signal(
@@ -306,31 +316,10 @@ async def test_a_bare_display_id_in_the_subject_routes_as_a_weaker_signal(
     message.company_id = company.id
     await db_session.flush()
 
-    outcome = await route_message(db_session, message=message)
+    outcome = await _route_by_subject(db_session, message)
 
+    assert outcome is not None
     assert outcome.signal is RoutingSignal.SUBJECT_REFERENCE
-
-
-async def test_the_token_rung_still_wins(db_session: AsyncSession) -> None:
-    """FIRST HIT WINS, and the order is by strength. A forwarded message that still carries the
-    borrower's `lf-<token>@` in `X-Gm-Original-To` must route on that, with certainty, rather than on
-    a subject line."""
-    company = await _company(db_session, "order")
-    loan_file = await _file(db_session, company)
-    other = await _file(db_session, company)
-    message = await _arrived(
-        db_session,
-        to=[token_address(loan_file)],
-        subject=f"About {other.display_id}",
-    )
-    message.company_id = company.id
-    await db_session.flush()
-
-    outcome = await route_message(db_session, message=message)
-
-    assert outcome.signal is RoutingSignal.INBOX_TOKEN
-    assert outcome.loan_file is not None
-    assert outcome.loan_file.id == loan_file.id
 
 
 # --------------------------------------------------------------------------------------------- #

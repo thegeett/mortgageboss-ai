@@ -119,6 +119,12 @@ celery_app.conf.update(
             "schedule": 60.0,
             "options": {"expires": 60},
         },
+        # LP-1008 — incoming mail. Dropped if late: the next run reads the same queue.
+        "read-inbound-mail": {
+            "task": "inbound.poll_queue",
+            "schedule": 60.0,
+            "options": {"expires": 60},
+        },
         # LP-1006 — finishes customer domain setup and catches a broken one. Dropped if late: the
         # next hour checks the same domains.
         "check-mail-domains": {

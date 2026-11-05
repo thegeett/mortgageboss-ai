@@ -568,7 +568,7 @@ module "compute" {
     },
     # LP-988 — email resource names, set only when their stack exists (a disabled stack sets nothing,
     # so the settings stay None). MAIL_BUCKET / INBOUND_QUEUE_URL: the raw-mail bucket and the
-    # queue `inbound.poll_queue` drains (not on the beat schedule). EVENTS_QUEUE_URL,
+    # queue `inbound.poll_queue` drains (every minute, LP-1008). EVENTS_QUEUE_URL,
     # SES_CONFIGURATION_SET and MAIL_TRANSPORT are for step 2 and not read yet; settings ignore
     # unknown variables (`extra="ignore"`).
     #

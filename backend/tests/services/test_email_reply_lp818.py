@@ -36,10 +36,9 @@ from app.services.email_reply import (
     set_important,
     unread_count,
 )
-from app.services.inbound_ingest import process_raw_message
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from tests.mail_address import token_address
+from tests.mail_address import deliver, file_mail_address
 
 _PDF = (Path(__file__).resolve().parents[1] / "fixtures" / "attachments" / "clean.pdf").read_bytes()
 
@@ -77,12 +76,12 @@ async def _arrived(
     between them are all the ones the product makes."""
     message = EmailMessage()
     message["From"] = "Jane Borrower <Jane.Borrower@Personal-Email.com>"
-    message["To"] = token_address(loan_file)
+    message["To"] = await file_mail_address(db, loan_file)
     message["Subject"] = subject
     message["Message-ID"] = f"<{message_id}>"
     message.set_content("is page 4 really needed?")
     message.add_attachment(_PDF, maintype="application", subtype="pdf", filename="p.pdf")
-    await process_raw_message(
+    await deliver(
         db, raw=message.as_bytes(policy=policy.default), raw_storage_path=None, store_raw=True
     )
     return (

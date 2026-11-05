@@ -19,7 +19,7 @@ import pytest
 from app.models import Company, LoanProgram
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
-from tests.mail_address import token_address
+from tests.mail_address import file_mail_address
 
 
 async def _company_with_file(db: AsyncSession, *, slug: str):
@@ -52,9 +52,11 @@ async def test_a_token_resolves_only_its_own_file(db_session: AsyncSession) -> N
     assert their_file.inbox_token != my_file.inbox_token
 
     resolved_theirs = await resolve_loan_file_by_address(
-        db_session, address=token_address(their_file)
+        db_session, address=await file_mail_address(db_session, their_file)
     )
-    resolved_mine = await resolve_loan_file_by_address(db_session, address=token_address(my_file))
+    resolved_mine = await resolve_loan_file_by_address(
+        db_session, address=await file_mail_address(db_session, my_file)
+    )
 
     assert resolved_theirs is not None and resolved_theirs.id == their_file.id
     assert resolved_mine is not None and resolved_mine.id == my_file.id
@@ -73,7 +75,9 @@ async def test_the_company_comes_from_the_resolved_file_and_nowhere_else(
     theirs, their_file = await _company_with_file(db_session, slug="theirs")
     mine, _my_file = await _company_with_file(db_session, slug="mine")
 
-    resolved = await resolve_loan_file_by_address(db_session, address=token_address(their_file))
+    resolved = await resolve_loan_file_by_address(
+        db_session, address=await file_mail_address(db_session, their_file)
+    )
 
     assert resolved is not None
     assert resolved.company_id == theirs.id
@@ -107,7 +111,7 @@ async def test_a_soft_deleted_file_does_not_resolve(db_session: AsyncSession) ->
     from app.services.inbound_routing import resolve_loan_file_by_address
 
     _company, loan_file = await _company_with_file(db_session, slug="theirs")
-    address = token_address(loan_file)
+    address = await file_mail_address(db_session, loan_file)
     assert await resolve_loan_file_by_address(db_session, address=address) is not None
 
     loan_file.deleted_at = utcnow()
@@ -122,7 +126,7 @@ async def test_the_lookup_is_case_insensitive(db_session: AsyncSession) -> None:
     from app.services.inbound_routing import resolve_loan_file_by_address
 
     _company, loan_file = await _company_with_file(db_session, slug="theirs")
-    shouted = token_address(loan_file).upper()
+    shouted = (await file_mail_address(db_session, loan_file)).upper()
 
     resolved = await resolve_loan_file_by_address(db_session, address=shouted)
     assert resolved is not None and resolved.id == loan_file.id
@@ -135,7 +139,7 @@ async def test_a_token_from_another_domain_does_not_resolve(db_session: AsyncSes
     from app.services.inbound_routing import resolve_loan_file_by_address
 
     _company, loan_file = await _company_with_file(db_session, slug="theirs")
-    local = token_address(loan_file).split("@", 1)[0]
+    local = (await file_mail_address(db_session, loan_file)).split("@", 1)[0]
 
     assert (
         await resolve_loan_file_by_address(db_session, address=f"{local}@elsewhere.example.com")
@@ -167,7 +171,9 @@ async def test_rung_one_routes_on_the_inbox_token(db_session: AsyncSession) -> N
     from app.services.inbound_routing import RoutingSignal, route_message
 
     _company, loan_file = await _company_with_file(db_session, slug="theirs")
-    message = await _message(db_session, to_addresses=[token_address(loan_file)])
+    message = await _message(
+        db_session, envelope_recipients=[await file_mail_address(db_session, loan_file)]
+    )
 
     outcome = await route_message(db_session, message=message)
 
@@ -189,7 +195,7 @@ async def test_rung_two_matches_the_whole_references_array(db_session: AsyncSess
         CommunicationDirection,
         CommunicationStatus,
     )
-    from app.services.inbound_routing import RoutingSignal, route_message
+    from app.services.inbound_routing import RoutingSignal, _route_by_thread
 
     _company, loan_file = await _company_with_file(db_session, slug="theirs")
     db_session.add(
@@ -211,9 +217,9 @@ async def test_rung_two_matches_the_whole_references_array(db_session: AsyncSess
         ],
     )
 
-    outcome = await route_message(db_session, message=message)
+    outcome = await _route_by_thread(db_session, message)
 
-    assert outcome.routed
+    assert outcome is not None
     assert outcome.loan_file is not None and outcome.loan_file.id == loan_file.id
     assert outcome.signal is RoutingSignal.THREAD_REFERENCE
 
@@ -234,7 +240,7 @@ async def test_rung_two_does_not_match_a_message_id_we_never_sent(
         CommunicationDirection,
         CommunicationStatus,
     )
-    from app.services.inbound_routing import route_message
+    from app.services.inbound_routing import _route_by_thread
 
     _theirs, their_file = await _company_with_file(db_session, slug="theirs")
     db_session.add(
@@ -249,8 +255,7 @@ async def test_rung_two_does_not_match_a_message_id_we_never_sent(
 
     message = await _message(db_session, references=["not-ours@example.com"])
 
-    outcome = await route_message(db_session, message=message)
-    assert not outcome.routed, (
+    assert await _route_by_thread(db_session, message) is None, (
         "a reference we never generated must not route, even when other communications exist"
     )
 
@@ -261,7 +266,7 @@ async def test_an_unmatched_message_is_unrouted_not_an_error(db_session: AsyncSe
     from app.services.inbound_routing import route_message
 
     await _company_with_file(db_session, slug="theirs")
-    message = await _message(db_session, to_addresses=["someone@example.com"])
+    message = await _message(db_session, envelope_recipients=["someone@example.com"])
 
     outcome = await route_message(db_session, message=message)
     assert not outcome.routed
@@ -280,7 +285,7 @@ async def test_quarantine_is_the_default(db_session: AsyncSession) -> None:
     _company, loan_file = await _company_with_file(db_session, slug="theirs")
     message = await _message(
         db_session,
-        to_addresses=[token_address(loan_file)],
+        envelope_recipients=[await file_mail_address(db_session, loan_file)],
         auth_verdicts={"dmarcVerdict": "PASS", "virusVerdict": "PASS"},
     )
     outcome = await route_message(db_session, message=message)
@@ -310,7 +315,7 @@ async def test_a_trusted_sender_on_a_certain_match_may_auto_accept(
 
     message = await _message(
         db_session,
-        to_addresses=[token_address(loan_file)],
+        envelope_recipients=[await file_mail_address(db_session, loan_file)],
         auth_verdicts={"dmarcVerdict": "PASS", "virusVerdict": "PASS"},
     )
     outcome = await route_message(db_session, message=message)
@@ -339,7 +344,7 @@ async def test_gray_is_not_pass(db_session: AsyncSession) -> None:
 
     message = await _message(
         db_session,
-        to_addresses=[token_address(loan_file)],
+        envelope_recipients=[await file_mail_address(db_session, loan_file)],
         auth_verdicts={"dmarcVerdict": "GRAY", "virusVerdict": "PASS"},
     )
     outcome = await route_message(db_session, message=message)
@@ -354,7 +359,7 @@ async def test_a_virus_is_rejected_outright(db_session: AsyncSession) -> None:
     _company, loan_file = await _company_with_file(db_session, slug="theirs")
     message = await _message(
         db_session,
-        to_addresses=[token_address(loan_file)],
+        envelope_recipients=[await file_mail_address(db_session, loan_file)],
         auth_verdicts={"virusVerdict": "FAIL"},
     )
     outcome = await route_message(db_session, message=message)
@@ -372,12 +377,12 @@ async def test_dmarc_fail_under_a_reject_policy_is_rejected(db_session: AsyncSes
     _company, loan_file = await _company_with_file(db_session, slug="theirs")
     rejected = await _message(
         db_session,
-        to_addresses=[token_address(loan_file)],
+        envelope_recipients=[await file_mail_address(db_session, loan_file)],
         auth_verdicts={"dmarcVerdict": "FAIL", "dmarcPolicy": "REJECT"},
     )
     triaged = await _message(
         db_session,
-        to_addresses=[token_address(loan_file)],
+        envelope_recipients=[await file_mail_address(db_session, loan_file)],
         auth_verdicts={"dmarcVerdict": "FAIL", "dmarcPolicy": "NONE"},
     )
 
@@ -402,7 +407,9 @@ async def test_applying_routing_writes_the_company_from_the_file(
 
     company, loan_file = await _company_with_file(db_session, slug="theirs")
     _other, _other_file = await _company_with_file(db_session, slug="mine")
-    message = await _message(db_session, to_addresses=[token_address(loan_file)])
+    message = await _message(
+        db_session, envelope_recipients=[await file_mail_address(db_session, loan_file)]
+    )
 
     await apply_routing(db_session, message=message)
 
@@ -419,7 +426,7 @@ async def test_an_unrouted_message_is_owned_by_nobody(db_session: AsyncSession) 
     from app.services.inbound_routing import apply_routing
 
     await _company_with_file(db_session, slug="theirs")
-    message = await _message(db_session, to_addresses=["stranger@example.com"])
+    message = await _message(db_session, envelope_recipients=["stranger@example.com"])
 
     await apply_routing(db_session, message=message)
 
@@ -437,7 +444,9 @@ async def test_routing_opens_the_correspondence_record(db_session: AsyncSession)
     from sqlalchemy import select
 
     _company, loan_file = await _company_with_file(db_session, slug="theirs")
-    message = await _message(db_session, to_addresses=[token_address(loan_file)])
+    message = await _message(
+        db_session, envelope_recipients=[await file_mail_address(db_session, loan_file)]
+    )
 
     await apply_routing(db_session, message=message)
 
@@ -622,9 +631,7 @@ async def test_the_token_lookup_uses_an_index(db_session: AsyncSession) -> None:
     means no index could serve the query at all rather than that the planner merely preferred not
     to. Measured before the index existed: Seq Scan even under that setting.
 
-    It matters because this is the hottest path in inbound routing — every message resolves a token
-    — and it is also the path an attacker probes by mailing guessed addresses, which LP-805 records
-    as having no rate limit. A full table scan per guess is the wrong cost to hand them.
+    Since LP-1008 routing no longer runs this lookup. The index stays until LP-1011 can drop it.
     """
     await db_session.execute(sa_text("SET enable_seqscan = off"))
     plan = (

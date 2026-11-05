@@ -11,8 +11,8 @@ sentence.
 THE ADDRESS IS NOT A SECRET. `display_id` is guessable by design (ADR-048); the defence is the
 authenticated-sender gate — DMARC pass plus a known contact on the file (ADR-397, amended LP-991).
 
-The inbound resolver still reads `lf-<inbox_token>@<settings.inbox_domain>` until step 4 moves it to
-`display_id`, so until then `settings.file_addresses_enabled` is off and no address is shown anywhere.
+The inbound resolver reads this address since LP-1008. `settings.file_addresses_enabled` still hides
+it wherever it is off, until LP-1011 removes the setting.
 """
 
 import asyncio
@@ -87,8 +87,7 @@ async def file_address(db: AsyncSession, loan_file: LoanFile) -> str | None:
     """`lf-<display_id>@<domain>`, lowercase, or None.
 
     None when the company has no active domain, and for every company while
-    `settings.file_addresses_enabled` is off (nothing routes the address until step 4). A domain with
-    a problem keeps its addresses (LP-1006), so an address alone doesn't mean it may send.
+    `settings.file_addresses_enabled` is off (LP-1011 removes it). A domain with a problem keeps its addresses (LP-1006), so an address alone doesn't mean it may send.
     """
     address, _ = await file_address_and_sending(db, loan_file)
     return address

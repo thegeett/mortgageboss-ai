@@ -2,10 +2,8 @@
  * The triage queue (LP-807) — what arrived, and what a processor decides about it.
  *
  * TWO LISTS, DELIBERATELY SEPARATE. A file's own messages come from a file-scoped route and carry
- * everything the sender wrote. The company queue also holds UNROUTED messages, which have no owner
- * and are therefore visible to every company — so the server returns them with the sender, the
- * subject and both filenames stripped. Those nulls are a state to render, not data that failed to
- * load, and `unclaimed()` below is what tells them apart.
+ * everything the sender wrote. The company queue holds only this company's mail: a message with no
+ * company reaches no company (LP-1008).
  */
 import { apiClient } from "@/lib/api/client";
 import { withWrongFileConfirmation } from "@/lib/api/wrong-file";
@@ -49,11 +47,7 @@ export function useFileMessages(fileId: string) {
 }
 
 export async function fetchTriageQueue(): Promise<InboundMessage[]> {
-  return (
-    await apiClient.get<InboundMessage[]>(`${API_V1}/inbound/queue`, {
-      params: { include_unrouted: true },
-    })
-  ).data;
+  return (await apiClient.get<InboundMessage[]>(`${API_V1}/inbound/queue`)).data;
 }
 
 export function useTriageQueue() {

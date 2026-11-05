@@ -80,3 +80,15 @@ def test_the_beat_schedule_names_only_registered_tasks() -> None:
     )
     assert schedule["heartbeat"]["task"] == "health.heartbeat"
     assert schedule["heartbeat"]["schedule"] == 300.0
+
+
+def test_the_inbound_reader_is_on_the_schedule() -> None:
+    """LP-1008 — every minute, and dropped if late: the next run reads the same queue."""
+    import app.tasks.inbound  # noqa: F401
+
+    assert "inbound.poll_queue" in celery_app.tasks
+    assert "app.tasks.inbound" in _TASK_MODULES
+    entry = celery_app.conf.beat_schedule["read-inbound-mail"]
+    assert entry["task"] == "inbound.poll_queue"
+    assert entry["schedule"] == 60.0
+    assert entry["options"]["expires"] == 60

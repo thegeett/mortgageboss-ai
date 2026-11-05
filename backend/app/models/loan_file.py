@@ -11,9 +11,8 @@ ADR-036:
      to reference a file in the UI, conversation, and email subjects. Globally
      unique (ADR-048). An *identifier*: access is gated by auth + company
      scoping, so its predictability is low-risk.
-  3. ``inbox_token`` — a cryptographically unguessable token. The inbound
-     resolver still routes ``lf-<token>@<INBOX_DOMAIN>`` until step 4 moves it
-     to ``display_id``; since LP-991 no address shown to anyone carries it — the
+  3. ``inbox_token`` — a cryptographically unguessable token. Since LP-1008 no
+     address routes on it, and since LP-991 none shown to anyone carries it — the
      file address is ``lf-<display_id>@<company domain>``
      (:mod:`app.services.mail_domain`). Never derived from the display ID.
 
@@ -139,19 +138,8 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
 
     __tablename__ = "loan_files"
     __table_args__ = (
-        # LP-805 review — THE UNIQUE INDEX ON `inbox_token` CANNOT SERVE THE ROUTING LOOKUP.
-        # `resolve_loan_file_by_address` compares `func.lower(inbox_token)`, deliberately, so a relay
-        # that rewrites the case of an address does not make a borrower's documents vanish into
-        # triage. PostgreSQL cannot use a plain btree index for an expression: measured with
-        # `enable_seqscan = off`, which costs a sequential scan at ten billion, the planner STILL
-        # chose Seq Scan for the `lower()` form and an Index Scan for the exact one.
-        #
-        # That is the hottest path in inbound routing — every message resolves a token — and it is
-        # also the path an attacker probes by mailing guessed addresses, which LP-805 records as
-        # having no rate limit. A full table scan per guess is the wrong cost to hand them.
-        #
-        # NOT unique: the raw-token unique index above already prevents duplicates, and a unique
-        # functional index could fail to build on an existing database over a case-only collision.
+        # LP-805 review: backed the old `lower(inbox_token)` routing lookup, which a plain btree index
+        # cannot serve. Since LP-1008 no query uses it; LP-1011 can drop it.
         Index("ix_loan_files_inbox_token_lower", text("lower(inbox_token)")),
     )
 

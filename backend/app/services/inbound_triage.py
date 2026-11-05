@@ -29,6 +29,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.activity_log import ActivityType
 from app.models.condition_round import ConditionRound
@@ -43,7 +44,7 @@ from app.models.inbound_message import InboundMessage
 from app.models.loan_file import LoanFile
 from app.services.activity_log import log_activity
 from app.services.documents import create_document
-from app.storage import get_storage_backend
+from app.storage import StorageError, get_mail_storage, get_storage_backend
 
 # THE MODEL IS A TOP-LEVEL IMPORT; ONLY THE SERVICE IS FUNCTION-LOCAL. An earlier version put
 # `ConditionRound` under `TYPE_CHECKING`, reasoning about a cycle — but the cycle concern belongs to
@@ -82,6 +83,9 @@ async def _attachment_bytes(db: AsyncSession, *, attachment: InboundAttachment) 
     of a borrower's document is a second thing to secure, retain and destroy. Matched back by sha256,
     which is what that column is for — and which also means a message whose bytes have changed since
     ingest cannot silently supply different content than the one that was assessed.
+
+    FROM MAIL STORAGE, never the documents bucket (LP-1008). A path naming any other bucket is
+    refused rather than read with the wrong backend.
     """
     from app.services.inbound_mime import parse_message
 
@@ -89,11 +93,17 @@ async def _attachment_bytes(db: AsyncSession, *, attachment: InboundAttachment) 
     if message is None or not message.raw_storage_path:
         raise CannotAcceptError("The original message is no longer available.")
 
-    storage = get_storage_backend()
     path = message.raw_storage_path
     if path.startswith("s3://"):
-        path = path.split("/", 3)[3]
-    raw = await storage.read(path)
+        bucket, _, path = path.removeprefix("s3://").partition("/")
+        if bucket != settings.mail_bucket or not path:
+            raise CannotAcceptError("The original message is no longer available.")
+    try:
+        raw = await get_mail_storage().read(path)
+    except StorageError as exc:
+        # `StorageError` also covers a failed read, so the log says which one it was.
+        logger.warning("inbound_raw_message_unreadable", error_type=type(exc).__name__)
+        raise CannotAcceptError("The original message is no longer available.") from exc
 
     for parsed in parse_message(raw).attachments:
         if parsed.sha256 == attachment.sha256:
@@ -556,23 +566,15 @@ async def attachment_preview(db: AsyncSession, *, attachment: InboundAttachment)
     return render_preview_png(await _attachment_bytes(db, attachment=attachment))
 
 
-async def list_triage_queue(
-    db: AsyncSession, *, company_id: UUID, include_unrouted: bool = True
-) -> list[InboundMessage]:
-    """Messages awaiting a processor's decision, for one company.
+async def list_triage_queue(db: AsyncSession, *, company_id: UUID) -> list[InboundMessage]:
+    """Messages for one company, and only that company.
 
-    SCOPED TO THE COMPANY, and unrouted messages are the interesting case: they have NO `company_id`,
-    because LP-805 refuses to guess one from the sender. So they cannot be returned by a
-    company-scoped filter, and `phase4.md` §2.2 says they must still be visible —
-    "confidence gates auto-acceptance, never visibility".
-
-    THE RESOLUTION IS THAT UNROUTED IS A SEPARATE, DELIBERATE QUERY, not a widening of the scoped
-    one. `include_unrouted` exists so a caller has to ask for them, and the endpoint that does is a
-    company-level view rather than a file-level one. An unrouted message is shown to every company —
-    which is the honest consequence of not knowing whose it is, and is why nothing about it beyond
-    the fact of its existence may be exposed until somebody claims it.
+    A MESSAGE WITH NO COMPANY IS RETURNED TO NOBODY (LP-1008). It used to be returned to every
+    company with the sender's words stripped, which still showed one company a trace of another's
+    mail: its time, its verdicts, its attachments' sizes and types. No company sees another's mail at
+    all. These rows stay in the table, readable internally.
     """
-    routed = (
+    return list(
         (
             await db.execute(
                 only_active(
@@ -586,24 +588,6 @@ async def list_triage_queue(
         .scalars()
         .all()
     )
-    if not include_unrouted:
-        return list(routed)
-
-    unrouted = (
-        (
-            await db.execute(
-                only_active(
-                    select(InboundMessage)
-                    .where(InboundMessage.company_id.is_(None))
-                    .order_by(InboundMessage.created_at.desc()),
-                    InboundMessage,
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    return [*routed, *unrouted]
 
 
 __all__ = [

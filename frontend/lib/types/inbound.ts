@@ -42,8 +42,8 @@ export interface InboundMessage {
   /**
    * NULL ON AN UNCLAIMED MESSAGE, and that is a state to render, not missing data.
    *
-   * An unrouted message has no company, so the queue returns it to every company that asks — which
-   * is why nothing the sender wrote travels with it until somebody claims it.
+   * The server strips the sender's words from a message with no company. No route returns one to a
+   * company (LP-1008); this is the second lock.
    */
   from_address: string | null;
   subject: string | null;

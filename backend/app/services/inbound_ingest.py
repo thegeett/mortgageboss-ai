@@ -35,7 +35,7 @@ from app.core.logging import get_logger
 from app.models.inbound_attachment import InboundAttachment
 from app.models.inbound_message import InboundMessage, InboundRoutingState
 from app.services.inbound_mime import parse_message
-from app.storage import get_storage_backend
+from app.storage import get_mail_storage
 
 logger = get_logger(__name__)
 
@@ -120,6 +120,14 @@ def extract_receipt_verdicts(receipt: dict[str, Any] | None) -> dict[str, Any]:
         elif value is not None:
             verdicts[key] = value
     return verdicts
+
+
+def extract_envelope_recipients(receipt: dict[str, Any] | None) -> list[str]:
+    """`receipt.recipients`, lowercased and trimmed. Empty when there is no receipt."""
+    recipients = receipt.get("recipients") if isinstance(receipt, dict) else None
+    if not isinstance(recipients, list):
+        return []
+    return [r.strip().lower() for r in recipients if isinstance(r, str) and r.strip()]
 
 
 def _addresses(parsed: Message, header: str) -> list[str]:
@@ -225,6 +233,7 @@ async def ingest_raw_message(
         "references": [ref for ref in (parsed.get("References") or "").split() if ref.strip()],
         "from_address": next(iter(_addresses(parsed, "From")), None),
         "to_addresses": _addresses(parsed, "To") + _addresses(parsed, "Delivered-To"),
+        "envelope_recipients": extract_envelope_recipients(receipt),
         "subject": parsed.get("Subject"),
         "received_at": _received_at(parsed),
         "raw_storage_path": raw_storage_path,
@@ -267,15 +276,15 @@ async def ingest_raw_message(
     return IngestResult(message_id=str(existing), created=False, ingest_key=ingest_key)
 
 
-#: Where a raw inbound message lives when it did not come from SES's own bucket — the dev injector
-#: (§H1) and the seed. One flat prefix keyed on the row's uuid: raw mail has no company and no loan
-#: file at the moment it is stored, so it cannot use the tenant-prefixed document path.
-INBOUND_RAW_PREFIX = "inbound-raw"
+#: Where a raw inbound message lives in mail storage when the dev injector (§H1) or the seed stored
+#: it: the prefix SES writes to. One flat prefix keyed on the row's uuid: raw mail has no company and
+#: no loan file at the moment it is stored, so it cannot use the tenant-prefixed document path.
+INBOUND_RAW_PREFIX = "inbound"
 
 
 def raw_storage_path_for(message_id: str) -> str:
     """The key a locally-stored raw message is written to. Server-controlled, never sender-derived."""
-    return f"{INBOUND_RAW_PREFIX}/{message_id}.eml"
+    return f"{INBOUND_RAW_PREFIX}/{message_id}"
 
 
 async def process_raw_message(
@@ -304,7 +313,7 @@ async def process_raw_message(
     a human, and one of its conditions is that the attachments passed every safety gate; running it
     against attachments still in `PENDING` would ask that question before anything had looked.
 
-    ``store_raw`` writes the bytes through the storage backend and records the path. It is False for
+    ``store_raw`` writes the bytes through mail storage and records the key. It is False for
     SES, whose bucket already holds the object and whose path is passed in; it is True for the dev
     injector and the seed, where nothing else has stored anything. Without it `raw_storage_path` is
     NULL, and both accept-into-file and the attachment preview refuse — they re-derive the bytes from
@@ -330,16 +339,14 @@ async def process_raw_message(
 
     if store_raw:
         path = raw_storage_path_for(result.message_id)
-        await get_storage_backend().save_at(storage_path=path, content=raw)
+        await get_mail_storage().save_at(storage_path=path, content=raw)
         message.raw_storage_path = path
 
     from app.services.attachment_safety import apply_safety_to_message
     from app.services.inbound_routing import apply_routing
 
     await apply_safety_to_message(db, inbound_message_id=message.id, raw=raw)
-    # `raw` is passed so a FORWARDED message's original-hop headers can be read (LP-808). It is
-    # ignored for a direct message, where §2.3 forbids reading them.
-    await apply_routing(db, message=message, raw=raw)
+    await apply_routing(db, message=message)
     await db.flush()
     return result
 
@@ -387,6 +394,7 @@ __all__ = [
     "INBOUND_RAW_PREFIX",
     "IngestResult",
     "compute_ingest_key",
+    "extract_envelope_recipients",
     "extract_receipt_verdicts",
     "ingest_raw_message",
     "is_auto_reply",

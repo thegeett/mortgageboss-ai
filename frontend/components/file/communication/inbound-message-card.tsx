@@ -207,8 +207,7 @@ export function InboundMessageCard({
 
       {hidden ? (
         <p className="rounded border border-dashed border-input px-3 py-2 text-xs text-muted-foreground">
-          This message could not be matched to a loan file, so it is shown to every company and
-          nothing the sender wrote is included. Everything appears once somebody claims it.
+          This message could not be matched to a loan file.
         </p>
       ) : null}
 

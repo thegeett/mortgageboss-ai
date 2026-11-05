@@ -107,6 +107,13 @@ KNOWN_UNWIRED = {
     "_is_borrower_facing",  # LP-809
     "open_draft_preview",  # LP-811a
     "existing_identities",  # LP-93
+    # Off by decision 11-04 (LP-1008): the file is found by address only. Code kept, still tested.
+    "_route_by_thread",
+    "_route_by_footer_tag",
+    "_route_by_participant",
+    "_route_by_subject",
+    "attach_route_b_company",
+    "record_original_hop",
 }
 
 

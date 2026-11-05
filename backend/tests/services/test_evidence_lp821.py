@@ -39,7 +39,7 @@ from app.services.evidence import (
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from tests.mail_address import token_address
+from tests.mail_address import deliver, file_mail_address
 
 
 async def _company_and_file(db: AsyncSession, *, slug: str):
@@ -252,20 +252,18 @@ async def test_an_inbound_record_carries_the_manifest_and_the_verdicts(
     from email.message import EmailMessage
     from pathlib import Path
 
-    from app.services.inbound_ingest import process_raw_message
-
     _company, loan_file = await _company_and_file(db_session, slug="inbound")
     pdf = (
         Path(__file__).resolve().parents[1] / "fixtures" / "attachments" / "clean.pdf"
     ).read_bytes()
     message = EmailMessage()
     message["From"] = "jane@borrower.example"
-    message["To"] = token_address(loan_file)
+    message["To"] = await file_mail_address(db_session, loan_file)
     message["Subject"] = "Statements"
     message["Message-ID"] = "<ev1@example.com>"
     message.set_content("attached")
     message.add_attachment(pdf, maintype="application", subtype="pdf", filename="March.pdf")
-    await process_raw_message(
+    await deliver(
         db_session,
         raw=message.as_bytes(policy=policy.default),
         raw_storage_path=None,

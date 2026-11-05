@@ -82,17 +82,10 @@ async def _routed_attachment(
     The raw message is stored locally so `accept` can re-read it — the bytes are re-derived from the
     stored `.eml` rather than copied, and a test that skipped that would not exercise the hash check.
     """
-    from app.storage import get_storage_backend
+    from app.storage import get_mail_storage
 
     raw = _message_bytes(message_id=message_id, filename=filename)
-    storage = get_storage_backend()
-    storage_path = await storage.save(
-        company_id=loan_file.company_id,
-        file_id=loan_file.id,
-        document_id=uuid4(),
-        filename="message.eml",
-        content=raw,
-    )
+    storage_path = await get_mail_storage().save_at(storage_path=f"inbound/{uuid4()}", content=raw)
     result = await ingest_raw_message(
         db, raw=raw, raw_storage_path=storage_path, ses_message_id=f"ses-{message_id}"
     )
@@ -392,42 +385,39 @@ async def test_the_queue_is_scoped_to_the_company(db_session: AsyncSession) -> N
     mine, _my_user, _my_file = await _company_user_file(db_session, slug="mine")
     await _routed_attachment(db_session, loan_file=their_file, message_id="queue-1@example.com")
 
-    theirs_queue = await list_triage_queue(db_session, company_id=theirs.id, include_unrouted=False)
-    mine_queue = await list_triage_queue(db_session, company_id=mine.id, include_unrouted=False)
+    theirs_queue = await list_triage_queue(db_session, company_id=theirs.id)
+    mine_queue = await list_triage_queue(db_session, company_id=mine.id)
 
     assert len(theirs_queue) == 1
     assert mine_queue == []
 
 
-async def test_unrouted_messages_are_visible_but_only_when_asked_for(
-    db_session: AsyncSession,
-) -> None:
-    """§2.2: "confidence gates auto-acceptance, never visibility". An unrouted message has NO
-    company_id — LP-805 refuses to guess one — so it cannot come back from a company-scoped filter,
-    and `include_unrouted` makes a caller ask for it deliberately."""
-    theirs, _user, _file = await _company_user_file(db_session, slug="theirs")
+async def test_a_message_with_no_company_is_in_no_companys_queue(db_session: AsyncSession) -> None:
+    """LP-1008. The same query does return this company's own message, so an empty result can only
+    be the scoping."""
+    theirs, _user, their_file = await _company_user_file(db_session, slug="theirs")
+    await _routed_attachment(db_session, loan_file=their_file, message_id="own-1@example.com")
     raw = _message_bytes(message_id="unrouted-1@example.com")
-    await ingest_raw_message(
+    unrouted = await ingest_raw_message(
         db_session, raw=raw, raw_storage_path=None, ses_message_id="ses-unrouted-1"
     )
 
-    without = await list_triage_queue(db_session, company_id=theirs.id, include_unrouted=False)
-    with_unrouted = await list_triage_queue(db_session, company_id=theirs.id, include_unrouted=True)
+    queue = await list_triage_queue(db_session, company_id=theirs.id)
 
-    assert without == []
-    assert len(with_unrouted) == 1
-    assert with_unrouted[0].company_id is None
+    assert len(queue) == 1
+    assert queue[0].company_id == theirs.id
+    assert str(queue[0].id) != unrouted.message_id
 
 
 # --------------------------------------------------------------------------------------------- #
-# An unrouted message is shown to EVERY company (review finding)
+# The second lock: a message with no company carries nothing the sender wrote (review finding)
 # --------------------------------------------------------------------------------------------- #
 async def test_an_unclaimed_message_carries_nothing_the_sender_wrote(
     db_session: AsyncSession,
 ) -> None:
-    """The queue returns unrouted messages to every company, because none owns them yet.
+    """No route returns these to a company any more (LP-1008); this is the second lock.
 
-    Before the redaction that meant one tenant received another tenant's borrower's personal email
+    Before the redaction, when the queue returned them to every company, that meant one tenant received another tenant's borrower's personal email
     address, a subject line that in this domain routinely names the borrower and the property, and
     the sender's own filenames. Measured: `from_address` came back as
     `jane.borrower@personal-email.com` to a company with no connection to it.

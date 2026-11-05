@@ -16910,3 +16910,24 @@ said "the library has no type for this condition" although PA-03 exists.
   kept table.
 
 *Status.* Accepted (LP-965).
+
+## ADR-420
+
+**A message with no company is shown to no company.**
+
+*Context.* A message that matches no file has no `company_id`. Since LP-806, `list_triage_queue` returned
+those rows to every company with the sender, subject and filenames stripped, under `phase4.md` §2.2's
+"confidence gates auto-acceptance, never visibility". That harmed little while reading mail was off.
+LP-1008 turns reading on, and each company would then see a trace of other companies' mail: that it
+arrived, when, its verdicts, and its attachments' sizes and types.
+
+*Decision.* No company sees another company's mail at all, not even a blank row. The queue returns only
+the caller's company's rows. The redaction stays as a second lock.
+
+*Consequences.*
+- **Replaces the §2.2 rule for this case.** Mail with no company is visible only internally
+  (`readonly.inbound_messages`, without sender or subject).
+- **A mistyped address or a two-file email reaches no processor yet.** Whether to take the company from
+  the domain or the matched files is open (LP-1008, Open 1).
+
+*Status.* Accepted (LP-1008).

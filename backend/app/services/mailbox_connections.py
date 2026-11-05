@@ -76,7 +76,7 @@ def generate_connection_token() -> str:
 def connection_token_in(address: str | None) -> str | None:
     """The connection token an address carries, or None.
 
-    BOTH HALVES, like `inbox_token_in`. The domain is part of the credential: matching the local part
+    BOTH HALVES. The domain is part of the credential: matching the local part
     alone would let a token lifted from staging resolve against production.
     """
     if not address:

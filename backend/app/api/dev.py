@@ -5,7 +5,7 @@ so in production its routes are absent (404). Dev tools are still **auth'd and
 tenant-scoped** — touching real documents is no excuse to skip isolation.
 
 LP-803 adds a second: the raw-message injector (§H1). It takes an ``.eml`` and runs it through the
-same ingest the SQS consumer would, so everything downstream of ``inbound.ingest_message`` is
+same ingest the SQS consumer would, so everything downstream of ``inbound.poll_queue`` is
 testable on a laptop with no AWS at all. Without it LP-804 and LP-805 are written blind and debugged
 in staging.
 
@@ -109,6 +109,7 @@ async def inject_raw_message(
     file: Annotated[UploadFile, File(description="A raw RFC 5322 message (.eml)")],
     ses_message_id: Annotated[str | None, Form()] = None,
     dmarc_verdict: Annotated[str | None, Form()] = None,
+    recipient: Annotated[list[str] | None, Form()] = None,
 ) -> InjectedMessageResponse:
     """Ingest an `.eml` exactly as the SQS consumer would (LP-803, §H1). Dev only.
 
@@ -118,8 +119,11 @@ async def inject_raw_message(
     offer a shortcut that the real path does not have. Passing a `dmarcVerdict` of GRAY here is how
     the GRAY-stays-GRAY behaviour is exercised without waiting for a real message to be graded.
 
-    ``store_raw=True`` writes the bytes through the configured storage backend and records that
-    path. The first version passed ``raw_storage_path=None`` on the reasoning that nothing came from
+    ``recipient`` (repeat it for several) is the envelope, so dev routes the way SES does: from
+    ``receipt.recipients``, never the message's To (LP-1008). None given means no envelope, which is
+    unrouted. Verdicts are PASS unless ``dmarc_verdict`` says otherwise.
+
+    ``store_raw=True`` writes the bytes through mail storage and records that key. The first version passed ``raw_storage_path=None`` on the reasoning that nothing came from
     S3 so nothing should be recorded — true, and the consequence was that everything downstream of
     ingest was dead locally: accept-into-file and the attachment preview both re-derive the bytes
     from the stored message rather than keeping a second copy, so a NULL path means an injected
@@ -138,7 +142,14 @@ async def inject_raw_message(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="The uploaded file was empty"
         )
-    receipt = {"dmarcVerdict": {"status": dmarc_verdict}} if dmarc_verdict else None
+    receipt = {
+        "recipients": recipient or [],
+        "spfVerdict": {"status": "PASS"},
+        "dkimVerdict": {"status": "PASS"},
+        "dmarcVerdict": {"status": dmarc_verdict or "PASS"},
+        "spamVerdict": {"status": "PASS"},
+        "virusVerdict": {"status": "PASS"},
+    }
     result = await process_raw_message(
         db,
         raw=raw,

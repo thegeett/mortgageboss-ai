@@ -1,4 +1,4 @@
-"""Inbound mail tasks (LP-803) — ingest one message, and poll the queue for more.
+"""Inbound mail task (LP-803, LP-1008) — read the queue, and store what is on it.
 
 REGISTERED IN ``_TASK_MODULES``. A module left out of that list is never imported by the worker, the
 task is never registered, and every enqueued message is discarded with no error anywhere — the LP-78
@@ -10,8 +10,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from celery.exceptions import SoftTimeLimitExceeded
+
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.tasks.base import run_async, task_session
 from app.tasks.celery_app import celery_app
 
 logger = get_logger(__name__)
@@ -20,42 +23,24 @@ logger = get_logger(__name__)
 _BATCH_SIZE = 10
 
 
-@celery_app.task(  # type: ignore[untyped-decorator]
-    bind=True, name="inbound.ingest_message", max_retries=3
-)
-def ingest_message(
-    self: Any,
-    *,
-    bucket: str,
-    key: str,
-    receipt: dict[str, Any] | None = None,
-    ses_message_id: str | None = None,
-) -> str:
-    """Pull one raw message out of the inbound bucket and store it.
-
-    Synchronous body around the async service, matching the pattern every other task here uses.
-
-    NOTHING ABOUT THE MESSAGE IS LOGGED — not the key, which is an SES message id identifying one
-    borrower's mail, and certainly not the bytes. The bucket is safe to log; it is ours.
-    """
-    import asyncio
-
-    return asyncio.run(
-        _ingest_message(bucket=bucket, key=key, receipt=receipt, ses_message_id=ses_message_id)
-    )
-
-
 async def _ingest_message(
     *, bucket: str, key: str, receipt: dict[str, Any] | None, ses_message_id: str | None = None
 ) -> str:
-    from app.core.database import async_session_maker
+    """Pull one raw message out of the bucket and store it. Committed when this returns.
+
+    `task_session`, not the app's pooled engine: each run has its own event loop, and a pooled
+    connection from the last one fails with "Event loop is closed" (`tasks/base.py`).
+
+    NOTHING ABOUT THE MESSAGE IS LOGGED — not the key, which is an SES message id identifying one
+    borrower's mail, and certainly not the bytes.
+    """
     from app.services.inbound_ingest import process_raw_message
     from app.storage.s3 import S3StorageBackend
 
     storage = S3StorageBackend(bucket=bucket, region=settings.s3_region)
     raw = await storage.read(key)
 
-    async with async_session_maker() as session:
+    async with task_session() as session:
         # THE WHOLE CHAIN, not just the row. `process_raw_message` stores, assesses (LP-804b) and
         # routes (LP-805). Calling `ingest_raw_message` alone — which is what this did until LP-807 —
         # left every message PENDING and unrouted forever, with both service test suites green.
@@ -87,18 +72,24 @@ async def _ingest_message(
 
 @celery_app.task(name="inbound.poll_queue")  # type: ignore[untyped-decorator]
 def poll_queue() -> int:
-    """Drain up to one batch from the inbound SQS queue, enqueueing an ingest per message.
+    """Store up to one batch from the inbound SQS queue, deleting each message once it is saved.
+
+    DELETED ONLY AFTER THE COMMIT (LP-1008). A message that fails stays on the queue: SQS redelivers
+    it after the visibility timeout, and after 5 receives it goes to the DLQ, where the alarm sees it.
+    Ingest is idempotent, so a redelivery of one already saved is a no-op that then gets deleted.
+
+    STORED HERE, NOT IN A SEPARATE TASK, so the message is not waiting behind other work in the
+    worker's queue while its visibility timeout runs out and its receive count climbs. The hard time
+    limit (180s) is under the visibility timeout (300s).
 
     A BEAT TASK RATHER THAN A SECOND DAEMON, per the plan. A long-running consumer process would be
     a new deployable with its own health check, restart policy and scaling story, for work that is
     already idempotent and already retried.
 
-    NO-OPS WHEN THE QUEUE IS NOT CONFIGURED, which is every environment today — INFRA-1 is written
-    and unapplied, so `inbound_queue_url` is None. Returning 0 rather than raising means the beat
-    schedule can be turned on before the infrastructure without filling the log with failures.
+    NO-OPS WHEN THE QUEUE IS NOT CONFIGURED, as in local dev, where `inbound_queue_url` is None.
+    Returning 0 rather than raising keeps the schedule from filling the log with failures there.
 
-    NOT ON THE BEAT SCHEDULE YET. Scheduling it belongs with the apply that gives it a queue; a task
-    that is scheduled and permanently no-oping is a green tick that means nothing.
+    ON THE BEAT SCHEDULE every minute since LP-1008 (`tasks/celery_app.py`).
     """
     if not settings.inbound_queue_url:
         return 0
@@ -127,12 +118,23 @@ def poll_queue() -> int:
             logger.warning("inbound_queue_unexpected_shape")
             continue
 
-        ingest_message.delay(
-            bucket=record[0],
-            key=record[1],
-            receipt=notification.get("receipt"),
-            ses_message_id=_ses_message_id(notification),
-        )
+        try:
+            run_async(
+                _ingest_message(
+                    bucket=record[0],
+                    key=record[1],
+                    receipt=notification.get("receipt"),
+                    ses_message_id=_ses_message_id(notification),
+                )
+            )
+        except SoftTimeLimitExceeded:
+            # Out of time for the whole batch: stop, rather than carry on until the hard kill.
+            raise
+        except Exception as exc:  # broad: one bad message must not take the batch down with it
+            # The type only. An exception's text can carry the key, which identifies one person's mail.
+            logger.warning("inbound_ingest_failed", error_type=type(exc).__name__)
+            continue
+
         client.delete_message(
             QueueUrl=settings.inbound_queue_url, ReceiptHandle=message["ReceiptHandle"]
         )

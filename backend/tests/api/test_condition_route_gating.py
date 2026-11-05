@@ -42,11 +42,8 @@ from fastapi.routing import APIRoute
 #: than the general one, which can only fail if one of them already has. Every check below now
 #: consults it.
 _UNGATED_BY_DESIGN: set[tuple[str, str]] = {
-    # Company-level, not file-level: the triage queue's interesting rows are the UNROUTED ones,
-    # which by definition belong to no loan file. `list_triage_queue` scopes on the caller's company
-    # instead, and `attachment_preview` reasons about the same exposure — an unrouted message is
-    # visible to every company, so its sender, subject and filenames are stripped rather than
-    # gated. A file gate here would have no id to scope and would hide the feature.
+    # Company-level, not file-level: `list_triage_queue` scopes on the caller's company and returns
+    # nothing else (LP-1008). A file gate here would have no id to scope and would hide the feature.
     ("GET", "/inbound/queue"),
     # LP-925 (S3-11): a LENDER's condition settings — company-level configuration that reaches no
     # condition and no loan file, so no file/round/condition gate has anything to scope. Each handler

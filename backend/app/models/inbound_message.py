@@ -105,6 +105,9 @@ class InboundMessage(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     # --- Envelope ----------------------------------------------------------
     from_address: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
     to_addresses: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
+    #: LP-1008 — SES `receipt.recipients`, lowercased: where the mail was actually delivered. Routing
+    #: reads only this (rule 7); `to_addresses` is what the sender wrote in the headers.
+    envelope_recipients: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
     subject: Mapped[str | None] = mapped_column(Text, nullable=True)
     received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

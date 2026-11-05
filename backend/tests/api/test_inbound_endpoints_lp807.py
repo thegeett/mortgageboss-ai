@@ -27,12 +27,11 @@ from app.main import app
 from app.models import Company, LoanProgram, User, UserRole
 from app.models.inbound_attachment import AttachmentSafetyState, InboundAttachment
 from app.models.inbound_message import InboundMessage
-from app.services.inbound_ingest import process_raw_message
 from app.services.loan_files import create_loan_file
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
-from tests.mail_address import token_address
+from tests.mail_address import deliver, file_mail_address
 
 API = "/api/v1/loan-files"
 QUEUE = "/api/v1/inbound/queue"
@@ -113,7 +112,7 @@ def _message_to(address: str, *, message_id: str, content: bytes = _PDF) -> byte
 
 
 async def _arrive(db: AsyncSession, *, address: str, message_id: str) -> InboundMessage:
-    result = await process_raw_message(
+    result = await deliver(
         db, raw=_message_to(address, message_id=message_id), raw_storage_path=None, store_raw=True
     )
     message = await db.get(InboundMessage, UUID(result.message_id))
@@ -140,7 +139,9 @@ async def test_a_files_messages_come_back_with_the_senders_words(
     loan_file = await create_loan_file(
         db, company_id=company.id, loan_program=LoanProgram.CONVENTIONAL
     )
-    message = await _arrive(db, address=token_address(loan_file), message_id="a1@example.com")
+    message = await _arrive(
+        db, address=await file_mail_address(db, loan_file), message_id="a1@example.com"
+    )
     await db.commit()
 
     resp = await client.get(f"{API}/{loan_file.display_id}/inbound/messages", headers=_auth(token))
@@ -160,7 +161,7 @@ async def test_another_companys_file_is_not_readable(client: AsyncClient, db: As
     their_file = await create_loan_file(
         db, company_id=theirs.id, loan_program=LoanProgram.CONVENTIONAL
     )
-    await _arrive(db, address=token_address(their_file), message_id="t1@example.com")
+    await _arrive(db, address=await file_mail_address(db, their_file), message_id="t1@example.com")
     await db.commit()
 
     resp = await client.get(
@@ -178,7 +179,9 @@ async def test_a_safe_attachment_previews_as_a_png(client: AsyncClient, db: Asyn
     loan_file = await create_loan_file(
         db, company_id=company.id, loan_program=LoanProgram.CONVENTIONAL
     )
-    message = await _arrive(db, address=token_address(loan_file), message_id="p1@example.com")
+    message = await _arrive(
+        db, address=await file_mail_address(db, loan_file), message_id="p1@example.com"
+    )
     attachment = await _attachment_of(db, message)
     await db.commit()
 
@@ -202,7 +205,9 @@ async def test_an_unsafe_attachment_will_not_be_rendered(
     loan_file = await create_loan_file(
         db, company_id=company.id, loan_program=LoanProgram.CONVENTIONAL
     )
-    message = await _arrive(db, address=token_address(loan_file), message_id="u1@example.com")
+    message = await _arrive(
+        db, address=await file_mail_address(db, loan_file), message_id="u1@example.com"
+    )
     attachment = await _attachment_of(db, message)
     assert attachment.safety_state is AttachmentSafetyState.SAFE, (
         "the fixture must START safe, or flipping it below proves nothing"
@@ -234,7 +239,7 @@ async def test_an_attachment_on_another_file_is_the_same_404_as_a_missing_one(
     )
     my_file = await create_loan_file(db, company_id=mine.id, loan_program=LoanProgram.CONVENTIONAL)
     their_message = await _arrive(
-        db, address=token_address(their_file), message_id="o1@example.com"
+        db, address=await file_mail_address(db, their_file), message_id="o1@example.com"
     )
     their_attachment = await _attachment_of(db, their_message)
     await db.commit()
@@ -255,30 +260,32 @@ async def test_an_attachment_on_another_file_is_the_same_404_as_a_missing_one(
 # --------------------------------------------------------------------------------------------- #
 # The unrouted queue, and the thing it must not become
 # --------------------------------------------------------------------------------------------- #
-async def test_an_unrouted_message_reaches_every_company_with_nothing_the_sender_wrote(
+async def test_no_company_sees_another_companys_mail_or_mail_with_no_company(
     client: AsyncClient, db: AsyncSession
 ) -> None:
-    """LP-806's redaction, asserted from the other company's session rather than from the service.
-
-    The fixture's sender and subject are the ones that were actually measured leaking.
-    """
-    _mine, _user, token = await _company_user_token(db, slug="stranger")
-    message = await _arrive(db, address="nobody@example.com", message_id="n1@example.com")
-    assert message.company_id is None
+    """LP-1008, from a real session. Three messages exist: this company's, another company's, and one
+    with no company. Only the first comes back; not a blank row, not a count."""
+    mine, _user, token = await _company_user_token(db, slug="mine")
+    theirs, _their_user, _their_token = await _company_user_token(db, slug="theirs")
+    my_file = await create_loan_file(db, company_id=mine.id, loan_program=LoanProgram.CONVENTIONAL)
+    their_file = await create_loan_file(
+        db, company_id=theirs.id, loan_program=LoanProgram.CONVENTIONAL
+    )
+    own = await _arrive(
+        db, address=await file_mail_address(db, my_file), message_id="own@example.com"
+    )
+    other = await _arrive(
+        db, address=await file_mail_address(db, their_file), message_id="other@example.com"
+    )
+    nobodys = await _arrive(db, address="nobody@example.com", message_id="n1@example.com")
+    assert other.company_id == theirs.id
+    assert nobodys.company_id is None
     await db.commit()
 
     resp = await client.get(QUEUE, headers=_auth(token))
 
     assert resp.status_code == 200
-    row = next(r for r in resp.json() if r["id"] == str(message.id))
-    assert row["from_address"] is None
-    assert row["subject"] is None
-    assert row["attachments"][0]["filename_original"] is None
-    assert row["attachments"][0]["filename_normalized"] is None
-    # Still visible, and still useful — §2.2's "confidence gates auto-acceptance, never visibility".
-    assert row["routing_state"] == "unrouted"
-    assert row["attachments"][0]["safety_state"] == "safe"
-    assert row["attachments"][0]["size_bytes"] > 0
+    assert [row["id"] for row in resp.json()] == [str(own.id)]
 
 
 async def test_an_unrouted_attachment_cannot_be_previewed_by_anyone(

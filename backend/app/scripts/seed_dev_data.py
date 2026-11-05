@@ -865,9 +865,13 @@ async def _seed_inbound_mail(db: AsyncSession, *, company: Company) -> int:
         logger.info("seed_inbound_skipped_no_files")
         return 0
     loan_file = files[0]
-    # THE TOKEN ADDRESS, NOT THE FILE ADDRESS (LP-991). This feeds the inbound resolver, which still
-    # matches `lf-<inbox_token>@<INBOX_DOMAIN>` until step 4 moves it to `display_id`.
-    address = f"lf-{loan_file.inbox_token}@{settings.inbox_domain}"
+    # The company's own domain, which may not be `_MAIL_DOMAIN`: `_link_dev_mail_domain` keeps any
+    # domain already set (LP-1008).
+    await _link_dev_mail_domain(db, company=company)
+    domain = await db.scalar(
+        select(CompanyMailDomain.domain).where(CompanyMailDomain.company_id == company.id)
+    )
+    address = f"{loan_file.display_id.lower()}@{domain}"
 
     # A zip that claims to be a PDF — LP-804b's own acceptance criterion, and the shape a processor
     # most needs the queue to catch.
@@ -912,8 +916,13 @@ async def _seed_inbound_mail(db: AsyncSession, *, company: Company) -> int:
             raw=raw,
             raw_storage_path=None,
             # DMARC PASS on the seeded mail, so the auth badge has something to be green about and
-            # the GRAY case is visibly different when a developer injects one by hand.
-            receipt={"dmarcVerdict": {"status": "PASS"}, "virusVerdict": {"status": "PASS"}},
+            # the GRAY case is visibly different when a developer injects one by hand. `recipients`
+            # is what routes it, as on the real path.
+            receipt={
+                "recipients": [to_address],
+                "dmarcVerdict": {"status": "PASS"},
+                "virusVerdict": {"status": "PASS"},
+            },
             store_raw=True,
         )
         if result.created:

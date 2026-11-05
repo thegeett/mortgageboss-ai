@@ -32,12 +32,11 @@ from app.models.inbound_attachment import (
     InboundAttachment,
 )
 from app.models.inbound_message import InboundMessage
-from app.services.inbound_ingest import process_raw_message
 from app.services.loan_files import create_loan_file
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from tests.mail_address import token_address
+from tests.mail_address import deliver, file_mail_address
 
 
 @pytest.fixture
@@ -92,7 +91,7 @@ async def _arrive(db: AsyncSession, *, address: str, content: bytes) -> InboundA
     message["Message-ID"] = f"<{uuid4().hex}@example.test>"
     message.set_content("attached")
     message.add_attachment(content, maintype="application", subtype="pdf", filename="approval.pdf")
-    result = await process_raw_message(
+    result = await deliver(
         db, raw=message.as_bytes(policy=policy.default), raw_storage_path=None, store_raw=True
     )
     inbound = await db.get(InboundMessage, UUID(result.message_id))
@@ -115,7 +114,7 @@ async def _setup(
     loan_file = await create_loan_file(db, company_id=company.id)
     attachment = await _arrive(
         db,
-        address=token_address(loan_file),
+        address=await file_mail_address(db, loan_file),
         content=content if content is not None else _pdf(),
     )
     message = await db.get(InboundMessage, attachment.inbound_message_id)

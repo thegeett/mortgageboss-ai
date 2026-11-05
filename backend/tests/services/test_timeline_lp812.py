@@ -27,7 +27,6 @@ from app.models.communication import (
 )
 from app.models.inbound_message import InboundMessage, InboundRoutingState
 from app.services.activity_log import log_activity
-from app.services.inbound_ingest import process_raw_message
 from app.services.timeline import (
     MESSAGE_ACTIVITY_TYPES,
     TimelineFilter,
@@ -36,7 +35,7 @@ from app.services.timeline import (
 )
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from tests.mail_address import token_address
+from tests.mail_address import deliver, file_mail_address
 
 _PDF = (Path(__file__).resolve().parents[1] / "fixtures" / "attachments" / "clean.pdf").read_bytes()
 
@@ -75,9 +74,9 @@ async def test_one_real_arrival_is_one_timeline_row(db_session: AsyncSession) ->
     arrival twice — and would pass any test whose fixture wrote only one of them.
     """
     _company, loan_file = await _company_and_file(db_session, slug="once")
-    await process_raw_message(
+    await deliver(
         db_session,
-        raw=_raw(token_address(loan_file), message_id="once@example.com"),
+        raw=_raw(await file_mail_address(db_session, loan_file), message_id="once@example.com"),
         raw_storage_path=None,
         store_raw=True,
     )
@@ -128,9 +127,9 @@ async def test_the_one_row_carries_the_attachment_manifest(db_session: AsyncSess
     it needing a path to the attachments, which hang off `inbound_messages`. That path is the FK,
     not the sender-written `Message-ID`."""
     _company, loan_file = await _company_and_file(db_session, slug="manifest")
-    await process_raw_message(
+    await deliver(
         db_session,
-        raw=_raw(token_address(loan_file), message_id="manifest@example.com"),
+        raw=_raw(await file_mail_address(db_session, loan_file), message_id="manifest@example.com"),
         raw_storage_path=None,
         store_raw=True,
     )
@@ -162,9 +161,9 @@ async def test_the_manifest_says_which_attachments_were_accepted(db_session: Asy
     from sqlalchemy import select
 
     _company, loan_file = await _company_and_file(db_session, slug="accepted")
-    await process_raw_message(
+    await deliver(
         db_session,
-        raw=_raw(token_address(loan_file), message_id="accepted@example.com"),
+        raw=_raw(await file_mail_address(db_session, loan_file), message_id="accepted@example.com"),
         raw_storage_path=None,
         store_raw=True,
     )

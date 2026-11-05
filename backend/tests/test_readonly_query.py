@@ -567,6 +567,8 @@ EXCLUDED: dict[str, frozenset[str]] = {
             "subject",
             "from_address",
             "to_addresses",
+            # LP-1008 — addresses, like `to_addresses`.
+            "envelope_recipients",
             "raw_storage_path",
             "ingest_key",
             "ses_message_id",

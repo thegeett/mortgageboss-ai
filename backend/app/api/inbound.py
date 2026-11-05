@@ -92,24 +92,10 @@ async def _message_public(db: DbSession, message: InboundMessage) -> InboundMess
         .scalars()
         .all()
     )
-    # AN UNROUTED MESSAGE IS SHOWN TO EVERY COMPANY, so nothing the SENDER wrote may travel with it.
-    #
-    # It has no `company_id` — LP-805 refuses to guess one — so the queue returns it to whoever
-    # asks. Before this redaction that meant one tenant received another tenant's borrower's
-    # personal email address, a subject line that in this domain routinely names the borrower and
-    # the property, and the sender's own filenames. Measured: `from_address` came back as
-    # `jane.borrower@personal-email.com` and the subject as "Docs for 42 Maple Ave - Jane Borrower"
-    # to a company with no connection to either.
-    #
-    # `phase4.md` §2.2 requires an unrouted message to stay VISIBLE — "confidence gates
-    # auto-acceptance, never visibility" — and visible is satisfied by the fact of it, its shape and
-    # its age. `InboundAttachmentPublic`'s own docstring names the condition that makes returning
-    # `filename_original` safe: "an authenticated user of the OWNING COMPANY, over a route already
-    # scoped to their loan file". An unrouted message has no owning company and this route is not
-    # file-scoped, so that condition simply is not met here.
-    #
-    # Everything comes back the moment a company CLAIMS the message, which is the reassign
-    # operation this ticket deliberately left for its own design.
+    # A MESSAGE WITH NO COMPANY NEVER REACHES THIS FROM A ROUTE: `list_triage_queue` returns only the
+    # caller's company's rows (LP-1008). Kept as a second lock, because the cost of being wrong is
+    # one tenant reading another tenant's borrower's address, subject line and filenames, as was once
+    # measured here.
     unclaimed = message.company_id is None
     return InboundMessagePublic(
         id=message.id,
@@ -128,20 +114,9 @@ async def _message_public(db: DbSession, message: InboundMessage) -> InboundMess
 
 
 @company_router.get("/queue", response_model=list[InboundMessagePublic])
-async def triage_queue(
-    db: DbSession, current_user: CurrentUser, include_unrouted: bool = True
-) -> list[InboundMessagePublic]:
-    """Everything awaiting a decision for this company.
-
-    COMPANY-LEVEL, not file-level, because the interesting rows have no file. `phase4.md` §2.2:
-    "confidence gates auto-acceptance, never visibility" — an unrouted message must be visible, and
-    it has no `company_id` precisely because LP-805 refuses to guess one from the sender.
-
-    `include_unrouted` is a parameter rather than an assumption so a caller has to ask.
-    """
-    messages = await list_triage_queue(
-        db, company_id=current_user.company_id, include_unrouted=include_unrouted
-    )
+async def triage_queue(db: DbSession, current_user: CurrentUser) -> list[InboundMessagePublic]:
+    """This company's mail, and no other company's. See `list_triage_queue`."""
+    messages = await list_triage_queue(db, company_id=current_user.company_id)
     return [await _message_public(db, message) for message in messages]
 
 
@@ -188,11 +163,8 @@ async def attachment_preview_png(
     """A PNG thumbnail of one attachment. 409 when it is not safe, 415 when it cannot be rendered.
 
     ONLY REACHABLE FOR A ROUTED MESSAGE. The route is file-scoped and an unrouted message has no
-    file, so the company-level queue cannot produce a preview for a message nobody owns — which
-    matters more here than anywhere else in this module: the unrouted queue is visible to every
-    company, and a thumbnail is the sender's content in the most legible form there is. Dropping
-    their filename from that queue and then rendering their document would give back everything the
-    redaction took, and more.
+    file, so no route can produce a preview for a message nobody owns. A thumbnail is the sender's
+    content in the most legible form there is.
 
     NOT CACHEABLE BY A SHARED CACHE. The bytes are one borrower's document, served over a route whose
     authorisation is per-user.
@@ -276,10 +248,9 @@ async def use_as_condition_sheet(
 
     THE CAPABILITY THE SPEC DESCRIBED IS GENUINELY GONE, AND THAT IS AN EXISTING RULE RATHER THAN
     A NEW ONE. Spec §LP-905 puts `loan_file_id` in the body "if the message is unrouted"; here an
-    unrouted attachment 404s at `_scoped_attachment`. `attachment_preview` in this module already
-    reasons the same way on purpose — "the unrouted queue is visible to EVERY company" — and
-    forwarding has the same exposure: it would create a round on a file from a message no company
-    owns yet. Route the message first, then forward it.
+    unrouted attachment 404s at `_scoped_attachment`. `attachment_preview` in this module refuses
+    the same way on purpose, and forwarding has the same exposure: it would create a round on a file
+    from a message no company owns yet. Route the message first, then forward it.
 
     TWO OUTCOMES, TWO STATUS CODES, AND THE DIFFERENCE IS WHETHER ANYTHING WAS CREATED. Without
     `attach_to_round_id` this opens a new round and answers **202**: the round comes back `PARSING`

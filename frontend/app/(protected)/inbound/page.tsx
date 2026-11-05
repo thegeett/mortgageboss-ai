@@ -5,19 +5,11 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { unclaimed, useTriageQueue } from "@/lib/api/inbound";
 
 /**
- * The company inbox (LP-807) — everything awaiting a decision, including the mail nobody owns.
+ * The company inbox (LP-807) — this company's mail, and no other company's.
  *
- * WHY THIS PAGE EXISTS AT ALL. A message that could not be matched to a loan file has no
- * `company_id`, because LP-805 refuses to guess one from the sender. It therefore cannot appear on
- * any file's tab, and §2.2's rule is that "confidence gates auto-acceptance, never visibility" — so
- * it has to be visible somewhere, and this is the somewhere.
- *
- * The honest consequence is that an unclaimed message is visible to EVERY company, which is why the
- * server returns it stripped of the sender, the subject and both filenames, and why no thumbnail
- * can be fetched for it. The card renders those nulls as a state rather than as missing data.
- *
- * Claiming — moving an unrouted message onto a file — is the one operation here that would cross a
- * tenant boundary, and it is deliberately not built yet.
+ * A message that matched no file and has no company is not returned here or anywhere else (LP-1008).
+ * So "Not matched to a file" appears only when this company has such a row, and has no empty state:
+ * "everything has been matched" would be a claim this page cannot see to make.
  */
 export default function InboundQueuePage() {
   const { data: messages, isPending, isError } = useTriageQueue();
@@ -43,18 +35,14 @@ export default function InboundQueuePage() {
         </p>
       </header>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-base font-semibold text-foreground">Not matched to a file</h2>
-        {unclaimedMessages.length === 0 ? (
-          <EmptyState kind="structural" title="Everything has been matched">
-            Mail that cannot be matched to a loan file waits here. There is none.
-          </EmptyState>
-        ) : (
-          unclaimedMessages.map((message) => (
+      {unclaimedMessages.length > 0 ? (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-base font-semibold text-foreground">Not matched to a file</h2>
+          {unclaimedMessages.map((message) => (
             <InboundMessageCard key={message.id} message={message} fileId={null} />
-          ))
-        )}
-      </section>
+          ))}
+        </section>
+      ) : null}
 
       <section className="flex flex-col gap-3">
         <h2 className="text-base font-semibold text-foreground">Matched to a file</h2>
