@@ -23,7 +23,7 @@ Each loan file gets its own email address on the customer's domain. MortgageBoss
 ## 2. Rules
 
 1. Templates send automatically. AI-written text is always a draft a processor approves (v1). See §11 for how AI replies graduate to automatic.
-2. Every inbound message is shown on the file. Nothing is acted on silently.
+2. Every inbound message is shown on the file. Nothing is acted on silently. *(Precisely: every message that matched a file is shown on it; one that matched no file goes to its company's unassigned list — see "Mail that matches no file" in §3.)*
 3. Attachments go through the existing document intake, same as a manual upload.
 4. Customer's root domain is never touched. One NS record delegates a subdomain to us.
 5. ~~Pre-send check on every outbound — template, human or AI: no rates, APRs, approval/denial wording, account or routing numbers. Blocks with a reason; override needs a note.~~ **Changed 2026-10-30: deferred to a later iteration — no app check on what a processor writes in v1.** Step 2 ships sending first and adds safeguards iteratively. For now she sends whatever she writes, as she would from her own mail app, and is responsible for it. What stays: AI-written text still passes the drafter's own deterministic guard (`ai/email_draft.py`) before a processor ever sees it; templates are fixed text reviewed in code; every send records the exact text and the approver (evidence record, `.eml` copy).
@@ -95,6 +95,7 @@ Each loan file gets its own email address on the customer's domain. MortgageBoss
 | Accepting attachments | **Always a person's click**, even from a known, verified sender: **Preview**, then **Accept** (becomes a document) — no automatic accept in v1 | 11-04 |
 | Automatic replies to borrowers | **Off in step 4** (the LP-815 "we received it" nudge stays unbuilt). Chasing comes with reminders in step 5 | 11-04 |
 | Attachments in the processor's copy | **Not attached; linked.** The copy carries the sender, subject and text, and says how many attachments are on the file with a link. Keeps the "no documents in outbound email" rule and the copy simple; she previews and accepts in the app. *(Changes the 10-17 "attachments included" wording)* | 11-04 |
+| Mail with no company | Shown to **no company** in the app (ADR-420, LP-1008): before, every company's triage list showed that unmatched mail existed (time, verdicts, attachment types). It stays in the table and in the internal readonly view | 11-04 |
 | SES Message-ID | SES replaces our Message-ID with `<{SES MessageId}@email.amazonses.com>`; the id part equals `Communication.external_message_id`. Step 4's reply threading matches `In-Reply-To` / `References` on this, not on the id in the stored `.eml` (found in LP-998) | 10-31 |
 | Pre-send content check | **Deferred to a later iteration (2026-10-30)** — not rejected; v1 ships sending first and adds safeguards iteratively. Built in LP-996 and reverted. Measured, it blocked ordinary requests: every bank, investment or retirement statement request (catalog text says "the account number"), every borrower condition email ("The lender approved your loan with a few conditions"), title-commitment and wire-instruction requests to title companies, and any percentage ("100% of the gift funds"). For v1 the processor sends what she writes; AI drafts keep the drafter's guard. When it comes back, start from `docs/tickets/LP-996.md` (code, measurement and the misfire list) and fix the misfires first, or ship it as a warning rather than a block | 10-30 |
 | Not in v1 | Reading the processor's inbox (OAuth), automatic AI replies, automatic DNS tools (Entri / Domain Connect), lender portal integration, SES tenant management (revisit at ~10 tenants) | 10-17 |
@@ -155,7 +156,7 @@ mbai-staging-documents-058190633983/
 
 An emailed attachment therefore exists twice: inside the raw email (evidence of what was received) and as a document (what the app works with). Intentional.
 
-**Dev:** no S3. Raw inbound already goes to local storage at `inbound-raw/<message_id>.eml`; outbound copies use `outbound-raw/<communication_id>.eml`.
+**Dev:** no S3. Raw inbound goes to local mail storage at `inbound/<message id>` (since LP-1008; was `inbound-raw/<message_id>.eml`); outbound copies use `outbound-raw/<communication_id>.eml`.
 
 ## 5. Status
 
@@ -169,7 +170,7 @@ An emailed attachment therefore exists twice: inside the raw email (evidence of 
 | LP-990 — scan-result delivery fix | ✅ **Done** 2026-10-21. Scan results now reach their queue; failures go to the DLQ and alarm |
 | Step 2 — Send | ✅ **Done** 2026-10-31. Proven in staging (LP-998): the test company MortgageBoss sends from `lf-…@mail.staging.mortgageboss.ai`; delivered and bounced show on the file. From display name fixed in LP-999 |
 | Step 3 — Tenant domain | ✅ **Done** 2026-11-04. Proven with `mb-mail.yadees.com` (GoDaddy) as test customer "Yadees Test Co": one command + one NS record → active in about 13 minutes; real email delivered, signed by the customer subdomain; a removed NS record paused Send at the next hourly check and recovery came back the same way. Runbook in §15b LP-1007 |
-| Step 4 — Receive | Groomed 2026-11-04 into LP-1008–1012 (§15c). Not started |
+| Step 4 — Receive | In progress: LP-1008 ✅ (code, not deployed); LP-1009–1012 to do (§15c) |
 | Steps 5–6 | Not started |
 
 **Until LP-989 and step 2 are done:** the staging account can deliver real mail to anyone (production access is account-wide). Send test mail only to own inboxes or `success@ / bounce@ / complaint@simulator.amazonses.com`. No real borrower addresses.
@@ -792,7 +793,7 @@ Order: LP-1008 → 1009 → 1010 → 1011 → 1012. Each ticket writes `docs/tic
 
 **Gaps:** nothing schedules the reader; the resolver still matches the old `lf-<inbox_token>@<INBOX_DOMAIN>` form, so replies to the new addresses match nothing; accept reads raw mail from the documents bucket (step-1 bug); no copy to the processor; loan files have no assigned processor.
 
-### LP-1008 — Read incoming mail
+### LP-1008 — Read incoming mail — ✅ Done (code)
 - `inbound.poll_queue` on beat every minute (`expires: 60`).
 - Resolver: `lf-<display_id>@<domain>` → the file with that `display_id` **whose company's mail domain is that domain** (active or problem). Case-insensitive. Built from `receipt.recipients`, never To/Cc. Unknown and wrong-domain behave the same (no oracle).
 - Only the address: rungs 2–5 (thread, footer tag, sender, subject) and the Route B company attach are not called. Recipients matching more than one file → unassigned.
@@ -800,6 +801,13 @@ Order: LP-1008 → 1009 → 1010 → 1011 → 1012. Each ticket writes `docs/tic
 - Every routed message stays in triage (no auto-accept); out-of-office and delivery notices are stored, never answered; no auto-reply.
 - Dev: the existing inbound injector feeds an `.eml` with a new-style address.
 - **Done when:** in dev, an email to a file's address lands on that file; a typo address and a two-file email land in unassigned; accepting an attachment reads from the mail bucket.
+- **Result (2026-11-04):** reader on beat every minute; envelope recipients stored (`inbound_messages.envelope_recipients`, migration `c4f7a92e1b36`) and used for routing — To/Cc are never used; resolver `lf-<display_id>@<domain>` → the file whose company owns that domain (`active` or `problem`); unknown, wrong-domain, inactive-domain, deleted-file and malformed all look the same; one file → routed, none or several → unrouted. The four guesses and Route B are not called (code kept, marked off). Accept and preview read raw mail through `get_mail_storage()`; dev injector and seed store under `inbound/` in mail storage with a fake receipt. **Added on your instruction:** the reader saves each message before deleting it from the queue (a failed save used to lose the mail silently; now it retries and reaches the DLQ + alarm), and **no company sees another company's unmatched mail** (the triage list used to show every company that unmatched mail existed). Also fixed: ingest crashed every other run ("Event loop is closed"). Dev check passed (envelope beat To; typo and two-file → unrouted; preview and accept worked). Tests 9615 passed. Not exercised with real SQS/S3: LP-1012. Details: `docs/tickets/LP-1008.md`.
+- **Open (from LP-1008):**
+  - **Decision needed before LP-1009:** unmatched mail now reaches nobody, so the "unassigned list" decision (11-04) isn't true yet. Proposed: take the company from the **domain the mail was delivered to** when every recipient domain belongs to one company (see the conversation of 11-04).
+  - First poll after deploy will ingest the old test replies still in the queue (14-day retention) — expected.
+  - `decide_disposition` can still label a message `auto_accept`; it changes nothing, but never turn auto-accept on based on the address alone (a 4-character file code is not a secret).
+  - Route B's admin screen is still live with nothing behind it — LP-1011 hides it.
+  - Throughput 10 messages a minute; fine for the pilot.
 
 ### LP-1009 — Show it on the file
 - Turn on `receiving` for companies with an active (or problem) mail domain: the messages panel shows on the Communication tab.
@@ -842,6 +850,7 @@ Pre-send content check, revisited from `LP-996.md` (fix the misfires, or warn in
 
 ## 18. Log
 
+- 2026-11-04 — LP-1008 ✅ (code): reading on; file found by address from the envelope; mail-bucket reader fixed; reader saves before deleting; unmatched mail no longer visible across companies. Open decision: which company owns unmatched mail.
 - 2026-11-04 — Step 4 groomed into LP-1008–1012 (§15c). Decisions: copy goes to the last app sender on the file (none → no copy); find the file by address only, guesses off; several file addresses → unassigned; every attachment needs Preview + Accept; no automatic replies; the copy links to attachments instead of attaching them.
 - 2026-11-04 — **Step 3 done.** LP-1007 ✅ with `mb-mail.yadees.com`: setup to active in ~13 min, real email signed by the customer subdomain, NS removal paused Send within the hour and recovery the same. The 2-day delay feared in LP-1006 did not happen; the 3-of-4 nameserver blind spot is real and handled in the runbook. Onboarding runbook added (§15b).
 - 2026-11-03 — LP-1006 ✅: hourly check finishes setup and catches a broken one (clear failures only); `problem` pauses sending; worker given the setup permissions; `DOMAIN_PROVIDER=route53` in staging. Open: removed-NS delay up to 2 days and partial-NS blind spot — LP-1007 measures them.
