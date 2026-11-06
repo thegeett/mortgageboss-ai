@@ -24,10 +24,13 @@ from pydantic import BaseModel
 
 from app.api.dependencies import CurrentUser
 from app.core.database import DbSession
+from app.core.logging import get_logger
 from app.services.documents import get_document_for_company
 from app.services.inbound_ingest import process_raw_message
 from app.services.pdf_utils import extract_text_from_pdf
 from app.storage import get_storage_backend
+
+logger = get_logger(__name__)
 
 dev_router = APIRouter(tags=["dev"])
 
@@ -159,6 +162,15 @@ async def inject_raw_message(
         store_raw=True,
     )
     await db.commit()
+    # LP-1010 — the processor's copy is sent by the worker (rule 8), as the SES path's is. A broker
+    # that is down is logged and moved on: the message is stored either way.
+    if result.created:
+        from app.tasks.inbound import copy_to_processor
+
+        try:
+            copy_to_processor.delay(result.message_id)
+        except Exception:
+            logger.warning("processor_copy_enqueue_failed", inbound_message_id=result.message_id)
     return InjectedMessageResponse(
         inbound_message_id=result.message_id,
         created=result.created,

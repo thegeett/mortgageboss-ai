@@ -88,6 +88,17 @@ def _no_document_processing_queued(monkeypatch: pytest.MonkeyPatch) -> list[str]
 
 
 @pytest.fixture(autouse=True)
+def _no_processor_copy_queued(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """LP-1010 — the dev injector queues the processor's copy. Recorded here rather than pushed into
+    whatever Redis the environment points at, like the two fixtures above."""
+    from app.tasks import inbound
+
+    queued: list[str] = []
+    monkeypatch.setattr(inbound.copy_to_processor, "delay", queued.append)
+    return queued
+
+
+@pytest.fixture(autouse=True)
 def _pin_ai_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     """Deterministic AI-provider baseline for the WHOLE suite.
 

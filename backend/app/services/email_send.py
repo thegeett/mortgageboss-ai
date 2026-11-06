@@ -537,19 +537,48 @@ async def transmit_blocker(
     it (the message detail has, for `build_outbound`); otherwise it is read here.
     """
     from app.services.condition_drafts import TEMPLATE_ASK, TEMPLATE_QUESTION
+
+    code = await company_send_blocker(
+        db, loan_file=loan_file, address_and_sending=address_and_sending
+    )
+    if code is not None:
+        return _COMPANY_BLOCKER_SENTENCE[code]
+    if draft.template_key in (TEMPLATE_ASK, TEMPLATE_QUESTION):
+        return "Condition emails can't be sent from the app yet. Send it from your own mail."
+    return None
+
+
+#: What `company_send_blocker`'s codes say to a person, in `transmit_blocker`.
+_COMPANY_BLOCKER_SENTENCE: dict[str, str] = {
+    "no_address": "This company can't send email from the app yet.",
+    "domain_problem": MAIL_DOMAIN_PAUSED,
+    "sending_off": "Sending email from the app isn't switched on for this company yet.",
+    "no_sender": "Sending email is not set up here.",
+}
+
+
+async def company_send_blocker(
+    db: AsyncSession,
+    *,
+    loan_file: LoanFile,
+    address_and_sending: tuple[str | None, bool] | None = None,
+) -> str | None:
+    """Why this file's company can't send email from the app now, as a code, or None when it can.
+
+    The company half of `transmit_blocker`, shared with the processor's copy (LP-1010), which is not
+    a draft: a file address, the domain not in `problem`, sending switched on, a mail sender here.
+    """
     from app.services.mail_sender import get_mail_sender
 
     address, sending = address_and_sending or await file_address_and_sending(db, loan_file)
     if address is None:
-        return "This company can't send email from the app yet."
+        return "no_address"
     if await mail_domain_paused(db, loan_file.company_id):
-        return MAIL_DOMAIN_PAUSED
+        return "domain_problem"
     if not sending:
-        return "Sending email from the app isn't switched on for this company yet."
+        return "sending_off"
     if get_mail_sender() is None:
-        return "Sending email is not set up here."
-    if draft.template_key in (TEMPLATE_ASK, TEMPLATE_QUESTION):
-        return "Condition emails can't be sent from the app yet. Send it from your own mail."
+        return "no_sender"
     return None
 
 
@@ -676,6 +705,7 @@ __all__ = [
     "CannotSendError",
     "OutboundMessage",
     "build_outbound",
+    "company_send_blocker",
     "footer_tag",
     "loan_reference_in",
     "open_draft_preview",

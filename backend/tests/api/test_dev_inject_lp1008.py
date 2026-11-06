@@ -163,3 +163,22 @@ async def test_no_recipient_is_unrouted_and_a_verdict_can_be_set(
     assert message.routing_state is InboundRoutingState.UNROUTED
     assert message.envelope_recipients == []
     assert message.auth_verdicts["dmarcVerdict"] == "GRAY"
+
+
+async def test_lp1010_a_new_message_queues_the_copy_for_the_worker_once(
+    client: AsyncClient, db_session: AsyncSession, _no_processor_copy_queued: list[str]
+) -> None:
+    """The API never sends (rule 8): it queues the copy, and only for a first insert."""
+    auth, (file_a, _), domain = await _setup(db_session)
+    raw = _eml(_address(file_a, domain))
+    data = {"recipient": _address(file_a, domain), "ses_message_id": f"ses-{uuid4().hex}"}
+
+    first = await client.post(
+        _INJECT, headers=auth, files={"file": ("m.eml", raw, "message/rfc822")}, data=data
+    )
+    again = await client.post(
+        _INJECT, headers=auth, files={"file": ("m.eml", raw, "message/rfc822")}, data=data
+    )
+    assert first.json()["created"] is True
+    assert again.json()["created"] is False
+    assert _no_processor_copy_queued == [first.json()["inbound_message_id"]]

@@ -67,7 +67,44 @@ async def _ingest_message(
             receipt=receipt,
         )
         await session.commit()
+    # LP-1010 — THE PROCESSOR'S COPY, after the commit (the message is safe first), and only on the
+    # first insert: a redelivery returns `created=False` and never sends a second copy.
+    if result.created:
+        await _copy_to_processor(result.message_id, raw=raw)
     return result.message_id
+
+
+async def _copy_to_processor(message_id: str, *, raw: bytes | None = None) -> None:
+    """Send the processor's copy in its own session, and commit its activity entry.
+
+    NEVER RAISES, except running out of time. The message is already stored; a failure here must not
+    leave it on the queue, where a redelivery would find it stored and send nothing anyway. The soft
+    time limit is passed on, so `poll_queue` stops the batch as it does for a slow save.
+    """
+    from uuid import UUID
+
+    from app.services.processor_copy import send_processor_copy
+
+    try:
+        async with task_session() as session:
+            await send_processor_copy(session, message_id=UUID(message_id), raw=raw)
+            await session.commit()
+    except SoftTimeLimitExceeded:
+        raise
+    except Exception as exc:  # broad: see the docstring
+        logger.warning(
+            "processor_copy_task_failed",
+            inbound_message_id=message_id,
+            error_type=type(exc).__name__,
+        )
+
+
+@celery_app.task(name="inbound.copy_to_processor")  # type: ignore[untyped-decorator]
+def copy_to_processor(message_id: str) -> None:
+    """The processor's copy for a message stored outside this worker: the dev injector stores in the
+    API, which must not send (rule 8), so it queues this. The SES path calls `_copy_to_processor`
+    directly from `_ingest_message`."""
+    run_async(_copy_to_processor(message_id))
 
 
 @celery_app.task(name="inbound.poll_queue")  # type: ignore[untyped-decorator]

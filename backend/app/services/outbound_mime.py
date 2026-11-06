@@ -57,7 +57,7 @@ def build_mime(
     from_address: str,
     to: str | Sequence[str],
     cc: str | Sequence[str] | None = None,
-    reply_to: str | None,
+    reply_to: str | Sequence[str] | None,
     subject: str,
     body: str,
     html: bool,
@@ -71,7 +71,8 @@ def build_mime(
 
     `body` is the draft as stored: plain text, or the sanitised HTML an authored draft holds
     (`html=True`). An HTML body goes out as multipart/alternative with a plain-text part first.
-    `reply_to` is the file address, or None when the file has none (LP-991).
+    `reply_to` is the file address, or None when the file has none (LP-991). LP-1010's copy to the
+    processor passes two (the sender and the file address); each is checked like a To address.
     """
     recipients = _as_list(to)
     copies = _as_list(cc)
@@ -88,7 +89,7 @@ def build_mime(
     sender = _address("from_address", from_address)
     to_addresses = [_address("to", a) for a in recipients]
     cc_addresses = [_address("cc", a) for a in copies]
-    reply_address = _address("reply_to", reply_to) if reply_to is not None else None
+    reply_addresses = [_address("reply_to", a) for a in _as_list(reply_to)]
     if in_reply_to is not None:
         _no_newline("in_reply_to", in_reply_to)
     for ref in references or []:
@@ -103,8 +104,8 @@ def build_mime(
     message["To"] = to_addresses
     if cc_addresses:
         message["Cc"] = cc_addresses
-    if reply_address is not None:
-        message["Reply-To"] = reply_address
+    if reply_addresses:
+        message["Reply-To"] = reply_addresses
     message["Subject"] = subject
     message["Date"] = format_datetime(datetime.now(UTC))
     # Our own id on the sending domain. SES may replace it with its own; LP-998 records which one
