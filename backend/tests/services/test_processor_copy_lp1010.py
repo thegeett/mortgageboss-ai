@@ -63,7 +63,6 @@ class _FakeSender(MailSender):
 @pytest.fixture(autouse=True)
 def _settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setattr(settings, "storage_local_path", str(tmp_path / "storage"))
-    monkeypatch.setattr(settings, "file_addresses_enabled", True)
     monkeypatch.setattr(settings, "upload_link_base_url", _ORIGIN)
     get_storage_backend.cache_clear()
     yield
@@ -282,7 +281,9 @@ async def test_the_copy(db_session: AsyncSession, file: _File, sender: _FakeSend
     [copy] = sender.sent
     display = file.loan_file.display_id
     link = f"{_ORIGIN}/loan-files/{display}/communication"
-    assert str(copy["From"]) == f"Jane Sample via Summit Lending <{file.address}>"
+    [sender_header] = copy["From"].addresses
+    assert sender_header.display_name == "jane@borrower.example via Summit Lending"
+    assert sender_header.addr_spec == file.address
     assert str(copy["To"]) == file.processor.email
     assert [a.addr_spec for a in copy["Reply-To"].addresses] == [
         "jane@borrower.example",
@@ -322,6 +323,48 @@ async def test_success_is_recorded_on_the_file(
     assert entry.activity_type is ActivityType.COMMUNICATION_SENT
     assert entry.summary == "A copy was emailed to Priya Processor"
     assert entry.detail["provider_message_id"] == "provider-1"
+
+
+async def test_lp1011_the_from_name_is_the_address_whatever_the_display_name_says(
+    db_session: AsyncSession, file: _File, sender: _FakeSender
+) -> None:
+    raw = _raw(file.address, sender='"Summit IT Support - Password Reset" <x@evil.example>')
+    assert await _copy(db_session, file, raw) == SENT
+    [copy] = sender.sent
+    assert copy["From"].addresses[0].display_name == "x@evil.example via Summit Lending"
+    assert "Password Reset" not in str(copy["From"])
+    # The body's first line keeps the name, as plain text.
+    assert copy.get_content().startswith("Reply from Summit IT Support - Password Reset on ")
+
+
+def _raw_with_line_breaks(to: str) -> bytes:
+    """An encoded subject and display name that decode to text with a line break in it."""
+    return (
+        b"From: =?utf-8?q?Jane=0ASample?= <jane@borrower.example>\r\n"
+        + f"To: {to}\r\n".encode()
+        + b"Subject: =?utf-8?q?Statements=0D=0Aattached?=\r\n"
+        + f"Message-ID: <{uuid4().hex}@borrower.example>\r\n".encode()
+        + b"Content-Type: text/plain; charset=utf-8\r\n\r\nHere they are.\r\n"
+    )
+
+
+async def test_lp1011_line_breaks_in_the_subject_and_name_become_spaces(
+    db_session: AsyncSession, file: _File, sender: _FakeSender
+) -> None:
+    assert await _copy(db_session, file, _raw_with_line_breaks(file.address)) == SENT
+    [copy] = sender.sent
+    assert str(copy["Subject"]) == "Statements attached"
+    assert copy.get_content().startswith("Reply from Jane Sample on ")
+
+
+async def test_lp1011_a_deleted_file_gets_no_copy(
+    db_session: AsyncSession, file: _File, sender: _FakeSender
+) -> None:
+    message = await _arrive(db_session, _raw(file.address), [file.address])
+    file.loan_file.deleted_at = utcnow()
+    await db_session.flush()
+    assert await send_processor_copy(db_session, message_id=message.id) == "file_deleted"
+    assert sender.sent == []
 
 
 # --------------------------------------------------------------------------------------------- #

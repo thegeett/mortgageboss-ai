@@ -25,6 +25,11 @@ const mockPreview = vi.fn((): { data: string | null; isPending: boolean } => ({
   isPending: false,
 }));
 const mockReject = vi.fn();
+const mockDismiss = vi.fn();
+const mockDismissState = vi.fn((): { isError: boolean; error: unknown } => ({
+  isError: false,
+  error: null,
+}));
 const mockUseAsSheet = vi.fn();
 
 vi.mock("@/lib/api/inbound", async () => {
@@ -47,6 +52,7 @@ vi.mock("@/lib/api/inbound", async () => {
     }),
     useAttachmentPreview: () => mockPreview(),
     useMoveMessage: () => ({ mutate: mockMove, isPending: false, isError: false, error: null }),
+    useDismissMessage: () => ({ mutate: mockDismiss, isPending: false, ...mockDismissState() }),
   };
 });
 
@@ -129,6 +135,7 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   mockPreview.mockReturnValue({ data: null, isPending: false });
+  mockDismissState.mockReturnValue({ isError: false, error: null });
 });
 
 describe("a message on its own file", () => {
@@ -187,6 +194,34 @@ describe("an email that matched no file", () => {
     expect(screen.getByText("jane.borrower@personal-email.com")).toBeDefined();
     expect(screen.getByText("Docs for 42 Maple Ave - Jane Borrower")).toBeDefined();
     expect(screen.getByText("Jane_2024_tax_return.pdf")).toBeDefined();
+  });
+
+  it("offers Dismiss on an unmatched email only, and dismisses that email (LP-1011)", () => {
+    render(<InboundMessageCard message={UNCLAIMED} fileId={null} />, { wrapper });
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(mockDismiss).toHaveBeenCalledWith(UNCLAIMED.id, expect.anything());
+    cleanup();
+    render(<InboundMessageCard message={ROUTED} fileId={null} />, { wrapper });
+    expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+    cleanup();
+    render(<InboundMessageCard message={ROUTED} fileId="file-1" />, { wrapper });
+    expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+  });
+
+  it("says why when Dismiss fails, e.g. someone moved it first (LP-1011)", () => {
+    const error = {
+      isAxiosError: true,
+      response: {
+        status: 409,
+        data: { detail: "Only an email not matched to a file can be dismissed." },
+      },
+    };
+    render(<InboundMessageCard message={UNCLAIMED} fileId={null} />, { wrapper });
+    expect(screen.queryByText("Only an email not matched to a file can be dismissed.")).toBeNull();
+    cleanup();
+    mockDismissState.mockReturnValue({ isError: true, error });
+    render(<InboundMessageCard message={UNCLAIMED} fileId={null} />, { wrapper });
+    expect(screen.getByText("Only an email not matched to a file can be dismissed.")).toBeDefined();
   });
 
   it("offers Move to file, and only where it has no file", () => {

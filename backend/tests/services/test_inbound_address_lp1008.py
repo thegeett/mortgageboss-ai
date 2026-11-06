@@ -185,7 +185,7 @@ async def test_malformed_is_nothing(db_session: AsyncSession, address: str | Non
 async def test_the_old_token_form_is_nothing(db_session: AsyncSession) -> None:
     """On the old domain and on the company's own: the token no longer opens a file either way."""
     _co, domain, (loan_file, _other) = await _company_with_domain(db_session, slug="a")
-    for on in (settings.inbox_domain, domain):
+    for on in ("imbox.mortgageboss.ai", domain):
         address = f"lf-{loan_file.inbox_token}@{on}"
         assert await resolve_loan_file_by_address(db_session, address=address) is None
 
@@ -322,7 +322,8 @@ async def test_a_route_b_alias_gives_no_company(db_session: AsyncSession) -> Non
 
     company, _domain, _files = await _company_with_domain(db_session, slug="a")
     connection = await create_connection(db_session, company_id=company.id)
-    alias = connection.get_ingest_address()
+    # The old Route B form; `get_ingest_address` is None since LP-1011 (no INBOX_DOMAIN).
+    alias = f"co-{connection.token}@imbox.mortgageboss.ai"
     message = await _message(db_session, to_addresses=[alias], envelope_recipients=[alias])
 
     await apply_routing(db_session, message=message)

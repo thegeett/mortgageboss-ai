@@ -175,7 +175,11 @@ export function MailboxConnections() {
                     <code className="truncate rounded bg-muted px-2 py-0.5 font-mono text-xs">
                       {connection.address}
                     </code>
-                    <Button size="sm" variant="ghost" onClick={() => void copy(connection.address)}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => void copy(connection.address ?? "")}
+                    >
                       {copied === connection.address ? (
                         <Check className="h-3.5 w-3.5" aria-hidden />
                       ) : (

@@ -525,7 +525,7 @@ async def transmit_blocker(
     when this is None, and `_refuse_if_cannot_transmit` refuses with the same sentence, so the screen
     never shows a Send the API will turn down for one of these reasons.
 
-    - A file address: the company's active domain, with `FILE_ADDRESSES_ENABLED` on (LP-991, LP-994).
+    - A file address: the company's `active` or `problem` domain (LP-991, LP-994, LP-1011).
     - The company switched on for sending (`company_mail_domains.sending_enabled`, LP-997): off by
       default; turned on once its domain is onboarded for sending.
     - The company's domain not in `problem` (LP-1006): the hourly check found its setup broken.

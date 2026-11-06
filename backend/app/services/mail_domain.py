@@ -11,8 +11,8 @@ sentence.
 THE ADDRESS IS NOT A SECRET. `display_id` is guessable by design (ADR-048); the defence is the
 authenticated-sender gate — DMARC pass plus a known contact on the file (ADR-397, amended LP-991).
 
-The inbound resolver reads this address since LP-1008. `settings.file_addresses_enabled` still hides
-it wherever it is off, until LP-1011 removes the setting.
+The inbound resolver reads this address since LP-1008. Since LP-1011 there is no switch: a company
+with an `active` or `problem` domain has file addresses.
 """
 
 import asyncio
@@ -24,7 +24,6 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.models.company_mail_domain import (
     RECEIVING_STATUSES,
     CompanyMailDomain,
@@ -71,8 +70,6 @@ async def file_address_and_sending(
 ) -> tuple[str | None, bool]:
     """The file address (see `file_address`) and whether the company is switched on for sending
     (LP-997), from one read of the company's row. `(None, False)` when there is no address."""
-    if not settings.file_addresses_enabled:
-        return None, False
     row = (
         await db.execute(
             select(CompanyMailDomain.domain, CompanyMailDomain.sending_enabled).where(
@@ -101,8 +98,8 @@ async def company_receives_mail(db: AsyncSession, company_id: UUID) -> bool:
 async def file_address(db: AsyncSession, loan_file: LoanFile) -> str | None:
     """`lf-<display_id>@<domain>`, lowercase, or None.
 
-    None when the company has no active domain, and for every company while
-    `settings.file_addresses_enabled` is off (LP-1011 removes it). A domain with a problem keeps its addresses (LP-1006), so an address alone doesn't mean it may send.
+    None when the company has no `active` or `problem` domain. A domain with a problem keeps its
+    addresses (LP-1006), so an address alone doesn't mean it may send.
     """
     address, _ = await file_address_and_sending(db, loan_file)
     return address

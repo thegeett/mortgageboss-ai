@@ -225,3 +225,11 @@ describe("fileSections (LP-UI-022)", () => {
     }
   });
 });
+
+describe("LP-1011 — Route B's Email screen is hidden", () => {
+  it("is not on the Administration menu", () => {
+    const hrefs = contextSection("/admin")?.items.map((item) => item.href) ?? [];
+    expect(hrefs).toContain("/admin/lenders");
+    expect(hrefs).not.toContain("/admin/email");
+  });
+});

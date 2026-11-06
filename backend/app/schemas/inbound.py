@@ -45,6 +45,7 @@ class InboundMessagePublic(BaseModel):
     is_auto_reply: bool
     from_address: str | None
     subject: str | None
+    #: When we received it (the row's `created_at`, LP-1011); not the email's own `Date` header.
     received_at: datetime | None
     auth_verdicts: dict[str, str]
     attachments: list[InboundAttachmentPublic]

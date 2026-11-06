@@ -18,7 +18,6 @@ import {
   FolderOpen,
   Inbox,
   LayoutDashboard,
-  Mail,
   MessageSquare,
   Package,
   ScrollText,
@@ -117,9 +116,8 @@ const ADMIN_SECTION: ContextSection = {
     { label: "Overview", href: "/admin", icon: ShieldCheck },
     { label: "Lenders", href: "/admin/lenders", icon: Building2 },
     { label: "Validation", href: "/admin/validation", icon: SlidersHorizontal },
-    // LP-808 — where a company connects its own mailbox. Under Administration rather than beside a
-    // loan file, because a connection is company configuration and one address serves every file.
-    { label: "Email", href: "/admin/email", icon: Mail },
+    // LP-1011 — "Email" (/admin/email, LP-808's Route B mailbox connections) is hidden: Route B is
+    // superseded by docs/email-communication/loan-email.md. The page and its code stay.
   ],
 };
 

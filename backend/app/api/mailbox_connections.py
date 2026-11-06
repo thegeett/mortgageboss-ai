@@ -89,7 +89,8 @@ class ConnectionPublic(BaseModel):
     id: UUID
     kind: str
     provider: str | None
-    address: str
+    #: None since LP-1011 (Route B superseded; no `INBOX_DOMAIN`).
+    address: str | None
     source_address: str | None
     status: str
     verification: str
@@ -145,7 +146,7 @@ class EmailStepsRequest(BaseModel):
 def _steps_for(connection: MailboxConnection) -> ConnectionSteps:
     provider = (connection.provider or "other").lower()
     template = _STEPS.get(provider, _STEPS["other"])
-    address = connection.get_ingest_address()
+    address = connection.get_ingest_address() or ""
     return ConnectionSteps(
         provider=provider, steps=[step.format(address=address) for step in template]
     )

@@ -1,5 +1,7 @@
 # Phase 4 build plan — what to build, in what order, and how
 
+> Route B (company mailbox forwarding, `FORWARDED_ALIAS`): superseded by docs/email-communication/loan-email.md (2026-11).
+
 - **Companion:** [`phase4.md`](phase4.md) is the design (architecture, data model, decisions).
   This document is the execution plan. Ticket scope lives here; the *why* lives there.
 - **Figures:** [`phase4-mail-flows.md`](phase4-mail-flows.md) — the eight flows this plan builds.

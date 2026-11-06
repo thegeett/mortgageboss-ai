@@ -36,14 +36,12 @@ for anything other than scoping a triage queue and the routing ladder.
 
 from __future__ import annotations
 
-import re
 import secrets
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.base import utcnow
 from app.models.helpers import only_active, scope_to_company
@@ -56,11 +54,6 @@ from app.models.mailbox_connection import (
 )
 
 logger = get_logger(__name__)
-
-#: `co-<token>@<domain>`. Deliberately the same shape as `lf-<token>@` and deliberately a different
-#: prefix: the two resolve to different things, and a resolver that accepted either would make
-#: "which kind of address is this" a question answered by whichever lookup happened to hit.
-_CONNECTION_LOCAL_PART = re.compile(r"^co-(?P<token>[A-Za-z0-9_-]+)$")
 
 #: No mail for this long means the routing rule is probably gone. `phase4.md` §3 asks for a
 #: persistent banner and gives no number; four days is what its own example sentence uses ("no mail
@@ -76,17 +69,11 @@ def generate_connection_token() -> str:
 def connection_token_in(address: str | None) -> str | None:
     """The connection token an address carries, or None.
 
-    BOTH HALVES. The domain is part of the credential: matching the local part
-    alone would let a token lifted from staging resolve against production.
+    Always None since LP-1011: the address's domain was `INBOX_DOMAIN`, which is gone with Route B
+    (superseded by `docs/email-communication/loan-email.md`). Nothing calls this on the inbound path
+    (`inbound_routing.KNOWN_UNWIRED`).
     """
-    if not address:
-        return None
-    candidate = address.strip().strip("<>").lower()
-    local, separator, domain = candidate.partition("@")
-    if not separator or domain != settings.inbox_domain.lower():
-        return None
-    found = _CONNECTION_LOCAL_PART.match(local)
-    return found.group("token") if found else None
+    return None
 
 
 async def resolve_connection_by_address(

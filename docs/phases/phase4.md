@@ -1,5 +1,7 @@
 # Phase 4 — Communication Workflow: research, architecture and ticket plan
 
+> Route B (company mailbox forwarding, `FORWARDED_ALIAS`): superseded by docs/email-communication/loan-email.md (2026-11).
+
 - **Type:** Research + design. Nothing built.
 - **Date:** 2026-09-06
 - **Source of truth for scope:** `docs/domain/V1_Build_Plan_v3_rule_engine.docx`, Phase 4 (paras 853–917).

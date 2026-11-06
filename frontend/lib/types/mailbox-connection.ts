@@ -15,8 +15,10 @@ export interface MailboxConnection {
    *
    * THE ADDRESS CONTAINS THE TOKEN, so this is a bearer capability, not a label (ADR-397). Anyone
    * who can send to it gets mail into this company's triage queue.
+   *
+   * LP-1011 — always null: Route B is superseded and its address domain (`INBOX_DOMAIN`) is gone.
    */
-  address: string;
+  address: string | null;
   source_address: string | null;
   status: ConnectionStatus;
   verification: ConnectionVerification;

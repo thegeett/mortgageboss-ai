@@ -33,12 +33,6 @@ _BLANK_S3_MEANS_DEFAULT: dict[str, str | int] = {
 }
 
 
-#: Production's borrower inbox domain (LP-836). Named rather than repeated, because two places
-#: knowing this string is how one of them ends up stale — and the one that would be stale is the
-#: guard that exists to catch the other.
-PRODUCTION_INBOX_DOMAIN = "imbox.mortgageboss.ai"
-
-
 class Settings(BaseSettings):
     """Application settings loaded from environment variables.
 
@@ -334,35 +328,14 @@ class Settings(BaseSettings):
 
     # --- Email: inbound (Phase 4) ------------------------------------------ #
     #
-    # LP-802 — the borrower inbox domain, moved off `models/loan_file.py` because it MUST differ per
-    # environment: a staging file addressed at production's domain would take delivery of real
-    # borrower mail. The constant's own comment anticipated this move.
-    #
-    # LP-836 — the values are `imbox.mortgageboss.ai` and `imboxstaging.mortgageboss.ai`, confirmed
-    # directly and deliberately DIFFERENT per environment. The spelling is `imbox`, with an m.
-    #
-    # The default is still PRODUCTION's domain, so this still fails OPEN: an environment that forgets
-    # to set INBOX_DOMAIN starts happily and advertises production's address on every file. That
-    # default is deliberate — see the note in `env_files` about why a loud failure is preferred where
-    # one is possible.
-    #
-    # LP-991 — the address shown on a file no longer uses this (it is `lf-<display_id>@<company's
-    # mail domain>`), so LP-836's guard went with `LoanFile.get_inbox_address`. Since LP-1008 the
-    # inbound resolver does not read it either; LP-1011 removes it with `INBOX_DOMAIN`.
-    inbox_domain: str = PRODUCTION_INBOX_DOMAIN
-
-    # LP-991 — whether this deployment shows file addresses (`lf-<display_id>@<company domain>`) at
-    # all. Off, `services.mail_domain.file_address` returns None for every company: no address on a
-    # screen, in a template, or as reply-to/bcc.
-    #
-    # Off by default from before anything routed that address. Since LP-1008 the resolver does;
-    # LP-1011 removes this setting.
-    file_addresses_enabled: bool = False
+    # LP-1011 — `inbox_domain` (INBOX_DOMAIN) and `file_addresses_enabled` (FILE_ADDRESSES_ENABLED)
+    # are gone. A file has an address exactly when its company's mail domain is `active` or
+    # `problem` (`services/mail_domain.py`). An old value left in an environment is ignored.
 
     # LP-815 — where the borrower's upload link points. The app's own public origin, not the API's:
     # the token lands in a browser, on a page a person reads.
     #
-    # The default is LOCAL, unlike `inbox_domain`, and the asymmetry is deliberate. A wrong inbox
+    # The default is LOCAL, unlike the old `inbox_domain`, and the asymmetry is deliberate. A wrong inbox
     # domain takes delivery of real borrower mail, so it fails to production. A wrong upload base
     # URL sends a borrower to a link that does not resolve — visible, harmless and reported in
     # minutes — while a default of the production origin would have a staging test email pointing a

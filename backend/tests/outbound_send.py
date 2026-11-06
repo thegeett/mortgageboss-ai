@@ -1,7 +1,7 @@
 """Helpers for LP-994's send tests: a file ready to send, and fakes for the sender and storage.
 
 `ready_to_send` builds a company with an active mail domain (sending switched on, LP-997), a
-processor, a loan file and a draft asking for one need. The caller turns file addresses on (`file_addresses_on`) and sets
+processor, a loan file and a draft asking for one need. The caller sets
 `settings.mail_transport`, as a deployment that sends would.
 """
 

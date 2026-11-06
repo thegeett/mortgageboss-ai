@@ -15921,6 +15921,8 @@ everything else already degrades acceptably.
 
 ## ADR-395
 
+> Route B (company mailbox forwarding, `FORWARDED_ALIAS`): superseded by docs/email-communication/loan-email.md (2026-11).
+
 **The ingestion source is pluggable. The parser, the router and the store never learn which one
 delivered the message.**
 

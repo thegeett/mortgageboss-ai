@@ -289,7 +289,6 @@ async def test_the_draft_records_the_template_and_version_that_rendered_it(
     assert result.draft.template_version == TEMPLATES[DRAFT_TEMPLATE].version
 
 
-@pytest.mark.usefixtures("file_addresses_on")
 async def test_the_draft_carries_the_files_own_inbox_address(db_session: AsyncSession) -> None:
     """M3's routing depends on the borrower having been given THIS file's address. One file's
     address in another file's email would route documents to the wrong loan."""
@@ -304,7 +303,6 @@ async def test_the_draft_carries_the_files_own_inbox_address(db_session: AsyncSe
     assert f"or send them to {loan_file.display_id.lower()}@{domain}." in result.draft.body
 
 
-@pytest.mark.usefixtures("file_addresses_on")
 async def test_a_draft_follows_the_files_address_when_the_domain_changes(
     db_session: AsyncSession,
 ) -> None:
@@ -1016,7 +1014,6 @@ async def test_a_lender_is_not_told_it_is_their_loan_file(db_session: AsyncSessi
     assert "credit report" in body
 
 
-@pytest.mark.usefixtures("file_addresses_on")
 async def test_no_third_party_email_carries_the_file_inbox_address(
     db_session: AsyncSession,
 ) -> None:

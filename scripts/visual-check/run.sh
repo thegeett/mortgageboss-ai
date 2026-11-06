@@ -39,8 +39,6 @@ export STORAGE_BACKEND=local
 export STORAGE_LOCAL_PATH="$SCRATCH_DIR/storage"
 export CORS_ALLOWED_ORIGINS="[\"http://localhost:$WEB_PORT\"]"
 export RECEIVING_ENABLED=false
-# Only the inbound resolver reads this since LP-991; kept so nothing here touches production's domain.
-export INBOX_DOMAIN="inbox.visual-check.example"
 
 pids=()
 # `next dev` rewrites tsconfig.json (it adds `.next-visual/types`) and may touch next-env.d.ts. The

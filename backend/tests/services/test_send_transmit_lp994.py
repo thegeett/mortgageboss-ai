@@ -34,7 +34,7 @@ TO = "borrower@example.test"
 
 
 @pytest.fixture(autouse=True)
-def _can_send(file_addresses_on: None, monkeypatch: pytest.MonkeyPatch) -> None:
+def _can_send(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "mail_transport", "smtp")
 
 

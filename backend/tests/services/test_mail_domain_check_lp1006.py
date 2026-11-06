@@ -541,7 +541,7 @@ async def test_other_states_are_still_refused(
 # A problem domain: keeps its addresses, doesn't send
 # --------------------------------------------------------------------------------------------- #
 @pytest.fixture
-def can_send(file_addresses_on: None, monkeypatch: pytest.MonkeyPatch) -> None:
+def can_send(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "mail_transport", "smtp")
 
 

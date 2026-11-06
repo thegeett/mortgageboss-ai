@@ -268,9 +268,8 @@ def _message_at(message: Communication) -> datetime:
 
     An inbound message has no `sent_at` (that column is about outbound; LP-805 says so explicitly and
     declines to reuse it for a received-at), so it falls to `created_at`, which is when we ingested
-    it. The message's own `received_at` lives on the `inbound_message` row and is the better answer;
-    using it would mean joining that table just to order this list, and the two differ by the ingest
-    lag — seconds, except on the nights staging is asleep.
+    it. The card and the document label use the same `created_at` since LP-1011; the row's
+    `received_at` is the sender-written `Date` header and is shown nowhere.
     """
     return message.sent_at or message.created_at
 

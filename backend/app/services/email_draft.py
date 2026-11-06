@@ -402,7 +402,7 @@ def render_draft_body(
     now would bake in whoever happened to click "request", who is not necessarily who sends it.
 
     LP-991 — `address` is the file's address from `mail_domain.file_address`, or None when the
-    company has no active mail domain or `FILE_ADDRESSES_ENABLED` is off; the borrower template
+    company has no `active` or `problem` mail domain; the borrower template
     then drops the "or send them to" phrase entirely.
     """
     document_list = "\n\n".join(_document_line(need) for need in needs)

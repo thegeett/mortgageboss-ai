@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * Administration → Email (LP-808).
  *
@@ -12,32 +10,13 @@
  * rather than the endpoint.
  */
 
-import { MailboxConnections } from "@/components/admin/mailbox-connections";
-import { useAuthStore } from "@/lib/stores/auth-store";
+import { notFound } from "next/navigation";
 
+/**
+ * LP-1011 — HIDDEN. Route B (connecting a company mailbox) is superseded by
+ * docs/email-communication/loan-email.md: borrowers reply to each file's own address. The screen
+ * answers 404 and is off the Administration menu; `MailboxConnections` and the API stay.
+ */
 export default function AdminEmailPage() {
-  const role = useAuthStore((state) => state.user?.role);
-
-  if (role !== "admin") {
-    return (
-      <section className="space-y-2">
-        <h2 className="text-label uppercase text-muted-foreground">Email</h2>
-        <p className="text-sm text-muted-foreground">
-          Connecting a mailbox is available to admins only.
-        </p>
-      </section>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      <header className="space-y-1">
-        <h1 className="text-lg font-semibold text-foreground">Email</h1>
-        <p className="text-sm text-muted-foreground">
-          How your borrowers&apos; mail reaches this system.
-        </p>
-      </header>
-      <MailboxConnections />
-    </div>
-  );
+  notFound();
 }

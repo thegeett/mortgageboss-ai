@@ -24,39 +24,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-#: LP-836 — the suite's own inbox domain.
-#:
-#: `settings.inbox_domain` defaults to PRODUCTION's, and `LoanFile.get_inbox_address` now refuses to
-#: compose an address on production's domain outside production. Without this the suite runs as an
-#: environment that forgot to set `INBOX_DOMAIN` — which is exactly the state the guard exists to
-#: refuse, and 164 tests said so on the first run.
-#:
-#: THE FIX IS TO CONFIGURE THE ENVIRONMENT, NOT TO EXEMPT IT. A test-shaped hole in the guard would
-#: mean the one place the guard is exercised is the one place it does not apply. Same argument as
-#: `_pin_ai_provider` below: the suite must not inherit whatever the ambient `.env` happens to say.
-TEST_INBOX_DOMAIN = "imbox.example.test"
-
-
-@pytest.fixture(autouse=True)
-def _pin_inbox_domain(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give the suite its own inbox domain, as every environment must (LP-836).
-
-    `.test` is reserved (RFC 6761) and resolves nowhere, so a fixture address can never be mistaken
-    for one somebody could register — and a test that needs a specific domain sets its own, which
-    runs after this and wins.
-    """
-    monkeypatch.setattr(settings, "inbox_domain", TEST_INBOX_DOMAIN)
-    # LP-991 — pinned to its default for the same reason: a local `.env` with
-    # FILE_ADDRESSES_ENABLED=true must not change what the suite sees. `file_addresses_on` turns it
-    # on for the tests about the address itself.
-    monkeypatch.setattr(settings, "file_addresses_enabled", False)
-
-
-@pytest.fixture
-def file_addresses_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    """LP-991 — show file addresses, as a deployment with step 4 will."""
-    monkeypatch.setattr(settings, "file_addresses_enabled", True)
-
 
 @pytest.fixture(autouse=True)
 def _no_reading_queued(monkeypatch: pytest.MonkeyPatch) -> list[str]:

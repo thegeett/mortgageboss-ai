@@ -281,7 +281,8 @@ async def _email_origins(
 ) -> dict[UUID, DocumentEmailOrigin]:
     """The email each emailed document came from, through `InboundAttachment.document_id` (LP-1009).
 
-    `received_at` is the message's own date, which can be absent, so the row's arrival stands in.
+    `received_at` is when we received it (the row's `created_at`, LP-1011), not the email's own
+    `Date` header, which the sender writes.
     """
     from app.models.inbound_attachment import InboundAttachment
     from app.models.inbound_message import InboundMessage
@@ -298,7 +299,7 @@ async def _email_origins(
         document_id: DocumentEmailOrigin(
             inbound_message_id=message.id,
             from_address=message.from_address,
-            received_at=message.received_at or message.created_at,
+            received_at=message.created_at,
         )
         for document_id, message in rows.all()
     }

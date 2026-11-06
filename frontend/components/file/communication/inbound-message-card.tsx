@@ -16,11 +16,13 @@ import { canAttachPdf, useConditionRounds } from "@/lib/api/conditions";
 import {
   unclaimed,
   useAcceptAttachment,
+  useDismissMessage,
   useForwardAttachmentAsSheet,
   useRejectAttachment,
 } from "@/lib/api/inbound";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import { messageTimeShort } from "@/lib/message-time";
+import { notifySuccess } from "@/lib/toast";
 import type { ConditionRound } from "@/lib/types/conditions";
 import type { InboundMessage } from "@/lib/types/inbound";
 import { cn } from "@/lib/utils";
@@ -101,10 +103,8 @@ function receivedLabel(iso: string | null): string {
   // this one sentence, and that strip could be defeated by an unclosed `/*` in a string literal —
   // measured, not supposed. Rewording one comment is cheaper than a regex that can hide real code.
   //
-  // `received_at` STAYS the instant, and is not swapped for the timeline's. It is the message's own
-  // arrival time; `_message_at` falls back to `created_at` for inbound only to avoid joining
-  // `inbound_messages` to order a list, and its own comment says received_at "is the better answer".
-  // This card already holds it, so it uses it.
+  // `received_at` is when we received the email: since LP-1011 the server sends the row's
+  // `created_at`, not the sender-written `Date` header.
   if (!iso) return "Arrival time unknown";
   return `Received ${messageTimeShort(iso)}`;
 }
@@ -233,7 +233,10 @@ export function InboundMessageCard({
           <p className="text-xs text-muted-foreground">
             This email could not be matched to a loan file.
           </p>
-          <MoveToFile messageId={message.id} />
+          <div className="flex items-center gap-2">
+            <DismissMessage messageId={message.id} />
+            <MoveToFile messageId={message.id} />
+          </div>
         </div>
       ) : null}
 
@@ -337,5 +340,32 @@ export function InboundMessageCard({
         </p>
       ) : null}
     </article>
+  );
+}
+
+/** LP-1011 — take an unmatched email (spam, a stray) off the Inbox. It stays on record. */
+function DismissMessage({ messageId }: { messageId: string }) {
+  const dismiss = useDismissMessage();
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        disabled={dismiss.isPending}
+        onClick={() =>
+          dismiss.mutate(messageId, {
+            onSuccess: () =>
+              notifySuccess({ title: "Dismissed", consequence: "It is no longer in the Inbox." }),
+          })
+        }
+      >
+        Dismiss
+      </Button>
+      {/* A 409 when someone moved it first, or a 404: say so, as Move to file does. */}
+      {dismiss.isError ? (
+        <p className="text-sm text-danger">{getErrorMessage(dismiss.error)}</p>
+      ) : null}
+    </div>
   );
 }

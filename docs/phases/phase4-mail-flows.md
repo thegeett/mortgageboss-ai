@@ -1,5 +1,7 @@
 # Phase 4 mail flows — every scenario, drawn
 
+> Route B (company mailbox forwarding, `FORWARDED_ALIAS`): superseded by docs/email-communication/loan-email.md (2026-11).
+
 What happens when a processor asks for a document, and what happens when one comes back.
 
 - **Design:** [`phase4.md`](phase4.md) — architecture, data model, decisions.

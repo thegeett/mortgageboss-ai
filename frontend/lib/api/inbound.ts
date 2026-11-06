@@ -69,6 +69,19 @@ export function useMoveMessage() {
   });
 }
 
+/** LP-1011 — dismiss an unmatched email: it leaves the Inbox and stays on record. */
+export function useDismissMessage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (messageId: string) =>
+      (await apiClient.post<InboundMessage>(`${API_V1}/inbound/messages/${messageId}/dismiss`))
+        .data,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: triageQueueQueryKey() });
+    },
+  });
+}
+
 /**
  * A thumbnail's object URL, or null when the attachment has no preview.
  *

@@ -586,7 +586,8 @@ async def test_an_accepted_attachment_carries_its_email_in_list_and_detail(
         origin = body["email_origin"]
         assert origin["from_address"] == "jane@borrower.example"
         assert origin["inbound_message_id"] == str(message.id)
-        assert origin["received_at"].startswith("2026-11-03")
+        # LP-1011 — when we received it, not the email's `Date` header (3 Nov 2026 10:00).
+        assert origin["received_at"] == message.created_at.isoformat().replace("+00:00", "Z")
 
 
 async def test_a_manual_upload_has_no_email_origin(
@@ -725,7 +726,6 @@ async def _draft_detail(
 ) -> dict[str, Any]:
     from app.models.communication import CommunicationStatus
 
-    monkeypatch.setattr(settings, "file_addresses_enabled", True)
     draft = Communication(
         loan_file_id=a.files[0].id,
         direction=CommunicationDirection.OUTBOUND,
@@ -764,3 +764,75 @@ async def test_the_reason_is_returned_only_when_paused(
     body = await _draft_detail(client, db_session, a, monkeypatch)
     assert body["can_send"] is False  # sending is off in every case here
     assert body["send_blocked_reason"] == (MAIL_DOMAIN_PAUSED if reason else None)
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-1011 — Dismiss, and the arrival time
+# --------------------------------------------------------------------------------------------- #
+def _dismiss_url(message: InboundMessage) -> str:
+    return f"/api/v1/inbound/messages/{message.id}/dismiss"
+
+
+async def test_lp1011_dismiss_takes_it_off_the_inbox_and_keeps_the_row(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    a = await _company(db_session, "a")
+    message = await _arrive(db_session, [f"lf-typo@{a.domain}"])
+    kept = await _arrive(db_session, [f"lf-other@{a.domain}"])
+    await db_session.commit()
+    queue = "/api/v1/inbound/queue"
+    assert {m["id"] for m in (await client.get(queue, headers=a.auth)).json()} == {
+        str(message.id),
+        str(kept.id),
+    }
+
+    dismissed = await client.post(_dismiss_url(message), headers=a.auth)
+
+    assert dismissed.status_code == 200, dismissed.text
+    assert [m["id"] for m in (await client.get(queue, headers=a.auth)).json()] == [str(kept.id)]
+    await db_session.refresh(message)
+    assert message.routing_state is InboundRoutingState.REJECTED
+    assert message.company_id == a.company.id
+    assert message.deleted_at is None
+
+
+async def test_lp1011_another_companys_message_cannot_be_dismissed(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    a = await _company(db_session, "a")
+    b = await _company(db_session, "b")
+    message = await _arrive(db_session, [f"lf-typo@{a.domain}"])
+    await db_session.commit()
+
+    assert (await client.post(_dismiss_url(message), headers=b.auth)).status_code == 404
+    await db_session.refresh(message)
+    assert message.routing_state is InboundRoutingState.UNROUTED
+
+
+async def test_lp1011_a_message_on_a_file_cannot_be_dismissed(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    a = await _company(db_session, "a")
+    message = await _arrive(db_session, [a.address()])
+    await db_session.commit()
+
+    assert (await client.post(_dismiss_url(message), headers=a.auth)).status_code == 409
+    await db_session.refresh(message)
+    assert message.routing_state is InboundRoutingState.ROUTED
+
+
+async def test_lp1011_the_card_shows_when_we_received_it_not_the_date_header(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """`_arrive` writes `Date: 3 Nov 2026`; the row is created now. A year-off header would read the
+    same: the card follows the row."""
+    a = await _company(db_session, "a")
+    message = await _arrive(db_session, [a.address()])
+    message.received_at = message.created_at.replace(year=message.created_at.year - 1)
+    await db_session.commit()
+
+    listed = (
+        await client.get(f"/api/v1/loan-files/{a.files[0].id}/inbound/messages", headers=a.auth)
+    ).json()
+    expected = message.created_at.isoformat().replace("+00:00", "Z")
+    assert listed[0]["received_at"] == expected

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from app.core.config import Settings, settings
-from app.models.company_mail_domain import MailDomainStatus
+from app.core.config import Settings
+from app.models.company_mail_domain import CompanyMailDomain, MailDomainStatus
 from app.services.loan_files import create_loan_file
 from app.services.mail_domain import (
     MailDomainError,
@@ -12,13 +12,10 @@ from app.services.mail_domain import (
     normalise_domain,
     set_company_mail_domain,
 )
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.mail_address import active_mail_domain
 from tests.models.conftest_helpers import make_company
-
-# Every test here is about what the address is when addresses are shown at all; the two flag tests
-# below turn it back off.
-pytestmark = pytest.mark.usefixtures("file_addresses_on")
 
 
 async def test_an_active_domain_gives_the_lowercase_display_id_address(
@@ -37,25 +34,39 @@ async def test_an_active_domain_gives_the_lowercase_display_id_address(
     assert address == address.lower()
 
 
-def test_file_addresses_are_off_by_default() -> None:
-    """Nothing routes `lf-<display_id>@<domain>` until step 4, so a deployment that sets nothing
-    shows no address."""
-    assert Settings.model_fields["file_addresses_enabled"].default is False
-
-
-async def test_with_file_addresses_off_an_active_domain_gives_no_address(
-    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("status", "has_address"),
+    [
+        (MailDomainStatus.ACTIVE, True),
+        (MailDomainStatus.PROBLEM, True),
+        (MailDomainStatus.VERIFYING, False),
+        (MailDomainStatus.PENDING_NS, False),
+        (MailDomainStatus.INACTIVE, False),
+    ],
+)
+async def test_lp1011_the_domain_status_alone_decides_the_address(
+    db_session: AsyncSession, status: MailDomainStatus, has_address: bool
 ) -> None:
+    """No switch since LP-1011: `active` or `problem` gives an address, any other state none."""
     company = await make_company(db_session)
-    await set_company_mail_domain(db_session, company_id=company.id, domain="off.example.test")
+    await set_company_mail_domain(db_session, company_id=company.id, domain="st.example.test")
+    row = await db_session.scalar(
+        select(CompanyMailDomain).where(CompanyMailDomain.company_id == company.id)
+    )
+    assert row is not None
+    row.status = status
+    await db_session.flush()
     loan_file = await create_loan_file(db_session, company_id=company.id)
-    # The control: the same file, linked and active, has an address while the setting is on.
-    assert await file_address(db_session, loan_file) is not None
 
-    monkeypatch.setattr(settings, "file_addresses_enabled", False)
+    assert (await file_address(db_session, loan_file) is not None) is has_address
 
-    assert await active_mail_domain(db_session, company.id) == "off.example.test"
-    assert await file_address(db_session, loan_file) is None
+
+def test_lp1011_the_removed_settings_are_gone() -> None:
+    for name in ("file_addresses_enabled", "inbox_domain"):
+        assert name not in Settings.model_fields
+    import app.core.config as config
+
+    assert not hasattr(config, "PRODUCTION_INBOX_DOMAIN")
 
 
 async def test_no_row_means_no_address(db_session: AsyncSession) -> None:

@@ -23,9 +23,11 @@ NOTHING HERE LOGS AN ADDRESS, A SUBJECT OR A BODY. Skips and failures log a code
 from __future__ import annotations
 
 import asyncio
+import re
 from email import policy
-from email.message import EmailMessage
-from email.parser import BytesParser
+from email.header import decode_header, make_header
+from email.message import Message
+from email.parser import BytesHeaderParser
 from email.utils import getaddresses
 from typing import Any
 from uuid import UUID
@@ -86,16 +88,38 @@ def _normalised(address: str) -> str:
     return address.strip().lower()
 
 
-def _header_addresses(parsed: EmailMessage, *names: str) -> set[str]:
+#: Line breaks, tabs and other control characters (LP-1011).
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
+
+
+def _one_line(text: str) -> str:
+    """`text` with every control character, a line break among them, as one space (LP-1011).
+    `build_mime` refuses a header with CR/LF, and a sender can put one in an encoded subject or name."""
+    return " ".join(_CONTROL.sub(" ", text).split())
+
+
+def _decoded(text: str) -> str:
+    """RFC 2047 encoded words decoded, on one line. Ingest stores the subject as written, encoded."""
+    try:
+        decoded = str(make_header(decode_header(text)))
+    except (LookupError, UnicodeError, ValueError):  # an unknown charset: keep the text as sent
+        decoded = text
+    return _one_line(decoded)
+
+
+def _header_addresses(headers: Message, *names: str) -> set[str]:
     values: list[str] = []
     for name in names:
-        values.extend(str(value) for value in parsed.get_all(name, []))
+        values.extend(str(value) for value in headers.get_all(name, []))
     return {_normalised(address) for _, address in getaddresses(values) if address}
 
 
-def _sender_name(parsed: EmailMessage) -> str | None:
-    names = [name for name, _ in getaddresses([str(v) for v in parsed.get_all("From", [])])]
-    return (names[0].strip() or None) if names else None
+def _sender_name(headers: Message) -> str | None:
+    """The From display name, decoded and on one line, or None."""
+    names = [name for name, _ in getaddresses([str(v) for v in headers.get_all("From", [])])]
+    if not names or not names[0].strip():
+        return None
+    return _decoded(names[0]) or None
 
 
 def copy_body(*, sender: str, display_id: str, link: str, text: str, attachment_count: int) -> str:
@@ -115,6 +139,8 @@ def _skip_reason(message: InboundMessage, loan_file: LoanFile | None) -> str | N
     """The first rule that stops a copy which the row alone can answer, or None."""
     if loan_file is None:
         return "not_routed"
+    if loan_file.deleted_at is not None:
+        return "file_deleted"
     if message.routing_state is InboundRoutingState.REJECTED:
         return "rejected"
     if message.routing_state is not InboundRoutingState.ROUTED:
@@ -159,9 +185,15 @@ async def send_processor_copy(
     if reason is not None or loan_file is None:
         return _skipped(reason or "not_routed", message_id)
 
+    # THE HEADERS ARE READ INSIDE THIS `try`, with the lenient parser (compat32), which keeps a header
+    # as written instead of refusing one with a line break in it (LP-1011). Anything that still fails
+    # here is logged as `raw_unreadable`, never lost.
     try:
         raw = raw if raw is not None else await raw_message(message)
-        parsed = BytesParser(policy=policy.default).parsebytes(raw)
+        headers = BytesHeaderParser(policy=policy.compat32).parsebytes(raw)
+        is_our_copy = headers.get(COPY_MARKER_HEADER) is not None
+        to_and_cc = _header_addresses(headers, "To", "Cc")
+        display_name = _sender_name(headers)
     except Exception as exc:
         logger.warning(
             "processor_copy_raw_unreadable",
@@ -169,7 +201,7 @@ async def send_processor_copy(
             error_type=type(exc).__name__,
         )
         return _skipped("raw_unreadable", message_id)
-    if parsed.get(COPY_MARKER_HEADER) is not None:
+    if is_our_copy:
         return _skipped("our_copy", message_id)
 
     recipient = await copy_recipient(db, loan_file)
@@ -178,7 +210,10 @@ async def send_processor_copy(
     her_address = _normalised(recipient.email)
     if her_address == _normalised(message.from_address or ""):
         return _skipped("she_sent_it", message_id)
-    if her_address in _header_addresses(parsed, "To", "Cc"):
+    # A Bcc'd processor is in no header, and NOT in `envelope_recipients` either: SES only receives for
+    # the company mail domains, so her own mailbox's copy of a Bcc never passes through SES. A Bcc
+    # cannot be seen, and she gets a second copy (LP-1011, Open).
+    if her_address in to_and_cc:
         return _skipped("already_has_it", message_id)
     if await is_suppressed(db, company_id=loan_file.company_id, address=her_address):
         return _skipped("suppressed", message_id)
@@ -206,7 +241,7 @@ async def send_processor_copy(
         )
     ) or 0
     sender_address = message.from_address or ""
-    sender_label = _sender_name(parsed) or sender_address
+    sender_label = display_name or sender_address
     link = f"{origin}/loan-files/{loan_file.display_id}/communication"
     detail: dict[str, Any] = {
         "kind": "processor_copy",
@@ -215,11 +250,13 @@ async def send_processor_copy(
     }
     try:
         email = build_mime(
-            from_name=f"{sender_label} via {company.name if company else ''}".strip(),
+            # LP-1011 — THE ADDRESS, NOT THE DISPLAY NAME: a sender chooses their name, and this
+            # email is signed by our domain. The body's first line keeps the name, as plain text.
+            from_name=_one_line(f"{sender_address} via {company.name if company else ''}"),
             from_address=file_address,
             to=recipient.email,
             reply_to=[sender_address, file_address],
-            subject=message.subject or "(no subject)",
+            subject=_decoded(message.subject or "") or "(no subject)",
             body=copy_body(
                 sender=sender_label,
                 display_id=loan_file.display_id,

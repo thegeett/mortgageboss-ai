@@ -52,7 +52,7 @@ async def db(test_engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
 
 
 @pytest.fixture
-def sender(file_addresses_on: None, monkeypatch: pytest.MonkeyPatch) -> FakeSender:
+def sender(monkeypatch: pytest.MonkeyPatch) -> FakeSender:
     monkeypatch.setattr(settings, "mail_transport", "smtp")  # for send_draft's own check
     fake = FakeSender()
     monkeypatch.setattr(outbound, "get_mail_sender", lambda: fake)

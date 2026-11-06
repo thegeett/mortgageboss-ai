@@ -613,6 +613,40 @@ async def move_unrouted_message(
     return message
 
 
+async def dismiss_unrouted_message(
+    db: AsyncSession, *, company_id: UUID, message_id: UUID, actor_user_id: UUID
+) -> InboundMessage | None:
+    """Dismiss this company's unmatched message (LP-1011). ``flush`` only.
+
+    REJECTED, an existing final state, with its company kept: routing never gives a rejected
+    unmatched message a company, so "rejected with a company and no file" means a person dismissed
+    it. It leaves the Inbox and stays in the table and the readonly view. No column records who; the
+    log line carries the user id, and `updated_at` is when. Same 404 rules and lock as Move to file.
+    """
+    message = (
+        await db.execute(
+            only_active(
+                select(InboundMessage)
+                .where(InboundMessage.id == message_id, InboundMessage.company_id == company_id)
+                .with_for_update(),
+                InboundMessage,
+            )
+        )
+    ).scalar_one_or_none()
+    if message is None:
+        return None
+    if message.routing_state is not InboundRoutingState.UNROUTED:
+        raise CannotAcceptError("Only an email not matched to a file can be dismissed.")
+    message.routing_state = InboundRoutingState.REJECTED
+    await db.flush()
+    logger.info(
+        "inbound_message_dismissed",
+        inbound_message_id=str(message.id),
+        actor_user_id=str(actor_user_id),
+    )
+    return message
+
+
 async def list_triage_queue(db: AsyncSession, *, company_id: UUID) -> list[InboundMessage]:
     """Messages for one company, and only that company.
 
@@ -626,7 +660,14 @@ async def list_triage_queue(db: AsyncSession, *, company_id: UUID) -> list[Inbou
             await db.execute(
                 only_active(
                     select(InboundMessage)
-                    .where(InboundMessage.company_id == company_id)
+                    .where(
+                        InboundMessage.company_id == company_id,
+                        # LP-1011 — a dismissed message (rejected, no file) leaves the Inbox.
+                        ~(
+                            (InboundMessage.routing_state == InboundRoutingState.REJECTED)
+                            & InboundMessage.loan_file_id.is_(None)
+                        ),
+                    )
                     .order_by(InboundMessage.created_at.desc()),
                     InboundMessage,
                 )
@@ -643,6 +684,7 @@ __all__ = [
     "CannotAcceptError",
     "accept_attachment",
     "attachment_preview",
+    "dismiss_unrouted_message",
     "forward_attachment_as_sheet",
     "list_file_messages",
     "list_triage_queue",

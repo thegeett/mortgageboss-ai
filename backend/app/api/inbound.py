@@ -41,6 +41,7 @@ from app.services.inbound_triage import (
     CannotAcceptError,
     accept_attachment,
     attachment_preview,
+    dismiss_unrouted_message,
     forward_attachment_as_sheet,
     list_file_messages,
     list_triage_queue,
@@ -151,7 +152,8 @@ def _message_public(
         is_auto_reply=message.is_auto_reply,
         from_address=None if unclaimed else message.from_address,
         subject=None if unclaimed else message.subject,
-        received_at=message.received_at,
+        # LP-1011 — when we received it, not the sender-written `Date` header (`message.received_at`).
+        received_at=message.created_at,
         auth_verdicts={k: str(v) for k, v in (message.auth_verdicts or {}).items()},
         attachments=[_attachment_public(a, redacted=unclaimed) for a in attachments],
         communication_id=communication.id if communication else None,
@@ -205,6 +207,30 @@ async def move_to_file(
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     if message is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No such message or loan file")
+    await db.commit()
+    return (await _messages_public(db, [message]))[0]
+
+
+@company_router.post("/messages/{message_id}/dismiss", response_model=InboundMessagePublic)
+async def dismiss(
+    message_id: UUID, db: DbSession, current_user: CurrentUser
+) -> InboundMessagePublic:
+    """Dismiss an unmatched email of this company (LP-1011): it leaves the Inbox.
+
+    The same 404 for another company's message as for one that does not exist; 409 when it is not an
+    unmatched email.
+    """
+    try:
+        message = await dismiss_unrouted_message(
+            db,
+            company_id=current_user.company_id,
+            message_id=message_id,
+            actor_user_id=current_user.id,
+        )
+    except CannotAcceptError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if message is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No such message")
     await db.commit()
     return (await _messages_public(db, [message]))[0]
 

@@ -814,8 +814,8 @@ _SEEDED_INGEST_KEYS = (_ROUTED_KEY, _QUARANTINED_KEY, _UNROUTED_KEY)
 
 
 async def _link_dev_mail_domain(db: AsyncSession, *, company: Company) -> bool:
-    """LP-991 — link the dev company to `mb-mail.localhost`, so its files have an address (with
-    FILE_ADDRESSES_ENABLED on). Returns whether it linked.
+    """LP-991 — link the dev company to `mb-mail.localhost`, so its files have an address.
+    Returns whether it linked.
 
     Only when the company has no row: a re-run must not undo a domain or an `--inactive` set since
     with `set_company_mail_domain`.
@@ -1094,7 +1094,7 @@ def _print_summary(
     state = "created" if company_created else "already existed"
     print("\n=== Dev seed complete (DEV-ONLY) ===")
     print(f"Company: {_COMPANY_NAME} (slug: {_COMPANY_SLUG}) [{state}]")
-    print(f"Mail domain: {_MAIL_DOMAIN} unless already linked (FILE_ADDRESSES_ENABLED shows them)")
+    print(f"Mail domain: {_MAIL_DOMAIN} unless already linked")
     print(f"Loan files seeded this run: {files_created} (re-runs skip existing)")
     print("  Incl. one file imported from MISMO (synthetic PII) — the LP-53 import path.")
     print("Inbound mail: three messages through the real ingest chain (routed / quarantined /")

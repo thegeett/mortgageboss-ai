@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
+import pytest
 import pytest_asyncio
 from app.core.database import get_db
 from app.main import app
@@ -90,6 +91,7 @@ def _auth(token: str) -> dict[str, str]:
 # --------------------------------------------------------------------------------------------- #
 # The gate, in both directions
 # --------------------------------------------------------------------------------------------- #
+@pytest.mark.skip(reason="Route B superseded (LP-1011): no ingest address without INBOX_DOMAIN")
 async def test_an_admin_connects_a_mailbox(client: AsyncClient, db: AsyncSession) -> None:
     _company, tokens = await _company_with_users(db, slug="acme")
     await db.commit()
@@ -199,6 +201,7 @@ async def test_the_raw_token_field_never_appears(client: AsyncClient, db: AsyncS
     assert resp.json()[0]["address"] == connection.get_ingest_address()
 
 
+@pytest.mark.skip(reason="Route B superseded (LP-1011): no ingest address without INBOX_DOMAIN")
 async def test_the_google_steps_say_admin_routing_rule_not_user_forward(
     client: AsyncClient, db: AsyncSession
 ) -> None:

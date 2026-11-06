@@ -477,18 +477,8 @@ module "compute" {
     S3_KMS_KEY_ID        = local.documents_kms_key_arn
     CORS_ALLOWED_ORIGINS = jsonencode(var.cors_allowed_origins)
 
-    # LP-802 — REQUIRED, and it must not be production's domain. The value is baked into
-    # every file's borrower inbox address, which is a bearer credential (ADR-397): a
-    # staging file advertising production's domain invites real borrower mail, and real
-    # documents, into the staging database. settings.inbox_domain DEFAULTS to production,
-    # so leaving this unset fails open rather than failing to start.
-    #
-    # LP-836 — the open failure is now caught where the address is composed:
-    # `LoanFile.get_inbox_address` raises when the domain is production's and ENVIRONMENT
-    # is not "production". So an unset value here is a loud failure on the first address
-    # rather than a silent one on every file. This line is still what supplies the right
-    # value; the guard only stops a missing one being invisible.
-    INBOX_DOMAIN = var.inbox_domain
+    # LP-1011 — INBOX_DOMAIN (LP-802/LP-836) removed: no setting reads it. A file's address is
+    # `lf-<display_id>@<the company's mail domain>`.
 
     # LP-827 — REQUIRED, and the app now refuses to start without it outside development.
     # `settings.upload_link_base_url` defaults to `http://localhost:3000` deliberately (a wrong
@@ -580,8 +570,7 @@ module "compute" {
       MAIL_BUCKET       = module.inbound_mail[0].bucket_name
       MAIL_KMS_KEY_ID   = module.inbound_mail[0].kms_key_arn
       INBOUND_QUEUE_URL = module.inbound_mail[0].queue_url
-      # LP-998 — only companies with an active mail domain get a file address; in staging that is only the test company.
-      FILE_ADDRESSES_ENABLED = "true"
+      # LP-1011 — FILE_ADDRESSES_ENABLED removed: a company with an `active` or `problem` mail domain has file addresses.
     } : {},
     var.outbound_mail_enabled ? {
       EVENTS_QUEUE_URL      = module.outbound_mail[0].events_queue_url

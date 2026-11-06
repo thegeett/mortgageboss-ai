@@ -318,10 +318,6 @@ module "compute" {
     AWS_REGION           = var.aws_region # boto3 clients with no explicit region; Fargate has no IMDS
     CORS_ALLOWED_ORIGINS = jsonencode(var.cors_allowed_origins)
 
-    # LP-802 — see the staging comment: unset means this environment advertises
-    # production's inbox domain, because that is settings.inbox_domain's default.
-    INBOX_DOMAIN = "imboxdev.mortgageboss.ai"
-
     # LP-827 — DELIBERATELY ABSENT HERE, unlike staging. This template has no `domain_name` variable
     # (it is a C4 addition staging carries and dev does not), so there is no public origin to build a
     # link from: a reference to one would not resolve.

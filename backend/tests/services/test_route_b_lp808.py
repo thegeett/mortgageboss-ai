@@ -20,6 +20,7 @@ from __future__ import annotations
 from datetime import timedelta
 from uuid import uuid4
 
+import pytest
 from app.models import Company, LoanProgram
 from app.models.base import utcnow
 from app.models.inbound_message import InboundMessage, InboundRoutingState
@@ -74,6 +75,7 @@ async def _arrived(db: AsyncSession, *, to: list[str], **overrides) -> InboundMe
 # --------------------------------------------------------------------------------------------- #
 # The inversion
 # --------------------------------------------------------------------------------------------- #
+@pytest.mark.skip(reason="Route B superseded (LP-1011): no ingest address without INBOX_DOMAIN")
 async def test_the_alias_resolves_to_its_own_company(db_session: AsyncSession) -> None:
     company = await _company(db_session, "acme")
     connection = await create_connection(db_session, company_id=company.id)
@@ -86,6 +88,7 @@ async def test_the_alias_resolves_to_its_own_company(db_session: AsyncSession) -
     assert resolved.company_id == company.id
 
 
+@pytest.mark.skip(reason="Route B superseded (LP-1011): no ingest address without INBOX_DOMAIN")
 async def test_every_failure_is_the_same_answer(db_session: AsyncSession) -> None:
     """FOUR REAL STATES, each built. A distinguishable answer tells a prober which token is worth
     another guess — and here a right guess reaches a whole company's triage queue, not one file."""
@@ -112,6 +115,7 @@ async def test_every_failure_is_the_same_answer(db_session: AsyncSession) -> Non
         assert await resolve_connection_by_address(db_session, address=address) is None
 
 
+@pytest.mark.skip(reason="Route B superseded (LP-1011): no ingest address without INBOX_DOMAIN")
 async def test_the_live_one_still_resolves(db_session: AsyncSession) -> None:
     """THE CONTROL. Without it the refusals above pass against a resolver that answers None always,
     which is the shape a broken allowlist takes."""
@@ -123,6 +127,7 @@ async def test_the_live_one_still_resolves(db_session: AsyncSession) -> None:
     ) is not None
 
 
+@pytest.mark.skip(reason="Route B superseded (LP-1011): no ingest address without INBOX_DOMAIN")
 async def test_the_lookup_is_case_insensitive(db_session: AsyncSession) -> None:
     """A relay may rewrite the local part. A case-sensitive lookup drops a company's mail on the
     floor for a reason nobody can see."""
@@ -152,6 +157,7 @@ async def test_a_file_address_does_not_resolve_as_a_connection(db_session: Async
 # --------------------------------------------------------------------------------------------- #
 # Attaching the company, and what it does not do
 # --------------------------------------------------------------------------------------------- #
+@pytest.mark.skip(reason="Route B superseded (LP-1011): no ingest address without INBOX_DOMAIN")
 async def test_a_forwarded_message_gets_its_company(db_session: AsyncSession) -> None:
     company = await _company(db_session, "forwarded")
     connection = await create_connection(db_session, company_id=company.id)
@@ -178,6 +184,7 @@ async def test_an_already_owned_message_is_left_alone(db_session: AsyncSession) 
     assert message.company_id == company.id
 
 
+@pytest.mark.skip(reason="Route B superseded (LP-1011): no ingest address without INBOX_DOMAIN")
 async def test_arrival_verifies_the_connection(db_session: AsyncSession) -> None:
     """§3: "the moment anything arrives at that address we flip it to verified". No button — one
     would let somebody mark a connection working before the admin had made the rule, and the banner

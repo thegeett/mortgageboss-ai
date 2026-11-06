@@ -383,7 +383,6 @@ async def _new_row(db: AsyncSession) -> tuple[Any, CompanyMailDomain]:
     return ready, row
 
 
-@pytest.mark.usefixtures("file_addresses_on")
 async def test_each_stage_with_the_fake_ends_active_with_an_address(
     db_session: AsyncSession,
 ) -> None:

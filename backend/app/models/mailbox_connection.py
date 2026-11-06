@@ -25,7 +25,6 @@ from uuid import UUID
 from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.config import settings
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
 from app.models.enums import str_enum
 from app.models.types import MEDIUM_STRING, SHORT_STRING
@@ -144,14 +143,11 @@ class MailboxConnection(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
 
     company: Mapped["Company"] = relationship()
 
-    def get_ingest_address(self) -> str:
-        """`co-<token>@<inbox domain>` — the address an admin routes mail to.
-
-        THE ONE ACCESSOR, on ADR-397's original reasoning (Route B, superseded): the token
-        field itself stays out of every response, and the capability is handed over in the one shape
-        that is meant to be handed over.
-        """
-        return f"co-{self.token}@{settings.inbox_domain}"
+    def get_ingest_address(self) -> str | None:
+        """Always None since LP-1011: Route B is superseded by `docs/email-communication/loan-email.md`
+        and its `co-<token>@<INBOX_DOMAIN>` address went with the `INBOX_DOMAIN` setting. Kept so the
+        Route B code still runs; its screen is hidden."""
+        return None
 
     def __repr__(self) -> str:
         return f"<MailboxConnection {self.kind} {self.status} company={self.company_id}>"

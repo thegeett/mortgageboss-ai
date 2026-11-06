@@ -33,7 +33,7 @@ OFF = "Sending email from the app isn't switched on for this company yet."
 
 
 @pytest.fixture(autouse=True)
-def _can_send(file_addresses_on: None, monkeypatch: pytest.MonkeyPatch) -> None:
+def _can_send(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "mail_transport", "smtp")
 
 
