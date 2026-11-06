@@ -171,7 +171,7 @@ An emailed attachment therefore exists twice: inside the raw email (evidence of 
 | LP-990 — scan-result delivery fix | ✅ **Done** 2026-10-21. Scan results now reach their queue; failures go to the DLQ and alarm |
 | Step 2 — Send | ✅ **Done** 2026-10-31. Proven in staging (LP-998): the test company MortgageBoss sends from `lf-…@mail.staging.mortgageboss.ai`; delivered and bounced show on the file. From display name fixed in LP-999 |
 | Step 3 — Tenant domain | ✅ **Done** 2026-11-04. Proven with `mb-mail.yadees.com` (GoDaddy) as test customer "Yadees Test Co": one command + one NS record → active in about 13 minutes; real email delivered, signed by the customer subdomain; a removed NS record paused Send at the next hourly check and recovery came back the same way. Runbook in §15b LP-1007 |
-| Step 4 — Receive | In progress: LP-1008 ✅, LP-1009 ✅ (code, not deployed); LP-1010–1012 to do (§15c) |
+| Step 4 — Receive | In progress: LP-1008 ✅, LP-1009 ✅, LP-1010 ✅ (code, not deployed); LP-1011–1012 to do (§15c) |
 | Steps 5–6 | Not started |
 
 **Until LP-989 and step 2 are done:** the staging account can deliver real mail to anyone (production access is account-wide). Send test mail only to own inboxes or `success@ / bounce@ / complaint@simulator.amazonses.com`. No real borrower addresses.
@@ -220,7 +220,7 @@ Shared reputation: all tenants send through one SES account; one tenant's bounce
 
 **Reminder** — `Re:` on the original thread, processor CC'd. "Still waiting on: …", "We've received: … thank you", upload link, "if you've already sent it or need more time, just reply", footer: "automated reminder from ABC Mortgage's loan file system; replies go straight to Priya."
 
-**Forward of a plain reply** — From "John Smith via ABC Mortgage" `<lf-y36e@…>`, To `priya@abcmortgage.com`, subject unchanged, original body and attachments, Reply-To = John + file address, one-line header: "Reply from John Smith on LF-Y36E — reply normally, or open the file."
+**Forward of a plain reply** — From "John Smith via ABC Mortgage" `<lf-y36e@…>`, To `priya@abcmortgage.com`, subject unchanged, original body and attachments, Reply-To = John + file address, one-line header: "Reply from John Smith on LF-Y36E — reply normally, or open the file." *(As built in LP-1010: no attachments; first line "Reply from John Smith on LF-Y36E. Reply normally, or open the file: <link>", last line "N attachments are on the file: <link>"; marked automatic so out-of-office replies don't fire.)*
 
 None contain rates, amounts or account numbers. *(The pre-send check was dropped 10-30; see rule 5.)*
 
@@ -826,23 +826,36 @@ Order: LP-1008 → 1009 → 1010 → 1011 → 1012. Each ticket writes `docs/tic
   - Capabilities are cached 5 minutes in the browser; logging in as another company in the same tab can show the wrong panel state briefly (data is still scoped). Later.
   - The Inbox link shows for companies with no domain (empty). Minor.
 
-### LP-1010 — Copy to the processor
+### LP-1010 — Copy to the processor — ✅ Done (code)
 - After a message is routed (and isn't an out-of-office, a delivery notice, or from our own forwarding): find the **last person who sent from the app on that file** (approver of the latest Send). None → no copy.
 - Skip if her address is already in To or Cc (reply-all already reached her), or she is the sender.
 - Send through the worker (LP-994 path): From `"<sender name> via <company>" <file address>`, To her, Reply-To the sender **and** the file address, subject unchanged, a one-line header ("Reply from <sender> on LF-Y36E — reply normally, or open the file: <link>"), the original text, and "N attachments are on the file" with the link. **No attachments.** A marker header so a copy is never copied again.
 - Recorded on the file like any outbound email.
 - **Done when:** in dev a borrower reply produces exactly one copy to the last sender; reply-all produces none; a file with no app sender produces none; a copy never triggers another copy.
+- **Result (2026-11-05):** `services/processor_copy.py`; the worker sends the copy right after saving the message (first insert only; never on Move to file or a redelivery). Recipient = approver of the latest Send on the file. Skipped (logged by code only) for: not routed, rejected, out-of-office, delivery notice, bulk, our own copy (`X-MortgageBoss-Copy`), no recipient, she sent it, she's in To/Cc, her address suppressed, and whenever the company can't send (the same `company_send_blocker` the Send button now uses). Reply-To = sender + file address (`build_mime` takes a list now). Link from `UPLOAD_LINK_BASE_URL`. Recorded as an activity entry ("A copy was emailed to …" / "Could not email a copy to …"), **not** an outbound email in the thread. No retry. Dev check: 1 copy for a plain reply; 0 for Cc, no app sender, out-of-office, our own copy. Tests 9701 passed. Details: `docs/tickets/LP-1010.md`.
+- **Open (from LP-1010's review) — proposed for LP-1011 (small, safety):**
+  - **Phishing via display name:** the copy's From name uses the stranger's own display name ("Summit IT Support – Password Reset via …") on a DKIM-signed email from our domain. Use the sender's **address** in the From name.
+  - **No limit on copies:** anyone who knows the file address can flood the processor (and our SES reputation). Cap per file (e.g. 1 per 5 minutes, 20 a day), skipped as `rate_limited`.
+  - **A line break in the subject or sender name breaks the copy.** Replace line breaks with spaces.
+  - **A Bcc'd processor gets a second copy.** Also check `envelope_recipients`.
+  - **A copy can go out for a deleted file.** Skip it.
+- **Open, later:** bounces/complaints about a copy aren't recorded (no outbound row), so a dead processor mailbox keeps receiving; a lost SES answer reads "Could not email a copy"; `Precedence: bulk` may push the copy to junk (check in LP-1012); the attachment count includes flagged files; not threaded in her mailbox; the send rules are checked by hand in a third place (`tasks/outbound.py`).
 
 ### LP-1011 — Clean up old settings
 - Remove `FILE_ADDRESSES_ENABLED`, `inbox_domain` / `INBOX_DOMAIN`, `PRODUCTION_INBOX_DOMAIN` from code, `.env.example`, staging and dev task env (small Terraform apply).
 - Hide the Route B (`FORWARDED_ALIAS`) connection screen; mark Route B docs superseded.
-- **Done when:** nothing reads the removed settings; `terraform plan` clean; addresses still show for companies with an active domain.
+- **Also (added 11-05, small fixes found in LP-1009/1010):**
+  - **Dismiss** for an unmatched email in the Inbox (spam to a made-up address).
+  - The document label's date = **arrival time**, not the sender's `Date` header.
+  - The processor copy: From name uses the sender's **address**, not their display name; a per-file cap on copies; line breaks in subject/name become spaces; Bcc'd processor (check `envelope_recipients`); skip a deleted file.
+- **Done when:** nothing reads the removed settings; `terraform plan` clean; addresses still show for companies with an active domain; each small fix has a test.
 
 ### LP-1012 — Prove step 4
 - Deploy. Test company Yadees Test Co (`mb-mail.yadees.com`).
 - From Gmail, reply to an app email with two PDFs → on the file within ~2 minutes, unread, verified badge; you get one copy (if you weren't on it); Preview and Accept make two labelled documents.
 - Reply-all → no copy. An email to a typo address → appears in Yadees Test Co's Inbox under "Not matched to a file" → Move to file puts it on the file.
 - Out-of-office reply → stored, not answered.
+- The copy: its activity entry is on the file; check whether it lands in the inbox or junk (`Precedence: bulk`); check a plain Reply from Gmail reaches both the borrower and the file address.
 - Alarms OK; DLQs 0.
 - **Done when:** every check passes.
 
@@ -859,6 +872,7 @@ Pre-send content check, revisited from `LP-996.md` (fix the misfires, or warn in
 
 ## 18. Log
 
+- 2026-11-05 — LP-1010 ✅ (code): processor copy of incoming mail (last app sender; skip rules; Reply-To sender + file; no attachments; activity entry). Five small safety fixes from its review moved into LP-1011 with Dismiss and arrival time.
 - 2026-11-05 — LP-1009 ✅ (code): incoming email on the Communication tab (unread, verified badge, open with text, Preview, Accept, labelled documents); unmatched mail to a company's own domain goes to its Inbox with Move to file (ADR-421); paused reason in the Send dialog.
 - 2026-11-04 — LP-1008 ✅ (code): reading on; file found by address from the envelope; mail-bucket reader fixed; reader saves before deleting; unmatched mail no longer visible across companies. Open decision: which company owns unmatched mail.
 - 2026-11-04 — Step 4 groomed into LP-1008–1012 (§15c). Decisions: copy goes to the last app sender on the file (none → no copy); find the file by address only, guesses off; several file addresses → unassigned; every attachment needs Preview + Accept; no automatic replies; the copy links to attachments instead of attaching them.
