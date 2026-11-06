@@ -96,6 +96,7 @@ Each loan file gets its own email address on the customer's domain. MortgageBoss
 | Automatic replies to borrowers | **Off in step 4** (the LP-815 "we received it" nudge stays unbuilt). Chasing comes with reminders in step 5 | 11-04 |
 | Attachments in the processor's copy | **Not attached; linked.** The copy carries the sender, subject and text, and says how many attachments are on the file with a link. Keeps the "no documents in outbound email" rule and the copy simple; she previews and accepts in the app. *(Changes the 10-17 "attachments included" wording)* | 11-04 |
 | Mail with no company | Shown to **no company** in the app (ADR-420, LP-1008): before, every company's triage list showed that unmatched mail existed (time, verdicts, attachment types). It stays in the table and in the internal readonly view | 11-04 |
+| Unmatched mail's company | Mail that matches no file goes to the company that owns the **domain it was delivered to** (`receipt.recipients`, `active` or `problem` domain), when every recipient domain belongs to exactly one company; it lands in that company's Inbox under "Not matched to a file", where **Move to file** places it. Otherwise (two companies, unknown domain) it stays internal only. Safe because each domain is unique to one company and SES says where it delivered (ADR-421, LP-1009) | 11-05 |
 | SES Message-ID | SES replaces our Message-ID with `<{SES MessageId}@email.amazonses.com>`; the id part equals `Communication.external_message_id`. Step 4's reply threading matches `In-Reply-To` / `References` on this, not on the id in the stored `.eml` (found in LP-998) | 10-31 |
 | Pre-send content check | **Deferred to a later iteration (2026-10-30)** — not rejected; v1 ships sending first and adds safeguards iteratively. Built in LP-996 and reverted. Measured, it blocked ordinary requests: every bank, investment or retirement statement request (catalog text says "the account number"), every borrower condition email ("The lender approved your loan with a few conditions"), title-commitment and wire-instruction requests to title companies, and any percentage ("100% of the gift funds"). For v1 the processor sends what she writes; AI drafts keep the drafter's guard. When it comes back, start from `docs/tickets/LP-996.md` (code, measurement and the misfire list) and fix the misfires first, or ship it as a warning rather than a block | 10-30 |
 | Not in v1 | Reading the processor's inbox (OAuth), automatic AI replies, automatic DNS tools (Entri / Domain Connect), lender portal integration, SES tenant management (revisit at ~10 tenants) | 10-17 |
@@ -170,7 +171,7 @@ An emailed attachment therefore exists twice: inside the raw email (evidence of 
 | LP-990 — scan-result delivery fix | ✅ **Done** 2026-10-21. Scan results now reach their queue; failures go to the DLQ and alarm |
 | Step 2 — Send | ✅ **Done** 2026-10-31. Proven in staging (LP-998): the test company MortgageBoss sends from `lf-…@mail.staging.mortgageboss.ai`; delivered and bounced show on the file. From display name fixed in LP-999 |
 | Step 3 — Tenant domain | ✅ **Done** 2026-11-04. Proven with `mb-mail.yadees.com` (GoDaddy) as test customer "Yadees Test Co": one command + one NS record → active in about 13 minutes; real email delivered, signed by the customer subdomain; a removed NS record paused Send at the next hourly check and recovery came back the same way. Runbook in §15b LP-1007 |
-| Step 4 — Receive | In progress: LP-1008 ✅ (code, not deployed); LP-1009–1012 to do (§15c) |
+| Step 4 — Receive | In progress: LP-1008 ✅, LP-1009 ✅ (code, not deployed); LP-1010–1012 to do (§15c) |
 | Steps 5–6 | Not started |
 
 **Until LP-989 and step 2 are done:** the staging account can deliver real mail to anyone (production access is account-wide). Send test mail only to own inboxes or `success@ / bounce@ / complaint@simulator.amazonses.com`. No real borrower addresses.
@@ -809,13 +810,21 @@ Order: LP-1008 → 1009 → 1010 → 1011 → 1012. Each ticket writes `docs/tic
   - Route B's admin screen is still live with nothing behind it — LP-1011 hides it.
   - Throughput 10 messages a minute; fine for the pilot.
 
-### LP-1009 — Show it on the file
+### LP-1009 — Show it on the file — ✅ Done (code)
 - Turn on `receiving` for companies with an active (or problem) mail domain: the messages panel shows on the Communication tab.
 - Unread mark until opened; verified / not verified badge from the stored DMARC verdict.
 - Each attachment: **Preview** (opens it in the app) and **Accept** (becomes a document, `BORROWER_INBOX`, labelled "Email · from <sender> · <date>", linked to the message).
 - The company's unassigned list reachable for its users, with "move to file".
 - From step 3: when Send is paused for a `problem` domain, the dialog says why.
 - **Done when:** in dev the email, badge, unread mark, Preview, Accept and label all show; the paused reason shows.
+- **Result (2026-11-05):** Communication tab shows incoming email for companies with an `active` or `problem` domain (new capability `inbox`, per company; the global `receiving` setting still gates upload links, unchanged). Each email: unread dot (cleared on open; "mark unread" works), "Verified sender" / "Not verified", **Open** shows its subject and text (re-read from the stored original each time; nothing copied), and per attachment **Preview** (first page as an image), **Accept** (→ document, "Added to documents" + View document) and Reject. Accepted documents show "Email · from <sender> · <date>", linking to the email. Inbox: unmatched mail of the company's own domain shows under "Not matched to a file" with **Move to file** (file picker by code or borrower name; signal `manual`). Send dialog shows the paused sentence for a `problem` domain. No migration. Dev check passed with screenshots. Tests: backend 9669, frontend 2472. Details: `docs/tickets/LP-1009.md`.
+- **Open (from LP-1009):**
+  - **Unmatched email can't be dismissed** — spam to a made-up address on the company's domain stays in its Inbox. Small: a Dismiss button. Proposed for LP-1011.
+  - **The label's date comes from the sender's own `Date` header.** Use the arrival time instead. Small; proposed for LP-1011.
+  - Preview shows the first page only (a 12-page statement can't be fully checked before Accept). Later.
+  - Opening an email marks it read through a GET; anything else that refetches an open email would mark it read again. Later.
+  - Capabilities are cached 5 minutes in the browser; logging in as another company in the same tab can show the wrong panel state briefly (data is still scoped). Later.
+  - The Inbox link shows for companies with no domain (empty). Minor.
 
 ### LP-1010 — Copy to the processor
 - After a message is routed (and isn't an out-of-office, a delivery notice, or from our own forwarding): find the **last person who sent from the app on that file** (approver of the latest Send). None → no copy.
@@ -832,7 +841,7 @@ Order: LP-1008 → 1009 → 1010 → 1011 → 1012. Each ticket writes `docs/tic
 ### LP-1012 — Prove step 4
 - Deploy. Test company Yadees Test Co (`mb-mail.yadees.com`).
 - From Gmail, reply to an app email with two PDFs → on the file within ~2 minutes, unread, verified badge; you get one copy (if you weren't on it); Preview and Accept make two labelled documents.
-- Reply-all → no copy. An email to a typo address → unassigned.
+- Reply-all → no copy. An email to a typo address → appears in Yadees Test Co's Inbox under "Not matched to a file" → Move to file puts it on the file.
 - Out-of-office reply → stored, not answered.
 - Alarms OK; DLQs 0.
 - **Done when:** every check passes.
@@ -850,6 +859,7 @@ Pre-send content check, revisited from `LP-996.md` (fix the misfires, or warn in
 
 ## 18. Log
 
+- 2026-11-05 — LP-1009 ✅ (code): incoming email on the Communication tab (unread, verified badge, open with text, Preview, Accept, labelled documents); unmatched mail to a company's own domain goes to its Inbox with Move to file (ADR-421); paused reason in the Send dialog.
 - 2026-11-04 — LP-1008 ✅ (code): reading on; file found by address from the envelope; mail-bucket reader fixed; reader saves before deleting; unmatched mail no longer visible across companies. Open decision: which company owns unmatched mail.
 - 2026-11-04 — Step 4 groomed into LP-1008–1012 (§15c). Decisions: copy goes to the last app sender on the file (none → no copy); find the file by address only, guesses off; several file addresses → unassigned; every attachment needs Preview + Accept; no automatic replies; the copy links to attachments instead of attaching them.
 - 2026-11-04 — **Step 3 done.** LP-1007 ✅ with `mb-mail.yadees.com`: setup to active in ~13 min, real email signed by the customer subdomain, NS removal paused Send within the hour and recovery the same. The 2-day delay feared in LP-1006 did not happen; the 3-of-4 nameserver blind spot is real and handled in the runbook. Onboarding runbook added (§15b).
