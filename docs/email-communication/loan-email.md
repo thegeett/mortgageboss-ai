@@ -88,7 +88,7 @@ Each loan file gets its own email address on the customer's domain. MortgageBoss
 | Manual-records fallback | **Not built unless the pilot needs it.** Ask pilot question 1 (who runs your DNS) first; build it only if their provider cannot add an NS record for a subdomain | 10-31 |
 | Domain self-test | **None.** "Active" = AWS has verified the domain (DKIM). The first real email is the test | 10-31 |
 | DMARC on customer subdomains | **`p=reject`, no report address (`rua`).** Every real email from the subdomain is ours and signed by SES, so it always passes; `p=reject` makes a forged `lf-…@mb-mail.<customer>` email (fake wire instructions) get refused, and never weakens a strict policy on the customer's own domain. No reports, so no extra record on `mortgageboss.ai`. Our own `mail.staging.mortgageboss.ai` is still `p=none`; tighten it later | 10-31 |
-| Company switches after step 3 | Domain **active** turns a company on: setup switches `sending_enabled` on automatically. The switch stays only as an emergency off for one company. A domain marked "problem" refuses Send whatever the switch says. `FILE_ADDRESSES_ENABLED` is removed in step 4 | 10-31 |
+| Company switches after step 3 | Domain **active** turns a company on: setup switches `sending_enabled` on automatically. The switch stays only as an emergency off for one company. A domain marked "problem" refuses Send whatever the switch says. `FILE_ADDRESSES_ENABLED` is removed in step 4 *(done, LP-1011)* | 10-31 |
 | Who gets the copy of an incoming email | The **last person who sent an email from the app on that file** (she was CC'd and is in the conversation). If nobody has sent from the app on that file yet, no copy is sent; the email shows on the file as unread. Loan files have no assigned processor | 11-04 |
 | Finding the file for an incoming email | **By address only** (`lf-<display_id>@<the file's company domain>`, from `receipt.recipients`). The four guesses (thread, footer tag, sender, subject) are off; their code stays. Anything the address doesn't match goes to the company's **unassigned** list for a person to place | 11-04 |
 | One email to several file addresses | Goes to **unassigned**; a person decides | 11-04 |
@@ -171,7 +171,7 @@ An emailed attachment therefore exists twice: inside the raw email (evidence of 
 | LP-990 — scan-result delivery fix | ✅ **Done** 2026-10-21. Scan results now reach their queue; failures go to the DLQ and alarm |
 | Step 2 — Send | ✅ **Done** 2026-10-31. Proven in staging (LP-998): the test company MortgageBoss sends from `lf-…@mail.staging.mortgageboss.ai`; delivered and bounced show on the file. From display name fixed in LP-999 |
 | Step 3 — Tenant domain | ✅ **Done** 2026-11-04. Proven with `mb-mail.yadees.com` (GoDaddy) as test customer "Yadees Test Co": one command + one NS record → active in about 13 minutes; real email delivered, signed by the customer subdomain; a removed NS record paused Send at the next hourly check and recovery came back the same way. Runbook in §15b LP-1007 |
-| Step 4 — Receive | In progress: LP-1008 ✅, LP-1009 ✅, LP-1010 ✅ (code, not deployed); LP-1011–1012 to do (§15c) |
+| Step 4 — Receive | In progress: LP-1008–1011 ✅ (code, not deployed); LP-1012 (prove) to do (§15c) |
 | Steps 5–6 | Not started |
 
 **Until LP-989 and step 2 are done:** the staging account can deliver real mail to anyone (production access is account-wide). Send test mail only to own inboxes or `success@ / bounce@ / complaint@simulator.amazonses.com`. No real borrower addresses.
@@ -676,7 +676,7 @@ Order: LP-991 → 992 → 993 → 994 → 995 → 996 → 997 → 998. Each tick
 - **Result:** Send in the Communication tab's message dialog, "From lf-…@… · CC you"; a refused Send shows the server's sentence. Status in plain words on the timeline and in the message: Queued, Sending, Sent, Delivered, "Failed: <reason>", "Not confirmed". After a Send the timeline re-checks every 30 seconds, three times. **Send shows only when all of these hold:** the file has an address (active domain and `FILE_ADDRESSES_ENABLED`), the company's new **sending switch** is on (`company_mail_domains.sending_enabled`, off by default, set with `app.scripts.set_email_sending <company> on`), the server has a mail sender (`MAIL_TRANSPORT`), and it is not a condition draft. **Condition page left out:** condition drafts keep "Mark as sent", and the API refuses a Send of one; it comes back as its own ticket. Dev check passed (Queued → Sent with no reload, Delivered, Failed with the reason, rate-limit refusal shown, Demo keeps the old buttons). Tests: frontend 2448, backend 9453. Details: `docs/tickets/LP-997.md`.
 - **Open (review, 2026-10-31):**
   - **The 1.5-minute "Not confirmed: check before sending again" label can invite a duplicate.** It is shown for any Send still `queued` or `sending` after 1.5 minutes, although the worker may still send it (re-enqueue every 5 minutes; the worker is off overnight). The rate limit blocks a resend for 5 minutes only. Fix: for a row that is merely still queued, say "Still sending — check back in a few minutes"; keep "Not confirmed: check before sending again" only for the server's own `Not confirmed` (an unknown SES outcome). One wording change.
-  - **Four things now gate Send** (domain status, `FILE_ADDRESSES_ENABLED`, `sending_enabled`, `MAIL_TRANSPORT`). The domain row already has `status` (`active`/`inactive`), which was meant to say whether a company sends; the new switch overlaps it. Simplify when step 3 builds onboarding: one company-level state, one server setting.
+  - **Four things now gate Send** (domain status, `FILE_ADDRESSES_ENABLED`, `sending_enabled`, `MAIL_TRANSPORT`). The domain row already has `status` (`active`/`inactive`), which was meant to say whether a company sends; the new switch overlaps it. Simplify when step 3 builds onboarding: one company-level state, one server setting. *(Three since LP-1011: domain status, `sending_enabled`, `MAIL_TRANSPORT`.)*
 
 ### LP-998 — Prove step 2 — ✅ Done
 - Deploy to staging. Test company only; recipients are your own Gmail and SES simulator addresses.
@@ -839,9 +839,10 @@ Order: LP-1008 → 1009 → 1010 → 1011 → 1012. Each ticket writes `docs/tic
   - **A line break in the subject or sender name breaks the copy.** Replace line breaks with spaces.
   - **A Bcc'd processor gets a second copy.** Also check `envelope_recipients`.
   - **A copy can go out for a deleted file.** Skip it.
+  - *(LP-1011: all done except the cap (deferred by decision) and Bcc — Bcc cannot be detected: the Bcc to her own mailbox never reaches SES, so a Bcc'd processor gets a second copy. She can filter on `X-MortgageBoss-Copy`.)*
 - **Open, later:** bounces/complaints about a copy aren't recorded (no outbound row), so a dead processor mailbox keeps receiving; a lost SES answer reads "Could not email a copy"; `Precedence: bulk` may push the copy to junk (check in LP-1012); the attachment count includes flagged files; not threaded in her mailbox; the send rules are checked by hand in a third place (`tasks/outbound.py`).
 
-### LP-1011 — Clean up old settings
+### LP-1011 — Clean up old settings — ✅ Done (code)
 - Remove `FILE_ADDRESSES_ENABLED`, `inbox_domain` / `INBOX_DOMAIN`, `PRODUCTION_INBOX_DOMAIN` from code, `.env.example`, staging and dev task env (small Terraform apply).
 - Hide the Route B (`FORWARDED_ALIAS`) connection screen; mark Route B docs superseded.
 - **Also (added 11-05, small fixes found in LP-1009/1010):**
@@ -849,6 +850,12 @@ Order: LP-1008 → 1009 → 1010 → 1011 → 1012. Each ticket writes `docs/tic
   - The document label's date = **arrival time**, not the sender's `Date` header.
   - The processor copy: From name uses the sender's **address**, not their display name; a per-file cap on copies; line breaks in subject/name become spaces; Bcc'd processor (check `envelope_recipients`); skip a deleted file.
 - **Done when:** nothing reads the removed settings; `terraform plan` clean; addresses still show for companies with an active domain; each small fix has a test.
+- **Result (2026-11-06):** `FILE_ADDRESSES_ENABLED`, `inbox_domain`/`INBOX_DOMAIN` and `PRODUCTION_INBOX_DOMAIN` removed (code, `.env.example`, staging task env, staging variable; dev edited and validated — never applied). A file has an address exactly when its company's domain is `active` or `problem`. Route B screen hidden (404, off the menu; code kept, 8 tests skipped); ADR-395 and the Phase 4 docs marked superseded. Fixes: **Dismiss** for unmatched email (state `rejected` with the company kept; staging had no older rows in that state); card and document label show **arrival time** (ingest time); copy From = **"<sender address> via <company>"**; line breaks in subject/name become spaces; no copy for a **deleted file**. **Bcc not fixable** (see LP-1010 note). Terraform: api 113, worker 113, migrate 154; plan clean after. Tests: backend 9704, frontend 2476. Details: `docs/tickets/LP-1011.md`.
+- **Open (from LP-1011):**
+  - **Subjects with accents or emoji show encoded on the email card** (`=?utf-8?q?…?=`): ingest stores the subject as written. Small fix: decode at ingest or on display. Proposed before the pilot.
+  - Arrival time is ingest time, not SES's receipt time (differs by the ingest lag; hours if the staging worker is off overnight).
+  - No undo for Dismiss; who dismissed is only in a log line.
+  - Route B's component, API and service remain with a null address; delete with Route B.
 
 ### LP-1012 — Prove step 4
 - Deploy. Test company Yadees Test Co (`mb-mail.yadees.com`).
@@ -872,6 +879,7 @@ Pre-send content check, revisited from `LP-996.md` (fix the misfires, or warn in
 
 ## 18. Log
 
+- 2026-11-06 — LP-1011 ✅ (code): old mail settings removed, Route B screen hidden, Dismiss, arrival time, copy From = sender address, line breaks, deleted file. Bcc found undetectable. Open: encoded subjects on the card.
 - 2026-11-05 — LP-1010 ✅ (code): processor copy of incoming mail (last app sender; skip rules; Reply-To sender + file; no attachments; activity entry). Five small safety fixes from its review moved into LP-1011 with Dismiss and arrival time.
 - 2026-11-05 — LP-1009 ✅ (code): incoming email on the Communication tab (unread, verified badge, open with text, Preview, Accept, labelled documents); unmatched mail to a company's own domain goes to its Inbox with Move to file (ADR-421); paused reason in the Send dialog.
 - 2026-11-04 — LP-1008 ✅ (code): reading on; file found by address from the envelope; mail-bucket reader fixed; reader saves before deleting; unmatched mail no longer visible across companies. Open decision: which company owns unmatched mail.
