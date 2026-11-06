@@ -7,7 +7,8 @@
  */
 import { apiClient } from "@/lib/api/client";
 import type { ConflictChoice } from "@/lib/api/draft-conflict";
-import { invalidateDraftViews } from "@/lib/api/draft-views";
+import { invalidateDraftViews, invalidateDraftViewsLocally } from "@/lib/api/draft-views";
+import { fileMessagesQueryKey } from "@/lib/api/inbound";
 import type { MessageDetail, OutboundDraft, SentCommunication } from "@/lib/types/communication";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
@@ -115,13 +116,28 @@ export function useAttachUploadLink(fileId: string, messageId: string) {
 }
 
 export function useMessageDetail(fileId: string, messageId: string | null) {
+  const queryClient = useQueryClient();
+  const queryKey = messageQueryKey(fileId, messageId ?? "");
   return useQuery({
-    queryKey: messageQueryKey(fileId, messageId ?? ""),
-    queryFn: async () =>
-      (await apiClient.get<MessageDetail>(`${API_V1}/loan-files/${fileId}/messages/${messageId}`))
-        .data,
+    queryKey,
+    queryFn: async () => {
+      const detail = (
+        await apiClient.get<MessageDetail>(`${API_V1}/loan-files/${fileId}/messages/${messageId}`)
+      ).data;
+      // LP-1009 — OPENING AN ARRIVED MESSAGE READS IT on the server. The server says when this
+      // request was the one that did, and only then are the lists showing it unread out of date.
+      if (detail.marked_read) {
+        invalidateDraftViewsLocally(queryClient, fileId);
+        void queryClient.invalidateQueries({ queryKey: fileMessagesQueryKey(fileId) });
+      }
+      return detail;
+    },
     enabled: Boolean(fileId) && Boolean(messageId),
     retry: noRetryOn404,
+    // LP-1009 — A REFETCH IS AN OPEN to the server, which marks the message read. Coming back to the
+    // browser tab is not opening it, and would undo a "mark unread" made while it was on screen.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 }
 

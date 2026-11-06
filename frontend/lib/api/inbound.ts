@@ -6,6 +6,7 @@
  * company reaches no company (LP-1008).
  */
 import { apiClient } from "@/lib/api/client";
+import { invalidateDraftViewsLocally } from "@/lib/api/draft-views";
 import { withWrongFileConfirmation } from "@/lib/api/wrong-file";
 import type { AcceptResult, InboundMessage } from "@/lib/types/inbound";
 import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -24,11 +25,7 @@ export const previewQueryKey = (fileId: string, attachmentId: string) =>
 const inboundPath = (fileId: string) => `${API_V1}/loan-files/${fileId}/inbound`;
 
 /**
- * True when nobody owns this message yet, so the sender's own words are not in it.
- *
- * Read off `loan_file_id` rather than off a null `from_address`, because a message genuinely CAN
- * arrive with no From header — a malformed one, or a bounce — and rendering that as "redacted for
- * your protection" would be a confident explanation of the wrong thing.
+ * True when this message matched no file. It can be moved to one from the Inbox (LP-1009).
  */
 export function unclaimed(message: InboundMessage): boolean {
   return message.loan_file_id === null;
@@ -52,6 +49,24 @@ export async function fetchTriageQueue(): Promise<InboundMessage[]> {
 
 export function useTriageQueue() {
   return useQuery({ queryKey: triageQueueQueryKey(), queryFn: fetchTriageQueue });
+}
+
+/** LP-1009 — move an unmatched email of this company to one of its files. */
+export function useMoveMessage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ messageId, fileId }: { messageId: string; fileId: string }) =>
+      (
+        await apiClient.post<InboundMessage>(`${API_V1}/inbound/messages/${messageId}/move`, {
+          file_identifier: fileId,
+        })
+      ).data,
+    onSuccess: (_message, { fileId }) => {
+      void queryClient.invalidateQueries({ queryKey: triageQueueQueryKey() });
+      void queryClient.invalidateQueries({ queryKey: fileMessagesQueryKey(fileId) });
+      invalidateDraftViewsLocally(queryClient, fileId);
+    },
+  });
 }
 
 /**

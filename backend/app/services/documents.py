@@ -38,6 +38,7 @@ from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
 from app.schemas.document import (
     DocumentDetailResponse,
+    DocumentEmailOrigin,
     DocumentResponse,
     ExtractionPublic,
     FieldScrutiny,
@@ -275,6 +276,34 @@ def _enrich(
     )
 
 
+async def _email_origins(
+    db: AsyncSession, documents: list[Document]
+) -> dict[UUID, DocumentEmailOrigin]:
+    """The email each emailed document came from, through `InboundAttachment.document_id` (LP-1009).
+
+    `received_at` is the message's own date, which can be absent, so the row's arrival stands in.
+    """
+    from app.models.inbound_attachment import InboundAttachment
+    from app.models.inbound_message import InboundMessage
+
+    ids = [d.id for d in documents if d.upload_source is UploadSource.BORROWER_INBOX]
+    if not ids:
+        return {}
+    rows = await db.execute(
+        select(InboundAttachment.document_id, InboundMessage)
+        .join(InboundMessage, InboundMessage.id == InboundAttachment.inbound_message_id)
+        .where(InboundAttachment.document_id.in_(ids))
+    )
+    return {
+        document_id: DocumentEmailOrigin(
+            inbound_message_id=message.id,
+            from_address=message.from_address,
+            received_at=message.received_at or message.created_at,
+        )
+        for document_id, message in rows.all()
+    }
+
+
 async def build_document_response(db: AsyncSession, *, document: Document) -> DocumentResponse:
     """Build one enriched response (fetches the current extraction + version count).
 
@@ -282,7 +311,9 @@ async def build_document_response(db: AsyncSession, *, document: Document) -> Do
     """
     extraction = await get_current_extraction(db, document=document)
     count = await version_count(db, document=document)
-    return _enrich(document, extraction, version_count=count)
+    response = _enrich(document, extraction, version_count=count)
+    response.email_origin = (await _email_origins(db, [document])).get(document.id)
+    return response
 
 
 async def build_document_detail(db: AsyncSession, *, document: Document) -> DocumentDetailResponse:
@@ -295,6 +326,7 @@ async def build_document_detail(db: AsyncSession, *, document: Document) -> Docu
         else {}
     )
     base = _enrich(document, extraction, version_count=count)
+    base.email_origin = (await _email_origins(db, [document])).get(document.id)
     return DocumentDetailResponse(
         **base.model_dump(),
         current_extraction=(
@@ -386,8 +418,11 @@ async def build_document_responses(
     loaded (``list_documents`` does)."""
     group_ids = {d.version_group_id for d in documents if d.version_group_id is not None}
     counts = await version_counts_for_group_ids(db, group_ids=group_ids)
+    origins = await _email_origins(db, documents)
     responses: list[DocumentResponse] = []
     for d in documents:
         count = counts.get(d.version_group_id, 1) if d.version_group_id is not None else 1
-        responses.append(_enrich(d, d.current_extraction, version_count=count))
+        response = _enrich(d, d.current_extraction, version_count=count)
+        response.email_origin = origins.get(d.id)
+        responses.append(response)
     return responses

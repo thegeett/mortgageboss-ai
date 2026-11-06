@@ -29,6 +29,8 @@ export interface InboundAttachment {
   disposition: Disposition;
   /** How deep inside forwarded messages this was found. 0 is the outer message. */
   nesting_depth: number;
+  /** LP-1009 — the document this attachment became, once accepted. */
+  document_id: string | null;
 }
 
 export interface InboundMessage {
@@ -51,6 +53,9 @@ export interface InboundMessage {
   /** SES's verdicts, verbatim. `GRAY` is not `PASS`. */
   auth_verdicts: Record<string, string>;
   attachments: InboundAttachment[];
+  /** LP-1009 — the timeline row, which is what opening this message opens. Null while on no file. */
+  communication_id: string | null;
+  unread: boolean;
 }
 
 export interface AcceptResult {

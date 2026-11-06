@@ -1,5 +1,6 @@
 "use client";
 
+import { emailOriginLabel } from "@/components/file/documents/email-origin";
 import { BoxOverlay } from "@/components/file/documents/reviewer/box-overlay";
 import { PageCanvas } from "@/components/file/documents/reviewer/page-canvas";
 import {
@@ -321,6 +322,12 @@ function Reviewer() {
                   <span className="block truncate">
                     {doc.standard_name || doc.original_filename}
                   </span>
+                  {/* Text, not a link: this row is itself a button. */}
+                  {doc.email_origin ? (
+                    <span className="block truncate text-xs font-normal text-muted-foreground">
+                      {emailOriginLabel(doc.email_origin)}
+                    </span>
+                  ) : null}
                   <StatusToken
                     meta={resolveStatus(DOCUMENT_STATUS, doc.status)}
                     variant="dot"

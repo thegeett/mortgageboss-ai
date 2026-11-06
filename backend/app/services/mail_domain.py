@@ -25,7 +25,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models.company_mail_domain import CompanyMailDomain, MailDomainStatus
+from app.models.company_mail_domain import (
+    RECEIVING_STATUSES,
+    CompanyMailDomain,
+    MailDomainStatus,
+)
 from app.models.loan_file import LoanFile
 from app.services.domain_provider import DomainProvider, DomainSetupError
 
@@ -81,6 +85,17 @@ async def file_address_and_sending(
     if row is None:
         return None, False
     return f"{loan_file.display_id.lower()}@{row.domain}", bool(row.sending_enabled)
+
+
+async def company_receives_mail(db: AsyncSession, company_id: UUID) -> bool:
+    """Whether this company has a mail domain that receives (`active` or `problem`, LP-1009)."""
+    found = await db.scalar(
+        select(CompanyMailDomain.id).where(
+            CompanyMailDomain.company_id == company_id,
+            CompanyMailDomain.status.in_(RECEIVING_STATUSES),
+        )
+    )
+    return found is not None
 
 
 async def file_address(db: AsyncSession, loan_file: LoanFile) -> str | None:

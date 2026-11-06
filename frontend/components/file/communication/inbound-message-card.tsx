@@ -1,6 +1,7 @@
 "use client";
 
 import { InboundAttachmentRow } from "@/components/file/communication/inbound-attachment";
+import { MoveToFile } from "@/components/file/communication/move-to-file";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +23,7 @@ import { getErrorMessage } from "@/lib/errors/api-error";
 import { messageTimeShort } from "@/lib/message-time";
 import type { ConditionRound } from "@/lib/types/conditions";
 import type { InboundMessage } from "@/lib/types/inbound";
+import { cn } from "@/lib/utils";
 import { Mail, MailQuestion, ShieldCheck, ShieldQuestion } from "lucide-react";
 import { useState } from "react";
 
@@ -30,7 +32,7 @@ import { useState } from "react";
  *
  * `GRAY` IS NOT `PASS`, and the badge must not round it to one. SES returns GRAY most often when a
  * message is signed by a domain that does not match `From:` — precisely the spoofing case — so it
- * reads as "not verified", the same as a failure, with the raw verdict beside it.
+ * reads as "Not verified", the same as a failure.
  */
 function AuthBadge({ verdicts }: { verdicts: Record<string, string> }) {
   const dmarc = (verdicts.dmarcVerdict ?? "").toUpperCase();
@@ -38,14 +40,14 @@ function AuthBadge({ verdicts }: { verdicts: Record<string, string> }) {
     return (
       <Badge className="gap-1 border-transparent bg-success/10 text-success hover:bg-success/10">
         <ShieldCheck className="h-3 w-3" aria-hidden />
-        Sender verified
+        Verified sender
       </Badge>
     );
   }
   return (
     <Badge className="gap-1 border-transparent bg-warning/10 text-warning hover:bg-warning/10">
       <ShieldQuestion className="h-3 w-3" aria-hidden />
-      {dmarc ? `Not verified (${dmarc})` : "Not verified"}
+      Not verified
     </Badge>
   );
 }
@@ -55,8 +57,8 @@ function AuthBadge({ verdicts }: { verdicts: Record<string, string> }) {
  * a processor about to accept a document wants to know it came to the file's own address, not that
  * a number was 1.0.
  *
- * EXACTLY THE RUNGS THAT EXIST. LP-805 built two — `inbox_token` and `thread_reference` — and the
- * first draft of this map had five, inventing copy for rungs 3 to 6 that no message can carry, and
+ * EXACTLY THE VALUES THAT EXIST. LP-805 built two — `inbox_token` and `thread_reference` — and LP-1009
+ * added `manual`. The first draft of this map had five, inventing copy for rungs 3 to 6 that no message can carry, and
  * spelling rung 2 `references`, which is not the value the server sends. The one real rung-2 message
  * would have fallen through to the generic fallback while the map looked complete.
  *
@@ -66,6 +68,7 @@ function AuthBadge({ verdicts }: { verdicts: Record<string, string> }) {
 export const SIGNAL_LABEL: Record<string, string> = {
   inbox_token: "Sent to this file's address",
   thread_reference: "A reply to a message we sent",
+  manual: "Moved to this file by a person",
 };
 
 function RoutingNote({ message }: { message: InboundMessage }) {
@@ -109,24 +112,28 @@ function receivedLabel(iso: string | null): string {
 /**
  * One message in the queue: who it is from, whether they authenticated, and what they attached.
  *
- * ACTIONS ONLY WHEN SOMEBODY OWNS IT. `onFile` is the loan file this card can accept into, and it
- * is null in the company-level queue — where the message has no file, the sender's words have been
- * stripped, and there is nothing to accept INTO. Passing the file down rather than reading it off
- * the message means the accept call is scoped by the route the caller is already on.
+ * `fileId` is the loan file this card can accept into, and it is null in the company-level queue,
+ * where there is nothing to accept INTO; an unmatched message offers Move to file there instead
+ * (LP-1009). Passing the file down rather than reading it off the message means the accept call is
+ * scoped by the route the caller is already on.
  */
 export function InboundMessageCard({
   message,
   fileId,
+  onOpen,
 }: {
   message: InboundMessage;
   /** The file whose page this is, or null in the company queue. */
   fileId: string | null;
+  /** Open this message's timeline row (LP-1009). Opening is what marks it read. */
+  onOpen?: (communicationId: string) => void;
 }) {
   const accept = useAcceptAttachment(fileId ?? "");
   const reject = useRejectAttachment(fileId ?? "");
   const useAsSheet = useForwardAttachmentAsSheet(fileId ?? "");
   const busy = accept.isPending || reject.isPending || useAsSheet.isPending;
-  const hidden = unclaimed(message);
+  const unmatched = unclaimed(message);
+  const communicationId = message.communication_id;
 
   /**
    * The file's rounds, for the two things S1-13 needs that an attachment cannot answer.
@@ -169,23 +176,39 @@ export function InboundMessageCard({
   }
 
   return (
-    <article className="flex flex-col gap-3 rounded-lg border border-input bg-card p-4">
+    <article
+      id={`email-${message.id}`}
+      className="flex scroll-mt-4 flex-col gap-3 rounded-lg border border-input bg-card p-4"
+    >
       <header className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex min-w-0 flex-col gap-1">
-          <p className="truncate text-sm font-medium text-foreground">
-            {hidden ? (
-              <span className="italic text-muted-foreground">Sender hidden until claimed</span>
-            ) : (
-              (message.from_address ?? "Sender unknown")
+          <p
+            className={cn(
+              "flex items-center gap-1.5 truncate text-sm text-foreground",
+              message.unread ? "font-semibold" : "font-medium",
             )}
+          >
+            {message.unread ? (
+              <span
+                role="img"
+                aria-label="Unread"
+                className="h-2 w-2 shrink-0 rounded-full bg-primary"
+              />
+            ) : null}
+            {message.from_address ?? "Sender unknown"}
           </p>
           <p className="truncate text-sm text-muted-foreground">
-            {hidden ? (
-              <span className="italic">Subject hidden until claimed</span>
-            ) : (
-              (message.subject ?? "No subject")
-            )}
+            {message.subject ?? "No subject"}
           </p>
+          {onOpen && communicationId ? (
+            <button
+              type="button"
+              className="w-fit text-xs text-primary underline underline-offset-2"
+              onClick={() => onOpen(communicationId)}
+            >
+              Open
+            </button>
+          ) : null}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           <AuthBadge verdicts={message.auth_verdicts} />
@@ -205,10 +228,13 @@ export function InboundMessageCard({
         ) : null}
       </div>
 
-      {hidden ? (
-        <p className="rounded border border-dashed border-input px-3 py-2 text-xs text-muted-foreground">
-          This message could not be matched to a loan file.
-        </p>
+      {unmatched && !fileId ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-dashed border-input px-3 py-2">
+          <p className="text-xs text-muted-foreground">
+            This email could not be matched to a loan file.
+          </p>
+          <MoveToFile messageId={message.id} />
+        </div>
       ) : null}
 
       {message.attachments.length > 0 ? (

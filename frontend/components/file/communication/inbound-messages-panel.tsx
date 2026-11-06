@@ -3,6 +3,7 @@
 import { InboundMessageCard } from "@/components/file/communication/inbound-message-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useFileMessages } from "@/lib/api/inbound";
+import { useEffect } from "react";
 
 /**
  * What arrived for this file (LP-807).
@@ -11,8 +12,22 @@ import { useFileMessages } from "@/lib/api/inbound";
  * asks for documents, then the documents come back. Two tabs would separate a request from its
  * reply, which is the one pairing this feature exists to keep together.
  */
-export function InboundMessagesPanel({ fileId }: { fileId: string }) {
+export function InboundMessagesPanel({
+  fileId,
+  onOpen,
+}: {
+  fileId: string;
+  /** Open this message's timeline row in the reading pane (LP-1009). */
+  onOpen?: (communicationId: string) => void;
+}) {
   const { data: messages, isPending, isError } = useFileMessages(fileId);
+
+  // LP-1009 — a document's "Email · from …" label links to `#email-<id>`, and this content arrives
+  // after the browser has looked for that anchor.
+  useEffect(() => {
+    if (!messages || !window.location.hash.startsWith("#email-")) return;
+    document.getElementById(window.location.hash.slice(1))?.scrollIntoView?.();
+  }, [messages]);
 
   if (isPending) {
     return <p className="text-sm text-muted-foreground">Loading what has arrived…</p>;
@@ -45,7 +60,12 @@ export function InboundMessagesPanel({ fileId }: { fileId: string }) {
         </p>
       </header>
       {messages.map((message) => (
-        <InboundMessageCard key={message.id} message={message} fileId={fileId} />
+        <InboundMessageCard
+          key={message.id}
+          message={message}
+          fileId={fileId}
+          {...(onOpen ? { onOpen } : {})}
+        />
       ))}
     </section>
   );

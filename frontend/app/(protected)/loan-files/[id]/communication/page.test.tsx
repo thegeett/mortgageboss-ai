@@ -13,7 +13,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockCapabilities = vi.fn(() => ({ data: { receiving: false, polish: false } }));
+const mockCapabilities = vi.fn(() => ({ data: { receiving: false, inbox: false, polish: false } }));
 const mockTimeline = vi.fn();
 const mockCompose = vi.fn();
 const mockSearchParams = vi.fn(() => new URLSearchParams());
@@ -509,14 +509,23 @@ describe("what the version cannot do", () => {
     expect(screen.getByTestId("rail")).toBeTruthy();
   });
 
-  it("shows them again when the version can receive", () => {
-    // THE POSITIVE CONTROL for both absences above.
-    mockCapabilities.mockReturnValue({ data: { receiving: true, polish: false } });
+  it("shows the upload link when the version can receive, and not the inbox (LP-1009)", () => {
+    mockCapabilities.mockReturnValue({ data: { receiving: true, inbox: false, polish: false } });
     entries([{ id: "d-1" }]);
     render(<CommunicationPage />);
 
     expect(screen.getByTestId("upload-link")).toBeTruthy();
+    expect(screen.queryByTestId("inbound")).toBeNull();
+  });
+
+  it("shows incoming mail when the company has a mail domain, and not the upload link", () => {
+    // THE POSITIVE CONTROL for the absences above. The two follow different switches.
+    mockCapabilities.mockReturnValue({ data: { receiving: false, inbox: true, polish: false } });
+    entries([{ id: "d-1" }]);
+    render(<CommunicationPage />);
+
     expect(screen.getByTestId("inbound")).toBeTruthy();
+    expect(screen.queryByTestId("upload-link")).toBeNull();
   });
 
   it("does not offer Write to another party", () => {

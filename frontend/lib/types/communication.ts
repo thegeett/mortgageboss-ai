@@ -109,6 +109,12 @@ export interface MessageDetail {
    * send itself (file address, company switched on for sending, a mail sender here, not a condition
    * draft). The same check the Send endpoint refuses on. */
   can_send: boolean;
+  /** LP-1009 — why Send is off, only when the company's domain is paused. */
+  send_blocked_reason?: string | null;
   /** LP-997 — when a person pressed Send; null for anything not sent from the app. */
   send_requested_at: string | null;
+  /** LP-1009 — a received email whose stored original could not be read. */
+  body_unavailable?: boolean;
+  /** LP-1009 — true only on the request that marked this message read. */
+  marked_read?: boolean;
 }

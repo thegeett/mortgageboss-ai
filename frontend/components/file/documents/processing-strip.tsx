@@ -1,5 +1,6 @@
 "use client";
 
+import { EmailOriginLink } from "@/components/file/documents/email-origin";
 import { StatusToken } from "@/components/status-token";
 import { currentDocuments, inFlightDocuments } from "@/lib/loan-files/documents";
 import { DOCUMENT_STATUS, resolveStatus } from "@/lib/status";
@@ -48,6 +49,10 @@ export function ProcessingStrip({ documents }: { documents: DocumentResponse[] }
           >
             <span className="min-w-0 flex-1 truncate text-sm text-foreground-2">
               {doc.standard_name || doc.original_filename}
+              {/* LP-1009 — an accepted email attachment is here first, while it is processed. */}
+              {doc.email_origin ? (
+                <EmailOriginLink fileId={doc.loan_file_id} origin={doc.email_origin} />
+              ) : null}
             </span>
             <StatusToken meta={resolveStatus(DOCUMENT_STATUS, doc.status)} className="shrink-0" />
           </li>

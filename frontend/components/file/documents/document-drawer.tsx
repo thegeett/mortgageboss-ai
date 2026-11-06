@@ -1,5 +1,6 @@
 "use client";
 
+import { EmailOriginLink } from "@/components/file/documents/email-origin";
 import { Button } from "@/components/ui/button";
 import { InlineErrorState } from "@/components/ui/error-state";
 import { SearchableSelect } from "@/components/ui/searchable-select";
@@ -527,6 +528,9 @@ function DrawerBody({
             {summary.processing_error}
           </p>
         )}
+        {summary.email_origin ? (
+          <EmailOriginLink fileId={fileId} origin={summary.email_origin} />
+        ) : null}
       </SheetHeader>
 
       <div className="flex-1 overflow-y-auto px-6 py-4">

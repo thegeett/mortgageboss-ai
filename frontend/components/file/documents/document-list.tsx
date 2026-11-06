@@ -1,5 +1,6 @@
 "use client";
 
+import { EmailOriginLink } from "@/components/file/documents/email-origin";
 import { StatusToken, railClass } from "@/components/status-token";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -103,6 +104,9 @@ export function DocumentRow({
             />
           ) : null}
         </span>
+        {document.email_origin ? (
+          <EmailOriginLink fileId={document.loan_file_id} origin={document.email_origin} />
+        ) : null}
         {/* Tier 2 (recognized) documents carry a short gist (LP-65). The mockup's
             table has no line for it; dropping a shipped signal to match a drawing
             is not a reason, so it stays as a quiet second line. */}

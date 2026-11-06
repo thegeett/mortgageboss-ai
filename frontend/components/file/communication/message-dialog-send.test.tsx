@@ -218,3 +218,19 @@ describe("message dialog: Send (LP-997)", () => {
     expect(screen.queryByText(/Not confirmed/)).toBeNull();
   });
 });
+
+describe("LP-1009 — why Send is paused", () => {
+  const PAUSED = "Email for this company is paused: its DNS setup changed. Contact support.";
+
+  it("shows the server's sentence when it gives one", () => {
+    mockUseMessageDetail.mockReturnValue(draft({ can_send: false, send_blocked_reason: PAUSED }));
+    render(<DraftPane fileId="LF-AB12" messageId="m1" onClose={vi.fn()} />);
+    expect(screen.getByText(PAUSED)).toBeTruthy();
+  });
+
+  it("shows nothing for any other reason Send is off", () => {
+    mockUseMessageDetail.mockReturnValue(draft({ can_send: false, send_blocked_reason: null }));
+    render(<DraftPane fileId="LF-AB12" messageId="m1" onClose={vi.fn()} />);
+    expect(screen.queryByText(/paused/)).toBeNull();
+  });
+});

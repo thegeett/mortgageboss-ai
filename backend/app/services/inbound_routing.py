@@ -1,11 +1,11 @@
-"""Deciding which loan file an inbound message belongs to (LP-805, LP-1008).
+"""Deciding which loan file an inbound message belongs to (LP-805, LP-1008, LP-1009).
 
 THIS MODULE CONTAINS THE ONE INVERSION OF THE TENANCY INVARIANT IN THE CODEBASE.
 
 Everywhere else, `company_id` comes from an authenticated user and a query is scoped to it before it
-runs. Here it comes from an EMAIL ADDRESS a stranger typed. `resolve_loan_file_by_address` starts
-from that address, finds a loan file, and the company is read OFF THE FILE — never from the message,
-never from the sender, never from a header.
+runs. Here it comes from an EMAIL ADDRESS a stranger typed. The company comes from the resolved file,
+or from the company's own mail domain the mail was delivered to (`company_from_delivered_domain`,
+LP-1009); never from headers or the sender.
 
 Nothing else in this codebase may do this. The execution protocol makes a second one a blocking
 finding, and the reason is that every other tenancy guarantee in the system is a consequence of
@@ -34,7 +34,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.models.company_mail_domain import CompanyMailDomain, MailDomainStatus
+from app.models.company_mail_domain import (
+    RECEIVING_STATUSES,
+    CompanyMailDomain,
+)
 from app.models.helpers import only_active
 from app.models.inbound_message import InboundMessage
 from app.models.loan_file import LoanFile
@@ -44,9 +47,6 @@ logger = get_logger(__name__)
 #: `lf-<code>`, lowercased: the file's `display_id` (`LF-XXXX`, `services/loan_file_ids.py`) as
 #: `services/mail_domain.file_address` writes it.
 _FILE_ADDRESS_LOCAL_PART = re.compile(r"^lf-[a-z0-9]+$")
-
-#: The domain states a file address still receives on. See `resolve_loan_file_by_address`.
-_RECEIVING_STATUSES = (MailDomainStatus.ACTIVE, MailDomainStatus.PROBLEM)
 
 
 class RoutingSignal(StrEnum):
@@ -60,6 +60,7 @@ class RoutingSignal(StrEnum):
     FOOTER_TAG = "footer_tag"  # rung 3 (LP-808)
     PARTICIPANT = "participant"  # rung 4 (LP-808)
     SUBJECT_REFERENCE = "subject_reference"  # rung 5 (LP-808)
+    MANUAL = "manual"  # a person moved it to the file (LP-1009)
 
 
 #: Rung confidences, from `phase4.md` §2.2. Stored so that confidence gates auto-acceptance.
@@ -74,6 +75,7 @@ _CONFIDENCE = {
     # forgeable, and this rung is reached precisely when nothing checkable matched.
     RoutingSignal.PARTICIPANT: 0.5,
     RoutingSignal.SUBJECT_REFERENCE: 0.5,
+    RoutingSignal.MANUAL: 1.0,
 }
 
 
@@ -127,7 +129,7 @@ async def resolve_loan_file_by_address(db: AsyncSession, *, address: str | None)
                     .where(
                         func.lower(LoanFile.display_id) == local,
                         CompanyMailDomain.domain == domain,
-                        CompanyMailDomain.status.in_(_RECEIVING_STATUSES),
+                        CompanyMailDomain.status.in_(RECEIVING_STATUSES),
                     ),
                     LoanFile,
                 )
@@ -522,53 +524,59 @@ async def attach_route_b_company(db: AsyncSession, *, message: InboundMessage) -
     return False
 
 
-async def apply_routing(db: AsyncSession, *, message: InboundMessage) -> RoutingOutcome:
-    """Route one message, record what happened, and open the correspondence record. ``flush`` only.
+async def company_from_delivered_domain(db: AsyncSession, message: InboundMessage) -> UUID | None:
+    """The one company owning every domain the message was delivered to, or None.
 
-    THE COMPANY IS READ OFF THE RESOLVED FILE. That is the invariant this whole module exists to keep
-    in one place: `message.company_id` is written here, from `loan_file.company_id`, and from nowhere
-    else.
+    SAFE BECAUSE OF TWO FACTS: a domain row belongs to one company (a unique column), and the domain
+    comes from `envelope_recipients`, where SES says it delivered, not from anything the sender wrote.
+
+    STRICT. A recipient on a domain with no row, or on one that is not receiving (`RECEIVING_STATUSES`,
+    the same states the file address and the `inbox` capability use), gives None, as do domains of
+    two companies: a message nobody can place on one company goes to no company.
     """
+    domains = {
+        recipient.strip().lower().rpartition("@")[2]
+        for recipient in message.envelope_recipients or ()
+    }
+    if not domains:
+        return None
+    rows = (
+        await db.execute(
+            select(CompanyMailDomain.domain, CompanyMailDomain.company_id).where(
+                CompanyMailDomain.domain.in_(domains),
+                CompanyMailDomain.status.in_(RECEIVING_STATUSES),
+            )
+        )
+    ).all()
+    companies: set[UUID] = {row.company_id for row in rows}
+    if {row.domain for row in rows} != domains or len(companies) != 1:
+        return None
+    return companies.pop()
+
+
+async def _record_arrival(
+    db: AsyncSession,
+    *,
+    message: InboundMessage,
+    loan_file: LoanFile,
+    summary: str,
+    disposition: Disposition,
+    reason: str,
+    actor_user_id: UUID | None = None,
+) -> None:
+    """The correspondence record and the activity entry for a message now on a file."""
     from app.models.activity_log import ActivityType
     from app.models.communication import (
         Communication,
         CommunicationDirection,
         CommunicationStatus,
     )
-    from app.models.inbound_message import InboundRoutingState
     from app.services.activity_log import log_activity
-
-    # Route B (`attach_route_b_company`, `record_original_hop`) is off by decision 11-04, address only.
-    outcome = await route_message(db, message=message)
-    disposition, reason = await decide_disposition(db, message=message, outcome=outcome)
-
-    message.routing_signal = outcome.signal.value if outcome.signal else None
-    message.routing_confidence = outcome.confidence
-
-    if outcome.loan_file is None:
-        message.routing_state = (
-            InboundRoutingState.REJECTED
-            if disposition is Disposition.REJECT
-            else InboundRoutingState.UNROUTED
-        )
-        # NO company_id. An unrouted message belongs to nobody yet, and guessing one from the sender
-        # is exactly the derivation this module exists to confine. No company's queue returns it
-        # (LP-1008).
-        await db.flush()
-        return outcome
-
-    message.company_id = outcome.loan_file.company_id
-    message.loan_file_id = outcome.loan_file.id
-    message.routing_state = {
-        Disposition.REJECT: InboundRoutingState.REJECTED,
-        Disposition.TRIAGE: InboundRoutingState.ROUTED,
-        Disposition.AUTO_ACCEPT: InboundRoutingState.ROUTED,
-    }[disposition]
 
     # The model and the enum value have both existed since LP-20 and have never been used.
     db.add(
         Communication(
-            loan_file_id=outcome.loan_file.id,
+            loan_file_id=loan_file.id,
             direction=CommunicationDirection.INBOUND,
             status=CommunicationStatus.RECEIVED,
             external_message_id=message.message_id,
@@ -587,9 +595,10 @@ async def apply_routing(db: AsyncSession, *, message: InboundMessage) -> Routing
     )
     await log_activity(
         db,
-        loan_file_id=outcome.loan_file.id,
+        loan_file_id=loan_file.id,
         activity_type=ActivityType.COMMUNICATION_RECEIVED,
-        summary="A message arrived for this file",
+        summary=summary,
+        actor_user_id=actor_user_id,
         detail={
             "inbound_message_id": str(message.id),
             "routing_signal": message.routing_signal,
@@ -597,6 +606,78 @@ async def apply_routing(db: AsyncSession, *, message: InboundMessage) -> Routing
             "disposition": disposition.value,
             "reason": reason,
         },
+    )
+
+
+async def move_message_to_file(
+    db: AsyncSession, *, message: InboundMessage, loan_file: LoanFile, actor_user_id: UUID
+) -> None:
+    """A person places an unrouted message on a file (LP-1009). ``flush`` only.
+
+    The caller has already checked that the message and the file are both the caller's company's.
+    """
+    from app.models.inbound_message import InboundRoutingState
+
+    message.loan_file_id = loan_file.id
+    message.routing_state = InboundRoutingState.ROUTED
+    message.routing_signal = RoutingSignal.MANUAL.value
+    message.routing_confidence = _CONFIDENCE[RoutingSignal.MANUAL]
+    await _record_arrival(
+        db,
+        message=message,
+        loan_file=loan_file,
+        summary="An unmatched email was moved to this file",
+        disposition=Disposition.TRIAGE,
+        reason="A person moved it to this file.",
+        actor_user_id=actor_user_id,
+    )
+    await db.flush()
+
+
+async def apply_routing(db: AsyncSession, *, message: InboundMessage) -> RoutingOutcome:
+    """Route one message, record what happened, and open the correspondence record. ``flush`` only.
+
+    THE COMPANY IS READ OFF THE RESOLVED FILE, or, for unmatched mail, off the company's own mail
+    domain it was delivered to. `message.company_id` is written here and from nowhere else.
+    """
+    from app.models.inbound_message import InboundRoutingState
+
+    # Route B (`attach_route_b_company`, `record_original_hop`) is off by decision 11-04, address only.
+    outcome = await route_message(db, message=message)
+    disposition, reason = await decide_disposition(db, message=message, outcome=outcome)
+
+    message.routing_signal = outcome.signal.value if outcome.signal else None
+    message.routing_confidence = outcome.confidence
+
+    if outcome.loan_file is None:
+        message.routing_state = (
+            InboundRoutingState.REJECTED
+            if disposition is Disposition.REJECT
+            else InboundRoutingState.UNROUTED
+        )
+        # Never guessed from the sender. Unmatched mail goes to the company owning the domain it was
+        # delivered to, or to no company, whose queue no one reads (LP-1008). A rejection stays
+        # with no company: there is nothing for a person to place.
+        if message.routing_state is InboundRoutingState.UNROUTED:
+            message.company_id = await company_from_delivered_domain(db, message)
+        await db.flush()
+        return outcome
+
+    message.company_id = outcome.loan_file.company_id
+    message.loan_file_id = outcome.loan_file.id
+    message.routing_state = {
+        Disposition.REJECT: InboundRoutingState.REJECTED,
+        Disposition.TRIAGE: InboundRoutingState.ROUTED,
+        Disposition.AUTO_ACCEPT: InboundRoutingState.ROUTED,
+    }[disposition]
+
+    await _record_arrival(
+        db,
+        message=message,
+        loan_file=outcome.loan_file,
+        summary="A message arrived for this file",
+        disposition=disposition,
+        reason=reason,
     )
     await db.flush()
     return outcome
@@ -608,7 +689,9 @@ __all__ = [
     "RoutingSignal",
     "apply_routing",
     "attach_route_b_company",
+    "company_from_delivered_domain",
     "decide_disposition",
+    "move_message_to_file",
     "record_original_hop",
     "resolve_loan_file_by_address",
     "route_message",

@@ -40,7 +40,7 @@ from app.models.inbound_attachment import (
     AttachmentSafetyState,
     InboundAttachment,
 )
-from app.models.inbound_message import InboundMessage
+from app.models.inbound_message import InboundMessage, InboundRoutingState
 from app.models.loan_file import LoanFile
 from app.services.activity_log import log_activity
 from app.services.documents import create_document
@@ -76,6 +76,27 @@ class AcceptResult:
     flagged_possible_duplicate: bool
 
 
+async def raw_message(message: InboundMessage) -> bytes:
+    """The stored `.eml`, FROM MAIL STORAGE, never the documents bucket (LP-1008).
+
+    A path naming any other bucket is refused rather than read with the wrong backend. Accept,
+    preview and the email's text (LP-1009) all read through here.
+    """
+    if not message.raw_storage_path:
+        raise CannotAcceptError("The original message is no longer available.")
+    path = message.raw_storage_path
+    if path.startswith("s3://"):
+        bucket, _, path = path.removeprefix("s3://").partition("/")
+        if bucket != settings.mail_bucket or not path:
+            raise CannotAcceptError("The original message is no longer available.")
+    try:
+        return await get_mail_storage().read(path)
+    except StorageError as exc:
+        # `StorageError` also covers a failed read, so the log says which one it was.
+        logger.warning("inbound_raw_message_unreadable", error_type=type(exc).__name__)
+        raise CannotAcceptError("The original message is no longer available.") from exc
+
+
 async def _attachment_bytes(db: AsyncSession, *, attachment: InboundAttachment) -> bytes:
     """The attachment's bytes, re-derived from the stored raw message.
 
@@ -83,27 +104,13 @@ async def _attachment_bytes(db: AsyncSession, *, attachment: InboundAttachment) 
     of a borrower's document is a second thing to secure, retain and destroy. Matched back by sha256,
     which is what that column is for — and which also means a message whose bytes have changed since
     ingest cannot silently supply different content than the one that was assessed.
-
-    FROM MAIL STORAGE, never the documents bucket (LP-1008). A path naming any other bucket is
-    refused rather than read with the wrong backend.
     """
     from app.services.inbound_mime import parse_message
 
     message = await db.get(InboundMessage, attachment.inbound_message_id)
-    if message is None or not message.raw_storage_path:
+    if message is None:
         raise CannotAcceptError("The original message is no longer available.")
-
-    path = message.raw_storage_path
-    if path.startswith("s3://"):
-        bucket, _, path = path.removeprefix("s3://").partition("/")
-        if bucket != settings.mail_bucket or not path:
-            raise CannotAcceptError("The original message is no longer available.")
-    try:
-        raw = await get_mail_storage().read(path)
-    except StorageError as exc:
-        # `StorageError` also covers a failed read, so the log says which one it was.
-        logger.warning("inbound_raw_message_unreadable", error_type=type(exc).__name__)
-        raise CannotAcceptError("The original message is no longer available.") from exc
+    raw = await raw_message(message)
 
     for parsed in parse_message(raw).attachments:
         if parsed.sha256 == attachment.sha256:
@@ -566,6 +573,46 @@ async def attachment_preview(db: AsyncSession, *, attachment: InboundAttachment)
     return render_preview_png(await _attachment_bytes(db, attachment=attachment))
 
 
+async def move_unrouted_message(
+    db: AsyncSession,
+    *,
+    company_id: UUID,
+    message_id: UUID,
+    file_identifier: str,
+    actor_user_id: UUID,
+) -> InboundMessage | None:
+    """Put this company's unrouted message on this company's file. ``flush`` only (LP-1009).
+
+    None when the message or the file is not this company's, or does not exist: the caller answers
+    404 for all of them, so the answer says nothing about another company's rows. Locked, so two
+    people moving one message cannot write two correspondence records.
+    """
+    from app.services.inbound_routing import move_message_to_file
+    from app.services.loan_files import get_loan_file
+
+    message = (
+        await db.execute(
+            only_active(
+                select(InboundMessage)
+                .where(InboundMessage.id == message_id, InboundMessage.company_id == company_id)
+                .with_for_update(),
+                InboundMessage,
+            )
+        )
+    ).scalar_one_or_none()
+    if message is None:
+        return None
+    if message.routing_state is not InboundRoutingState.UNROUTED:
+        raise CannotAcceptError("This message is already on a file.")
+    loan_file = await get_loan_file(db, company_id=company_id, identifier=file_identifier)
+    if loan_file is None:
+        return None
+    await move_message_to_file(
+        db, message=message, loan_file=loan_file, actor_user_id=actor_user_id
+    )
+    return message
+
+
 async def list_triage_queue(db: AsyncSession, *, company_id: UUID) -> list[InboundMessage]:
     """Messages for one company, and only that company.
 
@@ -599,5 +646,6 @@ __all__ = [
     "forward_attachment_as_sheet",
     "list_file_messages",
     "list_triage_queue",
+    "move_unrouted_message",
     "reject_attachment",
 ]

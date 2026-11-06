@@ -45,6 +45,8 @@ _UNGATED_BY_DESIGN: set[tuple[str, str]] = {
     # Company-level, not file-level: `list_triage_queue` scopes on the caller's company and returns
     # nothing else (LP-1008). A file gate here would have no id to scope and would hide the feature.
     ("GET", "/inbound/queue"),
+    # LP-1009: the message has no file until this runs. Both ids are scoped to the caller's company.
+    ("POST", "/inbound/messages/{message_id}/move"),
     # LP-925 (S3-11): a LENDER's condition settings — company-level configuration that reaches no
     # condition and no loan file, so no file/round/condition gate has anything to scope. Each handler
     # looks the lender up in the caller's company (`get_scoped_lender`) and answers 404 otherwise;
@@ -225,6 +227,7 @@ def test_an_exemption_actually_silences_the_check() -> None:
     without = _walk(set())
 
     queue = "[inbound-company] GET /inbound/queue (expected <none accepted>)"
+    move = "[inbound-company] POST /inbound/messages/{message_id}/move (expected <none accepted>)"
     settings = [
         f"[lender-condition-settings] {method} /lenders/{{lender_id}}/condition-settings "
         "(expected <none accepted>)"
@@ -234,7 +237,7 @@ def test_an_exemption_actually_silences_the_check() -> None:
     # Listed: silent. Unlisted: reported. Every entry is load-bearing, not decorative.
     assert with_exemptions == []
     assert queue in without, "emptying the list must surface the route the entry covers"
-    assert sorted(without) == sorted([queue, *settings]), (
+    assert sorted(without) == sorted([queue, move, *settings]), (
         "only the exempt routes should differ between the two walks"
     )
 

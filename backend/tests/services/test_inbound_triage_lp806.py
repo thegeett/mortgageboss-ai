@@ -427,7 +427,7 @@ async def test_an_unclaimed_message_carries_nothing_the_sender_wrote(
     scoped to their loan file". An unrouted message has no owning company and this route is not
     file-scoped, so that condition is not met and the field must not travel.
     """
-    from app.api.inbound import _message_public
+    from app.api.inbound import _messages_public
 
     stranger = Company(name="Stranger", slug=f"s-{uuid4().hex[:8]}")
     db_session.add(stranger)
@@ -455,7 +455,7 @@ async def test_an_unclaimed_message_carries_nothing_the_sender_wrote(
     )
     await db_session.flush()
 
-    public = await _message_public(db_session, message)
+    public = (await _messages_public(db_session, [message]))[0]
 
     # Nothing the sender wrote.
     assert public.from_address is None
@@ -473,7 +473,7 @@ async def test_an_unclaimed_message_carries_nothing_the_sender_wrote(
 async def test_a_claimed_message_is_returned_in_full(db_session: AsyncSession) -> None:
     """The control, and the one that matters: redacting everything would satisfy the test above
     while blinding a processor to their own file's mail."""
-    from app.api.inbound import _message_public
+    from app.api.inbound import _messages_public
 
     company = Company(name="Owner", slug=f"o-{uuid4().hex[:8]}")
     db_session.add(company)
@@ -501,7 +501,7 @@ async def test_a_claimed_message_is_returned_in_full(db_session: AsyncSession) -
     )
     await db_session.flush()
 
-    public = await _message_public(db_session, message)
+    public = (await _messages_public(db_session, [message]))[0]
 
     assert public.from_address == "jane.borrower@personal-email.com"
     assert public.subject == "Docs for 42 Maple Ave - Jane Borrower"

@@ -105,6 +105,14 @@ def _empty_staleness() -> StalenessInfo:
     return StalenessInfo(is_stale=False, kind=None, reason=None, resolution=None, as_of_date=None)
 
 
+class DocumentEmailOrigin(BaseModel):
+    """The email a document came from (LP-1009), for its label and the link back to the message."""
+
+    inbound_message_id: UUID
+    from_address: str | None
+    received_at: datetime
+
+
 class DocumentResponse(BaseModel):
     """An uploaded document's metadata (no ``storage_path``) + versioning/staleness."""
 
@@ -150,6 +158,8 @@ class DocumentResponse(BaseModel):
     version_count: int = 1
     # The email-ingest "possible duplicate" flag (surfaced gently). Default False.
     possible_duplicate: bool = False
+    #: LP-1009 — set for an accepted email attachment (`upload_source = borrower_inbox`).
+    email_origin: DocumentEmailOrigin | None = None
 
     # --- Staleness + package fitness (LP-71) — computed, deterministic -----------
     staleness: StalenessInfo = Field(default_factory=_empty_staleness)

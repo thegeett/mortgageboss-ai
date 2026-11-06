@@ -484,6 +484,20 @@ describe("DraftPane", () => {
     expect(screen.getByText("Who is $processor_name? I paid $10,000 <b>in cash</b>.")).toBeTruthy();
   });
 
+  it("says when a received email has no text, and when its text could not be read (LP-1009)", () => {
+    mockUseMessageDetail.mockReturnValue(state(detail({ direction: "inbound", body: "" })));
+    const { unmount } = render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    expect(screen.getByText("This email has no text.")).toBeTruthy();
+    unmount();
+
+    mockUseMessageDetail.mockReturnValue(
+      state(detail({ direction: "inbound", body: "", body_unavailable: true })),
+    );
+    render(<DraftPane fileId="LF-JR4T" messageId="m1" onClose={vi.fn()} />);
+    expect(screen.getByText("The email's text could not be read.")).toBeTruthy();
+    expect(screen.queryByText("This email has no text.")).toBeNull();
+  });
+
   it("shows what arrived, and what became of it", () => {
     // LP-859 §2 REVIEW — `pending`, WHICH IS WHAT THE SERVER ACTUALLY SENDS. This fixture said
     // `not_yet_accepted`, a value `AttachmentDisposition` has never had: the assertion below passed

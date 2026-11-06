@@ -5,6 +5,7 @@ import { useAttachmentPreview } from "@/lib/api/inbound";
 import type { InboundAttachment } from "@/lib/types/inbound";
 import { cn } from "@/lib/utils";
 import { FileText, ShieldAlert } from "lucide-react";
+import Link from "next/link";
 
 /** Bytes, in the units a person reads. */
 function humanSize(bytes: number): string {
@@ -38,6 +39,14 @@ function Thumbnail({
   const safe = attachment.safety_state === "safe";
   const { data: url, isPending } = useAttachmentPreview(fileId, attachment.id, safe);
 
+  // No file means no preview route (the Inbox page), so the query never runs and stays "pending".
+  if (safe && !fileId) {
+    return (
+      <div className="flex h-24 w-20 shrink-0 flex-col items-center justify-center gap-1 rounded border border-input bg-muted px-1 text-center">
+        <FileText className="h-5 w-5 text-muted-foreground" aria-hidden />
+      </div>
+    );
+  }
   if (!safe) {
     return (
       <div className="flex h-24 w-20 shrink-0 flex-col items-center justify-center gap-1 rounded border border-warning/40 bg-warning/5 px-1 text-center">
@@ -124,15 +133,19 @@ export function InboundAttachmentRow({
     Boolean(onUseAsConditionSheet) &&
     attachment.sniffed_content_type === "application/pdf";
   const name = attachment.filename_original ?? attachment.filename_normalized;
+  // LP-1009 — the same query the thumbnail ran. Null when it cannot be rendered or is not safe.
+  const { data: previewUrl } = useAttachmentPreview(
+    fileId,
+    attachment.id,
+    attachment.safety_state === "safe",
+  );
 
   return (
     <li className="flex items-start gap-3 rounded-lg border border-input bg-card p-3">
       <Thumbnail fileId={fileId} attachment={attachment} />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <p className="truncate text-sm font-medium text-foreground">
-          {/* An unclaimed message carries no filename at all — that is the redaction, not a file
-              with no name, and saying so is more honest than an empty line. */}
-          {name ?? <span className="italic text-muted-foreground">Name hidden until claimed</span>}
+          {name ?? <span className="italic text-muted-foreground">No file name</span>}
         </p>
         <p className="text-xs text-muted-foreground">
           {humanSize(attachment.size_bytes)}
@@ -150,6 +163,17 @@ export function InboundAttachmentRow({
         {decided ? (
           <p className={cn("text-xs font-medium", statusTone(attachment.disposition))}>
             {DISPOSITION_LABEL[attachment.disposition]}
+            {attachment.document_id && fileId ? (
+              <>
+                {" · "}
+                <Link
+                  href={`/loan-files/${fileId}/review?doc=${attachment.document_id}`}
+                  className="underline underline-offset-2"
+                >
+                  View document
+                </Link>
+              </>
+            ) : null}
           </p>
         ) : null}
         {usedAsRound ? (
@@ -165,8 +189,15 @@ export function InboundAttachmentRow({
           </p>
         ) : null}
       </div>
-      {canAccept || canUseAsSheet ? (
+      {canAccept || canUseAsSheet || previewUrl ? (
         <div className="flex shrink-0 flex-col gap-1">
+          {previewUrl ? (
+            <Button asChild size="sm" variant="outline">
+              <a href={previewUrl} target="_blank" rel="noreferrer">
+                Preview
+              </a>
+            </Button>
+          ) : null}
           {/* FIRST AND PRIMARY (S1-13), AND THAT ORDERING IS THE DECISION. A lender's approval
               letter is the one attachment a processor is most likely to be looking for, and
               "Accept" would file it as a borrower DOCUMENT — classified against a 166-type taxonomy
@@ -204,7 +235,7 @@ export function InboundAttachmentRow({
 }
 
 const DISPOSITION_LABEL: Record<string, string> = {
-  accepted: "Accepted onto this file",
+  accepted: "Added to documents",
   correspondence: "Kept as correspondence",
   rejected: "Rejected",
   duplicate: "Already on this file",

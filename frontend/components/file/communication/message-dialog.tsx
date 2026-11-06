@@ -745,6 +745,14 @@ export function DraftPane({
                   )}
                 </div>
               </div>
+            ) : data.direction === "inbound" && !data.body ? (
+              // LP-1009 — AN EMPTY BOX SAYS NOTHING. An email with only attachments and one whose
+              // stored original could not be read both arrive with no text; each gets its sentence.
+              <p className="text-sm text-muted-foreground">
+                {data.body_unavailable
+                  ? "The email's text could not be read."
+                  : "This email has no text."}
+              </p>
             ) : (
               // LP-844 — READ AS A LETTER, NOT AS A DUMP. This was a monospace `<pre>`, which is
               // part of why the message read as machine-generated: the product showed a business
@@ -833,6 +841,10 @@ export function DraftPane({
                     LP-997 — A FILE WITH ITS OWN ADDRESS GETS `Send` INSTEAD OF THE FIRST THREE: the
                     worker sends it From the file address with her in CC (LP-994). A file without
                     one keeps the three, because the app cannot send for it. */}
+                {/* LP-1009 — WHY SEND IS MISSING, only when the company's domain is paused. */}
+                {data.send_blocked_reason ? (
+                  <p className="text-sm text-warning">{data.send_blocked_reason}</p>
+                ) : null}
                 <div className="flex flex-wrap items-center gap-2">
                   {fileAddress ? (
                     <Button

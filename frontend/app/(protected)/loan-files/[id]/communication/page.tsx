@@ -58,7 +58,10 @@ const EMPTY_PANE =
 
 export default function CommunicationPage() {
   const { id } = useParams<{ id: string }>();
-  const receiving = useCapabilities().data?.receiving ?? false;
+  const capabilities = useCapabilities().data;
+  const receiving = capabilities?.receiving ?? false;
+  // LP-1009 — per company, and separate: `receiving` is the upload link, on a global switch.
+  const inbox = capabilities?.inbox ?? false;
 
   // THE FILE'S OWN TRUTH, not the rail's view of it. The list has status pills, so what it is
   // showing depends on which one is pressed — and "does this file have any drafts", which decides
@@ -344,11 +347,16 @@ export default function CommunicationPage() {
       {/* LP-857 — FLAGGED OUT, NOT DELETED. LP-815 and LP-807 are written, reviewed and tested, and
           they return in the phase that brings sending and receiving back. Their tests still run — a
           flag that rots is a deletion with extra steps. */}
-      {receiving ? (
-        <>
-          <UploadLinkPanel fileId={id} />
-          <InboundMessagesPanel fileId={id} />
-        </>
+      {receiving ? <UploadLinkPanel fileId={id} /> : null}
+      {inbox ? (
+        <InboundMessagesPanel
+          fileId={id}
+          onOpen={(communicationId) => {
+            setChosen(communicationId);
+            setClosed(false);
+            window.scrollTo?.({ top: 0 });
+          }}
+        />
       ) : null}
     </div>
   );

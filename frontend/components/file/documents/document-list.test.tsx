@@ -446,3 +446,53 @@ describe("the real row against the declared columns", () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 });
+
+const capabilities = vi.hoisted(() => ({ inbox: true }));
+vi.mock("@/lib/api/capabilities", () => ({
+  useCapabilities: () => ({ data: { inbox: capabilities.inbox } }),
+}));
+
+describe("LP-1009 — a document that came by email", () => {
+  afterEach(() => {
+    capabilities.inbox = true;
+  });
+  const origin = {
+    inbound_message_id: "m1",
+    from_address: "jane@borrower.example",
+    received_at: "2026-11-03T10:00:00Z",
+  };
+  const row = (document: DocumentResponse, onOpen = vi.fn()) => (
+    <table>
+      <tbody>
+        <DocumentRow document={document} onOpen={onOpen} onOpenDetails={vi.fn()} />
+      </tbody>
+    </table>
+  );
+
+  it("is labelled with its sender and date, linking to the email", () => {
+    render(row(doc({ upload_source: "borrower_inbox", email_origin: origin })));
+    const link = screen.getByRole("link", {
+      name: /Email · from jane@borrower\.example · 3 Nov 2026/,
+    });
+    expect(link.getAttribute("href")).toBe("/loan-files/f1/communication#email-m1");
+  });
+
+  it("opens the email, not the document, when the label is clicked", () => {
+    const onOpen = vi.fn();
+    render(row(doc({ upload_source: "borrower_inbox", email_origin: origin }), onOpen));
+    fireEvent.click(screen.getByRole("link", { name: /Email · from/ }));
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("is plain text when the Communication tab shows no emails", () => {
+    capabilities.inbox = false;
+    render(row(doc({ upload_source: "borrower_inbox", email_origin: origin })));
+    expect(screen.getByText(/Email · from jane@borrower\.example/)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Email · from/ })).toBeNull();
+  });
+
+  it("has no label when it did not come by email", () => {
+    render(row(doc()));
+    expect(screen.queryByText(/Email · from/)).toBeNull();
+  });
+});

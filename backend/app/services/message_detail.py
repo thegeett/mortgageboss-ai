@@ -32,6 +32,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging import get_logger
 from app.documents.catalog import ResponsibleParty
 from app.models.communication import (
     BodyFormat,
@@ -49,8 +50,10 @@ from app.services.email_draft import (
     party_for_draft_template,
 )
 from app.services.email_send import MAILTO_MAX_CHARS, build_outbound, transmit_blocker
-from app.services.mail_domain import file_address_and_sending
+from app.services.mail_domain import MAIL_DOMAIN_PAUSED, file_address_and_sending
 from app.services.timeline import TimelineAttachment, _attachment_manifest, _inbound_senders
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -120,9 +123,15 @@ class MessageDetail:
     #: draft the app can send itself: `email_send.transmit_blocker` found nothing, which is the same
     #: check the Send endpoint refuses on. False on everything else.
     can_send: bool = False
+    #: LP-1009 — why Send is off, ONLY when the company's domain is paused (LP-1006 Open 4). The other
+    #: reasons are not for a processor to act on, and the dialog already offers her own mail for them.
+    send_blocked_reason: str | None = None
     #: LP-997 — when a person pressed Send (LP-994's `send_requested_at`). The dialog re-checks for
     #: a while after it and then says "Not confirmed"; None for anything not sent from the app.
     send_requested_at: datetime | None = None
+    #: LP-1009 — True when a received email's stored original could not be read, so `body` is
+    #: empty because we could not read it, not because the sender wrote nothing.
+    body_unavailable: bool = False
 
 
 async def message_detail(
@@ -196,6 +205,24 @@ async def message_detail(
     else:
         body = message.body or ""
 
+    subject = message.subject
+    body_format = message.body_format.value
+    body_unavailable = False
+    if (
+        message.direction is CommunicationDirection.INBOUND
+        and message.inbound_message_id
+        and not message.body
+    ):
+        # LP-1009 — THE EMAIL'S OWN WORDS. The Communication row holds no subject or body (see
+        # `_record_arrival`); the subject is on the inbound row and the text is in the stored `.eml`,
+        # re-read on each open rather than copied into a second place. A row that does carry a body
+        # keeps it, and the text read here is always plain, whatever the row's column says.
+        stored_subject, body, body_unavailable = await _inbound_subject_and_text(
+            db, message.inbound_message_id
+        )
+        subject = message.subject or stored_subject
+        body_format = BodyFormat.PLAIN.value
+
     # LP-831 REVIEW — over the RESOLVED body, which is what a processor copies. Computing it from
     # the stored one would answer about text nobody sees.
     # LP-997 — one read of the company's mail-domain row, for the address and the Send check.
@@ -203,7 +230,7 @@ async def message_detail(
     outbound = build_outbound(
         loan_file,
         address=address_and_sending[0],
-        subject=message.subject or "",
+        subject=subject or "",
         body=body,
     )
 
@@ -227,23 +254,24 @@ async def message_detail(
         message.direction is CommunicationDirection.OUTBOUND
         and message.status is CommunicationStatus.DRAFT
     )
-    can_send = (
-        is_editable
-        and await transmit_blocker(
+    blocker = (
+        await transmit_blocker(
             db, loan_file=loan_file, draft=message, address_and_sending=address_and_sending
         )
-        is None
+        if is_editable
+        else None
     )
+    can_send = is_editable and blocker is None
     return MessageDetail(
         id=message.id,
         direction=message.direction.value,
         status=message.status.value,
-        subject=message.subject,
+        subject=subject,
         body=body,
         # LP-853 — WHICH LANGUAGE `body` IS IN, so the one editor can load it and the reader can
         # choose between rendering the plain form and showing the stored HTML. Derived from nothing:
         # it is the column, which is also LP-851's `body_edited`.
-        body_format=message.body_format.value,
+        body_format=body_format,
         counterparty=counterparty,
         template_key=message.template_key,
         template_version=message.template_version,
@@ -262,8 +290,42 @@ async def message_detail(
         mailto_available=outbound.mailto_available,
         mailto_max_chars=MAILTO_MAX_CHARS,
         can_send=can_send,
+        send_blocked_reason=blocker if blocker == MAIL_DOMAIN_PAUSED else None,
+        body_unavailable=body_unavailable,
         send_requested_at=message.send_requested_at,
     )
+
+
+async def _inbound_subject_and_text(
+    db: AsyncSession, inbound_message_id: UUID
+) -> tuple[str | None, str, bool]:
+    """A received email's subject, its text, and whether the text could not be read.
+
+    NEVER RAISES. A missing or unreadable original leaves the rest of the message (sender,
+    attachments) on screen with a sentence in place of the text, rather than a failed dialog.
+    """
+    from app.models.inbound_message import InboundMessage
+    from app.services.inbound_mime import body_text
+    from app.services.inbound_triage import CannotAcceptError, raw_message
+
+    inbound = await db.get(InboundMessage, inbound_message_id)
+    if inbound is None:
+        return None, "", True
+    try:
+        raw = await raw_message(inbound)
+    except CannotAcceptError:
+        return inbound.subject, "", True
+    except Exception as exc:
+        # Storage maps its own failures to `CannotAcceptError` above; anything else is unexpected,
+        # and still must not take the dialog down.
+        logger.warning("inbound_raw_message_unexpected_error", error_type=type(exc).__name__)
+        return inbound.subject, "", True
+    try:
+        return inbound.subject, body_text(raw), False
+    except Exception as exc:
+        # A malformed message must not take the dialog down; the type is logged, never the text.
+        logger.warning("inbound_body_unparseable", error_type=type(exc).__name__)
+        return inbound.subject, "", True
 
 
 def _party_of_draft(message: Communication) -> str | None:

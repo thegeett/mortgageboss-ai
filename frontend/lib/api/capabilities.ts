@@ -2,7 +2,7 @@ import { apiClient } from "@/lib/api/client";
 import { useQuery } from "@tanstack/react-query";
 
 /**
- * What this deployment can do (LP-857).
+ * What this deployment can do (LP-857), and whether the caller's company receives mail (LP-1009).
  *
  * READ FROM THE SERVER, NOT FROM A BUILD-TIME CONSTANT. The same flag decides whether the
  * Communication page offers the upload and inbound panels AND whether a generated request promises
@@ -12,11 +12,15 @@ import { useQuery } from "@tanstack/react-query";
  */
 export interface Capabilities {
   /**
-   * Both ways a document comes back IN: the secure upload link (LP-815) and inbound mail (LP-807).
-   * Off in v1 — *"No receiving, sending, secure upload link, reply email and all. We will do it in
-   * next phase."*
+   * The secure upload link (LP-815). Off in v1 — *"No receiving, sending, secure upload link, reply
+   * email and all. We will do it in next phase."*
    */
   receiving: boolean;
+  /**
+   * LP-1009 — incoming mail on the Communication tab: this company has a mail domain that receives.
+   * Separate from `receiving`, which also decides what a request promises a borrower.
+   */
+  inbox: boolean;
   /**
    * LP-858 §5 — whether ✦ polish is wired to anything (`email_draft_enabled`, off everywhere).
    *
@@ -57,7 +61,7 @@ export function useCapabilities() {
   return useQuery({
     queryKey: ["capabilities"],
     queryFn: fetchCapabilities,
-    // It changes on redeploy, never within a session.
-    staleTime: Number.POSITIVE_INFINITY,
+    // `inbox` follows the company's mail domain (LP-1009), which can change without a redeploy.
+    staleTime: 5 * 60 * 1000,
   });
 }

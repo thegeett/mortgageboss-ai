@@ -6,7 +6,10 @@
  * that skipped that would be the one outbound message in the product with no guardrails on it.
  */
 import { apiClient } from "@/lib/api/client";
+import { messageQueryKey } from "@/lib/api/communications";
 import { invalidateDraftViews } from "@/lib/api/draft-views";
+import { fileMessagesQueryKey } from "@/lib/api/inbound";
+import type { MessageDetail } from "@/lib/types/communication";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 const messagesPath = (fileId: string) => `/api/v1/loan-files/${fileId}/messages`;
@@ -115,6 +118,15 @@ export function useMarkRead(fileId: string) {
           read,
         })
       ).data,
-    onSuccess: () => invalidateTimeline(queryClient, fileId),
+    onSuccess: (summary, { communicationId }) => {
+      invalidateTimeline(queryClient, fileId);
+      void queryClient.invalidateQueries({ queryKey: fileMessagesQueryKey(fileId) });
+      // LP-1009 — THE OPEN MESSAGE'S COPY IS UPDATED IN PLACE, not refetched: a refetch is an open,
+      // and would mark it read again straight after "mark unread".
+      queryClient.setQueryData<MessageDetail>(
+        messageQueryKey(fileId, communicationId),
+        (previous) => (previous ? { ...previous, read_at: summary.read_at } : previous),
+      );
+    },
   });
 }

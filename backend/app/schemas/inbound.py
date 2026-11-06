@@ -29,6 +29,8 @@ class InboundAttachmentPublic(BaseModel):
     safety_reason: str | None
     disposition: str
     nesting_depth: int
+    #: LP-1009 — the document this attachment became, for "Added to documents" and its link.
+    document_id: UUID | None = None
 
 
 class InboundMessagePublic(BaseModel):
@@ -46,6 +48,16 @@ class InboundMessagePublic(BaseModel):
     received_at: datetime | None
     auth_verdicts: dict[str, str]
     attachments: list[InboundAttachmentPublic]
+    #: LP-1009 — this message's timeline row, which is what opening it opens, and whether anybody has
+    #: yet. None and False while it is on no file: the row is created when it reaches one.
+    communication_id: UUID | None = None
+    unread: bool = False
+
+
+class MoveMessageRequest(BaseModel):
+    """Which of the caller's company's files to move a message to: its id or display id."""
+
+    file_identifier: str = Field(min_length=1, max_length=64)
 
 
 class AcceptAttachmentRequest(BaseModel):

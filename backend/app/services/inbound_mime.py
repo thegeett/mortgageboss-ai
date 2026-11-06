@@ -178,10 +178,37 @@ def parse_message(raw: bytes) -> ParsedMessage:
     return ParsedMessage(attachments=tuple(unique), depth_limit_reached=truncated)
 
 
+def body_text(raw: bytes) -> str:
+    """What the sender wrote, as plain text, or "" when the message has no text part (LP-1009).
+
+    THE TOP-LEVEL BODY ONLY. `get_body` picks the text/plain part, or the text/html one when there is
+    no plain part, and does not go into a forwarded `message/rfc822`: a forward's own words are the
+    sender's, and the forwarded mail is an attachment. HTML becomes text here, so what reaches the
+    screen is always plain and is escaped there like every other plain body.
+    """
+    from app.services.outbound_mime import html_to_text
+
+    parsed = BytesParser(policy=policy.default).parsebytes(raw)
+    part = parsed.get_body(preferencelist=("plain", "html"))
+    if part is None or part.get_filename():
+        return ""
+    try:
+        content = part.get_content()
+    except (LookupError, UnicodeError):
+        payload = part.get_payload(decode=True)
+        content = payload.decode("utf-8", "replace") if isinstance(payload, bytes) else ""
+    if not isinstance(content, str):
+        return ""
+    if part.get_content_subtype() == "html":
+        content = html_to_text(content)
+    return content.strip()
+
+
 __all__ = [
     "MAX_NESTING_DEPTH",
     "ParsedAttachment",
     "ParsedMessage",
+    "body_text",
     "normalise_filename",
     "parse_message",
 ]

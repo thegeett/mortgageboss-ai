@@ -10,6 +10,8 @@ remains the only place that turns an address into a company; here the company co
 authenticated user, as it does everywhere else in the API.
 """
 
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Response, status
@@ -23,12 +25,17 @@ from app.schemas.inbound import (
     AcceptAttachmentResponse,
     InboundAttachmentPublic,
     InboundMessagePublic,
+    MoveMessageRequest,
     UseAsConditionSheetRequest,
     UseAsConditionSheetResponse,
 )
 from app.services.condition_enrich import RoundNotEnrichable
 from app.services.condition_rounds import ConditionSheetRejected
 from app.services.condition_wrong_file import WrongFileRefused
+
+if TYPE_CHECKING:
+    from app.models.communication import Communication
+
 from app.services.inbound_triage import (
     AcceptAs,
     CannotAcceptError,
@@ -38,6 +45,7 @@ from app.services.inbound_triage import (
     list_file_messages,
     list_triage_queue,
     merge_attachment_into_round,
+    move_unrouted_message,
     reject_attachment,
 )
 
@@ -70,28 +78,64 @@ def _attachment_public(
         safety_reason=attachment.safety_reason,
         disposition=attachment.disposition.value,
         nesting_depth=attachment.nesting_depth,
+        document_id=attachment.document_id,
     )
 
 
-async def _message_public(db: DbSession, message: InboundMessage) -> InboundMessagePublic:
+async def _messages_public(
+    db: DbSession, messages: Sequence[InboundMessage]
+) -> list[InboundMessagePublic]:
+    """Each message with its attachments and its Communication, in two queries for the whole list."""
+    from collections import defaultdict
+
     from sqlalchemy import select
 
+    from app.models.communication import Communication
     from app.models.helpers import only_active
 
-    attachments = (
-        (
-            await db.execute(
-                only_active(
-                    select(InboundAttachment).where(
-                        InboundAttachment.inbound_message_id == message.id
-                    ),
-                    InboundAttachment,
-                )
+    ids = [message.id for message in messages]
+    if not ids:
+        return []
+    attachments: defaultdict[UUID, list[InboundAttachment]] = defaultdict(list)
+    for attachment in (
+        await db.execute(
+            only_active(
+                select(InboundAttachment)
+                .where(InboundAttachment.inbound_message_id.in_(ids))
+                .order_by(InboundAttachment.created_at, InboundAttachment.id),
+                InboundAttachment,
             )
         )
-        .scalars()
-        .all()
-    )
+    ).scalars():
+        attachments[attachment.inbound_message_id].append(attachment)
+    communications: dict[UUID, Communication] = {
+        communication.inbound_message_id: communication
+        for communication in (
+            await db.execute(
+                only_active(
+                    select(Communication).where(Communication.inbound_message_id.in_(ids)),
+                    Communication,
+                )
+            )
+        ).scalars()
+        if communication.inbound_message_id is not None
+    }
+    return [
+        _message_public(
+            message,
+            attachments=attachments.get(message.id, []),
+            communication=communications.get(message.id),
+        )
+        for message in messages
+    ]
+
+
+def _message_public(
+    message: InboundMessage,
+    *,
+    attachments: Sequence[InboundAttachment],
+    communication: "Communication | None",
+) -> InboundMessagePublic:
     # A MESSAGE WITH NO COMPANY NEVER REACHES THIS FROM A ROUTE: `list_triage_queue` returns only the
     # caller's company's rows (LP-1008). Kept as a second lock, because the cost of being wrong is
     # one tenant reading another tenant's borrower's address, subject line and filenames, as was once
@@ -110,6 +154,8 @@ async def _message_public(db: DbSession, message: InboundMessage) -> InboundMess
         received_at=message.received_at,
         auth_verdicts={k: str(v) for k, v in (message.auth_verdicts or {}).items()},
         attachments=[_attachment_public(a, redacted=unclaimed) for a in attachments],
+        communication_id=communication.id if communication else None,
+        unread=communication is not None and communication.read_at is None,
     )
 
 
@@ -117,7 +163,7 @@ async def _message_public(db: DbSession, message: InboundMessage) -> InboundMess
 async def triage_queue(db: DbSession, current_user: CurrentUser) -> list[InboundMessagePublic]:
     """This company's mail, and no other company's. See `list_triage_queue`."""
     messages = await list_triage_queue(db, company_id=current_user.company_id)
-    return [await _message_public(db, message) for message in messages]
+    return await _messages_public(db, messages)
 
 
 @router.get("/messages", response_model=list[InboundMessagePublic])
@@ -132,7 +178,35 @@ async def file_messages(
     somebody owns them.
     """
     messages = await list_file_messages(db, loan_file=loan_file)
-    return [await _message_public(db, message) for message in messages]
+    return await _messages_public(db, messages)
+
+
+@company_router.post("/messages/{message_id}/move", response_model=InboundMessagePublic)
+async def move_to_file(
+    message_id: UUID,
+    payload: MoveMessageRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> InboundMessagePublic:
+    """Move an unmatched email of this company to one of this company's files (LP-1009).
+
+    The same 404 for another company's message or file as for one that does not exist; 409 when it
+    is already on a file.
+    """
+    try:
+        message = await move_unrouted_message(
+            db,
+            company_id=current_user.company_id,
+            message_id=message_id,
+            file_identifier=payload.file_identifier,
+            actor_user_id=current_user.id,
+        )
+    except CannotAcceptError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if message is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No such message or loan file")
+    await db.commit()
+    return (await _messages_public(db, [message]))[0]
 
 
 async def _scoped_attachment(

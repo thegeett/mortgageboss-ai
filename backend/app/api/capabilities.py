@@ -12,6 +12,10 @@ allowed. Preferences live on `/users/me/preferences` and permissions are decided
 that started meaning "this user may not" would be an authorisation check in the one place with no
 resource to check against.
 
+LP-1009 — `inbox` is the one exception to "what the server can do": it is a fact about the caller's
+company, read per request, because mail arrives per company. It is still a capability, not a
+permission: the inbound routes scope to the company whatever this says.
+
 It is authenticated like everything else. Nothing here is secret — a processor can see the same fact
 by looking at the page — but an unauthenticated route is a surface, and this one would exist only to
 save a header.
@@ -22,6 +26,8 @@ from pydantic import BaseModel
 
 from app.api.dependencies import CurrentUser
 from app.core.config import settings
+from app.core.database import DbSession
+from app.services.mail_domain import company_receives_mail
 
 router = APIRouter(tags=["capabilities"])
 
@@ -29,10 +35,13 @@ router = APIRouter(tags=["capabilities"])
 class Capabilities(BaseModel):
     """The switches a screen has to know about."""
 
-    #: LP-857 — both ways a document comes back IN: the secure upload link and inbound mail. Off in
-    #: v1, which is draft-only. The same value decides whether a request's closing sentence offers
-    #: an upload link, so the page and the email cannot disagree.
+    #: LP-857 — the secure upload link. Off in v1. The same value decides whether a request's closing
+    #: sentence offers an upload link, so the page and the email cannot disagree.
     receiving: bool
+    #: LP-1009 — incoming mail on the Communication tab: this company has a mail domain that receives
+    #: (`active` or `problem`). Separate from `receiving`, which must not change what borrowers are
+    #: promised.
+    inbox: bool
     #: LP-858 §5 — whether ✦ polish is wired to anything. `email_draft_enabled` is off in every
     #: environment, and the button was rendering and then refusing: *"Polish is not available on
     #: this environment."* That reads as breakage, and a processor cannot switch it on. Served here
@@ -42,6 +51,10 @@ class Capabilities(BaseModel):
 
 
 @router.get("/capabilities", response_model=Capabilities)
-async def get_capabilities(current_user: CurrentUser) -> Capabilities:
-    """What this deployment can do. Read from settings; nothing here is per-user."""
-    return Capabilities(receiving=settings.receiving_enabled, polish=settings.email_draft_enabled)
+async def get_capabilities(current_user: CurrentUser, db: DbSession) -> Capabilities:
+    """What this deployment can do, and whether the caller's company receives mail."""
+    return Capabilities(
+        receiving=settings.receiving_enabled,
+        inbox=await company_receives_mail(db, current_user.company_id),
+        polish=settings.email_draft_enabled,
+    )

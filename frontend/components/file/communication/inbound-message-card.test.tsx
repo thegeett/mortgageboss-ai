@@ -19,6 +19,11 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mockAccept = vi.fn();
+const mockMove = vi.fn();
+const mockPreview = vi.fn((): { data: string | null; isPending: boolean } => ({
+  data: null,
+  isPending: false,
+}));
 const mockReject = vi.fn();
 const mockUseAsSheet = vi.fn();
 
@@ -40,7 +45,8 @@ vi.mock("@/lib/api/inbound", async () => {
       isError: false,
       error: null,
     }),
-    useAttachmentPreview: () => ({ data: null, isPending: false }),
+    useAttachmentPreview: () => mockPreview(),
+    useMoveMessage: () => ({ mutate: mockMove, isPending: false, isError: false, error: null }),
   };
 });
 
@@ -88,6 +94,7 @@ const ATTACHMENT = {
   safety_reason: null,
   disposition: "pending" as const,
   nesting_depth: 0,
+  document_id: null,
 };
 
 const ROUTED = {
@@ -103,9 +110,11 @@ const ROUTED = {
   received_at: "2026-09-07T10:00:00Z",
   auth_verdicts: { dmarcVerdict: "PASS" },
   attachments: [ATTACHMENT],
+  communication_id: "comm-1",
+  unread: false,
 };
 
-/** The shape the server returns to a company that does not own the message. */
+/** This company's email that matched no file (LP-1009): its words are shown, it has no timeline row. */
 const UNCLAIMED = {
   ...ROUTED,
   id: "msg-2",
@@ -113,14 +122,13 @@ const UNCLAIMED = {
   routing_state: "unrouted" as const,
   routing_signal: null,
   routing_confidence: null,
-  from_address: null,
-  subject: null,
-  attachments: [{ ...ATTACHMENT, filename_original: null, filename_normalized: null }],
+  communication_id: null,
 };
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  mockPreview.mockReturnValue({ data: null, isPending: false });
 });
 
 describe("a message on its own file", () => {
@@ -172,16 +180,24 @@ describe("a message on its own file", () => {
   });
 });
 
-describe("a message nobody owns", () => {
-  it("says the sender and subject are hidden rather than leaving them blank", () => {
+describe("an email that matched no file", () => {
+  it("shows its sender, subject and file name to the company it belongs to", () => {
     render(<InboundMessageCard message={UNCLAIMED} fileId={null} />, { wrapper });
 
-    expect(screen.getByText("Sender hidden until claimed")).toBeDefined();
-    expect(screen.getByText("Subject hidden until claimed")).toBeDefined();
-    expect(screen.getByText("Name hidden until claimed")).toBeDefined();
-    // The sender's words are not on the page under any element.
-    expect(screen.queryByText(/personal-email\.com/)).toBeNull();
-    expect(screen.queryByText(/42 Maple Ave/)).toBeNull();
+    expect(screen.getByText("jane.borrower@personal-email.com")).toBeDefined();
+    expect(screen.getByText("Docs for 42 Maple Ave - Jane Borrower")).toBeDefined();
+    expect(screen.getByText("Jane_2024_tax_return.pdf")).toBeDefined();
+  });
+
+  it("offers Move to file, and only where it has no file", () => {
+    render(<InboundMessageCard message={UNCLAIMED} fileId={null} />, { wrapper });
+    expect(screen.getByRole("button", { name: "Move to file" })).toBeDefined();
+    cleanup();
+    render(<InboundMessageCard message={ROUTED} fileId={null} />, { wrapper });
+    expect(screen.queryByRole("button", { name: "Move to file" })).toBeNull();
+    cleanup();
+    render(<InboundMessageCard message={ROUTED} fileId="file-1" />, { wrapper });
+    expect(screen.queryByRole("button", { name: "Move to file" })).toBeNull();
   });
 
   it("offers no decision, because there is no file to accept into", () => {
@@ -197,9 +213,7 @@ describe("a message nobody owns", () => {
     expect(screen.queryByRole("button", { name: "Use as condition sheet" })).toBeNull();
   });
 
-  it("stays visible, with our own assessment of the bytes", () => {
-    // §2.2 — "confidence gates auto-acceptance, never visibility". The size and the safety state are
-    // ours, not the sender's, and they are what deciding whether to claim it actually requires.
+  it("says it is not matched", () => {
     render(<InboundMessageCard message={UNCLAIMED} fileId={null} />, { wrapper });
     expect(screen.getByText(/2 KB/)).toBeDefined();
     expect(screen.getByText("Not matched to a file")).toBeDefined();
@@ -298,7 +312,7 @@ describe("S1-13 — attach to the round already waiting, or start a new one", ()
 describe("the authentication badge", () => {
   it("verifies a DMARC pass", () => {
     render(<InboundMessageCard message={ROUTED} fileId="file-1" />, { wrapper });
-    expect(screen.getByText("Sender verified")).toBeDefined();
+    expect(screen.getByText("Verified sender")).toBeDefined();
   });
 
   it("does not verify GRAY", () => {
@@ -306,8 +320,8 @@ describe("the authentication badge", () => {
     const gray = { ...ROUTED, auth_verdicts: { dmarcVerdict: "GRAY" } };
     render(<InboundMessageCard message={gray} fileId="file-1" />, { wrapper });
 
-    expect(screen.queryByText("Sender verified")).toBeNull();
-    expect(screen.getByText("Not verified (GRAY)")).toBeDefined();
+    expect(screen.queryByText("Verified sender")).toBeNull();
+    expect(screen.getByText("Not verified")).toBeDefined();
   });
 
   it("does not verify a message with no verdict at all", () => {
@@ -337,11 +351,11 @@ describe("an attachment that is not safe", () => {
 });
 
 describe("the routing signal labels", () => {
-  it("covers exactly the rungs LP-805 built", () => {
+  it("covers exactly the values the server writes", () => {
     // The first draft of this map had five entries — copy for rungs 3 to 6, which no message can
     // carry — and spelled rung 2 `references` rather than `thread_reference`, so the one real
     // rung-2 message fell through to the fallback while the map looked complete.
-    expect(Object.keys(SIGNAL_LABEL).sort()).toEqual(["inbox_token", "thread_reference"]);
+    expect(Object.keys(SIGNAL_LABEL).sort()).toEqual(["inbox_token", "manual", "thread_reference"]);
   });
 
   it("falls back rather than printing a raw enum value for a rung added later", () => {
@@ -350,5 +364,56 @@ describe("the routing signal labels", () => {
 
     expect(screen.getByText("Matched to this file")).toBeDefined();
     expect(screen.queryByText(/some_future_rung/)).toBeNull();
+  });
+});
+
+describe("LP-1009 on the file", () => {
+  it("marks an unread message, and not a read one", () => {
+    render(<InboundMessageCard message={{ ...ROUTED, unread: true }} fileId="file-1" />, {
+      wrapper,
+    });
+    expect(screen.getByRole("img", { name: "Unread" })).toBeDefined();
+    cleanup();
+    render(<InboundMessageCard message={ROUTED} fileId="file-1" />, { wrapper });
+    expect(screen.queryByRole("img", { name: "Unread" })).toBeNull();
+  });
+
+  it("opens the message's timeline row", () => {
+    const onOpen = vi.fn();
+    render(<InboundMessageCard message={ROUTED} fileId="file-1" onOpen={onOpen} />, { wrapper });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(onOpen).toHaveBeenCalledWith("comm-1");
+  });
+
+  it("offers Preview when there is one to open, in a new tab", () => {
+    mockPreview.mockReturnValue({ data: "blob:preview-1", isPending: false });
+    render(<InboundMessageCard message={ROUTED} fileId="file-1" />, { wrapper });
+    const link = screen.getByRole("link", { name: "Preview" });
+    expect(link.getAttribute("href")).toBe("blob:preview-1");
+    expect(link.getAttribute("target")).toBe("_blank");
+  });
+
+  it("offers no Preview when the attachment cannot be rendered", () => {
+    render(<InboundMessageCard message={ROUTED} fileId="file-1" />, { wrapper });
+    expect(screen.queryByRole("link", { name: "Preview" })).toBeNull();
+  });
+
+  it("accepts from the panel", () => {
+    render(<InboundMessageCard message={ROUTED} fileId="file-1" />, { wrapper });
+    fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+    expect(mockAccept).toHaveBeenCalledWith({ attachmentId: "att-1" });
+  });
+
+  it("says Added to documents, with a link to that document, after Accept", () => {
+    const accepted = {
+      ...ROUTED,
+      attachments: [{ ...ATTACHMENT, disposition: "accepted" as const, document_id: "doc-1" }],
+    };
+    render(<InboundMessageCard message={accepted} fileId="file-1" />, { wrapper });
+    expect(screen.getByText(/Added to documents/)).toBeDefined();
+    expect(screen.getByRole("link", { name: "View document" }).getAttribute("href")).toBe(
+      "/loan-files/file-1/review?doc=doc-1",
+    );
+    expect(screen.queryByRole("button", { name: "Accept" })).toBeNull();
   });
 });

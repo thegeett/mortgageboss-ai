@@ -141,7 +141,7 @@ async def test_the_version_says_it_cannot_receive(client: AsyncClient, db: Async
     # LP-858 §5 added `polish`, from `email_draft_enabled` — off in every environment too, and for
     # its own reason. Asserted as a whole object rather than field by field, so a capability added
     # later has to be looked at here rather than appearing silently.
-    assert resp.json() == {"receiving": False, "polish": False}
+    assert resp.json() == {"receiving": False, "inbox": False, "polish": False}
     # THE DEFAULT IS THE PRODUCT, not a test convenience. Every other assertion in this file is
     # about the off state, so if the default flipped they would all be describing a configuration
     # nobody runs.
@@ -165,6 +165,7 @@ async def test_the_flag_is_reported_as_it_is_set(
 
     assert (await client.get("/api/v1/capabilities", headers=_auth(token))).json() == {
         "receiving": True,
+        "inbox": False,
         "polish": False,
     }
 
@@ -184,7 +185,7 @@ async def test_polish_is_reported_as_wired_only_when_the_flag_is_on(
 
     body = (await client.get("/api/v1/capabilities", headers=_auth(token))).json()
 
-    assert body == {"receiving": False, "polish": True}
+    assert body == {"receiving": False, "inbox": False, "polish": True}
     # THE DEFAULT IS THE PRODUCT. Every environment runs with this off, which is what makes hiding
     # the button the ordinary case rather than an edge.
     monkeypatch.undo()

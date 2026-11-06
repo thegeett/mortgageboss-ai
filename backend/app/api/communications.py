@@ -22,7 +22,7 @@ from app.api.dependencies import CurrentUser, ScopedLoanFile
 from app.core.config import settings
 from app.core.database import DbSession
 from app.documents.catalog import CATALOG
-from app.models.communication import Communication, CommunicationStatus
+from app.models.communication import Communication, CommunicationDirection, CommunicationStatus
 from app.schemas.communication import (
     DraftConflictPublic,
     OutboundDraftPublic,
@@ -494,8 +494,14 @@ class MessageDetailPublic(BaseModel):
     mailto_max_chars: int
     #: LP-997 — Send instead of copy / mail app / "Mark as sent"; see `MessageDetail.can_send`.
     can_send: bool
+    send_blocked_reason: str | None
     #: LP-997 — when a person pressed Send; None for anything not sent from the app.
     send_requested_at: datetime | None
+    #: LP-1009 — a received email whose stored original could not be read; see `MessageDetail`.
+    body_unavailable: bool = False
+    #: LP-1009 — True only on the request that marked this message read, so the screen refreshes
+    #: the lists showing it unread then, and not on every open.
+    marked_read: bool = False
 
 
 @message_router.post("/{communication_id}/upload-link", response_model=MessageDetailPublic)
@@ -570,6 +576,14 @@ async def read_message(
     )
     if detail is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No such message on this loan file")
+    # LP-1009 — OPENING AN ARRIVED MESSAGE READS IT, once. A person can put it back with `/read`.
+    read_at = detail.read_at
+    marked_read = detail.direction == CommunicationDirection.INBOUND.value and read_at is None
+    if marked_read:
+        read_at = (
+            await mark_read(db, loan_file=loan_file, communication_id=communication_id)
+        ).read_at
+        await db.commit()
     return MessageDetailPublic(
         id=detail.id,
         direction=detail.direction,
@@ -582,7 +596,7 @@ async def read_message(
         template_version=detail.template_version,
         created_at=detail.created_at,
         sent_at=detail.sent_at,
-        read_at=detail.read_at,
+        read_at=read_at,
         is_important=detail.is_important,
         error_detail=detail.error_detail,
         documents=list(detail.documents),
@@ -598,6 +612,9 @@ async def read_message(
         mailto_available=detail.mailto_available,
         mailto_max_chars=detail.mailto_max_chars,
         can_send=detail.can_send,
+        send_blocked_reason=detail.send_blocked_reason,
+        body_unavailable=detail.body_unavailable,
+        marked_read=marked_read,
         send_requested_at=detail.send_requested_at,
     )
 

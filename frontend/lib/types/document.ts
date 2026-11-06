@@ -28,6 +28,13 @@ export type DocumentCategory =
 
 export type UploadSource = "user_upload" | "borrower_inbox" | "mismo_import";
 
+/** LP-1009 — the email an accepted attachment came from. */
+export interface DocumentEmailOrigin {
+  inbound_message_id: string;
+  from_address: string | null;
+  received_at: string;
+}
+
 export type ExtractionStatus = "succeeded" | "failed" | "partial";
 
 /** The level-of-investment tier a document was handled as (LP-58). */
@@ -94,6 +101,7 @@ export interface DocumentResponse {
   version_count: number;
   /** The email-ingest "possible duplicate" flag (surfaced gently). */
   possible_duplicate: boolean;
+  email_origin?: DocumentEmailOrigin | null;
   // --- Staleness + package fitness (LP-71) ---
   staleness: StalenessInfo;
   package_fit: PackageFitness;

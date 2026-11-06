@@ -39,6 +39,10 @@ class MailDomainStatus(StrEnum):
     INACTIVE = "inactive"
 
 
+#: LP-1008 — the states a file address still receives on. `problem` pauses Send, not incoming mail.
+RECEIVING_STATUSES = (MailDomainStatus.ACTIVE, MailDomainStatus.PROBLEM)
+
+
 class CompanyMailDomain(Base, UUIDMixin, TimestampMixin):
     """The domain a company's file addresses are built on."""
 

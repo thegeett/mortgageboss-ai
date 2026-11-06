@@ -16931,3 +16931,27 @@ the caller's company's rows. The redaction stays as a second lock.
   the domain or the matched files is open (LP-1008, Open 1).
 
 *Status.* Accepted (LP-1008).
+
+## ADR-421
+
+**Unmatched mail belongs to the company that owns the domain it was delivered to.**
+
+*Context.* ADR-420 showed mail with no company to no company, which left a mistyped address or a two-file
+email reaching no processor. Decision 11-04 says these go to the company's unassigned list.
+
+*Decision.* When a message matches no file, and every envelope recipient's domain has a row that is
+receiving (`active` or `problem`, the same states the file address and the Inbox panel use), and those rows belong to exactly one company, the message gets that company, stays unrouted,
+and appears in that company's Inbox with its sender and subject. Otherwise it has no company, as in
+ADR-420. The company comes from the resolved file or from this rule, never from headers or the sender.
+
+*Why it is safe.* `company_mail_domains.domain` is unique, so a domain names one company. The domain comes
+from `receipt.recipients`, where SES says it delivered, not from anything the sender wrote.
+
+*Consequences.*
+- **Anyone can write to a company's domain**, so spam to a made-up address reaches that company's Inbox with
+  its sender and subject visible, like any shared inbox. Attachments cannot be opened or accepted until a
+  person moves it to a file.
+- **A rejected message (virus, DMARC reject) stays with no company.** There is nothing for a person to place.
+- Replaces the "reaches no processor yet" consequence of ADR-420; the rest of ADR-420 stands.
+
+*Status.* Accepted (LP-1009).
