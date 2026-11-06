@@ -836,3 +836,18 @@ async def test_lp1011_the_card_shows_when_we_received_it_not_the_date_header(
     ).json()
     expected = message.created_at.isoformat().replace("+00:00", "Z")
     assert listed[0]["received_at"] == expected
+
+
+async def test_lp1012_an_old_row_with_an_encoded_subject_shows_decoded(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Rows stored before LP-1012 kept the subject encoded; the card decodes it on the way out."""
+    a = await _company(db_session, "a")
+    message = await _arrive(db_session, [a.address()])
+    message.subject = "=?utf-8?q?Documentos_de_Jos=C3=A9?="
+    await db_session.commit()
+
+    listed = (
+        await client.get(f"/api/v1/loan-files/{a.files[0].id}/inbound/messages", headers=a.auth)
+    ).json()
+    assert listed[0]["subject"] == "Documentos de José"

@@ -28,6 +28,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 from email import policy
+from email.header import decode_header, make_header
 from email.message import MIMEPart
 from email.parser import BytesParser
 
@@ -178,6 +179,30 @@ def parse_message(raw: bytes) -> ParsedMessage:
     return ParsedMessage(attachments=tuple(unique), depth_limit_reached=truncated)
 
 
+#: Line breaks, tabs and other control characters (LP-1011).
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
+
+
+def one_line(text: str) -> str:
+    """`text` with every control character, a line break among them, as one space (LP-1011).
+    `build_mime` refuses a header with CR/LF, and a sender can put one in an encoded subject or name."""
+    return " ".join(_CONTROL.sub(" ", text).split())
+
+
+def decoded_header(text: str) -> str:
+    """RFC 2047 encoded words decoded, on one line (LP-1011; ingest's subject since LP-1012)."""
+    try:
+        # Raw 8-bit bytes (a subject sent unencoded) come back as `unknown-8bit`: read them as UTF-8,
+        # which is what senders use (LP-1012). Bytes that aren't UTF-8 fall to the `except`.
+        parts = [
+            (part, "utf-8" if cs == "unknown-8bit" else cs) for part, cs in decode_header(text)
+        ]
+        decoded = str(make_header(parts))
+    except (LookupError, UnicodeError, ValueError):  # an unknown charset: keep the text as sent
+        decoded = str(text)
+    return one_line(decoded)
+
+
 def body_text(raw: bytes) -> str:
     """What the sender wrote, as plain text, or "" when the message has no text part (LP-1009).
 
@@ -209,6 +234,8 @@ __all__ = [
     "ParsedAttachment",
     "ParsedMessage",
     "body_text",
+    "decoded_header",
     "normalise_filename",
+    "one_line",
     "parse_message",
 ]

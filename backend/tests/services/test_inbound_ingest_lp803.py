@@ -311,3 +311,53 @@ async def test_a_message_with_no_attachments_inventories_none(db_session: AsyncS
     )
     count = await db_session.scalar(select(func.count()).select_from(InboundAttachment))
     assert count == 0
+
+
+# --------------------------------------------------------------------------------------------- #
+# LP-1012 — the subject is stored decoded, on one line
+# --------------------------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    ("header", "stored"),
+    [
+        ("=?utf-8?q?Documentos_de_Jos=C3=A9?=", "Documentos de José"),
+        ("=?utf-8?b?RG9jcyDwn5OEIGF0dGFjaGVk?=", "Docs 📄 attached"),
+        ("Statements for March", "Statements for March"),
+        ("=?utf-8?q?Line_one=0D=0ALine_two?=", "Line one Line two"),
+    ],
+    ids=["accent", "emoji", "plain", "line-break"],
+)
+async def test_lp1012_the_subject_is_stored_decoded(
+    db_session: AsyncSession, header: str, stored: str
+) -> None:
+    raw = (
+        "From: Jane <jane@example.com>\r\nTo: lf-abc123@mail.example.com\r\n"
+        f"Subject: {header}\r\nMessage-ID: <s1@example.com>\r\n\r\nHello\r\n"
+    ).encode()
+    await ingest_raw_message(db_session, raw=raw, raw_storage_path=None, ses_message_id="ses-1")
+    row = (await db_session.execute(select(InboundMessage))).scalar_one()
+    assert row.subject == stored
+
+
+async def test_lp1012_no_subject_stays_none(db_session: AsyncSession) -> None:
+    raw = b"From: jane@example.com\r\nTo: lf-abc123@mail.example.com\r\n\r\nHello\r\n"
+    await ingest_raw_message(db_session, raw=raw, raw_storage_path=None, ses_message_id="ses-1")
+    row = (await db_session.execute(select(InboundMessage))).scalar_one()
+    assert row.subject is None
+
+
+@pytest.mark.parametrize(
+    ("subject", "stored"),
+    [(b"Documentos de Jos\xc3\xa9", "Documentos de José"), (b"Jos\xe9", "Jos�")],
+    ids=["utf-8", "not-utf-8"],
+)
+async def test_lp1012_an_unencoded_8bit_subject_is_stored(
+    db_session: AsyncSession, subject: bytes, stored: str
+) -> None:
+    """Sent as raw bytes rather than `=?…?=`. Before LP-1012 this crashed ingest (a `Header` object
+    reached the database); UTF-8 is read as UTF-8, anything else keeps a replacement character."""
+    raw = b"From: jane@example.com\r\nTo: lf-abc123@mail.example.com\r\nSubject: " + subject
+    await ingest_raw_message(
+        db_session, raw=raw + b"\r\n\r\nHello\r\n", raw_storage_path=None, ses_message_id="ses-1"
+    )
+    row = (await db_session.execute(select(InboundMessage))).scalar_one()
+    assert row.subject == stored

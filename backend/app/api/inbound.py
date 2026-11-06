@@ -36,6 +36,7 @@ from app.services.condition_wrong_file import WrongFileRefused
 if TYPE_CHECKING:
     from app.models.communication import Communication
 
+from app.services.inbound_mime import decoded_header
 from app.services.inbound_triage import (
     AcceptAs,
     CannotAcceptError,
@@ -151,7 +152,8 @@ def _message_public(
         is_dsn=message.is_dsn,
         is_auto_reply=message.is_auto_reply,
         from_address=None if unclaimed else message.from_address,
-        subject=None if unclaimed else message.subject,
+        # LP-1012 — decoded here too, for rows stored before ingest decoded it (a no-op on newer ones).
+        subject=None if unclaimed or message.subject is None else decoded_header(message.subject),
         # LP-1011 — when we received it, not the sender-written `Date` header (`message.received_at`).
         received_at=message.created_at,
         auth_verdicts={k: str(v) for k, v in (message.auth_verdicts or {}).items()},

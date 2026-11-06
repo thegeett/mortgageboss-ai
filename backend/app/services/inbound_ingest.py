@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.models.inbound_attachment import InboundAttachment
 from app.models.inbound_message import InboundMessage, InboundRoutingState
-from app.services.inbound_mime import parse_message
+from app.services.inbound_mime import decoded_header, parse_message
 from app.storage import get_mail_storage
 
 logger = get_logger(__name__)
@@ -234,7 +234,11 @@ async def ingest_raw_message(
         "from_address": next(iter(_addresses(parsed, "From")), None),
         "to_addresses": _addresses(parsed, "To") + _addresses(parsed, "Delivered-To"),
         "envelope_recipients": extract_envelope_recipients(receipt),
-        "subject": parsed.get("Subject"),
+        # LP-1012 — decoded and on one line, so the card shows "José", not `=?utf-8?q?Jos=C3=A9?=`.
+        # Rows stored before this keep the encoded form.
+        "subject": decoded_header(subject)
+        if (subject := parsed.get("Subject")) is not None
+        else None,
         "received_at": _received_at(parsed),
         "raw_storage_path": raw_storage_path,
         "auth_verdicts": extract_receipt_verdicts(receipt),

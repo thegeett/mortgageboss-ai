@@ -23,9 +23,7 @@ NOTHING HERE LOGS AN ADDRESS, A SUBJECT OR A BODY. Skips and failures log a code
 from __future__ import annotations
 
 import asyncio
-import re
 from email import policy
-from email.header import decode_header, make_header
 from email.message import Message
 from email.parser import BytesHeaderParser
 from email.utils import getaddresses
@@ -44,6 +42,7 @@ from app.models.inbound_attachment import InboundAttachment
 from app.models.inbound_message import InboundMessage, InboundRoutingState
 from app.models.loan_file import LoanFile
 from app.models.user import User
+from app.services.inbound_mime import decoded_header, one_line
 
 logger = get_logger(__name__)
 
@@ -88,25 +87,6 @@ def _normalised(address: str) -> str:
     return address.strip().lower()
 
 
-#: Line breaks, tabs and other control characters (LP-1011).
-_CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
-
-
-def _one_line(text: str) -> str:
-    """`text` with every control character, a line break among them, as one space (LP-1011).
-    `build_mime` refuses a header with CR/LF, and a sender can put one in an encoded subject or name."""
-    return " ".join(_CONTROL.sub(" ", text).split())
-
-
-def _decoded(text: str) -> str:
-    """RFC 2047 encoded words decoded, on one line. Ingest stores the subject as written, encoded."""
-    try:
-        decoded = str(make_header(decode_header(text)))
-    except (LookupError, UnicodeError, ValueError):  # an unknown charset: keep the text as sent
-        decoded = text
-    return _one_line(decoded)
-
-
 def _header_addresses(headers: Message, *names: str) -> set[str]:
     values: list[str] = []
     for name in names:
@@ -119,7 +99,7 @@ def _sender_name(headers: Message) -> str | None:
     names = [name for name, _ in getaddresses([str(v) for v in headers.get_all("From", [])])]
     if not names or not names[0].strip():
         return None
-    return _decoded(names[0]) or None
+    return decoded_header(names[0]) or None
 
 
 def copy_body(*, sender: str, display_id: str, link: str, text: str, attachment_count: int) -> str:
@@ -252,11 +232,11 @@ async def send_processor_copy(
         email = build_mime(
             # LP-1011 — THE ADDRESS, NOT THE DISPLAY NAME: a sender chooses their name, and this
             # email is signed by our domain. The body's first line keeps the name, as plain text.
-            from_name=_one_line(f"{sender_address} via {company.name if company else ''}"),
+            from_name=one_line(f"{sender_address} via {company.name if company else ''}"),
             from_address=file_address,
             to=recipient.email,
             reply_to=[sender_address, file_address],
-            subject=_decoded(message.subject or "") or "(no subject)",
+            subject=decoded_header(message.subject or "") or "(no subject)",
             body=copy_body(
                 sender=sender_label,
                 display_id=loan_file.display_id,
