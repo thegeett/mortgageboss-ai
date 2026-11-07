@@ -165,7 +165,8 @@ async def accept_attachment(
     The resulting document is INDISTINGUISHABLE FROM A MANUAL UPLOAD except for its `upload_source`
     and its null `uploaded_by_user_id` — same `create_document`, same storage path shape, same
     `PENDING` status, same processing pipeline. That is the ticket's acceptance criterion and it is
-    why this calls the existing service rather than building a parallel one.
+    why this calls the existing service rather than building a parallel one. The pipeline is queued
+    by the endpoint after its commit, not here (LP-1012: until then nothing queued it).
     """
     message = await db.get(InboundMessage, attachment.inbound_message_id)
     if message is None:

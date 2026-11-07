@@ -590,6 +590,78 @@ async def test_an_accepted_attachment_carries_its_email_in_list_and_detail(
         assert origin["received_at"] == message.created_at.isoformat().replace("+00:00", "Z")
 
 
+async def test_lp1012_accept_queues_the_document_for_processing(
+    client: AsyncClient, db_session: AsyncSession, _no_document_processing_queued: list[str]
+) -> None:
+    """Staging: two accepted PDFs stayed `pending`, never classified. Upload and the upload link
+    queue `process_document`; Accept did not."""
+    a = await _company(db_session, "a")
+    message = await _arrive(db_session, [a.address()])
+    attachment = await _attachment(db_session, message)
+    await db_session.commit()
+    url = f"/api/v1/loan-files/{a.files[0].id}/inbound/attachments/{attachment.id}/accept"
+
+    accepted = await client.post(url, headers=a.auth, json={})
+    assert accepted.status_code == 200, accepted.text
+    assert _no_document_processing_queued == [accepted.json()["document_id"]]
+
+    # Accepting it again is refused, and queues nothing more.
+    again = await client.post(url, headers=a.auth, json={})
+    assert again.status_code == 409
+    assert len(_no_document_processing_queued) == 1
+
+
+async def test_lp1012_accept_queues_after_its_commit(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Queued before the commit, the worker could look for a document that is not there yet."""
+    from app.tasks import document_processing
+
+    a = await _company(db_session, "a")
+    message = await _arrive(db_session, [a.address()])
+    attachment = await _attachment(db_session, message)
+    await db_session.commit()
+
+    events: list[str] = []
+    commit = db_session.commit
+
+    async def recorded_commit() -> None:
+        events.append("commit")
+        await commit()
+
+    monkeypatch.setattr(db_session, "commit", recorded_commit)
+    monkeypatch.setattr(
+        document_processing.process_document, "delay", lambda _id: events.append("queued")
+    )
+
+    accepted = await client.post(
+        f"/api/v1/loan-files/{a.files[0].id}/inbound/attachments/{attachment.id}/accept",
+        headers=a.auth,
+        json={},
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert events == ["commit", "queued"]
+
+
+async def test_lp1012_correspondence_is_not_queued(
+    client: AsyncClient, db_session: AsyncSession, _no_document_processing_queued: list[str]
+) -> None:
+    """Filed as correspondence there is no document, so nothing to process."""
+    a = await _company(db_session, "a")
+    message = await _arrive(db_session, [a.address()])
+    attachment = await _attachment(db_session, message)
+    await db_session.commit()
+
+    filed = await client.post(
+        f"/api/v1/loan-files/{a.files[0].id}/inbound/attachments/{attachment.id}/accept",
+        headers=a.auth,
+        json={"as_correspondence": True},
+    )
+    assert filed.status_code == 200, filed.text
+    assert filed.json()["document_id"] is None
+    assert _no_document_processing_queued == []
+
+
 async def test_a_manual_upload_has_no_email_origin(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:

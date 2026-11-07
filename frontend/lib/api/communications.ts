@@ -8,7 +8,7 @@
 import { apiClient } from "@/lib/api/client";
 import type { ConflictChoice } from "@/lib/api/draft-conflict";
 import { invalidateDraftViews, invalidateDraftViewsLocally } from "@/lib/api/draft-views";
-import { fileMessagesQueryKey } from "@/lib/api/inbound";
+import { fileMessageDetailsQueryKey, fileMessagesQueryKey } from "@/lib/api/inbound";
 import type { MessageDetail, OutboundDraft, SentCommunication } from "@/lib/types/communication";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
@@ -38,7 +38,7 @@ export async function fetchOutboundDraft(fileId: string): Promise<OutboundDraft 
 }
 
 export const messageQueryKey = (fileId: string, messageId: string) =>
-  ["message", fileId, messageId] as const;
+  [...fileMessageDetailsQueryKey(fileId), messageId] as const;
 
 /**
  * One message in full (LP-829) — the dialog's data.

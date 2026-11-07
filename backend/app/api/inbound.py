@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Response, status
 
 from app.api.dependencies import CurrentUser, ScopedLoanFile
 from app.core.database import DbSession
+from app.core.logging import get_logger
 from app.models.inbound_attachment import InboundAttachment
 from app.models.inbound_message import InboundMessage
 from app.schemas.inbound import (
@@ -53,6 +54,8 @@ from app.services.inbound_triage import (
 
 router = APIRouter(prefix="/loan-files/{file_identifier}/inbound", tags=["inbound"])
 company_router = APIRouter(prefix="/inbound", tags=["inbound"])
+
+logger = get_logger(__name__)
 
 _NOT_FOUND = HTTPException(
     status_code=status.HTTP_404_NOT_FOUND, detail="No such inbound attachment on this loan file"
@@ -295,6 +298,16 @@ async def attachment_preview_png(
     )
 
 
+def _enqueue_processing(document_id: UUID) -> None:
+    """Queue classification and extraction; a broker hiccup must not fail an accept that committed."""
+    try:
+        from app.tasks.document_processing import process_document
+
+        process_document.delay(str(document_id))
+    except Exception:
+        logger.warning("inbound_accept_enqueue_failed", document_id=str(document_id))
+
+
 @router.post("/attachments/{attachment_id}/accept", response_model=AcceptAttachmentResponse)
 async def accept(
     attachment_id: UUID,
@@ -318,6 +331,10 @@ async def accept(
     except CannotAcceptError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await db.commit()
+    if result.document is not None:
+        # LP-1012 — queued AFTER the commit, as upload and the upload link do. Without it an accepted
+        # attachment stayed `pending` and was never classified or read.
+        _enqueue_processing(result.document.id)
     return AcceptAttachmentResponse(
         document_id=result.document.id if result.document else None,
         disposition=result.attachment.disposition.value,

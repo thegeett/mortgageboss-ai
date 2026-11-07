@@ -8,6 +8,7 @@
 import { apiClient } from "@/lib/api/client";
 import { invalidateDraftViewsLocally } from "@/lib/api/draft-views";
 import { withWrongFileConfirmation } from "@/lib/api/wrong-file";
+import type { MessageDetail } from "@/lib/types/communication";
 import type { AcceptResult, InboundMessage } from "@/lib/types/inbound";
 import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
@@ -19,6 +20,27 @@ export const PREVIEW_KEY = "inbound-preview";
 
 export const fileMessagesQueryKey = (fileId: string) => ["inbound-messages", fileId] as const;
 export const triageQueueQueryKey = () => ["inbound-queue"] as const;
+/** Every message detail on this file: the prefix of `messageQueryKey`, which is built from it. */
+export const fileMessageDetailsQueryKey = (fileId: string) => ["message", fileId] as const;
+
+/**
+ * LP-1012 — an attachment's disposition shows in the open message ("What arrived"), so each action that
+ * changes one refreshes it. Accept left it saying "not yet accepted" until the page reloaded.
+ *
+ * ONLY A MESSAGE ALREADY READ. Fetching an unread one IS opening it (LP-1009): the server marks it read,
+ * so refreshing a message she just marked unread would undo her mark. That one shows the new
+ * disposition when she next opens it. A sent message or a draft is never read (`mark_read` refuses
+ * one), so it is not refreshed either; it has no attachments to show.
+ */
+export function refreshOpenMessages(queryClient: QueryClient, fileId: string): void {
+  void queryClient.invalidateQueries({
+    queryKey: fileMessageDetailsQueryKey(fileId),
+    predicate: (query) => {
+      const detail = query.state.data as MessageDetail | undefined;
+      return detail?.read_at != null;
+    },
+  });
+}
 export const previewQueryKey = (fileId: string, attachmentId: string) =>
   [PREVIEW_KEY, fileId, attachmentId] as const;
 
@@ -64,6 +86,7 @@ export function useMoveMessage() {
     onSuccess: (_message, { fileId }) => {
       void queryClient.invalidateQueries({ queryKey: triageQueueQueryKey() });
       void queryClient.invalidateQueries({ queryKey: fileMessagesQueryKey(fileId) });
+      refreshOpenMessages(queryClient, fileId);
       invalidateDraftViewsLocally(queryClient, fileId);
     },
   });
@@ -159,6 +182,7 @@ export function useAcceptAttachment(fileId: string) {
       ).data,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: fileMessagesQueryKey(fileId) });
+      refreshOpenMessages(queryClient, fileId);
       void queryClient.invalidateQueries({ queryKey: triageQueueQueryKey() });
       void queryClient.invalidateQueries({ queryKey: ["loan-file-documents", fileId] });
       void queryClient.invalidateQueries({ queryKey: ["loan-file-activity", fileId] });
@@ -229,6 +253,7 @@ export function useForwardAttachmentAsSheet(fileId: string) {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: fileMessagesQueryKey(fileId) });
+      refreshOpenMessages(queryClient, fileId);
       void queryClient.invalidateQueries({ queryKey: triageQueueQueryKey() });
       void queryClient.invalidateQueries({ queryKey: ["condition-rounds", fileId] });
       void queryClient.invalidateQueries({ queryKey: ["loan-file-activity", fileId] });
@@ -248,6 +273,7 @@ export function useRejectAttachment(fileId: string) {
       ).data,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: fileMessagesQueryKey(fileId) });
+      refreshOpenMessages(queryClient, fileId);
       void queryClient.invalidateQueries({ queryKey: triageQueueQueryKey() });
     },
   });
