@@ -171,7 +171,7 @@ An emailed attachment therefore exists twice: inside the raw email (evidence of 
 | LP-990 — scan-result delivery fix | ✅ **Done** 2026-10-21. Scan results now reach their queue; failures go to the DLQ and alarm |
 | Step 2 — Send | ✅ **Done** 2026-10-31. Proven in staging (LP-998): the test company MortgageBoss sends from `lf-…@mail.staging.mortgageboss.ai`; delivered and bounced show on the file. From display name fixed in LP-999 |
 | Step 3 — Tenant domain | ✅ **Done** 2026-11-04. Proven with `mb-mail.yadees.com` (GoDaddy) as test customer "Yadees Test Co": one command + one NS record → active in about 13 minutes; real email delivered, signed by the customer subdomain; a removed NS record paused Send at the next hourly check and recovery came back the same way. Runbook in §15b LP-1007 |
-| Step 4 — Receive | In progress: LP-1008–1011 ✅ (code, not deployed); LP-1012 (prove) to do (§15c) |
+| Step 4 — Receive | ✅ **Done** 2026-11-07. Proven in staging with Yadees + Gmail: a reply with two PDFs lands on its file within about a minute (verified, readable, accent intact); Preview + Accept make documents that are processed (W-2, bank statement); the processor's copy reaches the Gmail inbox (DMARC pass, `p=reject`); reply-all makes no copy; typo mail goes to the company Inbox and can be moved or dismissed |
 | Steps 5–6 | Not started |
 
 **Until LP-989 and step 2 are done:** the staging account can deliver real mail to anyone (production access is account-wide). Send test mail only to own inboxes or `success@ / bounce@ / complaint@simulator.amazonses.com`. No real borrower addresses.
@@ -852,12 +852,12 @@ Order: LP-1008 → 1009 → 1010 → 1011 → 1012. Each ticket writes `docs/tic
 - **Done when:** nothing reads the removed settings; `terraform plan` clean; addresses still show for companies with an active domain; each small fix has a test.
 - **Result (2026-11-06):** `FILE_ADDRESSES_ENABLED`, `inbox_domain`/`INBOX_DOMAIN` and `PRODUCTION_INBOX_DOMAIN` removed (code, `.env.example`, staging task env, staging variable; dev edited and validated — never applied). A file has an address exactly when its company's domain is `active` or `problem`. Route B screen hidden (404, off the menu; code kept, 8 tests skipped); ADR-395 and the Phase 4 docs marked superseded. Fixes: **Dismiss** for unmatched email (state `rejected` with the company kept; staging had no older rows in that state); card and document label show **arrival time** (ingest time); copy From = **"<sender address> via <company>"**; line breaks in subject/name become spaces; no copy for a **deleted file**. **Bcc not fixable** (see LP-1010 note). Terraform: api 113, worker 113, migrate 154; plan clean after. Tests: backend 9704, frontend 2476. Details: `docs/tickets/LP-1011.md`.
 - **Open (from LP-1011):**
-  - **Subjects with accents or emoji show encoded on the email card** (`=?utf-8?q?…?=`): ingest stores the subject as written. Small fix: decode at ingest or on display. Proposed before the pilot.
+  - **Subjects with accents or emoji show encoded on the email card** (`=?utf-8?q?…?=`): ingest stores the subject as written. Small fix: decode at ingest or on display. Proposed before the pilot. *(Fixed in LP-1012: stored decoded; old rows decoded on the card.)*
   - Arrival time is ingest time, not SES's receipt time (differs by the ingest lag; hours if the staging worker is off overnight).
   - No undo for Dismiss; who dismissed is only in a log line.
   - Route B's component, API and service remain with a null address; delete with Route B.
 
-### LP-1012 — Prove step 4
+### LP-1012 — Prove step 4 — ✅ Done
 - Deploy. Test company Yadees Test Co (`mb-mail.yadees.com`).
 - From Gmail, reply to an app email with two PDFs → on the file within ~2 minutes, unread, verified badge; you get one copy (if you weren't on it); Preview and Accept make two labelled documents.
 - Reply-all → no copy. An email to a typo address → appears in Yadees Test Co's Inbox under "Not matched to a file" → Move to file puts it on the file.
@@ -865,6 +865,12 @@ Order: LP-1008 → 1009 → 1010 → 1011 → 1012. Each ticket writes `docs/tic
 - The copy: its activity entry is on the file; check whether it lands in the inbox or junk (`Precedence: bulk`); check a plain Reply from Gmail reaches both the borrower and the file address.
 - Alarms OK; DLQs 0.
 - **Done when:** every check passes.
+- **Result (2026-11-07):** deployed (`staging-af2234ac`, then `staging-2f41b8ed`); migration `c4f7a92e1b36` ran; reader polling every minute. Backlog of 3 old test emails ingested (one copy sent, two correctly skipped). Subjects now stored decoded ("Documentos de José"). Steps passed: app send delivered; Gmail reply with two PDFs routed to LF-5HBR (SPF/DKIM/DMARC/virus PASS); Preview + Accept → documents; processor copy in **Gmail Inbox** with DMARC pass for `mb-mail.yadees.com`, Reply-To both addresses; reply-all → no copy (`already_has_it`); typo → Yadees Inbox → Move; second typo → Dismiss; 6 alarms OK, mail DLQs 0. **Two defects found in staging and fixed (Part 1b):** an accepted attachment was **never processed** (nothing queued `process_document` — the dev checks ran without a worker); and the open message didn't refresh after Accept. Re-test: both new documents processed (`w2`, `bank_statement`). Not testable with one mailbox: the `she_sent_it` skip (unit-tested). Details: `docs/tickets/LP-1012.md`.
+- **Open (from LP-1012):**
+  - The two documents accepted before the fix are stuck `pending`; the screen can't re-read a pending document. Test data — delete them or re-read through the API.
+  - **Nothing reads the `scan-results` queue**: GuardDuty tags each object but the verdict reaches no screen; messages expire. Decide later whether to use it or stop sending to it.
+  - `mbai-staging-scheduler-dlq` still holds 5 messages (seen in LP-998, LP-1007, LP-1012) — staging start/stop schedule, no alarm. Needs its own look.
+  - The company Inbox's "matched" cards don't say which file.
 
 ## 16. Diagrams
 
@@ -879,6 +885,7 @@ Pre-send content check, revisited from `LP-996.md` (fix the misfires, or warn in
 
 ## 18. Log
 
+- 2026-11-07 — **Step 4 done.** LP-1012 ✅: real Gmail reply with PDFs routed, accepted and processed; processor copy in the inbox; Move and Dismiss work. Two defects fixed in staging (accepted attachments weren't processed; open message didn't refresh). Steps 1–4 complete.
 - 2026-11-06 — LP-1011 ✅ (code): old mail settings removed, Route B screen hidden, Dismiss, arrival time, copy From = sender address, line breaks, deleted file. Bcc found undetectable. Open: encoded subjects on the card.
 - 2026-11-05 — LP-1010 ✅ (code): processor copy of incoming mail (last app sender; skip rules; Reply-To sender + file; no attachments; activity entry). Five small safety fixes from its review moved into LP-1011 with Dismiss and arrival time.
 - 2026-11-05 — LP-1009 ✅ (code): incoming email on the Communication tab (unread, verified badge, open with text, Preview, Accept, labelled documents); unmatched mail to a company's own domain goes to its Inbox with Move to file (ADR-421); paused reason in the Send dialog.
