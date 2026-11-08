@@ -1,6 +1,11 @@
 "use client";
 
 import { DeleteDraftDialog } from "@/components/file/communication/delete-draft-dialog";
+import {
+  DEFAULT_SETTINGS,
+  FollowUpBar,
+  SendFollowUpBox,
+} from "@/components/file/communication/follow-ups";
 import { MailClientDialog } from "@/components/file/communication/mail-client-dialog";
 import { PartyAddressForm } from "@/components/file/communication/party-address-form";
 import { Button } from "@/components/ui/button";
@@ -13,6 +18,7 @@ import {
   useSaveDraftBody,
   useSendDraft,
 } from "@/lib/api/communications";
+import type { FollowUpSettings } from "@/lib/api/follow-ups";
 import type { MailClient } from "@/lib/api/preferences";
 import { usePreferences, useUpdatePreferences } from "@/lib/api/preferences";
 import {
@@ -22,6 +28,7 @@ import {
 } from "@/lib/communication/compose-routes";
 import { polishMessage } from "@/lib/communication/polish-messages";
 import { getErrorMessage } from "@/lib/errors/api-error";
+import { browserTimeZone } from "@/lib/follow-ups";
 import { copyMessage } from "@/lib/markdown/copy-rich";
 import { emailBodyToHtml } from "@/lib/markdown/email-body";
 import { htmlToEmailBody } from "@/lib/markdown/from-html";
@@ -175,8 +182,13 @@ export function DraftPane({
   const [openedWith, setOpenedWith] = useState({ recipient: "", subject: "" });
   // Starts as the server's answer and becomes "html" once a save has landed.
   const [format, setFormat] = useState<"plain" | "html">("plain");
+  // LP-1014 — "Follow up if no reply", unticked on every message opened.
+  const [followUpOn, setFollowUpOn] = useState(false);
+  const [followUpSettings, setFollowUpSettings] = useState<FollowUpSettings>(DEFAULT_SETTINGS);
   if (data !== undefined && data.id !== seededFrom) {
     setSeededFrom(data.id);
+    setFollowUpOn(false);
+    setFollowUpSettings(DEFAULT_SETTINGS());
     setRecipient(data.counterparty ?? data.suggested_recipient ?? "");
     setSubject(data.subject ?? "");
     const seeded = data.body_format === "html" ? data.body : emailBodyToHtml(data.body);
@@ -567,6 +579,9 @@ export function DraftPane({
           <p className="text-sm text-muted-foreground">Loading the message…</p>
         ) : data ? (
           <div className="flex flex-col gap-4">
+            {/* LP-1014 — THE FOLLOW-UP ON A SENT EMAIL, under the header: only an original sent
+                from the app carries one, so a draft, a reminder or inbound mail shows nothing. */}
+            {data.follow_up ? <FollowUpBar fileId={fileId} message={data} /> : null}
             {/* THE BODY IS THE POINT — before this endpoint a sent message's words were readable
                 nowhere in the product. Pre-wrapped rather than rendered: this is plain text a person
                 wrote, and interpreting it as anything else is how a borrower's sentence becomes
@@ -845,6 +860,16 @@ export function DraftPane({
                 {data.send_blocked_reason ? (
                   <p className="text-sm text-warning">{data.send_blocked_reason}</p>
                 ) : null}
+                {/* LP-1014 — ONLY WHERE SEND IS: a follow-up replies in the thread the app sent,
+                    so "Mark as sent" has nothing to follow up. */}
+                {fileAddress ? (
+                  <SendFollowUpBox
+                    enabled={followUpOn}
+                    onEnabled={setFollowUpOn}
+                    settings={followUpSettings}
+                    onSettings={setFollowUpSettings}
+                  />
+                ) : null}
                 <div className="flex flex-wrap items-center gap-2">
                   {fileAddress ? (
                     <Button
@@ -859,6 +884,9 @@ export function DraftPane({
                             subject,
                             body: bodyForSend,
                             transmit: true,
+                            ...(followUpOn
+                              ? { followUp: { ...followUpSettings, tz: browserTimeZone() } }
+                              : {}),
                           },
                           { onSuccess: onClose },
                         );

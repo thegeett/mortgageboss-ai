@@ -11,11 +11,13 @@ before anything else runs, exactly as needs/borrowers/property do. Nothing in th
 """
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import select, text
 
 from app.ai.polish import polish
 from app.api.dependencies import CurrentUser, ScopedLoanFile
@@ -27,6 +29,7 @@ from app.schemas.communication import (
     DraftConflictPublic,
     FollowUpPatch,
     FollowUpPublic,
+    FollowUpRowPublic,
     FollowUpSettings,
     OutboundDraftPublic,
     PolishPublic,
@@ -61,6 +64,9 @@ from app.services.email_reply import (
 from app.services.email_send import CannotSendError, FollowUp, build_outbound, send_draft
 from app.services.mail_domain import file_address
 from app.services.message_detail import message_detail
+
+if TYPE_CHECKING:  # the endpoints below import services.follow_ups inside each function
+    from app.services.follow_ups import FollowUpView
 
 logger = structlog.get_logger(__name__)
 
@@ -344,6 +350,8 @@ async def send_draft_endpoint(
     an "authenticated approver" field on the evidence record itself; that record is LP-821's, and the
     activity log is where the fact lives until then.
     """
+    if payload.follow_up is not None and payload.transmit:
+        await _require_postgres_tz(db, payload.follow_up.tz)
     try:
         sent = await send_draft(
             db,
@@ -808,6 +816,10 @@ async def _follow_up_public(db: DbSession, row: Communication) -> FollowUpPublic
     view = await follow_up_view(db, row)
     if view is None:
         return None
+    return _public_of(view)
+
+
+def _public_of(view: "FollowUpView") -> FollowUpPublic:
     return FollowUpPublic(
         status=view.status,
         interval_days=view.interval_days,
@@ -820,6 +832,35 @@ async def _follow_up_public(db: DbSession, row: Communication) -> FollowUpPublic
         tz=view.tz,
         waiting_for=view.waiting_for,
     )
+
+
+#: Postgres's zone names, read once per process: `pg_timezone_names` reads the whole tz database
+#: (~600 rows, ~8 ms on dev) on every query, and it changes only with a Postgres upgrade.
+_POSTGRES_ZONES: frozenset[str] | None = None
+
+
+async def _postgres_zones(db: DbSession) -> frozenset[str]:
+    global _POSTGRES_ZONES
+    if _POSTGRES_ZONES is None:
+        names = (await db.execute(text("SELECT name FROM pg_timezone_names"))).scalars()
+        _POSTGRES_ZONES = frozenset(names)
+    return _POSTGRES_ZONES
+
+
+async def _require_postgres_tz(db: DbSession, tz: str | None) -> None:
+    """LP-1014 — a time zone the job's SQL can use too, or 422.
+
+    The schema has already checked Python's list (`zoneinfo`); the job computes the due moment in
+    Postgres (`due_moment_sql`), and one name Postgres does not know fails that query for every
+    company's follow-ups, not just this one.
+    """
+    if tz is None:
+        return
+    if tz not in await _postgres_zones(db):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Unknown time zone: {tz}. Use a name like America/New_York.",
+        )
 
 
 async def _follow_up_response(db: DbSession, row: Communication) -> FollowUpPublic:
@@ -845,6 +886,7 @@ async def start_follow_up(
 
     row = await _original(db, loan_file=loan_file, communication_id=communication_id)
     _went_out(row)
+    await _require_postgres_tz(db, payload.tz)
     now = utcnow()
     row.follow_up_status = FollowUpStatus.ON
     row.follow_up_interval_days = payload.interval_days
@@ -898,6 +940,7 @@ async def change_follow_up(
     """Change the interval, the count, the time of day or the time zone. The status and the clock
     are left as they are, so the next reminder moves with the new settings."""
     row = await _original(db, loan_file=loan_file, communication_id=communication_id)
+    await _require_postgres_tz(db, payload.tz)
     if payload.interval_days is not None:
         row.follow_up_interval_days = payload.interval_days
     if payload.max_auto is not None:
@@ -934,3 +977,60 @@ async def send_follow_up_now(
     public = await _follow_up_response(db, row)
     _enqueue_send(reminder.id)
     return public
+
+
+# --------------------------------------------------------------------------------------------- #
+# The file's Follow-ups list (LP-1014)
+# --------------------------------------------------------------------------------------------- #
+follow_up_router = APIRouter(
+    prefix="/loan-files/{file_identifier}/follow-ups", tags=["communications"]
+)
+
+
+@follow_up_router.get("", response_model=list[FollowUpRowPublic])
+async def list_follow_ups(
+    loan_file: ScopedLoanFile, db: DbSession, current_user: CurrentUser
+) -> list[FollowUpRowPublic]:
+    """The file's original emails whose follow-up was ever started (status not `off`), newest
+    first, each with its sender and whether that account is still active.
+
+    THREE QUERIES HOWEVER MANY ROWS (LP-1014 review): the emails, their needs, their senders."""
+    from app.models.communication import FollowUpStatus
+    from app.services.follow_ups import follow_up_view, needs_by_original, senders_of
+
+    rows = list(
+        (
+            await db.execute(
+                select(Communication)
+                .where(
+                    Communication.loan_file_id == loan_file.id,
+                    Communication.direction == CommunicationDirection.OUTBOUND,
+                    Communication.follow_up_of_id.is_(None),
+                    Communication.deleted_at.is_(None),
+                    Communication.follow_up_status != FollowUpStatus.OFF,
+                )
+                .order_by(Communication.send_requested_at.desc(), Communication.id)
+            )
+        ).scalars()
+    )
+    ids = [row.id for row in rows]
+    needs = await needs_by_original(db, ids)
+    senders = await senders_of(db, ids)
+    result: list[FollowUpRowPublic] = []
+    for row in rows:
+        view = await follow_up_view(db, row, needs=needs[row.id])
+        if view is None:  # not an original sent from the app
+            continue
+        sender = senders.get(row.id)
+        result.append(
+            FollowUpRowPublic(
+                communication_id=row.id,
+                subject=row.subject,
+                recipient=row.recipient,
+                sender_name=sender.full_name if sender else None,
+                sender_active=bool(sender and sender.is_active),
+                email_status=row.status.value,
+                follow_up=_public_of(view),
+            )
+        )
+    return result

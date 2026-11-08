@@ -1,6 +1,7 @@
 "use client";
 
 import { ComposeRequestButton } from "@/components/file/communication/compose-request-button";
+import { FollowUpsList } from "@/components/file/communication/follow-ups";
 import { InboundMessagesPanel } from "@/components/file/communication/inbound-messages-panel";
 import { DraftPane } from "@/components/file/communication/message-dialog";
 import { TimelinePanel } from "@/components/file/communication/timeline-panel";
@@ -202,6 +203,16 @@ export default function CommunicationPage() {
 
   return (
     <div className="flex flex-col gap-8">
+      {/* LP-1014 — EVERY FOLLOW-UP ON THE FILE, above the panes, full width; absent when there are
+          none. A row opens its email in the right pane, as a rail row does. */}
+      <FollowUpsList
+        fileId={id}
+        selectedId={selected}
+        onOpen={(communicationId) => {
+          setChosen(communicationId);
+          setClosed(false);
+        }}
+      />
       {/* BELOW ~720px THE PANES STACK, list first, draft under it — `flex-col` until `md`. Above it
           the rail is a fixed 300px: wide enough for party, subject preview, document count and
           time. A narrower rail that can only hold a name and a timestamp is what makes a full-width

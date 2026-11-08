@@ -395,6 +395,15 @@ async def _actor_names(db: AsyncSession, user_ids: list[UUID]) -> dict[UUID, str
     return {user.id: user.full_name for user in rows}
 
 
+async def _reminder_senders(db: AsyncSession, reminder_ids: list[UUID]) -> dict[UUID, str]:
+    """LP-1014 — `{reminder id: the sender's first name}` for automatic reminders, by the one
+    definition of "who sent this" (`follow_ups.senders_of`). One query."""
+    from app.services.follow_ups import senders_of
+
+    senders = await senders_of(db, reminder_ids)
+    return {pk: sender.first_name for pk, sender in senders.items()}
+
+
 async def _inbound_senders(db: AsyncSession, message_ids: list[UUID]) -> dict[UUID, str | None]:
     """`{inbound_message_id: from_address}` for the rows that have one.
 
@@ -548,6 +557,11 @@ async def build_timeline(
     actors = await _actor_names(
         db, [m.initiated_by_user_id for m in messages if m.initiated_by_user_id is not None]
     )
+    # LP-1014 — an automatic reminder: a reminder (`follow_up_of_id`) nobody clicked.
+    automatic = {
+        m.id for m in messages if m.follow_up_of_id is not None and m.initiated_by_user_id is None
+    }
+    reminder_for = await _reminder_senders(db, list(automatic))
 
     entries: list[TimelineEntry] = [
         TimelineEntry(
@@ -605,6 +619,12 @@ async def build_timeline(
                 "send_requested_at": (
                     message.send_requested_at.isoformat() if message.send_requested_at else None
                 ),
+                # LP-1014 — the row reads "Automatic reminder (for <her first name>)".
+                "follow_up_of_id": str(message.follow_up_of_id)
+                if message.follow_up_of_id
+                else None,
+                "automatic_reminder": message.id in automatic,
+                "reminder_for": reminder_for.get(message.id),
             },
         )
         for message in messages

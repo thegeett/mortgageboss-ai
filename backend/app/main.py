@@ -12,6 +12,7 @@ from app.api.auth import router as auth_router
 from app.api.borrowers import router as borrowers_router
 from app.api.calculators import router as calculators_router
 from app.api.capabilities import router as capabilities_router
+from app.api.communications import follow_up_router as follow_ups_router
 from app.api.communications import message_router as messages_router
 from app.api.communications import router as communications_router
 from app.api.conditions import CAPPED_HEADER as CONDITIONS_CAPPED_HEADER
@@ -158,6 +159,7 @@ app.include_router(lenders_router, prefix=API_V1_PREFIX)
 app.include_router(lender_file_router, prefix=API_V1_PREFIX)
 app.include_router(communications_router, prefix=API_V1_PREFIX)
 app.include_router(messages_router, prefix=API_V1_PREFIX)
+app.include_router(follow_ups_router, prefix=API_V1_PREFIX)
 app.include_router(inbound_router, prefix=API_V1_PREFIX)
 app.include_router(inbound_company_router, prefix=API_V1_PREFIX)
 app.include_router(needs_router, prefix=API_V1_PREFIX)

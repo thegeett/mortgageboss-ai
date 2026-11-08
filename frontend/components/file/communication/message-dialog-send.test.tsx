@@ -234,3 +234,39 @@ describe("LP-1009 — why Send is paused", () => {
     expect(screen.queryByText(/paused/)).toBeNull();
   });
 });
+
+describe("LP-1014 — Follow up if no reply", () => {
+  it("is offered beside Send, unticked; Send without it posts no follow-up", () => {
+    mockUseMessageDetail.mockReturnValue(draft());
+    render(<DraftPane fileId="LF-AB12" messageId="m1" onClose={vi.fn()} />);
+    const box = screen.getByRole("checkbox", { name: "Follow up if no reply" });
+    expect((box as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: /^Send$/ }));
+    const [input] = mockSend.mock.calls[0] as [Record<string, unknown>];
+    expect(input.followUp).toBeUndefined();
+  });
+
+  it("ticked, Send carries the three settings and the browser's zone", () => {
+    mockUseMessageDetail.mockReturnValue(draft());
+    render(<DraftPane fileId="LF-AB12" messageId="m1" onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Follow up if no reply" }));
+    fireEvent.change(screen.getByLabelText("Days between reminders"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("Number of reminders"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Time of day"), { target: { value: "09:30" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Send$/ }));
+    const [input] = mockSend.mock.calls[0] as [Record<string, unknown>];
+    expect(input.transmit).toBe(true);
+    expect(input.followUp).toEqual({
+      interval_days: 4,
+      max_auto: 1,
+      time: "09:30",
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
+  });
+
+  it("is not offered where Send is not (Mark as sent has no thread to follow up)", () => {
+    mockUseMessageDetail.mockReturnValue(draft({ can_send: false, suggested_bcc: null }));
+    render(<DraftPane fileId="LF-AB12" messageId="m1" onClose={vi.fn()} />);
+    expect(screen.queryByRole("checkbox", { name: "Follow up if no reply" })).toBeNull();
+  });
+});

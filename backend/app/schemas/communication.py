@@ -44,7 +44,7 @@ class OutboundDraftPublic(BaseModel):
 
 def _known_tz(value: str | None) -> str | None:
     if value is not None and not is_known_time_zone(value):
-        raise ValueError(f"unknown time zone: {value}")
+        raise ValueError(f"Unknown time zone: {value}. Use a name like America/New_York.")
     return value
 
 
@@ -54,7 +54,8 @@ class FollowUpSettings(BaseModel):
     the Start, in that time zone or `America/New_York`."""
 
     interval_days: int = Field(default=3, ge=1, le=30)
-    max_auto: int = Field(default=2, ge=0, le=10)
+    #: LP-1014 review — at least 1: "follow up, with no reminders" is "No reply" the moment it is sent.
+    max_auto: int = Field(default=2, ge=1, le=10)
     time: TimeOfDay | None = None
     tz: str | None = Field(default=None, max_length=64)
 
@@ -65,7 +66,7 @@ class FollowUpPatch(BaseModel):
     """LP-1013 — change any setting; an omitted one is left as it is."""
 
     interval_days: int | None = Field(default=None, ge=1, le=30)
-    max_auto: int | None = Field(default=None, ge=0, le=10)
+    max_auto: int | None = Field(default=None, ge=1, le=10)
     time: TimeOfDay | None = None
     tz: str | None = Field(default=None, max_length=64)
 
@@ -89,6 +90,22 @@ class FollowUpPublic(BaseModel):
     tz: str | None
     #: Still-missing document names, or ["a reply"] for an email that asked for no documents.
     waiting_for: list[str]
+
+
+class FollowUpRowPublic(BaseModel):
+    """LP-1014 — one email on the file's Follow-ups list: an original whose follow-up was started."""
+
+    communication_id: UUID
+    subject: str | None
+    recipient: str | None
+    #: Who sent the original (the approver on its evidence record); None when nothing records it.
+    sender_name: str | None
+    #: False when that user is deactivated: the job stops the follow-up, and the screen says why.
+    sender_active: bool
+    #: The original email's own status (`sent`, `delivered`, `failed`, …): a failed one cannot be
+    #: started again, so the screen does not offer Start on it.
+    email_status: str
+    follow_up: FollowUpPublic
 
 
 class SendDraftRequest(BaseModel):

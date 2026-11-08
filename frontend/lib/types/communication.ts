@@ -117,4 +117,45 @@ export interface MessageDetail {
   body_unavailable?: boolean;
   /** LP-1009 — true only on the request that marked this message read. */
   marked_read?: boolean;
+  /** LP-1013 — the follow-up on an original email sent from the app; null on anything else
+   * (inbound mail, drafts, reminders, "Mark as sent"). */
+  follow_up?: FollowUp | null;
+  /** LP-1013 — on a reminder: the email it follows up. */
+  follow_up_of_id?: string | null;
+  /** LP-1013 — a reminder nobody clicked: the job sent it. */
+  automatic_reminder?: boolean;
+}
+
+/** LP-1013 — `off` until started; `paused` when the recipient replied; `finished` when everything
+ * asked for arrived; `stopped` by a person, a failed original, a blocked or departed sender. */
+export type FollowUpStatus = "off" | "on" | "paused" | "finished" | "stopped";
+
+/** LP-1013 — mirrors `FollowUpPublic` in `app/schemas/communication.py`. */
+export interface FollowUp {
+  status: FollowUpStatus;
+  interval_days: number;
+  max_auto: number;
+  auto_sent: number;
+  clock_at: string | null;
+  paused_at: string | null;
+  /** When the next automatic reminder is due; null when none will go. */
+  next_reminder_at: string | null;
+  /** `HH:MM` in `tz`; null until first started. */
+  time: string | null;
+  /** IANA name, e.g. `America/New_York`. */
+  tz: string | null;
+  /** Still-missing document names, or ["a reply"] for an email that asked for none. */
+  waiting_for: string[];
+}
+
+/** LP-1014 — one row of `GET /loan-files/{file}/follow-ups`. */
+export interface FollowUpRow {
+  communication_id: string;
+  subject: string | null;
+  recipient: string | null;
+  sender_name: string | null;
+  sender_active: boolean;
+  /** The original email's own status: a `failed` one cannot be started again. */
+  email_status: string;
+  follow_up: FollowUp;
 }

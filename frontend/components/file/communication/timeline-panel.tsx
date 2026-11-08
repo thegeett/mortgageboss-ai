@@ -15,8 +15,10 @@
  * (LP-991).
  */
 
+import { FollowUpPill } from "@/components/file/communication/follow-ups";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { useFollowUps } from "@/lib/api/follow-ups";
 import { fetchReplyContext, useMarkRead, useReply, useSetImportant } from "@/lib/api/messages";
 import { useTimeline } from "@/lib/api/timeline";
 import { isNewSince, readLastSeen, writeLastSeen } from "@/lib/communication/last-seen";
@@ -172,6 +174,13 @@ function insideLine(entry: TimelineEntry): string {
  * it was left stranded above `isOutboundDraft`, where it read as that function's documentation. Its
  * one stale line was the format example `Draft · edited · 2m`, which §2 split across two lines.
  */
+/** LP-1014 — "Automatic reminder (for Priya)": a reminder nobody clicked, named for its sender. */
+function reminderLabel(entry: TimelineEntry): string | null {
+  if (entry.detail.automatic_reminder !== true) return null;
+  const name = typeof entry.detail.reminder_for === "string" ? entry.detail.reminder_for : null;
+  return name ? `Automatic reminder (for ${name})` : "Automatic reminder";
+}
+
 function stateWord(entry: TimelineEntry, now: number): string {
   if (entry.status === "draft") {
     // LP-857 — CANNOT BE SENT YET, AND THE ROW SAYS SO. A party draft is created even when the file
@@ -441,6 +450,10 @@ export function TimelinePanel({
 }) {
   const [filter, setFilter] = useState<TimelineFilter>("all");
   const { data, isPending, isError } = useTimeline(fileId, filter);
+  // LP-1014 — THE PILLS COME FROM THE FOLLOW-UPS LIST, not from the timeline query.
+  const followUps = new Map(
+    (useFollowUps(fileId).data ?? []).map((row) => [row.communication_id, row]),
+  );
   const fileAddress = data?.inbox_address ?? null;
   const [copied, setCopied] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
@@ -688,23 +701,36 @@ export function TimelinePanel({
                 {/* LINE 2 — the state, as a word, with the width of the rail. The attribution
                     ("Marked sent by Geet Thaker") is the longest string this screen can produce and
                     this is where it fits. */}
-                <span
-                  className={
-                    entry.unread
-                      ? "truncate font-semibold text-foreground"
-                      : "truncate text-foreground"
-                  }
-                >
-                  {/* LP-852 — "SINCE YOU LAST LOOKED", NOT "UNREAD". Nothing is received in this
+                <span className="flex min-w-0 items-center gap-2">
+                  <span
+                    className={
+                      entry.unread
+                        ? "truncate font-semibold text-foreground"
+                        : "truncate text-foreground"
+                    }
+                  >
+                    {/* LP-852 — "SINCE YOU LAST LOOKED", NOT "UNREAD". Nothing is received in this
                       version, so unread would be a claim about somebody else's behaviour. Labelled,
                       because a bare coloured dot says nothing to a screen reader. */}
-                  {isNewSince(entry.created_at, lastSeen) && !acknowledged.has(entry.id) ? (
-                    <span
-                      className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-primary align-middle"
-                      aria-label="New since you last looked"
+                    {isNewSince(entry.created_at, lastSeen) && !acknowledged.has(entry.id) ? (
+                      <span
+                        className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-primary align-middle"
+                        aria-label="New since you last looked"
+                      />
+                    ) : null}
+                    {/* LP-1014 — a reminder says what it is first; its send state follows. */}
+                    {reminderLabel(entry)
+                      ? `${reminderLabel(entry)} · ${stateWord(entry, now)}`
+                      : stateWord(entry, now)}
+                  </span>
+                  {followUps.has(entry.id) ? (
+                    <FollowUpPill
+                      // biome-ignore lint/style/noNonNullAssertion: checked on the line above
+                      followUp={followUps.get(entry.id)!.follow_up}
+                      // biome-ignore lint/style/noNonNullAssertion: checked on the line above
+                      senderActive={followUps.get(entry.id)!.sender_active}
                     />
                   ) : null}
-                  {stateWord(entry, now)}
                 </span>
 
                 {/* LINE 3 — WHAT IS INSIDE, and the most specific thing the row has. LP-852 added

@@ -26,6 +26,8 @@ vi.mock("@/lib/api/messages", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/messages")>()),
   useComposeDraft: () => ({ mutate: mockCompose, isPending: false }),
 }));
+// LP-1014 — the Follow-ups list above the panes reads its own query; none on these files.
+vi.mock("@/components/file/communication/follow-ups", () => ({ FollowUpsList: () => null }));
 vi.mock("@/lib/toast", () => ({ notifySuccess: vi.fn(), notifyError: vi.fn() }));
 vi.mock("next/navigation", () => ({
   useParams: () => ({ id: "LF-JR4T" }),

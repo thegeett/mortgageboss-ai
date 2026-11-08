@@ -29,6 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from enum import StrEnum
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import structlog
@@ -90,26 +91,33 @@ class Needs:
 
 async def needs_of(db: AsyncSession, original: Communication) -> Needs:
     """The needs the original asked for, through the communication-needs link (LP-809)."""
-    rows = list(
-        (
-            await db.execute(
-                select(NeedsItem)
-                .join(CommunicationNeedsItem, CommunicationNeedsItem.needs_item_id == NeedsItem.id)
-                .where(
-                    CommunicationNeedsItem.communication_id == original.id,
-                    NeedsItem.deleted_at.is_(None),
-                )
-                .order_by(CommunicationNeedsItem.created_at, NeedsItem.id)
+    return (await needs_by_original(db, [original.id]))[original.id]
+
+
+async def needs_by_original(db: AsyncSession, original_ids: list[UUID]) -> dict[UUID, Needs]:
+    """`needs_of` for many originals in ONE query (LP-1014 review: the Follow-ups list asked once
+    per row). Every id is in the result, empty both ways when it asked for nothing."""
+    found: dict[UUID, list[NeedsItem]] = {pk: [] for pk in original_ids}
+    if original_ids:
+        rows = await db.execute(
+            select(CommunicationNeedsItem.communication_id, NeedsItem)
+            .join(NeedsItem, CommunicationNeedsItem.needs_item_id == NeedsItem.id)
+            .where(
+                CommunicationNeedsItem.communication_id.in_(original_ids),
+                NeedsItem.deleted_at.is_(None),
             )
+            .order_by(CommunicationNeedsItem.created_at, NeedsItem.id)
         )
-        .scalars()
-        .all()
-    )
-    return Needs(
-        waiting=[n for n in rows if n.status in AWAITING_COLLECTION],
-        received=[n for n in rows if n.status in _ARRIVED],
-        is_document_request=bool(rows),
-    )
+        for communication_id, need in rows:
+            found[communication_id].append(need)
+    return {
+        pk: Needs(
+            waiting=[n for n in needs if n.status in AWAITING_COLLECTION],
+            received=[n for n in needs if n.status in _ARRIVED],
+            is_document_request=bool(needs),
+        )
+        for pk, needs in found.items()
+    }
 
 
 def is_original(row: Communication) -> bool:
@@ -422,15 +430,26 @@ async def _name_the_send(
 
 async def original_sender(db: AsyncSession, original: Communication) -> User | None:
     """Who sent the original: the approver on its evidence record, as the worker reads it."""
+    return (await senders_of(db, [original.id])).get(original.id)
+
+
+async def senders_of(db: AsyncSession, communication_ids: list[UUID]) -> dict[UUID, User]:
+    """`{communication id: who sent it}` in ONE query: the approver on each one's SENT evidence
+    record. THE definition of "who sent this", for the job, the Follow-ups list and the timeline's
+    "Automatic reminder (for …)" (LP-1014 review: the timeline had its own copy of this query)."""
+    if not communication_ids:
+        return {}
     from app.models.communication_evidence import CommunicationEvidence, EvidenceEvent
 
-    approver_id = await db.scalar(
-        select(CommunicationEvidence.approver_user_id).where(
-            CommunicationEvidence.communication_id == original.id,
+    rows = await db.execute(
+        select(CommunicationEvidence.communication_id, User)
+        .join(User, User.id == CommunicationEvidence.approver_user_id)
+        .where(
+            CommunicationEvidence.communication_id.in_(communication_ids),
             CommunicationEvidence.event == EvidenceEvent.SENT,
         )
     )
-    return await db.get(User, approver_id) if approver_id else None
+    return {row.communication_id: row.User for row in rows}
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -509,11 +528,15 @@ class FollowUpView:
     waiting_for: list[str]
 
 
-async def follow_up_view(db: AsyncSession, row: Communication) -> FollowUpView | None:
-    """The follow-up on an original email; None for anything that cannot have one."""
+async def follow_up_view(
+    db: AsyncSession, row: Communication, *, needs: Needs | None = None
+) -> FollowUpView | None:
+    """The follow-up on an original email; None for anything that cannot have one. `needs` when
+    the caller has already loaded them (`needs_by_original`, for a list)."""
     if not is_original(row):
         return None
-    needs = await needs_of(db, row)
+    if needs is None:
+        needs = await needs_of(db, row)
     due = due_moment(row)
     next_at = (
         due
@@ -549,11 +572,13 @@ __all__ = [
     "follow_up_view",
     "has_reply_since",
     "is_original",
+    "needs_by_original",
     "needs_of",
     "original_sender",
     "pause_for_reply",
     "reply_subject",
     "resume_clock",
     "send_reminder",
+    "senders_of",
     "thread_message_id",
 ]

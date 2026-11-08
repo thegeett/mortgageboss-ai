@@ -81,6 +81,12 @@ vi.mock("@/lib/api/communications", () => ({
   messageMailtoUrl: () => "mailto:someone@example.com",
 }));
 const mockMessageDetailArgs: unknown[][] = [];
+// LP-1014 — the pills read the file's Follow-ups list. Empty unless a test sets it.
+const mockFollowUps = vi.fn((): { data: unknown[] } => ({ data: [] }));
+vi.mock("@/lib/api/follow-ups", () => ({
+  useFollowUps: () => mockFollowUps(),
+  useFollowUpAction: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+}));
 
 import type { TimelineEntry } from "@/lib/types/timeline";
 import { TimelinePanel } from "./timeline-panel";
@@ -1160,5 +1166,69 @@ describe("a sent email's status (LP-997)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("LP-1014 — follow-ups on the list", () => {
+  const SENT: TimelineEntry = {
+    ...MESSAGE,
+    id: "sent-1",
+    direction: "outbound",
+    status: "sent",
+    unread: false,
+    detail: { send_requested_at: new Date(Date.now() - 7200 * 1000).toISOString() },
+  };
+
+  it("names an automatic reminder for its sender", () => {
+    loaded([
+      {
+        ...SENT,
+        id: "r1",
+        detail: { ...SENT.detail, automatic_reminder: true, reminder_for: "Priya" },
+      },
+    ]);
+    render(<TimelinePanel fileId="f1" />, { wrapper });
+    expect(screen.getByText(/^Automatic reminder \(for Priya\)/)).toBeTruthy();
+  });
+
+  it("does not call a reminder somebody clicked automatic", () => {
+    loaded([{ ...SENT, id: "r2", detail: { ...SENT.detail, automatic_reminder: false } }]);
+    render(<TimelinePanel fileId="f1" />, { wrapper });
+    expect(screen.queryByText(/Automatic reminder/)).toBeNull();
+  });
+
+  it.each([
+    [{ status: "on", auto_sent: 0 }, true, "Follow-up · Mon"],
+    [{ status: "paused", auto_sent: 0 }, true, "Paused"],
+    [{ status: "on", auto_sent: 2 }, true, "No reply"],
+    [{ status: "stopped", auto_sent: 0 }, false, "Stopped"],
+    [{ status: "finished", auto_sent: 1 }, true, "Finished"],
+  ])("shows the list's pill on the email's row: %o → %s", (over, active, label) => {
+    loaded([SENT]);
+    mockFollowUps.mockReturnValue({
+      data: [
+        {
+          communication_id: "sent-1",
+          subject: "Docs",
+          recipient: "jane@example.test",
+          sender_name: "Priya Desai",
+          sender_active: active,
+          follow_up: {
+            interval_days: 3,
+            max_auto: 2,
+            clock_at: null,
+            paused_at: null,
+            next_reminder_at: "2026-11-09T14:30:00Z",
+            time: "09:30",
+            tz: "America/New_York",
+            waiting_for: ["W-2"],
+            ...over,
+          },
+        },
+      ],
+    });
+    render(<TimelinePanel fileId="f1" />, { wrapper });
+    expect(screen.getByText(label)).toBeTruthy();
+    mockFollowUps.mockReturnValue({ data: [] });
   });
 });

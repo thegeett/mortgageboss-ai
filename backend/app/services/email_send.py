@@ -129,8 +129,8 @@ class FollowUp:
     tz: str | None = None
 
     def __post_init__(self) -> None:
-        if not 1 <= self.interval_days <= 30 or not 0 <= self.max_auto <= 10:
-            raise ValueError("follow-up interval must be 1-30 days and the count 0-10")
+        if not 1 <= self.interval_days <= 30 or not 1 <= self.max_auto <= 10:
+            raise ValueError("follow-up interval must be 1-30 days and the count 1-10")
         if self.tz is not None and not is_known_time_zone(self.tz):
             raise ValueError(f"unknown time zone: {self.tz}")
 

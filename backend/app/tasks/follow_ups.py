@@ -120,6 +120,12 @@ async def _one(db: AsyncSession, row: Communication, now: datetime) -> tuple[str
         # Nothing records who sent it, and nothing will: stopped, or it is picked every run.
         row.follow_up_status = FollowUpStatus.STOPPED
         return "stopped_no_sender", None
+    if not sender.is_active:
+        # LP-1014 — she has left: a reminder in her name would tell the borrower their reply goes
+        # to someone who is not there. The screen reads `sender_active` to say why it stopped.
+        logger.info("follow_up_sender_inactive", communication_id=str(row.id))
+        row.follow_up_status = FollowUpStatus.STOPPED
+        return "stopped_sender_inactive", None
     try:
         reminder = await send_reminder(
             db, loan_file=loan_file, original=row, sender=sender, automatic=True

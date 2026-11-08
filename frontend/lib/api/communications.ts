@@ -40,6 +40,9 @@ export async function fetchOutboundDraft(fileId: string): Promise<OutboundDraft 
 export const messageQueryKey = (fileId: string, messageId: string) =>
   [...fileMessageDetailsQueryKey(fileId), messageId] as const;
 
+/** LP-1014 — the file's Follow-ups list (`lib/api/follow-ups.ts`). Here so a Send can refresh it. */
+export const followUpsQueryKey = (fileId: string) => ["follow-ups", fileId] as const;
+
 /**
  * One message in full (LP-829) — the dialog's data.
  *
@@ -262,6 +265,8 @@ export interface SendDraftInput {
   subject?: string;
   /** LP-997 — true is the Send button: the worker sends it. Omitted is "Mark as sent". */
   transmit?: boolean;
+  /** LP-1014 — "Follow up if no reply", ticked: sent only with `transmit`. */
+  followUp?: { interval_days: number; max_auto: number; time: string; tz: string };
 }
 
 /**
@@ -271,13 +276,14 @@ export interface SendDraftInput {
 export function useSendDraft(fileId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ draftId, recipient, body, subject, transmit }: SendDraftInput) =>
+    mutationFn: async ({ draftId, recipient, body, subject, transmit, followUp }: SendDraftInput) =>
       (
         await apiClient.post<SentCommunication>(`${outboundPath(fileId)}/draft/${draftId}/send`, {
           recipient,
           body,
           subject,
           ...(transmit ? { transmit: true } : {}),
+          ...(transmit && followUp ? { follow_up: followUp } : {}),
         })
       ).data,
     onSuccess: (_sent, variables) => {
@@ -289,6 +295,10 @@ export function useSendDraft(fileId: string) {
       void queryClient.invalidateQueries({
         queryKey: messageQueryKey(fileId, variables.draftId),
       });
+      // LP-1014 — a Send with follow-up ticked adds a row to the file's Follow-ups list.
+      if (variables.followUp) {
+        void queryClient.invalidateQueries({ queryKey: followUpsQueryKey(fileId) });
+      }
     },
   });
 }
