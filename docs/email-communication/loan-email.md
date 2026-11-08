@@ -923,7 +923,8 @@ Fits the existing Communication tab (two panes: message list left, open message 
 - **Done when:** in dev, every control works and the list shows each status.
 - **Result (2026-11-08, commit `ea8ad9b7`):** all four screens as scoped. Backend: `GET /api/v1/loan-files/{file}/follow-ups` (started follow-ups, newest first, with `sender_name`, `sender_active`, `email_status`); the job stops a deactivated sender's follow-up (`stopped_sender_inactive`); the time zone is checked against Postgres's list on Start, Edit **and Send** (list read once per process). The timeline marks automatic reminders ("Automatic reminder (for Priya) · Sent"). "No reply" is worked out on screen in one place. Automatic reminders are now 1–10 (0 no longer allowed). Dev check passed for every state, with screenshots. Tests: backend 9817, frontend 2539. Details: `docs/tickets/LP-1014.md`.
 - **Open (from LP-1014):**
-  - **"No reply" never turns into "Everything arrived".** Once the automatic reminders run out the job never looks at the follow-up again, so it stays red at the top of the list even after every document is accepted. Fix before LP-1015 (scenarios 2 and 3 hit it).
+  - ~~"No reply" never turns into "Everything arrived"~~ — fixed on screen (commit `8be9dd45`): spent + nothing missing reads "Everything arrived"; the server still leaves it `on`.
+  - **Paused with nothing missing still says "Paused — they replied" with Resume.** The common path (the borrower replies with the documents → paused → processor accepts them all) never reads "Everything arrived" unless she presses Resume and waits a full interval. Same one-line widening of the screen rule to `paused`; fix before LP-1015.
   - Start and Resume still work for a deactivated sender; the screen shows a date until the job stops it (within 15 minutes). The "account was deactivated" wording is read from the account today, not stored as the reason. Accepted for the pilot.
   - A Send-now reminder's row reads "Sent · Re: …", not "Reminder".
   - The activity feed says "Sent a document request for 0 item(s)" for a composed email (older bug).
@@ -956,6 +957,7 @@ Upload link (built, off; needs a security review) → Pre-send content check, re
 
 ## 18. Log
 
+- 2026-11-08 — LP-1014 fix ✅: a spent follow-up with nothing missing reads "Everything arrived" (screen only). Same gap found for a paused one; one more line before LP-1015.
 - 2026-11-08 — LP-1014 ✅ (code): follow-ups on the Communication tab (box above Send, bar on a sent email, pills and reminder label, Follow-ups list with "No reply" first); list endpoint, deactivated sender stops, time zone checked against Postgres on Start/Edit/Send. Open: "No reply" doesn't finish when everything arrives — fix before LP-1015.
 - 2026-11-07 — LP-1014 scoped to the existing Communication tab (mockups reviewed): follow-up box in the draft pane, follow-up bar on a sent email, pills and reminder label in the list, Follow-ups list above the panes with "No reply" first. Thread view and a to-do list moved to §17.
 - 2026-11-07 — LP-1013 ✅ (code): automatic follow-ups backend with time of day, every 15 minutes. Send now restarts the clock but doesn't use up the automatic count. Three small backend items moved to LP-1014 (list endpoint, inactive sender, time-zone check).
