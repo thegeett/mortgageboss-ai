@@ -178,7 +178,7 @@ An emailed attachment therefore exists twice: inside the raw email (evidence of 
 | Step 2 — Send | ✅ **Done** 2026-10-31. Proven in staging (LP-998): the test company MortgageBoss sends from `lf-…@mail.staging.mortgageboss.ai`; delivered and bounced show on the file. From display name fixed in LP-999 |
 | Step 3 — Tenant domain | ✅ **Done** 2026-11-04. Proven with `mb-mail.yadees.com` (GoDaddy) as test customer "Yadees Test Co": one command + one NS record → active in about 13 minutes; real email delivered, signed by the customer subdomain; a removed NS record paused Send at the next hourly check and recovery came back the same way. Runbook in §15b LP-1007 |
 | Step 4 — Receive | ✅ **Done** 2026-11-07. Proven in staging with Yadees + Gmail: a reply with two PDFs lands on its file within about a minute (verified, readable, accent intact); Preview + Accept make documents that are processed (W-2, bank statement); the processor's copy reaches the Gmail inbox (DMARC pass, `p=reject`); reply-all makes no copy; typo mail goes to the company Inbox and can be moved or dismissed |
-| Step 5 — Follow-ups | In progress: LP-1013 ✅, LP-1014 ✅ (code, not deployed); LP-1015 (deploy + test every scenario in staging) to do (§15d) |
+| Step 5 — Follow-ups | In progress: LP-1013 ✅, LP-1014 ✅ (code, not deployed); LP-1015 (three small fixes, deploy, test 27 scenarios in staging) to do (§15d) |
 | Step 6 | Not started |
 
 **Until LP-989 and step 2 are done:** the staging account can deliver real mail to anyone (production access is account-wide). Send test mail only to own inboxes or `success@ / bounce@ / complaint@simulator.amazonses.com`. No real borrower addresses.
@@ -929,27 +929,46 @@ Fits the existing Communication tab (two panes: message list left, open message 
   - A Send-now reminder's row reads "Sent · Re: …", not "Reminder".
   - The activity feed says "Sent a document request for 0 item(s)" for a composed email (older bug).
 
-### LP-1015 — Test every follow-up scenario (staging)
-One ticket that runs every scenario end to end with real email (Yadees, your Gmail, and a second address of yours as "title company"). Move an email's send time back instead of waiting days.
-1. **Not ticked:** no reminder ever.
-2. **Document request, ticked, nothing back:** reminder 1 after the interval (same thread, still-waiting list, from you, Cc you, automatic footer, lands in Primary); reminder 2; then none, and the to-do list shows it.
-3. **Partial documents:** the borrower replies with 1 of 2 documents → paused; accept it → Resume → the next reminder lists only the missing one; send it → accept → finished.
-4. **Reply without documents** ("I'll send Friday") → paused; Stop → no more.
-5. **General question** (not documents), ticked: general reminder after the interval; any reply → paused.
-6. **Two recipients on one file** (borrower + "title company"), both ticked: each chased separately; a reply from one pauses only that one.
-7. **Send now:** sends immediately, restarts the clock (moves the next date) without using up the automatic count; works on an email with follow-up off.
-8. **Custom settings:** interval 1 day, count 3 → three automatic reminders.
-9. **Time of day / weekend:** a reminder set for 9:30 goes out between 9:30 and 9:45 on its due day; one due on a Saturday goes Monday at the same time.
-10. **Refusals:** suppressed recipient, rate limit, domain `problem` → no reminder, logged.
-11. Alarms OK; DLQs 0.
-- **Done when:** every scenario passes. Anything that fails is fixed in a follow-up ticket before the pilot.
+### LP-1015 — Three small fixes, deploy, and test every follow-up scenario (staging)
+Part 1 is the only code: a staging-only command that moves one email's whole conversation back N days (so a reminder is due without waiting), and three fixes found in the scenario review (11-08):
+- **Blocked address stops it.** A reminder refused because the address is suppressed (bounce or complaint) stops the follow-up ("Stopped — address blocked"); it was retried every 15 minutes forever. A rate-limit refusal still retries.
+- **Closed or withdrawn file:** the job skips it.
+- **No reply** gets **Stop**, so the red row can be cleared.
 
-## 16. Diagrams
+Then deploy (you run it) and test with real email (Yadees; your Gmail as borrower; an Outlook/Hotmail address of yours as title company), on a weekday, in two sessions.
 
-- **Loan Email Architecture** — three straight flows (in, out, domain setup); for customer conversations.
-- **Loan Email AWS Detail** — every AWS resource, VPC, numbered flows, resource change table; for implementation.
+**Session A — replies and documents**
+1. Not ticked → no reminder ever.
+2. Document request, ticked, nothing back → reminder 1 (same thread, still-waiting list, From you, Cc you, footer, `Auto-Submitted`, lands in Primary) → reminder 2 → none; "No reply", red, first; Stop clears it.
+3. Partial documents: reply with 1 of 2 → paused; accept → waiting_for drops it after processing → Resume → the reminder lists only the missing one → reply with it → accept → "Everything arrived".
+4. Reply without documents → paused; Stop → nothing.
+5. General question, ticked → general reminder; a reply pauses.
+6. Two recipients on one file (Gmail + Outlook), both ticked → each chased separately; a reply from one pauses only that one; Outlook threads it and it isn't junk.
+7. Out-of-office (Gmail vacation responder) → doesn't pause; the next reminder goes.
+8. Reply from a different address (work email, spouse) → doesn't pause (by design; recorded).
+9. Your own reply-all on the thread → doesn't pause.
+10. Address typed in different capitals → the reply still pauses.
+11. Reply that lands in the Inbox, then Move to file → no instant pause, but the job sends nothing at the due time.
+12. Same recipient, two emails on one file, both on → one reply pauses both.
+13. Wrong document (pay stub for a W-2) → still waiting; the reminder still asks for the W-2.
+14. Documents arrive without a reply from that person (you upload them) → at the due time: Finished, no reminder.
+15. Borrower reply-all to a reminder → exactly one processor copy, no loop.
 
-Regenerated 2026-10-26 after step 1: plain boxes are live in staging, tinted boxes are still to build. PNGs committed in the repo at `docs/email-communication/loan-email-architecture.png` and `loan-email-aws-detail.png`. Regenerate after each step.
+**Session B — controls and system**
+16. Send now: on an email with follow-up off; on one that is on (next date moves, count unchanged, no footer); while Paused and while No reply (state unchanged); from a second user (From that user).
+17. Custom settings: every 1 day, up to 3 → three reminders.
+18. Start on an email sent days ago → counts from today; on one that already has a reply → not paused.
+19. Resume when the reply is older than the interval → the reminder goes on the next run.
+20. Edit to a time already passed today → goes on the next run.
+21. Time of day: goes between the time and 15 minutes after, never before. Weekend: a due Saturday reads Monday, same time.
+22. Two job runs at the same moment → one reminder.
+23. Company sending switched off → the due reminder waits; switched on → goes once on the next run.
+24. Bounce (simulator) → email failed → stopped, "the email failed", Send now refused.
+25. Complaint (simulator) → address blocked → the next reminder stops it ("address blocked"), not retried.
+26. Closed loan file → no reminder.
+27. Clean up: every test follow-up stopped; alarms OK; DLQs 0 (scheduler-dlq's 5 known excepted).
+
+**Unit tests only (names listed in the ticket file):** DST, the 3-a-day and 5-minute rate limits, original not yet sent, 50 per run, 1–10 bounds, another company's file 404, row lock during Stop. **Known, not fixed:** reminders go on US holidays.
 
 ## 17. After v1, in order
 
@@ -957,6 +976,7 @@ Upload link (built, off; needs a security review) → Pre-send content check, re
 
 ## 18. Log
 
+- 2026-11-08 — LP-1015 reviewed and expanded: three fixes (blocked address stops a follow-up; closed/withdrawn files skipped; Stop on No reply) plus 27 staging scenarios in two sessions (out-of-office, other senders, wrong document, Outlook, double job run, sending switched off, complaint, closed file …). Holidays noted, not fixed.
 - 2026-11-08 — LP-1014 fix ✅: a spent follow-up with nothing missing reads "Everything arrived" (screen only). Same gap found for a paused one; one more line before LP-1015.
 - 2026-11-08 — LP-1014 ✅ (code): follow-ups on the Communication tab (box above Send, bar on a sent email, pills and reminder label, Follow-ups list with "No reply" first); list endpoint, deactivated sender stops, time zone checked against Postgres on Start/Edit/Send. Open: "No reply" doesn't finish when everything arrives — fix before LP-1015.
 - 2026-11-07 — LP-1014 scoped to the existing Communication tab (mockups reviewed): follow-up box in the draft pane, follow-up bar on a sent email, pills and reminder label in the list, Follow-ups list above the panes with "No reply" first. Thread view and a to-do list moved to §17.
