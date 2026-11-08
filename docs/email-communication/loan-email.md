@@ -178,7 +178,7 @@ An emailed attachment therefore exists twice: inside the raw email (evidence of 
 | Step 2 — Send | ✅ **Done** 2026-10-31. Proven in staging (LP-998): the test company MortgageBoss sends from `lf-…@mail.staging.mortgageboss.ai`; delivered and bounced show on the file. From display name fixed in LP-999 |
 | Step 3 — Tenant domain | ✅ **Done** 2026-11-04. Proven with `mb-mail.yadees.com` (GoDaddy) as test customer "Yadees Test Co": one command + one NS record → active in about 13 minutes; real email delivered, signed by the customer subdomain; a removed NS record paused Send at the next hourly check and recovery came back the same way. Runbook in §15b LP-1007 |
 | Step 4 — Receive | ✅ **Done** 2026-11-07. Proven in staging with Yadees + Gmail: a reply with two PDFs lands on its file within about a minute (verified, readable, accent intact); Preview + Accept make documents that are processed (W-2, bank statement); the processor's copy reaches the Gmail inbox (DMARC pass, `p=reject`); reply-all makes no copy; typo mail goes to the company Inbox and can be moved or dismissed |
-| Step 5 — Follow-ups | In progress: LP-1013 ✅ (code, not deployed); LP-1014 (screen) and LP-1015 (test every scenario) to do (§15d) |
+| Step 5 — Follow-ups | In progress: LP-1013 ✅, LP-1014 ✅ (code, not deployed); LP-1015 (deploy + test every scenario in staging) to do (§15d) |
 | Step 6 | Not started |
 
 **Until LP-989 and step 2 are done:** the staging account can deliver real mail to anyone (production access is account-wide). Send test mail only to own inboxes or `success@ / bounce@ / complaint@simulator.amazonses.com`. No real borrower addresses.
@@ -913,7 +913,7 @@ Order: LP-1013 → 1014 → 1015. Each ticket writes `docs/tickets/LP-xxx.md` in
   - **One bad time zone could break the job for everyone:** the API checks the zone against Python's list, but the job's SQL uses Postgres's. Check against Postgres's list too.
 - **Open, later:** a reply moved from the Inbox to the file doesn't pause at once; "success" means queued (a reminder that then fails cleanly is spent); "my email below" is not quoted; no activity entry for Start/Stop/Resume/settings; the 3-a-day rate limit can delay a second follow-up to the same person; findings 3, 5, 7, 9, 10 (left as is).
 
-### LP-1014 — Follow-ups on screen
+### LP-1014 — Follow-ups on screen ✅
 Fits the existing Communication tab (two panes: message list left, open message right). No new dialog, no thread view, no to-do list. Mockups: "Follow-ups Screens (LP-1014)" design canvas (its Thread board is out of scope).
 - **Draft pane:** a **"Follow up if no reply"** box just above the button bar with Send (unticked): every [3] days, up to [2], at [time picker, default now], her time zone shown, and a line "First reminder: <day> at <time>". Shown only where Send is shown.
 - **Sent email (right pane):** a follow-up bar: status, waiting for, next reminder, "1 of 2 sent", and the buttons for its state — On: Edit, Send now, Stop · Paused (they replied): Resume, Send now, Stop · No reply (all automatic sent): Send now · Stopped: none · Off: **Start follow-ups** (the same three fields, inline).
@@ -921,6 +921,12 @@ Fits the existing Communication tab (two panes: message list left, open message 
 - **Follow-ups list:** full width above the two panes, only when the file has a started follow-up: email and recipient, waiting for, status, next / sent, actions. "No reply" rows (red) first. Clicking a row opens that email on the right. This replaces the to-do suggestion (there is no to-do list in the app).
 - **Backend (from LP-1013):** list endpoint for the file's follow-ups; a deactivated sender's follow-ups stop (reason "sender inactive"); time zone also checked against Postgres's list.
 - **Done when:** in dev, every control works and the list shows each status.
+- **Result (2026-11-08, commit `ea8ad9b7`):** all four screens as scoped. Backend: `GET /api/v1/loan-files/{file}/follow-ups` (started follow-ups, newest first, with `sender_name`, `sender_active`, `email_status`); the job stops a deactivated sender's follow-up (`stopped_sender_inactive`); the time zone is checked against Postgres's list on Start, Edit **and Send** (list read once per process). The timeline marks automatic reminders ("Automatic reminder (for Priya) · Sent"). "No reply" is worked out on screen in one place. Automatic reminders are now 1–10 (0 no longer allowed). Dev check passed for every state, with screenshots. Tests: backend 9817, frontend 2539. Details: `docs/tickets/LP-1014.md`.
+- **Open (from LP-1014):**
+  - **"No reply" never turns into "Everything arrived".** Once the automatic reminders run out the job never looks at the follow-up again, so it stays red at the top of the list even after every document is accepted. Fix before LP-1015 (scenarios 2 and 3 hit it).
+  - Start and Resume still work for a deactivated sender; the screen shows a date until the job stops it (within 15 minutes). The "account was deactivated" wording is read from the account today, not stored as the reason. Accepted for the pilot.
+  - A Send-now reminder's row reads "Sent · Re: …", not "Reminder".
+  - The activity feed says "Sent a document request for 0 item(s)" for a composed email (older bug).
 
 ### LP-1015 — Test every follow-up scenario (staging)
 One ticket that runs every scenario end to end with real email (Yadees, your Gmail, and a second address of yours as "title company"). Move an email's send time back instead of waiting days.
@@ -950,6 +956,7 @@ Upload link (built, off; needs a security review) → Pre-send content check, re
 
 ## 18. Log
 
+- 2026-11-08 — LP-1014 ✅ (code): follow-ups on the Communication tab (box above Send, bar on a sent email, pills and reminder label, Follow-ups list with "No reply" first); list endpoint, deactivated sender stops, time zone checked against Postgres on Start/Edit/Send. Open: "No reply" doesn't finish when everything arrives — fix before LP-1015.
 - 2026-11-07 — LP-1014 scoped to the existing Communication tab (mockups reviewed): follow-up box in the draft pane, follow-up bar on a sent email, pills and reminder label in the list, Follow-ups list above the panes with "No reply" first. Thread view and a to-do list moved to §17.
 - 2026-11-07 — LP-1013 ✅ (code): automatic follow-ups backend with time of day, every 15 minutes. Send now restarts the clock but doesn't use up the automatic count. Three small backend items moved to LP-1014 (list endpoint, inactive sender, time-zone check).
 - 2026-11-07 — Follow-ups get a time of day (time picker, default = when she sends, her time zone); job every 15 minutes; weekends move to Monday. Replaces the 9–5 Eastern window.
