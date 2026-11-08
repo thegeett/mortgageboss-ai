@@ -914,10 +914,12 @@ Order: LP-1013 → 1014 → 1015. Each ticket writes `docs/tickets/LP-xxx.md` in
 - **Open, later:** a reply moved from the Inbox to the file doesn't pause at once; "success" means queued (a reminder that then fails cleanly is spent); "my email below" is not quoted; no activity entry for Start/Stop/Resume/settings; the 3-a-day rate limit can delay a second follow-up to the same person; findings 3, 5, 7, 9, 10 (left as is).
 
 ### LP-1014 — Follow-ups on screen
-- Send dialog: **"Follow up if no reply"** tick box (unticked), with "every 3 days, up to 2, at <now>" editable — a **time picker** defaulting to the current time.
-- Communication tab: a **Follow-ups** list, one line per email with follow-up on: recipient, what it's waiting for (still-missing documents, or "a reply"), status (On / Paused — they replied / Finished / Stopped), next reminder date, automatic sent of total, and **Send now / Resume / Stop / Start**.
-- On the thread: automatic reminders labelled "Automatic reminder (for Priya)".
-- When the automatic ones run out, the to-do suggestion says so ("2 reminders sent, no reply").
+Fits the existing Communication tab (two panes: message list left, open message right). No new dialog, no thread view, no to-do list. Mockups: "Follow-ups Screens (LP-1014)" design canvas (its Thread board is out of scope).
+- **Draft pane:** a **"Follow up if no reply"** box just above the button bar with Send (unticked): every [3] days, up to [2], at [time picker, default now], her time zone shown, and a line "First reminder: <day> at <time>". Shown only where Send is shown.
+- **Sent email (right pane):** a follow-up bar: status, waiting for, next reminder, "1 of 2 sent", and the buttons for its state — On: Edit, Send now, Stop · Paused (they replied): Resume, Send now, Stop · No reply (all automatic sent): Send now · Stopped: none · Off: **Start follow-ups** (the same three fields, inline).
+- **Message list (left):** a reminder row reads "Automatic reminder (for Priya)"; a sent email with follow-ups shows a small pill (Follow-up · <day> / Paused / No reply / Stopped).
+- **Follow-ups list:** full width above the two panes, only when the file has a started follow-up: email and recipient, waiting for, status, next / sent, actions. "No reply" rows (red) first. Clicking a row opens that email on the right. This replaces the to-do suggestion (there is no to-do list in the app).
+- **Backend (from LP-1013):** list endpoint for the file's follow-ups; a deactivated sender's follow-ups stop (reason "sender inactive"); time zone also checked against Postgres's list.
 - **Done when:** in dev, every control works and the list shows each status.
 
 ### LP-1015 — Test every follow-up scenario (staging)
@@ -944,10 +946,11 @@ Regenerated 2026-10-26 after step 1: plain boxes are live in staging, tinted box
 
 ## 17. After v1, in order
 
-Upload link (built, off; needs a security review) → Pre-send content check, revisited from `LP-996.md` (fix the misfires, or warn instead of block) → Legal hold + retention schedule → AI reply tier 2 → M365 mailbox connector (if the customer is on M365) → AI reply tier 3 once gated → SES tenant management (per-tenant reputation and pause) → Domain Connect for GoDaddy-type DNS → production AWS account (repeat production access; re-delegate tenant NS).
+Upload link (built, off; needs a security review) → Pre-send content check, revisited from `LP-996.md` (fix the misfires, or warn instead of block) → Legal hold + retention schedule → AI reply tier 2 → M365 mailbox connector (if the customer is on M365) → AI reply tier 3 once gated → SES tenant management (per-tenant reputation and pause) → Domain Connect for GoDaddy-type DNS → production AWS account (repeat production access; re-delegate tenant NS) → Thread view on the Communication tab (an email with its reminders and replies in one scroll; proper thread rule by Message-ID / In-Reply-To) → To-do list across files (e.g. "2 reminders sent, no reply").
 
 ## 18. Log
 
+- 2026-11-07 — LP-1014 scoped to the existing Communication tab (mockups reviewed): follow-up box in the draft pane, follow-up bar on a sent email, pills and reminder label in the list, Follow-ups list above the panes with "No reply" first. Thread view and a to-do list moved to §17.
 - 2026-11-07 — LP-1013 ✅ (code): automatic follow-ups backend with time of day, every 15 minutes. Send now restarts the clock but doesn't use up the automatic count. Three small backend items moved to LP-1014 (list endpoint, inactive sender, time-zone check).
 - 2026-11-07 — Follow-ups get a time of day (time picker, default = when she sends, her time zone); job every 15 minutes; weekends move to Monday. Replaces the 9–5 Eastern window.
 - 2026-11-07 — Follow-ups redesigned: per email, for any email (not just documents); the processor ticks the box (no AI decision); a reply pauses, Resume continues with only what's missing, all documents arrived finishes. LP-1015 becomes a full scenario test.
