@@ -98,9 +98,9 @@ Each loan file gets its own email address on the customer's domain. MortgageBoss
 | Mail with no company | Shown to **no company** in the app (ADR-420, LP-1008): before, every company's triage list showed that unmatched mail existed (time, verdicts, attachment types). It stays in the table and in the internal readonly view | 11-04 |
 | Unmatched mail's company | Mail that matches no file goes to the company that owns the **domain it was delivered to** (`receipt.recipients`, `active` or `problem` domain), when every recipient domain belongs to exactly one company; it lands in that company's Inbox under "Not matched to a file", where **Move to file** places it. Otherwise (two companies, unknown domain) it stays internal only. Safe because each domain is unique to one company and SES says where it delivered (ADR-421, LP-1009) | 11-05 |
 | Follow-ups (reminders) | **Per email, for any email a processor sends** — a document request, a question to the lender, anything. Off by default: she ticks **"Follow up if no reply"** in the Send dialog, or clicks **Start follow-ups** on that email later. The app never decides on its own whether an email needs chasing (an AI guess would send real email on a guess; she knows). Later option: the AI pre-ticks the box and she can untick it | 11-07 |
-| Follow-up timing | Per email: **every 3 days by default**, **2 automatic by default**, both adjustable. **Send reminder now** any time (counts as a reminder; the next automatic one waits the full interval). Automatic ones go out on weekdays, 9am–5pm US Eastern. When the automatic ones run out, the email shows on the processor's to-do list | 11-07 |
+| Follow-up timing | Per email: **every 3 days by default**, **2 automatic by default**, and a **time of day** (time picker, default = the time she sends, in her own time zone), all adjustable. A reminder goes out on its due day at that time, within 15 minutes (the job runs every 15 minutes); a due day on a weekend moves to Monday at the same time. **Send reminder now** any time (it restarts the clock, so the next automatic one waits the full interval, but it does **not** use up the automatic count). When the automatic ones run out, the email shows on the processor's to-do list. *(Replaces the earlier 9am–5pm Eastern window, 11-07.)* | 11-07 |
 | Follow-up rules | **A reply from that recipient pauses it** (the reply may carry documents not yet accepted, or an answer). She clicks **Resume** (the next reminder comes an interval after the reply and lists only what's still missing), **Send now**, or **Stop**. For a document request, **all documents arrived → finished**. Stop → finished. Later option: resume automatically when she accepts something from the reply and something is still missing | 11-07 |
-| Follow-up wording | Always a reply in the same thread (`Re: <subject>`). Document request: "Just following up. We've received your W-2, thank you. Still waiting on: bank statements." Any other email: "Just following up on my email below. Could you let me know when you get a chance?" | 11-07 |
+| Follow-up wording | Always a reply in the same thread (`Re: <subject>`). Document request: "Just following up. We've received your W-2, thank you. Still waiting on: bank statements." Any other email: "Just following up on my email below. Could you let me know when you get a chance?" | 11-07 | *(As built: the general reminder also carries "Email is not a fully secure channel." — every template must; it reads abruptly after the question; reword in a v2.)*
 | Who a reminder is from | Automatic: the person who sent the original email — From "<her name>, <company>" `<file address>`, Cc her, Reply-To the file address, footer "This is an automatic reminder from <company>'s loan file system. Replies go straight to <her>." Recorded as "Automatic reminder (for <her>)". Send now: whoever clicks it, like any Send | 11-07 |
 | Upload link | **Off for now** (later iteration). Borrowers reply with attachments, which works end to end; the public upload page needs its own security review | 11-07 |
 | SES Message-ID | SES replaces our Message-ID with `<{SES MessageId}@email.amazonses.com>`; the id part equals `Communication.external_message_id`. Step 4's reply threading matches `In-Reply-To` / `References` on this, not on the id in the stored `.eml` (found in LP-998) | 10-31 |
@@ -178,7 +178,7 @@ An emailed attachment therefore exists twice: inside the raw email (evidence of 
 | Step 2 — Send | ✅ **Done** 2026-10-31. Proven in staging (LP-998): the test company MortgageBoss sends from `lf-…@mail.staging.mortgageboss.ai`; delivered and bounced show on the file. From display name fixed in LP-999 |
 | Step 3 — Tenant domain | ✅ **Done** 2026-11-04. Proven with `mb-mail.yadees.com` (GoDaddy) as test customer "Yadees Test Co": one command + one NS record → active in about 13 minutes; real email delivered, signed by the customer subdomain; a removed NS record paused Send at the next hourly check and recovery came back the same way. Runbook in §15b LP-1007 |
 | Step 4 — Receive | ✅ **Done** 2026-11-07. Proven in staging with Yadees + Gmail: a reply with two PDFs lands on its file within about a minute (verified, readable, accent intact); Preview + Accept make documents that are processed (W-2, bank statement); the processor's copy reaches the Gmail inbox (DMARC pass, `p=reject`); reply-all makes no copy; typo mail goes to the company Inbox and can be moved or dismissed |
-| Step 5 — Follow-ups | Groomed 2026-11-07 into LP-1013–1015 (§15d): per-email follow-ups for any email; LP-1015 tests every scenario. Not started |
+| Step 5 — Follow-ups | In progress: LP-1013 ✅ (code, not deployed); LP-1014 (screen) and LP-1015 (test every scenario) to do (§15d) |
 | Step 6 | Not started |
 
 **Until LP-989 and step 2 are done:** the staging account can deliver real mail to anyone (production access is account-wide). Send test mail only to own inboxes or `success@ / bounce@ / complaint@simulator.amazonses.com`. No real borrower addresses.
@@ -897,18 +897,24 @@ Order: LP-1013 → 1014 → 1015. Each ticket writes `docs/tickets/LP-xxx.md` in
 
 **Design correction during grooming:** follow-ups were first per file and only for document requests. A file has requests to several people (borrower, title company, employer, lender), so a per-file switch would chase only the latest one. Now **per email, for any email**.
 
-### LP-1013 — Automatic follow-ups (backend)
-- On the outbound email (`Communication`): follow-up on/off (default off), interval days (default 3), automatic count (default 2), automatic sent so far, paused (reason: recipient replied), last reminder time. Small migration.
+### LP-1013 — Automatic follow-ups (backend) — ✅ Done (code)
+- On the outbound email (`Communication`): follow-up on/off (default off), interval days (default 3), automatic count (default 2), **time of day and time zone** (default: when and where she sent it), automatic sent so far, paused (reason: recipient replied), last reminder time. Small migration.
 - `send_draft(..., follow_up=…)` turns it on when the box is ticked; endpoints to start, stop, resume, change the interval and count, and **Send now**.
-- Hourly beat job, weekdays 9am–5pm US Eastern: for each email with follow-up on, not paused, not finished, whose company can send: due when the last of (send, last reminder, reply-resume) is at least the interval old and fewer than the count have gone. Send a reminder.
+- Beat job **every 15 minutes**: for each email with follow-up on, not paused, not finished, whose company can send: due at **(date of the last send / reminder / reply) + interval days, at the chosen time of day in its time zone**, moved to Monday if that is a weekend, with fewer than the count gone. Send a reminder.
 - **Reply → pause:** an email from that recipient routed to the file after the email or its last reminder pauses that follow-up.
 - **Resume:** the clock restarts from the reply.
 - **Document request finished:** none of its needs still requested → finished, no reminder.
 - **The reminder:** document request → `reminder_follow_up` (received so far, still waiting); any other email → a short general follow-up template. Subject `Re: <original subject>`, threaded (`In-Reply-To` / `References` = the original's SES Message-ID `<id@email.amazonses.com>`), sent through `send_draft(transmit=True)` on behalf of the original sender (From her, Cc her), automatic footer, `Auto-Submitted: auto-generated` (not `Precedence: bulk`). Send now = the same reminder, from whoever clicks. A refusal (suppressed, rate limit, domain problem) skips and logs.
 - **Done when:** unit tests cover every rule above; a dev run sends one reminder for a due email and none for paused, finished, stopped or not-due ones.
+- **Result (2026-11-07):** migration `e3a9d4c7b512` (nine follow-up columns on `communications`); `services/follow_ups.py` (due rule, reply pause, resume, reminder text, send in one savepoint through `send_draft(transmit=True)`); job `communications.send_follow_ups` every 15 minutes (up to 50, earliest due first, row-locked); `reminder_follow_up` v4 ("Just following up. We've received your W-2, thank you. We are still waiting on…") and new `follow_up_general` v1; `Auto-Submitted` on automatic reminders only; reply pause at ingest; API: start, stop, resume, settings, Send now. **Time of day and time zone** per follow-up (default: the send moment; `America/New_York` if the screen sends no zone); weekends move to Monday; DST-safe. Resume counts from the recipient's latest reply and never moves the clock back. Companies that can't send don't hold up others. Dev check passed (reminders 1 and 2, the second listing only the missing need; count respected; general wording; pause on reply; Send now from the clicker with no footer; due exactly at the chosen time). Tests 9802 passed. Details: `docs/tickets/LP-1013.md`.
+- **Open (from LP-1013) — proposed for LP-1014's backend part:**
+  - **No list endpoint** for the Follow-ups list (only the message detail carries `follow_up`).
+  - **A deactivated sender's follow-ups keep sending in her name** (From her, Cc her dead mailbox). Stop them (`stopped`, reason "sender inactive").
+  - **One bad time zone could break the job for everyone:** the API checks the zone against Python's list, but the job's SQL uses Postgres's. Check against Postgres's list too.
+- **Open, later:** a reply moved from the Inbox to the file doesn't pause at once; "success" means queued (a reminder that then fails cleanly is spent); "my email below" is not quoted; no activity entry for Start/Stop/Resume/settings; the 3-a-day rate limit can delay a second follow-up to the same person; findings 3, 5, 7, 9, 10 (left as is).
 
 ### LP-1014 — Follow-ups on screen
-- Send dialog: **"Follow up if no reply"** tick box (unticked), with "every 3 days, up to 2" editable.
+- Send dialog: **"Follow up if no reply"** tick box (unticked), with "every 3 days, up to 2, at <now>" editable — a **time picker** defaulting to the current time.
 - Communication tab: a **Follow-ups** list, one line per email with follow-up on: recipient, what it's waiting for (still-missing documents, or "a reply"), status (On / Paused — they replied / Finished / Stopped), next reminder date, automatic sent of total, and **Send now / Resume / Stop / Start**.
 - On the thread: automatic reminders labelled "Automatic reminder (for Priya)".
 - When the automatic ones run out, the to-do suggestion says so ("2 reminders sent, no reply").
@@ -922,9 +928,9 @@ One ticket that runs every scenario end to end with real email (Yadees, your Gma
 4. **Reply without documents** ("I'll send Friday") → paused; Stop → no more.
 5. **General question** (not documents), ticked: general reminder after the interval; any reply → paused.
 6. **Two recipients on one file** (borrower + "title company"), both ticked: each chased separately; a reply from one pauses only that one.
-7. **Send now:** sends immediately, counts as a reminder, moves the next date; works on an email with follow-up off.
+7. **Send now:** sends immediately, restarts the clock (moves the next date) without using up the automatic count; works on an email with follow-up off.
 8. **Custom settings:** interval 1 day, count 3 → three automatic reminders.
-9. **Outside office hours / weekend:** a due reminder waits until the next weekday 9am.
+9. **Time of day / weekend:** a reminder set for 9:30 goes out between 9:30 and 9:45 on its due day; one due on a Saturday goes Monday at the same time.
 10. **Refusals:** suppressed recipient, rate limit, domain `problem` → no reminder, logged.
 11. Alarms OK; DLQs 0.
 - **Done when:** every scenario passes. Anything that fails is fixed in a follow-up ticket before the pilot.
@@ -942,6 +948,8 @@ Upload link (built, off; needs a security review) → Pre-send content check, re
 
 ## 18. Log
 
+- 2026-11-07 — LP-1013 ✅ (code): automatic follow-ups backend with time of day, every 15 minutes. Send now restarts the clock but doesn't use up the automatic count. Three small backend items moved to LP-1014 (list endpoint, inactive sender, time-zone check).
+- 2026-11-07 — Follow-ups get a time of day (time picker, default = when she sends, her time zone); job every 15 minutes; weekends move to Monday. Replaces the 9–5 Eastern window.
 - 2026-11-07 — Follow-ups redesigned: per email, for any email (not just documents); the processor ticks the box (no AI decision); a reply pauses, Resume continues with only what's missing, all documents arrived finishes. LP-1015 becomes a full scenario test.
 - 2026-11-07 — Reminders are opt-in: automatic follow-ups run only after the processor turns them on (tick box in the Send dialog or Start on the file); Stop any time; Send reminder now always available.
 - 2026-11-07 — Step 5 groomed into LP-1013–1015 (§15d). Decisions: automatic reminders plus Send now (counts as a reminder); every 3 days by default, 2 automatic by default, both adjustable per file; any borrower reply pauses; reminders come from the original requester with her in CC; upload link deferred.
