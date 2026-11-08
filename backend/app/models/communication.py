@@ -24,12 +24,22 @@ initiating-user links are ``SET NULL`` so the message survives if the referenced
 row is removed.
 """
 
-from datetime import datetime
+from datetime import datetime, time
 from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    Time,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
@@ -112,6 +122,21 @@ class CommunicationStatus(StrEnum):
 NOT_CONFIRMED_PREFIX = "Not confirmed: "
 
 
+class FollowUpStatus(StrEnum):
+    """LP-1013 — automatic follow-ups on one outbound email a person sent with Send.
+
+    `off` until she turns it on. `paused`: the recipient replied (she resumes, sends now or stops).
+    `finished`: a document request whose needs have all stopped being requested. `stopped`: she
+    stopped it, the original failed, or the recipient is blocked.
+    """
+
+    OFF = "off"
+    ON = "on"
+    PAUSED = "paused"
+    FINISHED = "finished"
+    STOPPED = "stopped"
+
+
 class Communication(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     """A message associated with a loan file."""
 
@@ -132,6 +157,16 @@ class Communication(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         # A non-unique index is kept: the drafts list, the header count and the outstanding-set union
         # all read by (loan_file_id, status).
         Index("ix_communications_loan_file_status", "loan_file_id", "status"),
+        # LP-1013 — the follow-up settings' bounds, also checked by the API.
+        CheckConstraint(
+            "follow_up_interval_days BETWEEN 1 AND 30", name="follow_up_interval_days_range"
+        ),
+        CheckConstraint("follow_up_max_auto BETWEEN 0 AND 10", name="follow_up_max_auto_range"),
+        # LP-1013 amendment — a follow-up that has ever been on has its time of day and time zone.
+        CheckConstraint(
+            "follow_up_status = 'off' OR (follow_up_time IS NOT NULL AND follow_up_tz IS NOT NULL)",
+            name="follow_up_time_set",
+        ),
     )
 
     # --- Ownership (owned child of the loan file, ADR-052) -----------------
@@ -289,6 +324,42 @@ class Communication(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     #: NULL IS THE ORDINARY STATE. A draft without a link is a complete email — LP-824's wording
     #: offers to send one on request, which is a promise a person can keep.
     upload_link_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # --- Automatic follow-ups (LP-1013) -------------------------------------
+    #: On the ORIGINAL email only. A reminder is its own row with `follow_up_of_id` set and these
+    #: left at their defaults.
+    follow_up_status: Mapped[FollowUpStatus] = mapped_column(
+        str_enum(FollowUpStatus),
+        default=FollowUpStatus.OFF,
+        server_default=FollowUpStatus.OFF.value,
+        nullable=False,
+    )
+    follow_up_interval_days: Mapped[int] = mapped_column(
+        Integer, default=3, server_default="3", nullable=False
+    )
+    #: How many AUTOMATIC reminders may go. Send now does not count toward it.
+    follow_up_max_auto: Mapped[int] = mapped_column(
+        Integer, default=2, server_default="2", nullable=False
+    )
+    follow_up_auto_sent: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    #: When the interval counts from: the Send, the last reminder, or the reply on resume.
+    follow_up_clock_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    #: The time of day a reminder goes, in `follow_up_tz` (an IANA name, `America/New_York`). Set
+    #: when she turns it on: the time she sends or clicks Start, unless she picks one.
+    follow_up_time: Mapped[time | None] = mapped_column(Time, nullable=True)
+    follow_up_tz: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: When the recipient's reply paused it.
+    follow_up_paused_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    #: On a reminder: the email it follows up. SET NULL, like the other links here.
+    follow_up_of_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("communications.id", ondelete="SET NULL"), index=True, nullable=True
+    )
 
     # --- Relationships -----------------------------------------------------
     loan_file: Mapped["LoanFile"] = relationship(back_populates="communications")

@@ -77,13 +77,18 @@ def test_the_initial_request_without_an_address() -> None:
 def _reminder(phrase: str) -> str:
     return render(
         TemplateKey.REMINDER_FOLLOW_UP,
-        _COMMON | {"document_list": "- Bank statements", "file_address_phrase": phrase},
+        _COMMON
+        | {
+            "document_list": "- Bank statements",
+            "file_address_phrase": phrase,
+            "received_sentence": "",
+        },
     ).body
 
 
 def _reminder_expected(line: str) -> str:
     return (
-        "Hello Akash,\n\nA short follow-up. We are still waiting on the following:\n\n"
+        "Hello Akash,\n\nJust following up. We are still waiting on the following:\n\n"
         f"- Bank statements\n\n{line}\n\n{_SECURITY}\n\n"
         "If you have already sent any of these, tell us and we will go looking rather than asking "
         "you for it again.\n\nPriya"
@@ -128,7 +133,8 @@ def test_the_condition_request_with_and_without_an_address() -> None:
     ("key", "current", "previous"),
     [
         (TemplateKey.INITIAL_DOCUMENTATION_REQUEST, "v5", "v4"),
-        (TemplateKey.REMINDER_FOLLOW_UP, "v3", "v2"),
+        # LP-1013 — v4 adds the "received so far" sentence; v3 stays pinned.
+        (TemplateKey.REMINDER_FOLLOW_UP, "v4", "v3"),
         (TemplateKey.CONDITION_RESPONSE_REQUEST, "v3", "v2"),
     ],
 )

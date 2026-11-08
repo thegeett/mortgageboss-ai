@@ -25,6 +25,9 @@ from app.documents.catalog import CATALOG
 from app.models.communication import Communication, CommunicationDirection, CommunicationStatus
 from app.schemas.communication import (
     DraftConflictPublic,
+    FollowUpPatch,
+    FollowUpPublic,
+    FollowUpSettings,
     OutboundDraftPublic,
     PolishPublic,
     PolishRequest,
@@ -55,7 +58,7 @@ from app.services.email_reply import (
     reply_context,
     set_important,
 )
-from app.services.email_send import CannotSendError, build_outbound, send_draft
+from app.services.email_send import CannotSendError, FollowUp, build_outbound, send_draft
 from app.services.mail_domain import file_address
 from app.services.message_detail import message_detail
 
@@ -351,6 +354,16 @@ async def send_draft_endpoint(
             subject=payload.subject,
             approver_user_id=current_user.id,
             transmit=payload.transmit,
+            follow_up=(
+                FollowUp(
+                    payload.follow_up.interval_days,
+                    payload.follow_up.max_auto,
+                    payload.follow_up.time,
+                    payload.follow_up.tz,
+                )
+                if payload.follow_up is not None and payload.transmit
+                else None
+            ),
         )
     except CannotSendError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -502,6 +515,12 @@ class MessageDetailPublic(BaseModel):
     #: LP-1009 — True only on the request that marked this message read, so the screen refreshes
     #: the lists showing it unread then, and not on every open.
     marked_read: bool = False
+    #: LP-1013 — the follow-up on an email sent from the app; None on anything else.
+    follow_up: FollowUpPublic | None = None
+    #: LP-1013 — on a reminder: the email it follows up, and whether nobody clicked it ("Automatic
+    #: reminder (for <her>)").
+    follow_up_of_id: UUID | None = None
+    automatic_reminder: bool = False
 
 
 @message_router.post("/{communication_id}/upload-link", response_model=MessageDetailPublic)
@@ -584,6 +603,8 @@ async def read_message(
             await mark_read(db, loan_file=loan_file, communication_id=communication_id)
         ).read_at
         await db.commit()
+    # LP-1013 — `message_detail` checked the row is on this file.
+    row = await db.get(Communication, communication_id)
     return MessageDetailPublic(
         id=detail.id,
         direction=detail.direction,
@@ -616,6 +637,11 @@ async def read_message(
         body_unavailable=detail.body_unavailable,
         marked_read=marked_read,
         send_requested_at=detail.send_requested_at,
+        follow_up=await _follow_up_public(db, row) if row is not None else None,
+        follow_up_of_id=row.follow_up_of_id if row is not None else None,
+        automatic_reminder=row is not None
+        and row.follow_up_of_id is not None
+        and row.initiated_by_user_id is None,
     )
 
 
@@ -730,3 +756,181 @@ async def read_state(
         raise _refuse(exc) from exc
     await db.commit()
     return MessagePublic.of(message)
+
+
+# --------------------------------------------------------------------------------------------- #
+# Automatic follow-ups (LP-1013)
+# --------------------------------------------------------------------------------------------- #
+_NO_MESSAGE = HTTPException(status.HTTP_404_NOT_FOUND, detail="No such message on this loan file")
+
+
+async def _outbound_row(
+    db: DbSession, *, loan_file: ScopedLoanFile, communication_id: UUID
+) -> Communication:
+    """An outbound email on this (already company-scoped) file, or 404."""
+    row = await db.get(Communication, communication_id)
+    if (
+        row is None
+        or row.loan_file_id != loan_file.id
+        or row.deleted_at is not None
+        or row.direction is not CommunicationDirection.OUTBOUND
+    ):
+        raise _NO_MESSAGE
+    return row
+
+
+async def _original(
+    db: DbSession, *, loan_file: ScopedLoanFile, communication_id: UUID
+) -> Communication:
+    """An email sent from the app that a reminder can follow, or 404 / 409."""
+    from app.services.follow_ups import is_original
+
+    row = await _outbound_row(db, loan_file=loan_file, communication_id=communication_id)
+    if not is_original(row):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="Follow-ups are only for an email sent from the app.",
+        )
+    return row
+
+
+def _went_out(row: Communication) -> None:
+    if row.status not in (CommunicationStatus.SENT, CommunicationStatus.DELIVERED):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="This email has not gone out, so it cannot be followed up.",
+        )
+
+
+async def _follow_up_public(db: DbSession, row: Communication) -> FollowUpPublic | None:
+    from app.services.follow_ups import follow_up_view
+
+    view = await follow_up_view(db, row)
+    if view is None:
+        return None
+    return FollowUpPublic(
+        status=view.status,
+        interval_days=view.interval_days,
+        max_auto=view.max_auto,
+        auto_sent=view.auto_sent,
+        clock_at=view.clock_at,
+        paused_at=view.paused_at,
+        next_reminder_at=view.next_reminder_at,
+        time=view.time,
+        tz=view.tz,
+        waiting_for=view.waiting_for,
+    )
+
+
+async def _follow_up_response(db: DbSession, row: Communication) -> FollowUpPublic:
+    await db.commit()
+    public = await _follow_up_public(db, row)
+    assert public is not None  # `_original` checked
+    return public
+
+
+@message_router.post("/{communication_id}/follow-up/start", response_model=FollowUpPublic)
+async def start_follow_up(
+    communication_id: UUID,
+    payload: FollowUpSettings,
+    loan_file: ScopedLoanFile,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> FollowUpPublic:
+    """Turn follow-ups on for an email already sent. The clock starts now; the count starts again.
+    No time of day given: the time she clicks, in her time zone (or `America/New_York`)."""
+    from app.models.base import utcnow
+    from app.models.communication import FollowUpStatus
+    from app.services.email_send import DEFAULT_FOLLOW_UP_TZ, time_of_day
+
+    row = await _original(db, loan_file=loan_file, communication_id=communication_id)
+    _went_out(row)
+    now = utcnow()
+    row.follow_up_status = FollowUpStatus.ON
+    row.follow_up_interval_days = payload.interval_days
+    row.follow_up_max_auto = payload.max_auto
+    row.follow_up_tz = payload.tz or DEFAULT_FOLLOW_UP_TZ
+    row.follow_up_time = payload.time or time_of_day(now, row.follow_up_tz)
+    row.follow_up_auto_sent = 0
+    row.follow_up_clock_at = now
+    row.follow_up_paused_at = None
+    return await _follow_up_response(db, row)
+
+
+@message_router.post("/{communication_id}/follow-up/stop", response_model=FollowUpPublic)
+async def stop_follow_up(
+    communication_id: UUID, loan_file: ScopedLoanFile, db: DbSession, current_user: CurrentUser
+) -> FollowUpPublic:
+    """No more automatic reminders on this email. Start turns it on again."""
+    from app.models.communication import FollowUpStatus
+
+    row = await _original(db, loan_file=loan_file, communication_id=communication_id)
+    row.follow_up_status = FollowUpStatus.STOPPED
+    return await _follow_up_response(db, row)
+
+
+@message_router.post("/{communication_id}/follow-up/resume", response_model=FollowUpPublic)
+async def resume_follow_up(
+    communication_id: UUID, loan_file: ScopedLoanFile, db: DbSession, current_user: CurrentUser
+) -> FollowUpPublic:
+    """After a reply paused it: on again, the next reminder an interval after the recipient's
+    latest reply, at the same time of day. The response's `next_reminder_at` shows when; she
+    changes it with PATCH."""
+    from app.models.communication import FollowUpStatus
+    from app.services.follow_ups import resume_clock
+
+    row = await _original(db, loan_file=loan_file, communication_id=communication_id)
+    if row.follow_up_status is not FollowUpStatus.PAUSED:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="This follow-up is not paused.")
+    row.follow_up_status = FollowUpStatus.ON
+    row.follow_up_clock_at = await resume_clock(db, row)
+    return await _follow_up_response(db, row)
+
+
+@message_router.patch("/{communication_id}/follow-up", response_model=FollowUpPublic)
+async def change_follow_up(
+    communication_id: UUID,
+    payload: FollowUpPatch,
+    loan_file: ScopedLoanFile,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> FollowUpPublic:
+    """Change the interval, the count, the time of day or the time zone. The status and the clock
+    are left as they are, so the next reminder moves with the new settings."""
+    row = await _original(db, loan_file=loan_file, communication_id=communication_id)
+    if payload.interval_days is not None:
+        row.follow_up_interval_days = payload.interval_days
+    if payload.max_auto is not None:
+        row.follow_up_max_auto = payload.max_auto
+    if payload.time is not None:
+        row.follow_up_time = payload.time
+    if payload.tz is not None:
+        row.follow_up_tz = payload.tz
+    return await _follow_up_response(db, row)
+
+
+@message_router.post("/{communication_id}/follow-up/send-now", response_model=FollowUpPublic)
+async def send_follow_up_now(
+    communication_id: UUID, loan_file: ScopedLoanFile, db: DbSession, current_user: CurrentUser
+) -> FollowUpPublic:
+    """Send the reminder now, from whoever clicks, with no automatic footer, whatever the status.
+
+    Through `send_draft(transmit=True)`, so every Send check applies (409 when one refuses). The
+    next automatic reminder waits a full interval from now, at the same time of day; the automatic
+    count is unchanged.
+    """
+    from app.models.base import utcnow
+    from app.services.follow_ups import send_reminder
+
+    row = await _original(db, loan_file=loan_file, communication_id=communication_id)
+    _went_out(row)
+    try:
+        reminder = await send_reminder(
+            db, loan_file=loan_file, original=row, sender=current_user, automatic=False
+        )
+    except CannotSendError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    row.follow_up_clock_at = utcnow()
+    public = await _follow_up_response(db, row)
+    _enqueue_send(reminder.id)
+    return public

@@ -32,6 +32,7 @@ _TASK_MODULES = [
     "app.tasks.conditions",  # LP-905 — reading an arrived condition sheet
     "app.tasks.outbound",  # LP-994 — the worker sends a person's approved email
     "app.tasks.mail_domains",  # LP-1006 — the hourly check of customer mail domains
+    "app.tasks.follow_ups",  # LP-1013 — automatic follow-up reminders
 ]
 
 celery_app = Celery(
@@ -131,6 +132,13 @@ celery_app.conf.update(
             "task": "mail_domains.check_all",
             "schedule": 3600.0,
             "options": {"expires": 3600},
+        },
+        # LP-1013 — automatic follow-up reminders, each at its own time of day; a reminder goes within
+        # 15 minutes of it. Dropped if late: the next run finds the same due emails.
+        "send-follow-ups": {
+            "task": "communications.send_follow_ups",
+            "schedule": 900.0,
+            "options": {"expires": 900},
         },
     },
 )

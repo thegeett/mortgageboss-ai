@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
+from datetime import time as TimeOfDay
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.services.email_draft import DraftDecisionRequired
-from app.services.email_send import MAILTO_MAX_CHARS
+from app.services.email_send import MAILTO_MAX_CHARS, is_known_time_zone
 
 
 class OutboundDraftPublic(BaseModel):
@@ -39,6 +40,55 @@ class OutboundDraftPublic(BaseModel):
     #: NULLABLE FOR A REAL REASON: `borrowers.email` is nullable, so a file can have a borrower and
     #: no address. The panel must render that as an empty box, never as a claim.
     suggested_recipient: str | None = None
+
+
+def _known_tz(value: str | None) -> str | None:
+    if value is not None and not is_known_time_zone(value):
+        raise ValueError(f"unknown time zone: {value}")
+    return value
+
+
+class FollowUpSettings(BaseModel):
+    """LP-1013 — follow-up settings: every `interval_days`, up to `max_auto` automatic reminders, at
+    `time` (`HH:MM`) in `tz` (IANA, `America/New_York`). Either left out: the moment of the Send or
+    the Start, in that time zone or `America/New_York`."""
+
+    interval_days: int = Field(default=3, ge=1, le=30)
+    max_auto: int = Field(default=2, ge=0, le=10)
+    time: TimeOfDay | None = None
+    tz: str | None = Field(default=None, max_length=64)
+
+    _tz = field_validator("tz")(_known_tz)
+
+
+class FollowUpPatch(BaseModel):
+    """LP-1013 — change any setting; an omitted one is left as it is."""
+
+    interval_days: int | None = Field(default=None, ge=1, le=30)
+    max_auto: int | None = Field(default=None, ge=0, le=10)
+    time: TimeOfDay | None = None
+    tz: str | None = Field(default=None, max_length=64)
+
+    _tz = field_validator("tz")(_known_tz)
+
+
+class FollowUpPublic(BaseModel):
+    """LP-1013 — the follow-up on one email, for LP-1014's screen."""
+
+    status: str
+    interval_days: int
+    max_auto: int
+    auto_sent: int
+    clock_at: datetime | None
+    paused_at: datetime | None
+    #: When the next automatic reminder is due: the interval's day (a weekend moved to Monday) at
+    #: `time` in `tz`. None when none will go. The job sends it within 15 minutes after.
+    next_reminder_at: datetime | None
+    #: Her time of day, `HH:MM`, and IANA time zone; None until follow-up is first turned on.
+    time: str | None
+    tz: str | None
+    #: Still-missing document names, or ["a reply"] for an email that asked for no documents.
+    waiting_for: list[str]
 
 
 class SendDraftRequest(BaseModel):
@@ -73,6 +123,8 @@ class SendDraftRequest(BaseModel):
     #: LP-994 — True: the app sends it (the worker, from the file address). False, the default: "I've
     #: sent it", the processor sent it herself and this only records it.
     transmit: bool = False
+    #: LP-1013 — "Follow up if no reply", ticked. Only with `transmit`; ignored otherwise.
+    follow_up: FollowUpSettings | None = None
 
 
 class SaveDraftBodyRequest(BaseModel):

@@ -64,6 +64,8 @@ _CONTEXT = {
     # every asking template must say when the processor has minted nothing.
     "secure_upload_block": SECURITY_NOTICE,
     "subject_line": "About your loan",
+    # LP-1013 — the reminder's thanks for what has arrived.
+    "received_sentence": " We've received your W-2, thank you.",
     "message_body": "Just a note.",
 }
 
@@ -104,7 +106,8 @@ def test_every_template_key_is_registered() -> None:
     asserted below so the growth is deliberate rather than silent, but the set equality is the test.
     """
     assert set(TEMPLATES) == set(TemplateKey)
-    assert len(TemplateKey) == 7
+    # LP-1013 — `follow_up_general`, the reminder for an email that asked for no documents.
+    assert len(TemplateKey) == 8
 
 
 def test_declared_variables_match_the_files_exactly() -> None:

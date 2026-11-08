@@ -1,0 +1,9 @@
+Subject: $subject_line
+
+Hello $borrower_first_name,
+
+Just following up on my email below. Could you let me know when you get a chance?
+
+Email is not a fully secure channel.
+
+$processor_name

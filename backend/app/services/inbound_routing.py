@@ -679,6 +679,10 @@ async def apply_routing(db: AsyncSession, *, message: InboundMessage) -> Routing
         disposition=disposition,
         reason=reason,
     )
+    # LP-1013 — a reply from the person a follow-up is chasing pauses that follow-up.
+    from app.services.follow_ups import pause_for_reply
+
+    await pause_for_reply(db, message=message, loan_file=outcome.loan_file)
     await db.flush()
     return outcome
 

@@ -103,7 +103,12 @@ def test_only_the_send_endpoint_can_ask_to_transmit() -> None:
         for kw in call.keywords
         if kw.arg == "transmit"
     ]
-    assert transmitting == [("app/api/communications.py", "payload.transmit")]
+    # LP-1013 — the follow-up reminder (automatic, or Send now) is the one other caller that
+    # transmits; it goes through `send_draft` so every Send check applies to it.
+    assert sorted(transmitting) == [
+        ("app/api/communications.py", "payload.transmit"),
+        ("app/services/follow_ups.py", "True"),
+    ]
 
 
 # --------------------------------------------------------------------------------------------- #

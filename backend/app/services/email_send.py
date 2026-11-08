@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, time, timedelta
+from functools import cache
 from uuid import UUID
+from zoneinfo import ZoneInfo, available_timezones
 
 import structlog
 from sqlalchemy import func, select
@@ -30,6 +32,7 @@ from app.models.communication import (
     Communication,
     CommunicationDirection,
     CommunicationStatus,
+    FollowUpStatus,
 )
 from app.models.helpers import only_active
 from app.models.loan_file import LoanFile
@@ -83,7 +86,53 @@ _FOOTER_TAG = re.compile(r"\[(LF-[A-Za-z0-9]+)\]")
 
 
 class CannotSendError(Exception):
-    """The draft cannot be sent. Always tells the caller which rule stopped it."""
+    """The draft cannot be sent. Always tells the caller which rule stopped it.
+
+    LP-1013 — `code` names the rule for logs and for the follow-up job, which retries a rate limit
+    and stops on a blocked address: `suppressed`, `rate_limited`, a `company_send_blocker` code, or
+    `refused` for everything else.
+    """
+
+    def __init__(self, message: str, code: str = "refused") -> None:
+        super().__init__(message)
+        self.code = code
+
+
+#: LP-1013 amendment — the time zone a follow-up uses when the caller names none. The screen sends
+#: the processor's own (the browser's); staging runs on US Eastern hours.
+DEFAULT_FOLLOW_UP_TZ = "America/New_York"
+
+
+@cache
+def _known_time_zones() -> frozenset[str]:
+    return frozenset(available_timezones())
+
+
+def is_known_time_zone(name: str) -> bool:
+    """An IANA name `zoneinfo` knows (`America/New_York`); not a path, an offset or a typo."""
+    return name in _known_time_zones()
+
+
+def time_of_day(moment: datetime, tz: str) -> time:
+    """`moment`'s wall-clock time in `tz`, to the minute: the default time of day for a follow-up."""
+    return moment.astimezone(ZoneInfo(tz)).time().replace(second=0, microsecond=0)
+
+
+@dataclass(frozen=True)
+class FollowUp:
+    """LP-1013 — her follow-up settings on a Send: every `interval_days`, up to `max_auto`, at
+    `time` in `tz`. `time` / `tz` left empty: the moment she sends, in `DEFAULT_FOLLOW_UP_TZ`."""
+
+    interval_days: int = 3
+    max_auto: int = 2
+    time: time | None = None
+    tz: str | None = None
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.interval_days <= 30 or not 0 <= self.max_auto <= 10:
+            raise ValueError("follow-up interval must be 1-30 days and the count 0-10")
+        if self.tz is not None and not is_known_time_zone(self.tz):
+            raise ValueError(f"unknown time zone: {self.tz}")
 
 
 #: LP-815 — OUTBOUND MAIL CARRIES NO ATTACHMENTS, AND THAT IS ENFORCED HERE RATHER THAN ASSUMED.
@@ -260,14 +309,16 @@ async def _refuse_if_rate_limited(db: AsyncSession, *, company_id: UUID, recipie
     if last is not None and utcnow() - last < RATE_LIMIT_WINDOW:
         raise CannotSendError(
             f"{recipient} was emailed less than {int(RATE_LIMIT_WINDOW.total_seconds() // 60)} "
-            "minutes ago; wait before sending again"
+            "minutes ago; wait before sending again",
+            code="rate_limited",
         )
     if (
         await _recent_sends(db, company_id=company_id, recipient=recipient, since_hours=24)
         >= RATE_LIMIT_PER_DAY
     ):
         raise CannotSendError(
-            f"{recipient} has already been emailed {RATE_LIMIT_PER_DAY} times today"
+            f"{recipient} has already been emailed {RATE_LIMIT_PER_DAY} times today",
+            code="rate_limited",
         )
 
 
@@ -281,6 +332,7 @@ async def send_draft(
     approver_user_id: UUID,
     subject: str | None = None,
     transmit: bool = False,
+    follow_up: FollowUp | None = None,
 ) -> Communication:
     """Record that ``draft_id`` was sent, and start the clock on everything it asked for.
 
@@ -294,6 +346,9 @@ async def send_draft(
     composed. It replaces the stored body, because the record of an outbound message must be what
     went out; LP-821 builds the full three-way evidence record (composed / edited / as sent) and is
     where the composed version gets its own field.
+
+    LP-1013 — ``follow_up`` turns on automatic follow-ups for this email, and only with ``transmit``:
+    a reminder is a reply in the thread the app sent, so "I've sent it" has no thread to reply in.
 
     NO BULK SEND, by construction: this takes one ``draft_id``. The plan says so and the reason is
     the rate limit above — a bulk path would either bypass it or fail halfway through a list with no
@@ -344,7 +399,8 @@ async def send_draft(
             raise CannotSendError(
                 # LP-995 — one message for both reasons: a complaint blocks the address too.
                 f"{recipient} is blocked: an earlier email to it bounced or was marked as spam. "
-                "Confirm the address with the borrower before sending again."
+                "Confirm the address with the borrower before sending again.",
+                code="suppressed",
             )
         await _refuse_if_rate_limited(db, company_id=loan_file.company_id, recipient=recipient)
 
@@ -444,6 +500,15 @@ async def send_draft(
     if transmit:
         draft.status = CommunicationStatus.QUEUED
         draft.send_requested_at = utcnow()
+        if follow_up is not None:
+            draft.follow_up_status = FollowUpStatus.ON
+            draft.follow_up_interval_days = follow_up.interval_days
+            draft.follow_up_max_auto = follow_up.max_auto
+            draft.follow_up_clock_at = draft.send_requested_at
+            draft.follow_up_tz = follow_up.tz or DEFAULT_FOLLOW_UP_TZ
+            draft.follow_up_time = follow_up.time or time_of_day(
+                draft.send_requested_at, draft.follow_up_tz
+            )
     else:
         draft.status = CommunicationStatus.SENT
         draft.sent_at = utcnow()
@@ -536,13 +601,18 @@ async def transmit_blocker(
     `address_and_sending` is `mail_domain.file_address_and_sending` when the caller has already read
     it (the message detail has, for `build_outbound`); otherwise it is read here.
     """
-    from app.services.condition_drafts import TEMPLATE_ASK, TEMPLATE_QUESTION
-
     code = await company_send_blocker(
         db, loan_file=loan_file, address_and_sending=address_and_sending
     )
     if code is not None:
         return _COMPANY_BLOCKER_SENTENCE[code]
+    return _draft_blocker(draft)
+
+
+def _draft_blocker(draft: Communication) -> str | None:
+    """The draft half of `transmit_blocker`: a condition draft is sent from her own mail."""
+    from app.services.condition_drafts import TEMPLATE_ASK, TEMPLATE_QUESTION
+
     if draft.template_key in (TEMPLATE_ASK, TEMPLATE_QUESTION):
         return "Condition emails can't be sent from the app yet. Send it from your own mail."
     return None
@@ -590,7 +660,12 @@ async def _refuse_if_cannot_transmit(
     missing."""
     from app.services.outbound_mime import _address
 
-    blocker = await transmit_blocker(db, loan_file=loan_file, draft=draft)
+    # LP-1013 — `transmit_blocker`'s two halves taken apart, so the company's refusal carries its
+    # code; each is read once, and the sentences are the same ones the button is given.
+    code = await company_send_blocker(db, loan_file=loan_file)
+    if code is not None:
+        raise CannotSendError(_COMPANY_BLOCKER_SENTENCE[code], code=code)
+    blocker = _draft_blocker(draft)
     if blocker is not None:
         raise CannotSendError(blocker)
     if not recipient.strip():
@@ -701,14 +776,18 @@ async def open_draft_preview(db: AsyncSession, *, loan_file: LoanFile) -> Outbou
 
 __all__ = [
     "AUTO_REPLY_SUPPRESSION_HEADERS",
+    "DEFAULT_FOLLOW_UP_TZ",
     "MAILTO_MAX_CHARS",
     "CannotSendError",
+    "FollowUp",
     "OutboundMessage",
     "build_outbound",
     "company_send_blocker",
     "footer_tag",
+    "is_known_time_zone",
     "loan_reference_in",
     "open_draft_preview",
     "send_draft",
+    "time_of_day",
     "transmit_blocker",
 ]

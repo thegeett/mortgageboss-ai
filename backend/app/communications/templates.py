@@ -130,6 +130,9 @@ class TemplateKey(StrEnum):
     # parties sharing one template still get five tabs.
     DOCUMENT_REQUEST_THIRD_PARTY = "document_request_third_party"
     DOCUMENT_REQUEST_EMPLOYER = "document_request_employer"
+    # LP-1013 — the reminder for an email that asked for no documents: a question to a lender, a
+    # note to the title company. A document request's reminder is `REMINDER_FOLLOW_UP`.
+    FOLLOW_UP_GENERAL = "follow_up_general"
 
 
 @dataclass(frozen=True)
@@ -207,8 +210,11 @@ TEMPLATES: dict[TemplateKey, TemplateSpec] = {
         # Bumped with the reported one because an asymmetry is a class: leaving it would ship the
         # defect on the day somebody wires this template up, with nothing to say it was known.
         # v3 (LP-991) — `$file_address_phrase`, as `initial_documentation_request` v5.
-        version="v3",
-        variables=_COMMON | {"loan_reference", "document_list", "file_address_phrase"},
+        # v4 (LP-1013) — the first one anything sends (automatic follow-ups). Opens "Just following
+        # up." and thanks them for what has arrived (`$received_sentence`, or nothing), §3 11-07.
+        version="v4",
+        variables=_COMMON
+        | {"loan_reference", "document_list", "file_address_phrase", "received_sentence"},
     ),
     TemplateKey.STATUS_UPDATE: TemplateSpec(
         key=TemplateKey.STATUS_UPDATE,
@@ -262,6 +268,11 @@ TEMPLATES: dict[TemplateKey, TemplateSpec] = {
         version="v1",
         variables=_COMMON | {"subject_line", "message_body"},
     ),
+    TemplateKey.FOLLOW_UP_GENERAL: TemplateSpec(
+        key=TemplateKey.FOLLOW_UP_GENERAL,
+        version="v1",
+        variables=_COMMON | {"subject_line"},
+    ),
 }
 
 #: The `allowlist secret` pragmas below are because detect-secrets flags any 64-character hex string
@@ -272,6 +283,14 @@ TEMPLATES: dict[TemplateKey, TemplateSpec] = {
 #: added row rather than an edit to an existing one — the old hash stays readable, which is what
 #: makes a historical audit row checkable against the words that were actually sent.
 VERSION_FINGERPRINTS: dict[tuple[TemplateKey, str], str] = {
+    (
+        TemplateKey.REMINDER_FOLLOW_UP,
+        "v4",
+    ): "905b89ec78ad576ccb5d0899991108032bffd04d8503f4c638465c4753ec2e3f",  # pragma: allowlist secret
+    (
+        TemplateKey.FOLLOW_UP_GENERAL,
+        "v1",
+    ): "c5e6a2176ccfd558edb19d4b472c6f69b56258ff842e01329a39cbaf1b71576f",  # pragma: allowlist secret
     (
         TemplateKey.INITIAL_DOCUMENTATION_REQUEST,
         "v5",

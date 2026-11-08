@@ -93,6 +93,20 @@ async def _claim(db: AsyncSession, communication_id: UUID) -> bool:
     return claimed is not None
 
 
+#: LP-1013 — on an AUTOMATIC reminder only, so an out-of-office does not answer it. Not
+#: `Precedence: bulk`, which can file it under Promotions. A person's Send (Send now included)
+#: carries none, as before.
+AUTOMATIC_REMINDER_HEADERS: dict[str, str] = {"Auto-Submitted": "auto-generated"}
+
+
+def _automatic_headers(row: Communication) -> dict[str, str] | None:
+    """An automatic reminder is a follow-up nobody clicked: `follow_up_of_id` set, and no
+    `initiated_by_user_id` (Send now records whoever clicked it)."""
+    if row.follow_up_of_id is not None and row.initiated_by_user_id is None:
+        return AUTOMATIC_REMINDER_HEADERS
+    return None
+
+
 async def _build(db: AsyncSession, row: Communication) -> tuple[EmailMessage, MailSender]:
     loan_file = await db.get(LoanFile, row.loan_file_id)
     if loan_file is None:
@@ -130,6 +144,7 @@ async def _build(db: AsyncSession, row: Communication) -> tuple[EmailMessage, Ma
             html=row.body_format is BodyFormat.HTML,
             in_reply_to=row.in_reply_to_message_id,
             references=[row.in_reply_to_message_id] if row.in_reply_to_message_id else None,
+            headers=_automatic_headers(row),
         )
     except ValueError as exc:
         raise _NotSent("the email could not be built", "build_failed") from exc
