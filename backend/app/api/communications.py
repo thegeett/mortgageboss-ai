@@ -987,6 +987,24 @@ follow_up_router = APIRouter(
 )
 
 
+async def _suppressed_among(
+    db: DbSession, company_id: UUID, recipients: list[str | None]
+) -> set[str]:
+    """Which of these addresses this company must not email, normalised as `is_suppressed` does.
+    One query."""
+    from app.models.suppressed_address import SuppressedAddress
+
+    wanted = {r.strip().lower() for r in recipients if r and r.strip()}
+    if not wanted:
+        return set()
+    found = await db.execute(
+        select(SuppressedAddress.address).where(
+            SuppressedAddress.company_id == company_id, SuppressedAddress.address.in_(wanted)
+        )
+    )
+    return set(found.scalars())
+
+
 @follow_up_router.get("", response_model=list[FollowUpRowPublic])
 async def list_follow_ups(
     loan_file: ScopedLoanFile, db: DbSession, current_user: CurrentUser
@@ -994,7 +1012,8 @@ async def list_follow_ups(
     """The file's original emails whose follow-up was ever started (status not `off`), newest
     first, each with its sender and whether that account is still active.
 
-    THREE QUERIES HOWEVER MANY ROWS (LP-1014 review): the emails, their needs, their senders."""
+    FOUR QUERIES HOWEVER MANY ROWS (LP-1014 review): the emails, their needs, their senders, and
+    which of their recipients are blocked (LP-1015)."""
     from app.models.communication import FollowUpStatus
     from app.services.follow_ups import follow_up_view, needs_by_original, senders_of
 
@@ -1016,6 +1035,7 @@ async def list_follow_ups(
     ids = [row.id for row in rows]
     needs = await needs_by_original(db, ids)
     senders = await senders_of(db, ids)
+    blocked = await _suppressed_among(db, loan_file.company_id, [row.recipient for row in rows])
     result: list[FollowUpRowPublic] = []
     for row in rows:
         view = await follow_up_view(db, row, needs=needs[row.id])
@@ -1030,6 +1050,7 @@ async def list_follow_ups(
                 sender_name=sender.full_name if sender else None,
                 sender_active=bool(sender and sender.is_active),
                 email_status=row.status.value,
+                recipient_suppressed=(row.recipient or "").strip().lower() in blocked,
                 follow_up=_public_of(view),
             )
         )

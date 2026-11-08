@@ -14,15 +14,18 @@ export type FollowUpState =
   | "finished"
   | "stopped_sender_inactive"
   | "stopped_failed"
+  | "stopped_blocked"
   | "stopped"
   | "off";
 
 /** `emailFailed`: the original email itself failed, so it can never be started again (the server's
- * Start refuses it). */
+ * Start refuses it). `recipientSuppressed` (LP-1015): the address is blocked by a bounce or a
+ * complaint, so no reminder can go. A failed email names the failure first: a bounce does both. */
 export function followUpState(
   followUp: FollowUp,
   senderActive = true,
   emailFailed = false,
+  recipientSuppressed = false,
 ): FollowUpState {
   switch (followUp.status) {
     case "on":
@@ -32,11 +35,14 @@ export function followUpState(
       // A general email waits for ["a reply"], never empty, so it stays "No reply".
       return followUp.waiting_for.length === 0 ? "finished" : "no_reply";
     case "paused":
-      return "paused";
+      // LP-1014 fix 2 (11-08) — she replied with what was missing and it was accepted: nothing is
+      // left to resume for. A general email waits for ["a reply"], so it stays "Paused".
+      return followUp.waiting_for.length === 0 ? "finished" : "paused";
     case "finished":
       return "finished";
     case "stopped":
       if (emailFailed) return "stopped_failed";
+      if (recipientSuppressed) return "stopped_blocked";
       return senderActive ? "stopped" : "stopped_sender_inactive";
     default:
       return "off";
@@ -76,6 +82,7 @@ export function followUpPill(
     case "stopped":
     case "stopped_sender_inactive":
     case "stopped_failed":
+    case "stopped_blocked":
       return { label: "Stopped", tone: "neutral" };
     default:
       return null;

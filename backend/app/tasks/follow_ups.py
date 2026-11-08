@@ -32,7 +32,7 @@ from app.models.communication import (
     FollowUpStatus,
 )
 from app.models.company_mail_domain import CompanyMailDomain, MailDomainStatus
-from app.models.loan_file import LoanFile
+from app.models.loan_file import LoanFile, LoanFileStatus
 from app.services.email_send import CannotSendError
 from app.services.follow_ups import (
     Decision,
@@ -46,6 +46,9 @@ from app.tasks.base import BaseTask, run_async, task_session
 from app.tasks.celery_app import celery_app
 
 logger = structlog.get_logger(__name__)
+
+#: Files whose follow-ups the job leaves alone, like a deleted file (LP-1015).
+DONE_FILE_STATUSES = (LoanFileStatus.CLOSED, LoanFileStatus.WITHDRAWN)
 
 #: At most this many emails per run; the rest wait for the next run, 15 minutes later.
 DUE_CAP = 50
@@ -73,6 +76,8 @@ def candidates_stmt(now: datetime) -> Select[tuple[Communication]]:
         .join(LoanFile, LoanFile.id == Communication.loan_file_id)
         .where(
             LoanFile.deleted_at.is_(None),
+            # LP-1015 — a closed or withdrawn file is done: nobody is chased on it.
+            LoanFile.status.not_in(DONE_FILE_STATUSES),
             Communication.status.in_(
                 [
                     CommunicationStatus.SENT,
@@ -131,10 +136,14 @@ async def _one(db: AsyncSession, row: Communication, now: datetime) -> tuple[str
             db, loan_file=loan_file, original=row, sender=sender, automatic=True
         )
     except CannotSendError as exc:
-        logger.info("follow_up_refused", communication_id=str(row.id), error_code=exc.code)
         if exc.code == "suppressed":
+            # A bounce or complaint blocked the address: no reminder will ever go, so stop it rather
+            # than pick it again every run. The screen reads `recipient_suppressed` to say why.
+            logger.info("follow_up_recipient_suppressed", communication_id=str(row.id))
             row.follow_up_status = FollowUpStatus.STOPPED
             return "stopped_suppressed", None
+        # Anything else (the rate limit, mostly) is left as it is and tried on the next run.
+        logger.info("follow_up_refused", communication_id=str(row.id), error_code=exc.code)
         return f"refused_{exc.code}", None
     row.follow_up_auto_sent += 1
     row.follow_up_clock_at = now
@@ -193,4 +202,10 @@ def send_follow_ups_task() -> dict[str, int]:
     return run_async(_run())
 
 
-__all__ = ["DUE_CAP", "candidates_stmt", "send_follow_ups", "send_follow_ups_task"]
+__all__ = [
+    "DONE_FILE_STATUSES",
+    "DUE_CAP",
+    "candidates_stmt",
+    "send_follow_ups",
+    "send_follow_ups_task",
+]

@@ -105,6 +105,9 @@ class FollowUpRowPublic(BaseModel):
     #: The original email's own status (`sent`, `delivered`, `failed`, …): a failed one cannot be
     #: started again, so the screen does not offer Start on it.
     email_status: str
+    #: LP-1015 — the recipient is on the company's suppression list (a bounce or a complaint): the
+    #: job stops the follow-up, and the screen says "Stopped — address blocked".
+    recipient_suppressed: bool
     follow_up: FollowUpPublic
 
 

@@ -157,5 +157,7 @@ export interface FollowUpRow {
   sender_active: boolean;
   /** The original email's own status: a `failed` one cannot be started again. */
   email_status: string;
+  /** LP-1015 — the recipient is blocked (a bounce or a complaint); the job stopped it. */
+  recipient_suppressed: boolean;
   follow_up: FollowUp;
 }

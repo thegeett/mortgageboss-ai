@@ -236,6 +236,8 @@ export function stateSentence(state: ReturnType<typeof followUpState>, senderNam
       return `Stopped — ${senderName ?? "the sender"}'s account was deactivated`;
     case "stopped_failed":
       return "Stopped — the email failed";
+    case "stopped_blocked":
+      return "Stopped — address blocked (bounce or complaint)";
     case "stopped":
       return "Stopped";
     default:
@@ -257,18 +259,21 @@ export function FollowUpActions({
   followUp,
   senderActive = true,
   emailFailed = false,
+  recipientSuppressed = false,
 }: {
   fileId: string;
   communicationId: string;
   followUp: FollowUp;
   senderActive?: boolean;
   emailFailed?: boolean;
+  recipientSuppressed?: boolean;
 }) {
   const action = useFollowUpAction(fileId, communicationId);
   const [form, setForm] = useState<"edit" | "start" | null>(null);
   const [settings, setSettings] = useState<FollowUpSettings>(() => settingsOf(followUp));
-  // A failed original is `stopped_failed`, which offers nothing: Start would be refused (409).
-  const state = followUpState(followUp, senderActive, emailFailed);
+  // A failed original (`stopped_failed`) or a blocked address (`stopped_blocked`) offers nothing:
+  // Start would be refused, or would never send.
+  const state = followUpState(followUp, senderActive, emailFailed, recipientSuppressed);
 
   function run(next: FollowUpAction) {
     action.mutate(next, { onSuccess: () => setForm(null) });
@@ -308,6 +313,8 @@ export function FollowUpActions({
     buttons.push(button("Stop", () => run({ kind: "stop" })));
   } else if (state === "no_reply") {
     buttons.push(button("Send now", () => run({ kind: "send-now" }), "default"));
+    // LP-1015 — so the red row can be cleared without sending anything.
+    buttons.push(button("Stop", () => run({ kind: "stop" })));
   } else if (state === "stopped" || state === "off") {
     buttons.push(button("Start follow-ups", () => open("start")));
   }
@@ -365,7 +372,8 @@ export function FollowUpBar({ fileId, message }: { fileId: string; message: Mess
   if (!followUp) return null;
   const senderActive = row?.sender_active ?? true;
   const emailFailed = message.status === "failed";
-  const state = followUpState(followUp, senderActive, emailFailed);
+  const recipientSuppressed = row?.recipient_suppressed ?? false;
+  const state = followUpState(followUp, senderActive, emailFailed, recipientSuppressed);
   const next = nextReminder(followUp, state);
   return (
     <section
@@ -402,6 +410,7 @@ export function FollowUpBar({ fileId, message }: { fileId: string; message: Mess
         followUp={followUp}
         senderActive={senderActive}
         emailFailed={emailFailed}
+        recipientSuppressed={recipientSuppressed}
       />
     </section>
   );
@@ -445,7 +454,12 @@ export function FollowUpsList({
           <tbody>
             {orderRows(rows).map((row) => {
               const emailFailed = row.email_status === "failed";
-              const state = followUpState(row.follow_up, row.sender_active, emailFailed);
+              const state = followUpState(
+                row.follow_up,
+                row.sender_active,
+                emailFailed,
+                row.recipient_suppressed,
+              );
               const noReply = state === "no_reply";
               const next = nextReminder(row.follow_up, state);
               return (
@@ -484,6 +498,7 @@ export function FollowUpsList({
                     <FollowUpPill followUp={row.follow_up} senderActive={row.sender_active} />
                     {state === "stopped_sender_inactive" ||
                     state === "stopped_failed" ||
+                    state === "stopped_blocked" ||
                     state === "paused" ? (
                       <p className="mt-1 text-xs text-muted-foreground">
                         {stateSentence(state, row.sender_name)}
@@ -504,6 +519,7 @@ export function FollowUpsList({
                       followUp={row.follow_up}
                       senderActive={row.sender_active}
                       emailFailed={emailFailed}
+                      recipientSuppressed={row.recipient_suppressed}
                     />
                   </td>
                 </tr>

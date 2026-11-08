@@ -52,6 +52,7 @@ function row(id: string, overrides: Partial<FollowUp> = {}, extra: Partial<Follo
     sender_name: "Priya Desai",
     sender_active: true,
     email_status: "sent",
+    recipient_suppressed: false,
     follow_up: followUp(overrides),
     ...extra,
   } satisfies FollowUpRow;
@@ -201,10 +202,10 @@ describe("the bar on a sent email", () => {
     expect(mockMutate.mock.calls[0]?.[0]).toEqual({ kind: "resume" });
   });
 
-  it("No reply: Send now only, and no next date", () => {
+  it("No reply: Send now and Stop (LP-1015), and no next date", () => {
     render(<FollowUpBar fileId="LF-1" message={message(followUp({ auto_sent: 2 }))} />);
     expect(screen.getAllByText("No reply").length).toBeGreaterThan(0);
-    expect(buttonNames()).toEqual(["Send now"]);
+    expect(buttonNames()).toEqual(["Send now", "Stop"]);
     expect(screen.queryByText("Mon, Nov 9 at 9:30 AM")).toBeNull();
   });
 
@@ -405,5 +406,83 @@ describe("LP-1014 fix (11-08) — spent reminders with nothing missing", () => {
       "Subject arrived",
     ]);
     expect(rows[2]?.className).not.toContain("text-danger");
+  });
+});
+
+describe("LP-1014 fix 2 (11-08) — paused with nothing missing", () => {
+  it.each([
+    [[], "finished"],
+    [["W-2"], "paused"],
+    [["a reply"], "paused"],
+  ])("paused, waiting for %o → %s", (waiting, state) => {
+    expect(followUpState(followUp({ status: "paused", waiting_for: waiting }))).toBe(state);
+  });
+
+  it("reads Everything arrived with no Resume", () => {
+    render(
+      <FollowUpBar
+        fileId="LF-1"
+        message={message(followUp({ status: "paused", waiting_for: [] }))}
+      />,
+    );
+    expect(screen.getByText("Everything arrived")).toBeTruthy();
+    expect(buttonNames()).toEqual([]);
+  });
+});
+
+// --------------------------------------------------------------------------------------------- //
+describe("LP-1015", () => {
+  it("No reply: Stop clears it", () => {
+    render(<FollowUpBar fileId="LF-1" message={message(followUp({ auto_sent: 2 }))} />);
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(mockMutate.mock.calls[0]?.[0]).toEqual({ kind: "stop" });
+  });
+
+  it("No reply in the list: Send now and Stop", () => {
+    mockFollowUps.mockReturnValue({ data: [row("n", { auto_sent: 2 })] });
+    render(<FollowUpsList fileId="LF-1" selectedId={null} onOpen={vi.fn()} />);
+    const [only] = screen.getAllByRole("row").slice(1) as HTMLElement[];
+    const names = within(only as HTMLElement)
+      .getAllByRole("button")
+      .slice(1) // the subject
+      .map((b) => b.textContent);
+    expect(names).toEqual(["Send now", "Stop"]);
+  });
+
+  it("a blocked address: the bar says so, no buttons", () => {
+    mockFollowUps.mockReturnValue({
+      data: [row("m1", { status: "stopped" }, { recipient_suppressed: true })],
+    });
+    render(<FollowUpBar fileId="LF-1" message={message(followUp({ status: "stopped" }))} />);
+    expect(screen.getByText("Stopped — address blocked (bounce or complaint)")).toBeTruthy();
+    expect(buttonNames()).toEqual([]);
+  });
+
+  it("a blocked address in the list: says so, no Start; an unblocked stopped row keeps Start", () => {
+    mockFollowUps.mockReturnValue({
+      data: [
+        row("b", { status: "stopped" }, { recipient_suppressed: true }),
+        row("s", { status: "stopped" }),
+      ],
+    });
+    render(<FollowUpsList fileId="LF-1" selectedId={null} onOpen={vi.fn()} />);
+    const [blockedRow, stoppedRow] = screen.getAllByRole("row").slice(1) as HTMLElement[];
+    expect(
+      within(blockedRow as HTMLElement).getByText(
+        "Stopped — address blocked (bounce or complaint)",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(blockedRow as HTMLElement).queryByRole("button", { name: "Start follow-ups" }),
+    ).toBeNull();
+    expect(
+      within(stoppedRow as HTMLElement).getByRole("button", { name: "Start follow-ups" }),
+    ).toBeTruthy();
+  });
+
+  it("a bounce both fails the email and blocks the address: it says the email failed", () => {
+    const stopped = followUp({ status: "stopped" });
+    expect(followUpState(stopped, true, true, true)).toBe("stopped_failed");
+    expect(followUpState(stopped, true, false, true)).toBe("stopped_blocked");
   });
 });
