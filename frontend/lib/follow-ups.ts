@@ -26,7 +26,11 @@ export function followUpState(
 ): FollowUpState {
   switch (followUp.status) {
     case "on":
-      return followUp.auto_sent >= followUp.max_auto ? "no_reply" : "on";
+      if (followUp.auto_sent < followUp.max_auto) return "on";
+      // LP-1014 fix (11-08) — reminders spent but nothing missing: everything arrived. The job
+      // never picks a spent follow-up again, so the server leaves it `on`; this is not "No reply".
+      // A general email waits for ["a reply"], never empty, so it stays "No reply".
+      return followUp.waiting_for.length === 0 ? "finished" : "no_reply";
     case "paused":
       return "paused";
     case "finished":

@@ -370,3 +370,40 @@ describe("LP-1014 review fixes", () => {
     ).toBeTruthy();
   });
 });
+
+// --------------------------------------------------------------------------------------------- //
+describe("LP-1014 fix (11-08) — spent reminders with nothing missing", () => {
+  it.each([
+    [[], "finished"],
+    [["W-2"], "no_reply"],
+    [["a reply"], "no_reply"],
+  ])("on, 2 of 2 sent, waiting for %o → %s", (waiting, state) => {
+    expect(followUpState(followUp({ auto_sent: 2, waiting_for: waiting }))).toBe(state);
+  });
+
+  it("reads Everything arrived, with a neutral pill and no buttons", () => {
+    const done = followUp({ auto_sent: 2, waiting_for: [] });
+    expect(followUpPill(done)).toEqual({ label: "Finished", tone: "neutral" });
+    render(<FollowUpBar fileId="LF-1" message={message(done)} />);
+    expect(screen.getByText("Everything arrived")).toBeTruthy();
+    expect(buttonNames()).toEqual([]);
+  });
+
+  it("is not put first in the list, and not in red", () => {
+    mockFollowUps.mockReturnValue({
+      data: [
+        row("newest"),
+        row("arrived", { auto_sent: 2, waiting_for: [] }),
+        row("no-reply", { auto_sent: 2 }),
+      ],
+    });
+    render(<FollowUpsList fileId="LF-1" selectedId={null} onOpen={vi.fn()} />);
+    const rows = screen.getAllByRole("row").slice(1);
+    expect(rows.map((r) => within(r).getAllByRole("button")[0]?.textContent)).toEqual([
+      "Subject no-reply",
+      "Subject newest",
+      "Subject arrived",
+    ]);
+    expect(rows[2]?.className).not.toContain("text-danger");
+  });
+});
