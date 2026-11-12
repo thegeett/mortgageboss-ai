@@ -173,3 +173,17 @@ async def test_refuses_outside_the_allowlist(db_session: AsyncSession, environme
         await _transfer(db_session, "second@acme.com", environment=environment)
 
     assert await _stored_owner(db_session, company) == owner.id
+
+
+async def test_refuses_an_email_two_users_share_in_different_case(
+    db_session: AsyncSession,
+) -> None:
+    """The unique index is case-sensitive, so `Bob@` and `bob@` can both exist; neither is chosen."""
+    company, owner = await _owned(db_session)
+    await _user(db_session, company, "Bob@acme.com", UserRole.ADMIN)
+    await _user(db_session, company, "bob@acme.com", UserRole.ADMIN)
+
+    with pytest.raises(ProvisioningError, match="2 users have the email"):
+        await _transfer(db_session, "bob@acme.com")
+
+    assert await _stored_owner(db_session, company) == owner.id

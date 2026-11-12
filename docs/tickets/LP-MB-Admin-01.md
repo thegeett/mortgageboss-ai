@@ -148,14 +148,19 @@ success line, `require_role`) and 1 in tests (`test_add_user`). The 122 test sit
   shares `UserRole` with `user_roles.role`. It prints each company left with NULL `owner_user_id`.
 - `app/services/company_audit.py`: `log_company_action` (flush, never commit) and `AuditAction`
   (`owner_transferred`, `role_backfilled`). The migration writes one `role_backfilled` row per company.
-- `get_user_by_id` and `authenticate_user` load `User.company` with `selectinload` (login returns
-  `is_owner`, so it needs the company too). `require_role` checks `role_set`.
+- `get_user_by_id` and `authenticate_user` load `User.company` with `joinedload`, in the same query
+  as the user (login returns `is_owner`, so it needs the company too). `require_role` checks `role_set`.
   `UserPublic` gains `roles` (sorted) and `is_owner`; `role` is computed (`admin` iff ADMIN held).
 - Scripts: `add_company` and `bootstrap_admin` make the first user an ADMIN and the owner (user flushed
   first). `add_user` takes several roles. `seed_dev` / `seed_dev_data`: the admin also holds PROCESSOR
   and is the owner, and a loan officer is added (`lo@demo.com`, `jordan@summit-demo.com`);
   `seed_dev_data --reset` clears the owner and the company's audit rows before deleting users.
-  New `scripts/transfer_owner` (env vars, staging-only allowlist, refusal style of `add_user`).
+  A re-run on an existing database adds any missing role to an existing seeded user.
+  New `scripts/transfer_owner` (env vars, staging-only allowlist, refusal style of `add_user`), run
+  through a new `./scripts/deploy <env> transfer-owner` stage.
+- Readonly: `readonly.users` is rebuilt without `role` (the app no longer writes it, so the view
+  would answer with a frozen value), and `readonly.user_roles` exposes every column.
+  `docs/querying-staging.md` says so.
 - Tests: factory; role set round-trip and duplicate refused; `require_role` (ADMIN, PROCESSOR+ADMIN
   pass; PROCESSOR, LOAN_OFFICER, PROCESSOR+LOAN_OFFICER 403); `/auth/me` and login shape;
   `log_company_action`; `add_user`, `add_company`, `bootstrap_admin`, `transfer_owner`; and the
@@ -178,8 +183,9 @@ success line, `require_role`) and 1 in tests (`test_add_user`). The 122 test sit
   LP-MB-Admin-05 will seed differently. Revisions are named rather than `-1` so a later migration on
   top does not move the test.
 - "Active" admin for the owner means `is_active` and not soft-deleted; ties on `created_at` break by id.
-- `user_roles`, `company_audit_log` and `companies.owner_user_id` are listed as excluded in
-  `tests/test_readonly_query.py` (no readonly view, as the ticket says), with the reason.
+- `company_audit_log` and `companies.owner_user_id` are listed as excluded in
+  `tests/test_readonly_query.py`, with the reason. `user_roles` got a view after all (review
+  finding 1): without it, roles could not be read on staging once `role` left `readonly.users`.
 - A user created without roles now holds none (there was a PROCESSOR default on the column).
 - `backend/.env` in this worktree is a gitignored symlink to the main checkout's, and the tests ran
   against their own `mortgageboss_admin01_test` database via `TEST_DATABASE_URL`.
@@ -187,6 +193,27 @@ success line, `require_role`) and 1 in tests (`test_add_user`). The 122 test sit
 **Deferred**
 - The owner guard itself: no code path deactivates a user or removes a role yet, so there was nothing
   to refuse. It lands with the role and deactivation API (LP-MB-Admin-03).
-- Dropping `users.role`; readonly views for the new tables; logging the existing admin screens.
-- The seed scripts have no tests of their own (they open their own session against the dev
-  database); they were changed but not run.
+- Dropping `users.role`; a readonly view for `company_audit_log`; logging the existing admin screens.
+- The seed scripts' `seed()` entry points still are not run by any test (they open their own
+  session against the dev database); `_get_or_create_user` is tested in both.
+
+**Known interim behaviour (until LP-MB-Admin-02)**
+- The derived `role` is `processor` for anyone without ADMIN, so a LOAN_OFFICER (or a user with no
+  roles) gets the processor UI, and every route that is not admin-only admits them. This is the
+  ticket's specified mapping; permission keys replace it.
+
+**Rollback**
+- Roll back the DATABASE first (`alembic downgrade` to `e3a9d4c7b512`), then deploy the older code.
+  The other order breaks login for any user created after the release: their `users.role` is NULL
+  and the older code requires it. The downgrade fills it in (`admin` or `processor`).
+
+**Review fixes (after `da020dcd`)**
+1. `readonly.users` no longer exposes the frozen `role`; `readonly.user_roles` added.
+4. `transfer_owner` refuses an email two users share in different case instead of picking one.
+5. The company is joined into the user query: two round trips per request instead of three.
+8. The `add-user` deploy stage splits roles on commas only and refuses an empty item, as
+   `parse_roles` does, so it no longer launches a task the script will refuse.
+9. `./scripts/deploy <env> transfer-owner` exists.
+10. The seed scripts top up roles on an existing user.
+Not changed: finding 6 (roles load with every `User`; small today) and 7 (`migrated_db`'s fixed
+database name follows `migrated_engine`, and one test database per pytest is already the rule).

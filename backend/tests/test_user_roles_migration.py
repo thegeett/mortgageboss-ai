@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
 from tests.conftest import MigratedDb
 
 _BEFORE = "e3a9d4c7b512"  # pragma: allowlist secret  (Alembic revision id)
@@ -55,6 +56,17 @@ async def _seed(db: MigratedDb) -> dict[str, UUID]:
     return ids
 
 
+async def _view_columns(conn: AsyncConnection, view: str) -> set[str]:
+    rows = await conn.execute(
+        text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'readonly' AND table_name = :v"
+        ),
+        {"v": view},
+    )
+    return set(rows.scalars())
+
+
 async def test_backfill_owner_and_downgrade(migrated_db: MigratedDb) -> None:
     migrated_db.alembic("downgrade", _BEFORE)
     ids = await _seed(migrated_db)
@@ -86,6 +98,16 @@ async def test_backfill_owner_and_downgrade(migrated_db: MigratedDb) -> None:
                 )
             ).scalars()
             assert sorted(audited) == sorted([ids["acme"], ids["beta"]])
+            # The staging window: roles come from `readonly.user_roles`, and `readonly.users` no
+            # longer offers the frozen column.
+            assert "role" not in await _view_columns(conn, "users")
+            assert await _view_columns(conn, "user_roles") == {
+                "id",
+                "user_id",
+                "role",
+                "granted_by_user_id",
+                "created_at",
+            }
 
             # After the migration the app writes roles only: beta's processor gains ADMIN, and a
             # new user holds only LOAN_OFFICER with `users.role` NULL. Both must come back.
@@ -133,6 +155,8 @@ async def test_backfill_owner_and_downgrade(migrated_db: MigratedDb) -> None:
                 )
             )
             assert left == 0
+            assert "role" in await _view_columns(conn, "users")
+            assert await _view_columns(conn, "user_roles") == set()
     finally:
         # Leave the shared fixture where it was found: empty and at head.
         async with migrated_db.engine.begin() as conn:

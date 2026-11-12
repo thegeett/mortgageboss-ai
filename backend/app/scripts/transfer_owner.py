@@ -5,7 +5,7 @@ deactivate or demote. Changing it is never an API: MortgageBoss runs this on the
 customer's request. It is also how a company the LP-MB-Admin-01 migration left
 with no owner gets one.
 
-Usage (as a one-off ECS task, the same mechanism as ``add-user``)::
+Usage (as a one-off ECS task; see ``./scripts/deploy <env> transfer-owner``)::
 
     uv run python -m app.scripts.transfer_owner
 
@@ -106,10 +106,17 @@ async def transfer_owner(
         )
 
     # Case-insensitive, like `assert_email_unused`: the index is not, and the
-    # operator's typing should not decide whether the user is found.
-    user = await db.scalar(select(User).where(func.lower(User.email) == email.lower()))
-    if user is None:
+    # operator's typing should not decide whether the user is found. For the same
+    # reason two rows can match; picking one would make a guess the owner.
+    matches = list(await db.scalars(select(User).where(func.lower(User.email) == email.lower())))
+    if not matches:
         raise ProvisioningError(f"No user with email {email!r}. Nothing was changed.")
+    if len(matches) > 1:
+        raise ProvisioningError(
+            f"{len(matches)} users have the email {email!r} in different case; refusing to "
+            f"guess which is meant. Nothing was changed."
+        )
+    user = matches[0]
     if user.company_id != company.id:
         raise ProvisioningError(
             f"{email} belongs to another company, not {company.slug!r}. The owner must be "

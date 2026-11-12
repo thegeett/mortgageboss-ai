@@ -18,7 +18,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload
 
 from app.core.security import hash_password, verify_password
 from app.models.user import User
@@ -58,7 +58,7 @@ async def authenticate_user(db: AsyncSession, *, email: str, password: str) -> U
     """
     # `company` for `is_owner` in the login response; roles load with the user.
     result = await db.execute(
-        select(User).where(User.email == email).options(selectinload(User.company))
+        select(User).where(User.email == email).options(joinedload(User.company))
     )
     user = result.scalar_one_or_none()
 
@@ -84,8 +84,9 @@ async def get_user_by_id(db: AsyncSession, user_id: UUID) -> User | None:
     and re-check ``is_active`` before issuing a new access token, and by
     ``get_current_user`` on every request. ``company`` is loaded with it: the app is
     async, so nothing downstream may lazy-load it (``is_owner``, company settings).
+    Joined into the same query: this runs on every request.
     """
     result = await db.execute(
-        select(User).where(User.id == user_id).options(selectinload(User.company))
+        select(User).where(User.id == user_id).options(joinedload(User.company))
     )
     return result.scalar_one_or_none()

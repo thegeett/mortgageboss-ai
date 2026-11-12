@@ -74,6 +74,12 @@ async def _get_or_create_user(
     """
     existing = await db.scalar(select(User).where(User.email == email))
     if existing is not None:
+        # A database seeded before LP-MB-Admin-01 holds only the backfilled role; top it up so a
+        # re-run gives the same roles a fresh seed does. Nothing is removed.
+        for role in roles:
+            if role not in existing.role_set:
+                existing.roles.append(UserRoleAssignment(role=role))
+        await db.flush()
         return existing, False
     user = User(
         company_id=company_id,

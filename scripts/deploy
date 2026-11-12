@@ -20,7 +20,7 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 # shellcheck source=scripts/deploy-lib.sh
 . "$SCRIPT_DIR/deploy-lib.sh"
 
-STAGES="bootstrap phase1 dns images secrets migrate phase2 smoke all status bootstrap-admin add-user add-company query-setup query deploy backfill-mismo verify down up"
+STAGES="bootstrap phase1 dns images secrets migrate phase2 smoke all status bootstrap-admin add-user add-company transfer-owner query-setup query deploy backfill-mismo verify down up"
 
 # How long `dns` waits for the registrar's delegation to propagate, and how long
 # `migrate` waits for the one-off task to stop. Both overridable for a slow
@@ -90,6 +90,10 @@ ARGUMENTS
                Create a NEW company and its first admin in a populated
                environment, same mechanism. Refuses a slug any company has, a
                name a live company has, or an email that is already taken.
+    transfer-owner
+               Make another active admin of a company its owner (the admin the
+               app will not deactivate or demote), same mechanism. Refuses
+               anyone but an active admin of that company. Writes an audit row.
 
     query-setup
                Create the mbai_readonly role and its grants. Run ONCE per
@@ -1740,11 +1744,17 @@ stage_add_user() {
   first=$(ask_required "First name")
   last=$(ask_required "Last name")
   role=$(ask_required "Role(s), comma-separated (ADMIN, PROCESSOR, LOAN_OFFICER)")
-  local r
-  for r in $(printf '%s' "$role" | tr '[:upper:]' '[:lower:]' | tr ',' ' '); do
+  # Split on commas ONLY, item by item, the way app.scripts.add_user's parse_roles does: a
+  # space-separated list or an empty item ("ADMIN,") is refused here rather than by the task.
+  local r rest="$role,"
+  while [ -n "$rest" ]; do
+    r=${rest%%,*}
+    rest=${rest#*,}
+    r=$(printf '%s' "$r" | tr '[:upper:]' '[:lower:]' | sed 's/^ *//; s/ *$//')
     case "$r" in
       admin | processor | loan_officer) ;;
-      *) die "Each role must be ADMIN, PROCESSOR or LOAN_OFFICER, got '$r'." "Nothing was run." ;;
+      *) die "Each comma-separated role must be ADMIN, PROCESSOR or LOAN_OFFICER, got '$r'." \
+        "Nothing was run." ;;
     esac
   done
   coslug=$(ask_required "Company slug (must already exist)")
@@ -1805,6 +1815,74 @@ stage_add_user() {
   ok "add-user complete."
   info ""
   info "Remember the matching Cognito user, or they cannot reach the application."
+}
+
+stage_transfer_owner() {
+  banner "transfer-owner -- move a company's owner in '$ENV_NAME'"
+  need_cmd aws; need_cmd jq; need_cmd terraform
+  require_identity "$ACCOUNT_ID"
+  require_provisioning_environment
+  require_outputs "$ENV_DIR"
+  require_db_up "this stage"
+
+  local cluster taskdef container subnets sgs netcfg request
+  cluster=$(out ecs_cluster_name)
+  taskdef=$(out_map ecs_task_definition_arns migrate)
+  container=$(oneoff_container_name "$taskdef")
+  [ -n "$container" ] && [ "$container" != "None" ] || die \
+    "Could not resolve the container name from the migrate task definition."
+
+  info ""
+  info "Makes an existing ACTIVE ADMIN of the company its owner: the admin the app"
+  info "refuses to deactivate or demote. Run on the customer's request, or for a"
+  info "company the LP-MB-Admin-01 migration printed as having no owner. The script"
+  info "refuses anyone else and writes one owner_transferred audit row."
+  info ""
+
+  local coslug email
+  coslug=$(ask_required "Company slug")
+  email=$(ask_required "Email of the new owner (an active admin of that company)")
+
+  ensure_secret_tmpdir
+  netcfg=$(oneoff_network "$cluster")
+  subnets=$(printf '%s' "$netcfg" | awk -F'\t' '{print $1}')
+  sgs=$(printf '%s' "$netcfg" | awk -F'\t' '{print $2}')
+
+  hr
+  info "  environment : $ENV_NAME"
+  info "  company     : $coslug"
+  info "  new owner   : $email"
+  hr
+  confirm "Transfer ownership?" || die "Aborted. Nothing was run."
+
+  request="$SECRET_TMPDIR/transfer-owner.$$.json"
+  (
+    umask 077
+    ONEOFF_CLUSTER="$cluster" ONEOFF_TD="$taskdef" ONEOFF_CONTAINER="$container" \
+    ONEOFF_SUBNETS="$subnets" ONEOFF_SGS="$sgs" \
+    TRANSFER_OWNER_COMPANY_SLUG="$coslug" TRANSFER_OWNER_EMAIL="$email" \
+    TRANSFER_OWNER_ALLOWED_ENVIRONMENTS="$PROVISIONING_ENVIRONMENTS" \
+      jq -n '{
+        cluster: env.ONEOFF_CLUSTER,
+        taskDefinition: env.ONEOFF_TD,
+        launchType: "FARGATE",
+        networkConfiguration: {awsvpcConfiguration: {
+          subnets: (env.ONEOFF_SUBNETS | split(",")),
+          securityGroups: (env.ONEOFF_SGS | split(",")),
+          assignPublicIp: "DISABLED"}},
+        overrides: {containerOverrides: [{
+          name: env.ONEOFF_CONTAINER,
+          command: ["uv","run","python","-m","app.scripts.transfer_owner"],
+          environment: [
+            {name:"TRANSFER_OWNER_COMPANY_SLUG",         value: env.TRANSFER_OWNER_COMPANY_SLUG},
+            {name:"TRANSFER_OWNER_EMAIL",                value: env.TRANSFER_OWNER_EMAIL},
+            {name:"TRANSFER_OWNER_ALLOWED_ENVIRONMENTS", value: env.TRANSFER_OWNER_ALLOWED_ENVIRONMENTS}
+          ]}]}
+      }' >"$request"
+  ) || die "Could not build the run-task request."
+
+  run_oneoff_task "transfer-owner" "$request" "$cluster" "$container"
+  ok "transfer-owner complete."
 }
 
 stage_add_company() {
@@ -3789,6 +3867,7 @@ main() {
     bootstrap-admin) stage_bootstrap_admin ;;
     add-user)  stage_add_user ;;
     add-company) stage_add_company ;;
+    transfer-owner) stage_transfer_owner ;;
     query-setup) stage_query_setup ;;
     query)     stage_query ;;
     backfill-mismo) stage_backfill_mismo ;;

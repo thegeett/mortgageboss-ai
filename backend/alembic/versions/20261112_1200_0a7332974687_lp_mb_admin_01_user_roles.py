@@ -13,7 +13,10 @@
 Downgrade copies the set back (`admin` if the user holds admin, else `processor`, so a loan officer
 becomes a processor), restores NOT NULL and the two-value CHECK, and drops the column and tables.
 
-No readonly view for either table yet (out of scope; add one when someone needs to query them).
+5. Readonly: `readonly.users` is rebuilt WITHOUT `role`, so a staging query that still asks for the
+   column fails instead of reading a frozen value, and `readonly.user_roles` is where roles are now
+   read. Only ids, a role word and a timestamp, so every column is exposed. `company_audit_log`
+   gets no view yet: `summary` and `detail` are prose and values and would need the scrub.
 
 Hand-written, like every migration against this schema.
 
@@ -35,6 +38,16 @@ depends_on: str | Sequence[str] | None = None
 
 _ROLES = ("processor", "admin", "loan_officer")
 _OLD_ROLES = ("processor", "admin")
+
+_GRANT = """
+    DO $$
+    BEGIN
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mbai_readonly') THEN
+            EXECUTE 'GRANT SELECT ON readonly.users, readonly.user_roles TO mbai_readonly';
+        END IF;
+    END
+    $$;
+    """
 
 
 def _swap_users_role_check(values: tuple[str, ...]) -> None:
@@ -167,8 +180,50 @@ def upgrade() -> None:
     # 4. The app stops writing the column.
     op.alter_column("users", "role", existing_type=sa.String(length=32), nullable=True)
 
+    # 5. Readonly. DROP then CREATE: a view cannot lose a column with CREATE OR REPLACE.
+    op.execute("DROP VIEW IF EXISTS readonly.users")
+    op.execute(
+        """
+        CREATE VIEW readonly.users AS
+        SELECT id, company_id, is_active, default_aggression_level, density,
+               created_at, updated_at, deleted_at
+        FROM public.users
+        """
+    )
+    op.execute(
+        """
+        CREATE VIEW readonly.user_roles AS
+        SELECT id, user_id, role, granted_by_user_id, created_at
+        FROM public.user_roles
+        """
+    )
+    op.execute(_GRANT)
+
 
 def downgrade() -> None:
+    # The previous definitions are inside this function on purpose: the readonly drift guard reads
+    # everything above `def downgrade(` as the live view.
+    op.execute("DROP VIEW IF EXISTS readonly.user_roles")
+    op.execute("DROP VIEW IF EXISTS readonly.users")
+    op.execute(
+        """
+        CREATE VIEW readonly.users AS
+        SELECT id, company_id, role, is_active, default_aggression_level, density,
+               created_at, updated_at, deleted_at
+        FROM public.users
+        """
+    )
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mbai_readonly') THEN
+                EXECUTE 'GRANT SELECT ON readonly.users TO mbai_readonly';
+            END IF;
+        END
+        $$;
+        """
+    )
     op.execute(
         """
         UPDATE users u SET role = CASE

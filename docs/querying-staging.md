@@ -85,6 +85,10 @@ Dropped entirely, because there is no useful redaction of them:
 | `documents.generic_analysis`, `summary`, `storage_path` | Model prose over the document, and the object path. |
 | `lenders.contact_email` / `contact_phone` | Named contacts. |
 
+`users.role` is also gone from `readonly.users`, for a different reason: since LP-MB-Admin-01 a
+user holds a set of roles and the app no longer writes that column. Read roles from
+`readonly.user_roles` (one row per role a user holds).
+
 The full list, with the reasoning for each, is in `docs/tickets/C7-query-stage-result.md`
 and in comments beside each view in the migration.
 

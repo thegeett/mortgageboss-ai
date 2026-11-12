@@ -393,8 +393,11 @@ EXCLUDED: dict[str, frozenset[str]] = {
     # surface exists to answer questions about loan data from staging, and which mail client a
     # processor prefers answers none of them. Not sensitive — one of four fixed words — so this is a
     # noise decision rather than a privacy one.
+    # LP-MB-Admin-01 drops `role` from the view: the app no longer writes it, so the view would
+    # answer role questions with a frozen value. Roles are read from `readonly.user_roles`.
     "users": frozenset(
         {
+            "role",
             "hashed_password",
             "email",
             "first_name",
@@ -795,13 +798,9 @@ EXCLUDED_TABLES: dict[str, str] = {
         "whose readonly view already carries the send metadata). Only ids, a recipient and "
         "timestamps, which that view answers; excluded rather than a second view of the same sends."
     ),
-    "user_roles": (
-        "LP-MB-Admin-01 — which roles each user holds. No view yet: out of the ticket's scope, add "
-        "one when someone needs to query roles on staging. Ids, a role word and a timestamp only."
-    ),
     "company_audit_log": (
-        "LP-MB-Admin-01 — admin actions per company. No view yet, as `user_roles`. When one is "
-        "added, `summary` and `detail` are prose and before/after values, so they need the scrub."
+        "LP-MB-Admin-01 — admin actions per company. No view yet: out of the ticket's scope. When one "
+        "is added, `summary` and `detail` are prose and before/after values, so they need the scrub."
     ),
 }
 
