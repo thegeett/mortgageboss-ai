@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>People</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono&display=swap">
+<style>body{margin:0}
+/* Ledger look, Petrol palette (light), copied from frontend/app/palettes/petrol.css and globals.css */
+*{box-sizing:border-box}
+.app{--bg:hsl(180 14.3% 98.6%);--card:#fff;--muted:hsl(180 9.1% 95.7%);--hover:hsl(180 8.6% 93.1%);--line:hsl(165 7.7% 89.8%);--line2:hsl(170 6.4% 81.6%);--ctl:hsl(168 4.3% 54.5%);--t3:hsl(168 4.4% 41%);--t2:hsl(168 6.6% 29.8%);--t1:hsl(188.6 17.9% 7.6%);--brand:hsl(187.9 67.9% 22%);--brand10:hsl(187.9 67.9% 22%/.1);--red:hsl(7.1 61.8% 43.1%);--green:hsl(159.8 60.6% 26.9%);--amber:hsl(37.8 89.4% 29.6%);
+font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;line-height:1.2rem;color:var(--t1);background:var(--bg);display:flex;width:100%;min-height:820px;position:relative;font-variant-numeric:tabular-nums}
+.app svg{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.app a{color:inherit;text-decoration:none}
+.app p,.app h1,.app h2,.app h3{margin:0}
+.app button{font:inherit;color:inherit;cursor:pointer}
+/* shell */
+.rail{width:52px;flex:none;display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 0;background:var(--card);border-right:1px solid var(--line)}
+.logo,.ri{width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:5px}
+.logo{background:var(--brand);color:#fff;margin-bottom:4px}
+.ri{color:var(--t3)}
+.ri.on{background:var(--brand10);color:var(--brand)}
+.ctx{width:216px;flex:none;padding:8px;background:var(--card);border-right:1px solid var(--line)}
+.lbl{font-size:10.5px;line-height:1rem;letter-spacing:.09em;font-weight:600;text-transform:uppercase;color:var(--t3)}
+.ctx .lbl{padding:4px 8px}
+.ci{height:28px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:5px;color:var(--t2)}
+.ci svg{width:14px;height:14px}
+.ci.on{background:var(--brand10);color:var(--brand);font-weight:500}
+.ci .n{margin-left:auto;font-size:11.5px;color:var(--t3)}
+.col{flex:1;min-width:0;display:flex;flex-direction:column}
+.top{height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 12px;background:var(--card);border-bottom:1px solid var(--line)}
+.crumb{font-size:14px;font-weight:600;letter-spacing:-.01em}
+.crumb span{color:var(--t3);font-weight:400}
+.user{display:flex;align-items:center;gap:8px;border:0;background:none;padding:4px 8px 4px 4px;border-radius:5px;font-weight:500;color:var(--t2)}
+.av{width:32px;height:32px;border-radius:999px;background:var(--brand10);color:var(--brand);display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:600;flex:none}
+.av.sm{width:24px;height:24px;font-size:10px}
+.main{flex:1;padding:16px;display:flex;flex-direction:column;gap:16px}
+.sub{color:var(--t3);max-width:65ch;margin-top:4px}
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.grow{flex:1}
+/* controls */
+.btn{height:28px;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:0 12px;border-radius:5px;border:1px solid transparent;background:none;font-weight:500;white-space:nowrap}
+.btn svg{width:14px;height:14px}
+.btn.pri{background:var(--brand);color:#fff}
+.btn.out{border-color:var(--ctl);background:var(--bg)}
+.btn.red{background:var(--red);color:#fff}
+.btn.redo{border-color:var(--red);color:var(--red);background:var(--bg)}
+.btn.sm{height:24px;padding:0 8px;font-size:11.5px}
+.btn.link{padding:0;height:auto;color:var(--brand)}
+.in{height:28px;width:100%;border:1px solid var(--ctl);border-radius:5px;background:var(--bg);padding:0 10px;font:inherit;color:var(--t1);display:flex;align-items:center;justify-content:space-between;gap:8px}
+.in.ro{background:var(--muted);border-color:var(--line2);color:var(--t2)}
+.f{display:flex;flex-direction:column;gap:4px;font-weight:500;color:var(--t2);flex:1;min-width:140px}
+.f .in{font-weight:400}
+.hint{font-size:11.5px;color:var(--t3);font-weight:400}
+.chk{display:flex;align-items:flex-start;gap:8px;min-height:28px;padding:4px 0}
+.chk input{margin:3px 0 0;accent-color:var(--brand)}
+.chk.dis{color:var(--t3)}
+.chip{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;border:1px solid var(--line2);font-size:11.5px;font-weight:500;color:var(--t2);white-space:nowrap}
+.chip.b{border-color:transparent;background:var(--brand10);color:var(--brand)}
+.chips{display:flex;flex-wrap:wrap;gap:4px}
+.st{display:inline-flex;align-items:center;gap:6px}
+.st svg{width:14px;height:14px}
+.st.ok svg{color:var(--green)}
+.st.wait svg{color:var(--amber)}
+.st.off{color:var(--t3)}
+/* tables */
+.scroll{overflow-x:auto}
+.tbl{width:100%;border-collapse:separate;border-spacing:0}
+.tbl th{height:28px;padding:0 12px;text-align:left;font-size:11.5px;font-weight:500;color:var(--t3);border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl td{height:32px;padding:4px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+.tbl tr.sel td{background:var(--brand10)}
+.tbl .nm{font-weight:500}
+.tbl .q{color:var(--t3)}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px}
+.card>.hd{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line)}
+.card>.bd{padding:12px;display:flex;flex-direction:column;gap:12px}
+.rowi{display:flex;align-items:center;gap:8px;min-height:28px}
+.list{border-top:1px solid var(--line)}
+.list>*{display:flex;align-items:center;gap:12px;min-height:36px;padding:6px 0;border-bottom:1px solid var(--line)}
+/* overlays */
+.ov{position:absolute;inset:0;background:rgb(0 0 0/.8);display:flex;align-items:center;justify-content:center;padding:16px}
+.ov.soft{background:rgb(0 0 0/.4);justify-content:flex-end;padding:0}
+.dlg{width:100%;max-width:512px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:12px;box-shadow:0 10px 30px rgb(0 0 0/.2)}
+.dlg h2,.sheet h2{font-size:14px;font-weight:600;letter-spacing:-.01em}
+.sheet{width:448px;max-width:100%;align-self:stretch;background:var(--card);border-left:1px solid var(--line);display:flex;flex-direction:column;box-shadow:-10px 0 30px rgb(0 0 0/.15)}
+.sheet>.hd{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:8px}
+.sheet>.bd{flex:1;padding:16px;display:flex;flex-direction:column;gap:16px}
+.sheet>.ft{padding:12px 16px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:center}
+.menu{background:var(--card);border:1px solid var(--line);border-radius:5px;box-shadow:0 6px 20px rgb(0 0 0/.12);padding:4px;min-width:240px}
+.menu>*{display:flex;align-items:center;gap:8px;min-height:28px;padding:4px 8px;border-radius:4px}
+.menu>.on{background:var(--hover)}
+.note{background:var(--muted);border-radius:5px;padding:8px 10px;color:var(--t2)}
+@media(max-width:760px){.rail,.ctx{display:none}.sheet{width:100%}}
+/* v2 additions */
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line)}
+.tab{height:30px;padding:0 10px;display:flex;align-items:center;color:var(--t3);border-bottom:2px solid transparent;margin-bottom:-1px;font-weight:500}
+.tab.on{color:var(--brand);border-color:var(--brand)}
+.kv{display:grid;grid-template-columns:160px 1fr;gap:6px 12px;align-items:baseline}
+.kv dt{color:var(--t3)}.kv dd{margin:0}
+.ann{position:absolute;right:16px;bottom:16px;max-width:360px;background:hsl(37.8 89.4% 29.6%/.08);border:1px solid hsl(37.8 89.4% 29.6%/.4);border-radius:8px;padding:8px 10px;font-size:11.5px;color:var(--t2)}
+.ann b{color:var(--amber)}
+.empty{border:1px dashed var(--ctl);border-radius:8px;padding:40px 24px;text-align:center;color:var(--t3);background:var(--card)}
+.dot{width:8px;height:8px;border-radius:999px;display:inline-block;flex:none}
+.dot.g{background:var(--green)}.dot.a{background:var(--amber)}.dot.r{background:var(--red)}.dot.n{background:var(--line2)}
+</style></head><body>
+<div class="app">
+<nav class="rail" aria-label="Main">
+<a class="logo" href="#" aria-label="Dashboard"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 2 7l10 5 10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></a>
+<a class="ri" href="Pipeline.dc.html" aria-label="Dashboard"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z"/></svg></a>
+<a class="ri" href="#" aria-label="Inbox"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-6l-2 3h-4l-2-3H2M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/></svg></a>
+<a class="ri" href="#" aria-label="Reminders"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10 21h4"/></svg></a>
+<a class="ri on" href="Main.dc.html" aria-label="Administration"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></a>
+</nav>
+<div class="ctx">
+<nav aria-label="Administration">
+<p class="lbl">Administration</p>
+<a class="ci" href="Main.dc.html">Overview</a>
+<a class="ci on" href="People.dc.html">People</a>
+<a class="ci" href="Lenders.dc.html">Lenders</a>
+<a class="ci" href="Email.dc.html">Email</a>
+<a class="ci" href="AuditLog.dc.html">Audit log</a>
+</nav>
+</div>
+<div class="col">
+<header class="top">
+<h1 class="crumb">Administration <span>/</span> People</h1>
+<button class="user" type="button"><span class="av">PD</span>Priya Desai<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+</header>
+<main class="main">
+<header>
+<h2 class="lbl">People</h2>
+<p class="sub">Everyone who can sign in to Summit Mortgage Processing, and what each of them can do.</p>
+</header>
+<div class="tabs"><a class="tab on" href="People.dc.html">People <span class="hint" style="margin-left: 6px">6</span></a><a class="tab" href="Pending.dc.html">Invitations <span class="hint" style="margin-left: 6px">2</span></a></div>
+<div class="bar">
+<label class="in" style="max-width: 260px"><svg viewBox="0 0 24 24" aria-hidden="true" style="color: var(--t3)"><path d="M21 21l-4.3-4.3M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14"/></svg><input type="search" placeholder="Search name or email" aria-label="Search people" style="border: 0; outline: 0; background: none; font: inherit; flex: 1; min-width: 0"></label>
+<button class="in" type="button" style="width: auto">All roles<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+<label class="chk" style="padding: 0; align-items: center"><input type="checkbox" checked style="margin: 0"> Show inactive</label>
+<span class="grow"></span>
+<a class="btn pri" href="InviteDialog.dc.html"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Invite person</a>
+</div>
+<div class="scroll">
+<table class="tbl" style="min-width: 760px">
+<thead><tr><th style="width: 22%">Name</th><th style="width: 26%">Email</th><th style="width: 22%">Roles</th><th style="width: 10%">Files</th><th style="width: 10%">Status</th><th style="width: 10%">Last sign-in</th></tr></thead>
+<tbody>
+<tr><td><a class="nm" href="PersonLO.dc.html">Priya Desai</a> <span class="q">(you)</span></td><td class="q">priya.desai@summitmp.example</td><td><span class="chips"><span class="chip">Admin</span><span class="chip">Processor</span></span> <span class="hint" title="Account owner: set at onboarding; only MortgageBoss can change it">· owner</span><span style="display:none"></span></td><td class="q">3</td><td><span class="st ok"><span class="dot g"></span>Active</span></td><td class="q">Today 9:12</td></tr>
+<tr><td><a class="nm" href="PersonSheet.dc.html">Marcus Hill</a></td><td class="q">marcus.hill@summitmp.example</td><td><span class="chips"><span class="chip">Admin</span></span></td><td class="q">—</td><td><span class="st ok"><span class="dot g"></span>Active</span></td><td class="q">Yesterday</td></tr>
+<tr><td><a class="nm" href="PersonLO.dc.html">Daniel Okafor</a></td><td class="q">daniel.okafor@summitmp.example</td><td><span class="chips"><span class="chip">Loan officer</span></span></td><td class="q">9</td><td><span class="st ok"><span class="dot g"></span>Active</span></td><td class="q">Today 8:02</td></tr>
+<tr><td><a class="nm" href="PersonSheet.dc.html">Elena Ruiz</a></td><td class="q">elena.ruiz@summitmp.example</td><td><span class="chips"><span class="chip">Processor</span></span></td><td class="q">6</td><td><span class="st ok"><span class="dot g"></span>Active</span></td><td class="q">Today 8:40</td></tr>
+<tr><td><a class="nm" href="PersonSheet.dc.html">Tom Becker</a></td><td class="q">tom.becker@summitmp.example</td><td><span class="chips"><span class="chip">Processor</span></span></td><td class="q">14</td><td><span class="st ok"><span class="dot g"></span>Active</span></td><td class="q">Nov 9</td></tr>
+<tr><td><a class="nm" href="PersonSheet.dc.html">Nadia Osei</a></td><td class="q">nadia.osei@summitmp.example</td><td><span class="chips"><span class="chip">Processor</span></span></td><td class="q">0</td><td><span class="st ok"><span class="dot g"></span>Active</span></td><td class="q">Never</td></tr>
+<tr><td><a class="nm" href="PersonSheet.dc.html" style="color: var(--t3)">Aisha Khan</a></td><td class="q">aisha.khan@summitmp.example</td><td><span class="chips"><span class="chip">Processor</span></span></td><td class="q">0</td><td><span class="st off"><span class="dot n"></span>Inactive</span></td><td class="q">Sep 30</td></tr>
+</tbody>
+</table>
+</div>
+<p class="hint">6 active, 1 inactive. "Files" counts loan files the person is on the team of (LP-MB-Admin-05); the column is hidden until that ships.</p>
+</main>
+</div>
+</div>
+</body></html>

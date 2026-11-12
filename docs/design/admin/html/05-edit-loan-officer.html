@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Edit a loan officer</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono&display=swap">
+<style>body{margin:0}
+/* Ledger look, Petrol palette (light), copied from frontend/app/palettes/petrol.css and globals.css */
+*{box-sizing:border-box}
+.app{--bg:hsl(180 14.3% 98.6%);--card:#fff;--muted:hsl(180 9.1% 95.7%);--hover:hsl(180 8.6% 93.1%);--line:hsl(165 7.7% 89.8%);--line2:hsl(170 6.4% 81.6%);--ctl:hsl(168 4.3% 54.5%);--t3:hsl(168 4.4% 41%);--t2:hsl(168 6.6% 29.8%);--t1:hsl(188.6 17.9% 7.6%);--brand:hsl(187.9 67.9% 22%);--brand10:hsl(187.9 67.9% 22%/.1);--red:hsl(7.1 61.8% 43.1%);--green:hsl(159.8 60.6% 26.9%);--amber:hsl(37.8 89.4% 29.6%);
+font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;line-height:1.2rem;color:var(--t1);background:var(--bg);display:flex;width:100%;min-height:820px;position:relative;font-variant-numeric:tabular-nums}
+.app svg{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.app a{color:inherit;text-decoration:none}
+.app p,.app h1,.app h2,.app h3{margin:0}
+.app button{font:inherit;color:inherit;cursor:pointer}
+/* shell */
+.rail{width:52px;flex:none;display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 0;background:var(--card);border-right:1px solid var(--line)}
+.logo,.ri{width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:5px}
+.logo{background:var(--brand);color:#fff;margin-bottom:4px}
+.ri{color:var(--t3)}
+.ri.on{background:var(--brand10);color:var(--brand)}
+.ctx{width:216px;flex:none;padding:8px;background:var(--card);border-right:1px solid var(--line)}
+.lbl{font-size:10.5px;line-height:1rem;letter-spacing:.09em;font-weight:600;text-transform:uppercase;color:var(--t3)}
+.ctx .lbl{padding:4px 8px}
+.ci{height:28px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:5px;color:var(--t2)}
+.ci svg{width:14px;height:14px}
+.ci.on{background:var(--brand10);color:var(--brand);font-weight:500}
+.ci .n{margin-left:auto;font-size:11.5px;color:var(--t3)}
+.col{flex:1;min-width:0;display:flex;flex-direction:column}
+.top{height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 12px;background:var(--card);border-bottom:1px solid var(--line)}
+.crumb{font-size:14px;font-weight:600;letter-spacing:-.01em}
+.crumb span{color:var(--t3);font-weight:400}
+.user{display:flex;align-items:center;gap:8px;border:0;background:none;padding:4px 8px 4px 4px;border-radius:5px;font-weight:500;color:var(--t2)}
+.av{width:32px;height:32px;border-radius:999px;background:var(--brand10);color:var(--brand);display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:600;flex:none}
+.av.sm{width:24px;height:24px;font-size:10px}
+.main{flex:1;padding:16px;display:flex;flex-direction:column;gap:16px}
+.sub{color:var(--t3);max-width:65ch;margin-top:4px}
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.grow{flex:1}
+/* controls */
+.btn{height:28px;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:0 12px;border-radius:5px;border:1px solid transparent;background:none;font-weight:500;white-space:nowrap}
+.btn svg{width:14px;height:14px}
+.btn.pri{background:var(--brand);color:#fff}
+.btn.out{border-color:var(--ctl);background:var(--bg)}
+.btn.red{background:var(--red);color:#fff}
+.btn.redo{border-color:var(--red);color:var(--red);background:var(--bg)}
+.btn.sm{height:24px;padding:0 8px;font-size:11.5px}
+.btn.link{padding:0;height:auto;color:var(--brand)}
+.in{height:28px;width:100%;border:1px solid var(--ctl);border-radius:5px;background:var(--bg);padding:0 10px;font:inherit;color:var(--t1);display:flex;align-items:center;justify-content:space-between;gap:8px}
+.in.ro{background:var(--muted);border-color:var(--line2);color:var(--t2)}
+.f{display:flex;flex-direction:column;gap:4px;font-weight:500;color:var(--t2);flex:1;min-width:140px}
+.f .in{font-weight:400}
+.hint{font-size:11.5px;color:var(--t3);font-weight:400}
+.chk{display:flex;align-items:flex-start;gap:8px;min-height:28px;padding:4px 0}
+.chk input{margin:3px 0 0;accent-color:var(--brand)}
+.chk.dis{color:var(--t3)}
+.chip{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;border:1px solid var(--line2);font-size:11.5px;font-weight:500;color:var(--t2);white-space:nowrap}
+.chip.b{border-color:transparent;background:var(--brand10);color:var(--brand)}
+.chips{display:flex;flex-wrap:wrap;gap:4px}
+.st{display:inline-flex;align-items:center;gap:6px}
+.st svg{width:14px;height:14px}
+.st.ok svg{color:var(--green)}
+.st.wait svg{color:var(--amber)}
+.st.off{color:var(--t3)}
+/* tables */
+.scroll{overflow-x:auto}
+.tbl{width:100%;border-collapse:separate;border-spacing:0}
+.tbl th{height:28px;padding:0 12px;text-align:left;font-size:11.5px;font-weight:500;color:var(--t3);border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl td{height:32px;padding:4px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+.tbl tr.sel td{background:var(--brand10)}
+.tbl .nm{font-weight:500}
+.tbl .q{color:var(--t3)}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px}
+.card>.hd{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line)}
+.card>.bd{padding:12px;display:flex;flex-direction:column;gap:12px}
+.rowi{display:flex;align-items:center;gap:8px;min-height:28px}
+.list{border-top:1px solid var(--line)}
+.list>*{display:flex;align-items:center;gap:12px;min-height:36px;padding:6px 0;border-bottom:1px solid var(--line)}
+/* overlays */
+.ov{position:absolute;inset:0;background:rgb(0 0 0/.8);display:flex;align-items:center;justify-content:center;padding:16px}
+.ov.soft{background:rgb(0 0 0/.4);justify-content:flex-end;padding:0}
+.dlg{width:100%;max-width:512px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:12px;box-shadow:0 10px 30px rgb(0 0 0/.2)}
+.dlg h2,.sheet h2{font-size:14px;font-weight:600;letter-spacing:-.01em}
+.sheet{width:448px;max-width:100%;align-self:stretch;background:var(--card);border-left:1px solid var(--line);display:flex;flex-direction:column;box-shadow:-10px 0 30px rgb(0 0 0/.15)}
+.sheet>.hd{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:8px}
+.sheet>.bd{flex:1;padding:16px;display:flex;flex-direction:column;gap:16px}
+.sheet>.ft{padding:12px 16px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:center}
+.menu{background:var(--card);border:1px solid var(--line);border-radius:5px;box-shadow:0 6px 20px rgb(0 0 0/.12);padding:4px;min-width:240px}
+.menu>*{display:flex;align-items:center;gap:8px;min-height:28px;padding:4px 8px;border-radius:4px}
+.menu>.on{background:var(--hover)}
+.note{background:var(--muted);border-radius:5px;padding:8px 10px;color:var(--t2)}
+@media(max-width:760px){.rail,.ctx{display:none}.sheet{width:100%}}
+/* v2 additions */
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line)}
+.tab{height:30px;padding:0 10px;display:flex;align-items:center;color:var(--t3);border-bottom:2px solid transparent;margin-bottom:-1px;font-weight:500}
+.tab.on{color:var(--brand);border-color:var(--brand)}
+.kv{display:grid;grid-template-columns:160px 1fr;gap:6px 12px;align-items:baseline}
+.kv dt{color:var(--t3)}.kv dd{margin:0}
+.ann{position:absolute;right:16px;bottom:16px;max-width:360px;background:hsl(37.8 89.4% 29.6%/.08);border:1px solid hsl(37.8 89.4% 29.6%/.4);border-radius:8px;padding:8px 10px;font-size:11.5px;color:var(--t2)}
+.ann b{color:var(--amber)}
+.empty{border:1px dashed var(--ctl);border-radius:8px;padding:40px 24px;text-align:center;color:var(--t3);background:var(--card)}
+.dot{width:8px;height:8px;border-radius:999px;display:inline-block;flex:none}
+.dot.g{background:var(--green)}.dot.a{background:var(--amber)}.dot.r{background:var(--red)}.dot.n{background:var(--line2)}
+</style></head><body>
+<div class="app">
+<nav class="rail" aria-label="Main">
+<a class="logo" href="#" aria-label="Dashboard"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 2 7l10 5 10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></a>
+<a class="ri on" href="Main.dc.html" aria-label="Administration"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></a>
+</nav>
+<div class="ctx">
+<nav aria-label="Administration">
+<p class="lbl">Administration</p>
+<a class="ci" href="Main.dc.html">Overview</a>
+<a class="ci on" href="People.dc.html">People</a>
+<a class="ci" href="Lenders.dc.html">Lenders</a>
+<a class="ci" href="Email.dc.html">Email</a>
+<a class="ci" href="AuditLog.dc.html">Audit log</a>
+</nav>
+</div>
+<div class="col">
+<header class="top">
+<h1 class="crumb">Administration <span>/</span> People</h1>
+<button class="user" type="button"><span class="av">PD</span>Priya Desai<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+</header>
+<main class="main">
+<h2 class="lbl">People</h2>
+<div class="scroll">
+<table class="tbl" style="min-width: 700px">
+<thead><tr><th>Name</th><th>Email</th><th>Roles</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td class="nm">Priya Desai <span class="q">(you)</span></td><td class="q">priya.desai@summitmp.example</td><td><span class="chips"><span class="chip">Admin</span><span class="chip">Processor</span></span> <span class="hint" title="Account owner: set at onboarding; only MortgageBoss can change it">· owner</span><span style="display:none"></span></td><td>Active</td></tr>
+<tr><td class="nm">Marcus Hill</td><td class="q">marcus.hill@summitmp.example</td><td><span class="chips"><span class="chip">Admin</span></span></td><td>Active</td></tr>
+<tr class="sel"><td class="nm">Daniel Okafor</td><td class="q">daniel.okafor@summitmp.example</td><td><span class="chips"><span class="chip">Loan officer</span></span></td><td>Active</td></tr>
+<tr><td class="nm">Elena Ruiz</td><td class="q">elena.ruiz@summitmp.example</td><td><span class="chips"><span class="chip">Processor</span></span></td><td>Active</td></tr>
+</tbody>
+</table>
+</div>
+</main>
+</div>
+<div class="ov soft">
+<aside class="sheet" aria-label="Edit Daniel Okafor">
+<div class="hd">
+<div><h2>Daniel Okafor</h2><p class="hint">daniel.okafor@summitmp.example · joined Oct 1 · last sign-in today 8:02</p></div>
+<a class="btn sm" href="People.dc.html" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></a>
+</div>
+<div class="bd">
+<section style="display: flex; flex-direction: column; gap: 8px">
+<h3 class="lbl">Details</h3>
+<div class="bar"><label class="f">First name<input class="in" type="text" value="Daniel"></label><label class="f">Last name<input class="in" type="text" value="Okafor"></label></div>
+<div class="bar"><label class="f">Title<input class="in" type="text" value="Loan Officer"></label><label class="f">Phone<input class="in" type="tel" value="[PHONE]"></label></div>
+</section>
+<section style="display: flex; flex-direction: column; gap: 2px">
+<h3 class="lbl" style="margin-bottom: 4px">Roles</h3>
+<label class="chk"><input type="checkbox"><span>Admin<br><span class="hint">Manages people, lenders, email and settings.</span></span></label>
+<label class="chk"><input type="checkbox" checked><span>Loan officer<br><span class="hint">Owns loan files and invites borrowers.</span></span></label>
+<label class="chk"><input type="checkbox"><span>Processor<br><span class="hint">Works the company's loan files.</span></span></label>
+</section>
+<section style="display: flex; flex-direction: column; gap: 8px">
+<h3 class="lbl">Licensing <span class="hint" style="text-transform: none; letter-spacing: 0; font-weight: 400">· shown because Loan officer is ticked</span></h3>
+<div class="bar"><label class="f">NMLS ID<input class="in mono" type="text" value="[NMLS ID]"></label><label class="f">Licensed states<span class="in" style="height: auto; min-height: 28px; flex-wrap: wrap; justify-content: flex-start; gap: 4px; padding: 3px 6px"><span class="chip">NJ</span><span class="chip">NY</span><span class="chip">PA</span><span class="hint">Add state…</span></span></label></div>
+<p class="hint">Goes on pre-approval letters and the borrower's team card when the portal ships. Nothing here is validated against NMLS.</p>
+</section>
+<section style="display: flex; flex-direction: column; gap: 4px">
+<h3 class="lbl">Loan files</h3>
+<label class="chk"><input type="checkbox"><span>Sees all company loan files<br><span class="hint">A loan officer normally sees only files where he is the loan officer, once restriction is on.</span></span></label>
+</section>
+<section style="display: flex; flex-direction: column; gap: 4px">
+<h3 class="lbl">History</h3>
+<div class="list">
+<div><span style="flex: 1">Priya Desai added Loan officer, licensed states NJ, NY, PA</span><span class="hint">Oct 1</span></div>
+<div><span style="flex: 1">Accepted invitation from Priya Desai</span><span class="hint">Oct 1</span></div>
+</div>
+</section>
+</div>
+<div class="ft">
+<a class="btn redo" href="Reassign.dc.html">Deactivate</a>
+<span class="grow"></span>
+<a class="btn out" href="People.dc.html">Cancel</a>
+<button class="btn pri" type="button">Save changes</button>
+</div>
+</aside>
+</div>
+<div class="ann" style="right: 464px">The Licensing block appears only while Loan officer is ticked; for a processing company with no loan officers it never shows, so the sheet is the same length as screen 04.</div>
+</div>
+</body></html>
