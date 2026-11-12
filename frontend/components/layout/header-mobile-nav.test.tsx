@@ -16,7 +16,14 @@ const pathname = vi.hoisted(() => ({ current: "/dashboard" }));
 vi.mock("next/navigation", () => ({ usePathname: () => pathname.current }));
 vi.mock("@/lib/stores/auth-store", () => ({
   useAuthStore: (selector: (s: unknown) => unknown) =>
-    selector({ user: { first_name: "Pat", last_name: "P", email: "p@a.com", role: "processor" } }),
+    selector({
+      user: {
+        first_name: "Pat",
+        last_name: "P",
+        email: "p@a.com",
+        permissions: ["borrower.invite", "loan.create"],
+      },
+    }),
 }));
 vi.mock("@/components/layout/user-menu", () => ({ UserMenu: () => null }));
 vi.mock("@/components/layout/breadcrumb", () => ({ Breadcrumb: () => null }));

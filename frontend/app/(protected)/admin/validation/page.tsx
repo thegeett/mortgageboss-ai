@@ -17,8 +17,8 @@ import { InlineErrorState } from "@/components/ui/error-state";
 import { Input } from "@/components/ui/input";
 import { SkeletonText } from "@/components/ui/skeleton";
 import { useRecordVerdict, useValidationInventory } from "@/lib/api/validation-aid";
+import { useCan } from "@/lib/auth/permissions";
 import { VALIDATION_STATUS, resolveStatus } from "@/lib/status";
-import { useAuthStore } from "@/lib/stores/auth-store";
 import type {
   InventoryItem,
   ValidationInventory,
@@ -29,10 +29,13 @@ import { Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 
 export default function ValidationAidPage() {
-  const role = useAuthStore((state) => state.user?.role);
+  // Interim gate (LP-MB-Admin-02): the validation aid is outside the admin work, and its API
+  // still uses `require_role(ADMIN)`. `lenders.manage` is held by exactly the admins, so it
+  // stands in until this page is dealt with. `role` no longer exists to compare.
+  const canValidate = useCan("lenders.manage");
   const { data, isPending, isError, refetch } = useValidationInventory();
 
-  if (role !== "admin") {
+  if (!canValidate) {
     return (
       <div className="rounded-lg border border-dashed border-input bg-card px-6 py-16 text-center text-sm text-muted-foreground">
         The validation aid is available to admins only.

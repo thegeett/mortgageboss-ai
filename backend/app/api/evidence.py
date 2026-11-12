@@ -16,10 +16,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from app.api.dependencies import CurrentUser, ScopedLoanFile, require_role
+from app.api.dependencies import CurrentUser, ScopedLoanFile, require_permission
 from app.core.database import DbSession
+from app.core.permissions import Permission
 from app.models.communication_evidence import CommunicationEvidence
-from app.models.user import UserRole
 from app.services.evidence import (
     LegalHoldError,
     evidence_for,
@@ -29,7 +29,7 @@ from app.services.evidence import (
 
 router = APIRouter(prefix="/loan-files/{file_identifier}", tags=["evidence"])
 
-_ADMIN = Depends(require_role(UserRole.ADMIN))
+_EVIDENCE_MANAGE = Depends(require_permission(Permission.EVIDENCE_MANAGE))
 
 
 class EvidencePublic(BaseModel):
@@ -121,7 +121,7 @@ async def hold(
     loan_file: ScopedLoanFile,
     db: DbSession,
     current_user: CurrentUser,
-    _: None = _ADMIN,
+    _: None = _EVIDENCE_MANAGE,
 ) -> HoldPublic:
     """Suspend every destruction path for this file."""
     try:
@@ -143,7 +143,7 @@ async def release(
     loan_file: ScopedLoanFile,
     db: DbSession,
     current_user: CurrentUser,
-    _: None = _ADMIN,
+    _: None = _EVIDENCE_MANAGE,
 ) -> HoldPublic:
     """Release the file.
 

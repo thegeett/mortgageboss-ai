@@ -15,6 +15,7 @@ from app.api.capabilities import router as capabilities_router
 from app.api.communications import follow_up_router as follow_ups_router
 from app.api.communications import message_router as messages_router
 from app.api.communications import router as communications_router
+from app.api.company import router as company_router
 from app.api.conditions import CAPPED_HEADER as CONDITIONS_CAPPED_HEADER
 from app.api.conditions import conditions_by_id_router
 from app.api.conditions import rounds_router as condition_rounds_router
@@ -185,6 +186,7 @@ app.include_router(capabilities_router, prefix=API_V1_PREFIX)
 app.include_router(reminders_router, prefix=API_V1_PREFIX)
 app.include_router(reminders_file_router, prefix=API_V1_PREFIX)
 app.include_router(mailbox_connections_router, prefix=API_V1_PREFIX)
+app.include_router(company_router, prefix=API_V1_PREFIX)
 app.include_router(upload_links_router, prefix=API_V1_PREFIX)
 # LP-815 — THE ONE UNAUTHENTICATED SURFACE. The token in the path is the credential; see
 # `api/upload_links.py` for why every failure on it is one answer.

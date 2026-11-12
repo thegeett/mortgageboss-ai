@@ -15,10 +15,11 @@ from typing import Annotated
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 
-from app.api.dependencies import CurrentUser
+from app.api.dependencies import CurrentUser, require_permission
 from app.core.database import DbSession
+from app.core.permissions import Permission
 from app.mismo.import_service import MismoImportError, create_loan_file_from_mismo
 from app.mismo.parser import MismoParseError, parse_mismo
 from app.models.loan_file import LoanFileStatus
@@ -85,7 +86,12 @@ async def _read_capped(upload: UploadFile, *, max_bytes: int) -> bytes:
     return b"".join(chunks)
 
 
-@router.post("", response_model=LoanFileDetail, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=LoanFileDetail,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission(Permission.LOAN_CREATE))],
+)
 async def create(
     payload: LoanFileCreate, db: DbSession, current_user: CurrentUser
 ) -> LoanFileDetail:
@@ -120,6 +126,8 @@ async def create(
     "/import-mismo",
     response_model=MismoImportResponse,
     status_code=status.HTTP_201_CREATED,
+    # The primary way a file is created, so the same key as `POST /loan-files`.
+    dependencies=[Depends(require_permission(Permission.LOAN_CREATE))],
 )
 async def import_mismo(
     current_user: CurrentUser,

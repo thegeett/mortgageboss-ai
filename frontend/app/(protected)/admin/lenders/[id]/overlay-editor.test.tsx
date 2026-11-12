@@ -28,17 +28,11 @@ vi.mock("@/components/admin/lender-condition-settings", () => ({
 }));
 vi.mock("next/navigation", () => ({ useParams: () => ({ id: "l1" }) }));
 
-const authState = vi.hoisted(() => ({ role: "admin" as string | undefined }));
-vi.mock("@/lib/stores/auth-store", () => ({
-  useAuthStore: (selector: (s: unknown) => unknown) => selector({ user: { role: authState.role } }),
-}));
-
 import EditLenderOverlayPage from "./page";
 
 afterEach(() => {
   cleanup();
   useLenderOverlay.mockReset();
-  authState.role = "admin";
 });
 
 function view(overrides: Partial<LenderOverlayView> = {}): LenderOverlayView {

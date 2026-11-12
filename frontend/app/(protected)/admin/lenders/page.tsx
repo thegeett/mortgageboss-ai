@@ -27,7 +27,6 @@ import {
 } from "@/components/ui/table";
 import { useOverlayLenders } from "@/lib/api/overlay-admin";
 import { humanize } from "@/lib/format";
-import { useAuthStore } from "@/lib/stores/auth-store";
 import type { OverlayLenderSummary } from "@/lib/types/overlay-admin";
 import { formatDistanceToNow } from "date-fns";
 import Link from "next/link";
@@ -44,16 +43,7 @@ function changed(iso: string | null): string {
 }
 
 export default function AdminLendersPage() {
-  const role = useAuthStore((state) => state.user?.role);
   const { data, isPending, isError, refetch } = useOverlayLenders();
-
-  if (role !== "admin") {
-    return (
-      <p className="border-t border-border py-6 text-sm text-muted-foreground">
-        Lender overlays are available to admins only.
-      </p>
-    );
-  }
 
   return (
     <section aria-labelledby="lenders-heading" className="space-y-4">

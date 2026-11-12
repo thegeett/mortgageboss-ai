@@ -10,9 +10,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.dependencies import CurrentCompanyId, CurrentUser, require_role
+from app.api.dependencies import CurrentCompanyId, CurrentUser, require_permission
 from app.core.database import DbSession
-from app.models.user import UserRole
+from app.core.permissions import Permission
 from app.schemas.overlay_admin import (
     LenderOverlayView,
     OverlayLenderSummary,
@@ -32,7 +32,7 @@ from app.services.overlay_blast_radius import BlastRadius, estimate_blast_radius
 router = APIRouter(
     prefix="/admin/lenders",
     tags=["overlay-admin"],
-    dependencies=[Depends(require_role(UserRole.ADMIN))],  # admin-only surface
+    dependencies=[Depends(require_permission(Permission.OVERLAYS_MANAGE))],
 )
 
 _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lender not found")

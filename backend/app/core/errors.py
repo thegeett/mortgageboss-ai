@@ -25,6 +25,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.core.permissions import PermissionDeniedError
+
 logger = structlog.get_logger(__name__)
 
 # Status code → stable error ``type``. Anything unmapped falls back to
@@ -139,6 +141,17 @@ async def validation_exception_handler(
     )
 
 
+async def permission_denied_handler(request: Request, exc: PermissionDeniedError) -> JSONResponse:
+    """A service's ``ensure`` refusal → the same 403 ``require_permission`` gives (ADR-442).
+
+    The missing key is not named: the body matches the route-level refusal exactly.
+    """
+    return JSONResponse(
+        status_code=status.HTTP_403_FORBIDDEN,
+        content=error_body("forbidden", "Insufficient permissions"),
+    )
+
+
 def register_exception_handlers(app: Any) -> None:
     """Wire the handlers onto the FastAPI app (called from ``app.main``).
 
@@ -147,4 +160,5 @@ def register_exception_handlers(app: Any) -> None:
     """
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    app.add_exception_handler(PermissionDeniedError, permission_denied_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)

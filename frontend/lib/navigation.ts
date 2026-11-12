@@ -3,12 +3,12 @@
  *
  * One source of truth for the sidebar (desktop) and the mobile nav menu. Adding
  * a destination as Epic 4+ ships pages is a one-line edit here. Items may be
- * role-gated via `requiredRole`; `visibleNavItems(role)` does the filtering.
+ * gated by a permission key via `requiredPermission`; `visibleNavItems(permissions)`
+ * does the filtering.
  *
- * Role gating here is **UX only** — it hides chrome the user can't use. The
- * backend is the real authorization boundary (LP-24 `require_role`).
+ * Gating here is **UX only** — it hides chrome the user can't use. The backend is
+ * the real authorization boundary (`require_permission`, ADR-442).
  */
-import type { UserRole } from "@/lib/auth/types";
 import type { LucideIcon } from "lucide-react";
 import {
   BellRing,
@@ -29,8 +29,8 @@ export interface NavItem {
   label: string;
   href: string;
   icon: LucideIcon;
-  /** If set, the item is only shown to users with this role. */
-  requiredRole?: UserRole;
+  /** If set, the item is only shown to users holding this permission key. */
+  requiredPermission?: string;
   /**
    * Extra path prefixes this destination REPRESENTS without linking to.
    *
@@ -59,12 +59,21 @@ export const NAV_ITEMS: NavItem[] = [
   // LP-814 — company-wide, and it has to be: "this file has gone quiet" is about a file nobody is
   // opening, so a per-file view could never surface it.
   { label: "Reminders", href: "/reminders", icon: BellRing },
-  { label: "Administration", href: "/admin", icon: ShieldCheck, requiredRole: "admin" },
+  {
+    label: "Administration",
+    href: "/admin",
+    icon: ShieldCheck,
+    requiredPermission: "users.manage",
+  },
 ];
 
-/** The nav items a user with `role` may see (undefined role → only public items). */
-export function visibleNavItems(role: UserRole | undefined): NavItem[] {
-  return NAV_ITEMS.filter((item) => item.requiredRole === undefined || item.requiredRole === role);
+/** The nav items a user holding `permissions` may see (signed out → only ungated items). */
+export function visibleNavItems(permissions: readonly string[] | undefined): NavItem[] {
+  return NAV_ITEMS.filter(
+    (item) =>
+      item.requiredPermission === undefined ||
+      (permissions ?? []).includes(item.requiredPermission),
+  );
 }
 
 /** True if `pathname` is within `href` (exact, or a nested child route). */

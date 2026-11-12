@@ -16,7 +16,6 @@ import { InlineErrorState } from "@/components/ui/error-state";
 import { Input } from "@/components/ui/input";
 import { SkeletonText } from "@/components/ui/skeleton";
 import { useLenderOverlay, useUpdateLenderOverlay } from "@/lib/api/overlay-admin";
-import { useAuthStore } from "@/lib/stores/auth-store";
 import type { LenderOverlayView, OverlayAuditChange } from "@/lib/types/overlay-admin";
 import { formatDistanceToNow } from "date-fns";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
@@ -69,16 +68,7 @@ function when(iso: string): string {
 
 export default function EditLenderOverlayPage() {
   const { id } = useParams<{ id: string }>();
-  const role = useAuthStore((state) => state.user?.role);
   const { data, isPending, isError, refetch } = useLenderOverlay(id);
-
-  if (role !== "admin") {
-    return (
-      <div className="rounded-lg border border-dashed border-input bg-card px-6 py-16 text-center text-sm text-muted-foreground">
-        Lender overlays are available to admins only.
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6">

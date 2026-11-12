@@ -44,7 +44,7 @@ function sectionFromPath(pathname: string): string {
 export function Header() {
   const pathname = usePathname();
   const user = useAuthStore((state) => state.user);
-  const items = visibleNavItems(user?.role);
+  const items = visibleNavItems(user?.permissions);
   const current = items.find((item) => isNavItemActive(pathname, item));
   // Below `md` the context column is hidden, and LP-UI-016 removed the file's
   // tab strip — which was the mobile affordance. Without this you can open a

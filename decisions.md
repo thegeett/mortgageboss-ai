@@ -17004,3 +17004,47 @@ CHECK-swap pattern has already caused two incidents on `ActivityType` (LP-637, L
 - No update or delete path, no `updated_at`, no `deleted_at`.
 
 *Status.* Accepted (LP-MB-Admin-01).
+
+## ADR-442
+
+**Authorization is by permission key; the matrix is data in one module. Supersedes the role checks of
+LP-24.**
+
+*Context.* After ADR-440 a user holds several roles, but code still asked "is this user an admin?". With
+more roles and a matrix of who may do what, that question gets asked in more places and drifts.
+
+*Decision (LP-MB-Admin-02).*
+- `app/core/permissions.py` holds the `Permission` keys, `ROLE_PERMISSIONS` (what each role grants) and
+  `CONFIG_PERMISSIONS` (the cells a company setting switches), and `resolve_permissions(roles,
+  settings)`. Roles are never compared outside that module.
+- Routes gate with `require_permission(key)`; services check an `Actor` with `ensure(actor, key)`, whose
+  refusal the API maps to the same 403. Both read the set `resolve_permissions` produced.
+- The frontend gates on `user.permissions` (`useCan(key)`), the same resolved set, never on roles. UX
+  only; the API is the boundary.
+
+*Consequences.*
+- Changing who may do something is a change to the two tables, and the matrix test (a deliberate second
+  copy) fails on any row that moved.
+- `require_role` remains for one caller, `api/validation_aid.py`, and goes with that page.
+- `/auth/me`, login and refresh return `permissions`; the derived `role` is removed.
+
+*Status.* Accepted (LP-MB-Admin-02).
+
+## ADR-443
+
+**One function decides the effective company.**
+
+*Context.* Tenant scope was read as `current_user.company_id` in about a hundred places across 18 API
+files.
+
+*Decision (LP-MB-Admin-02).* Tenant scope is `actor.company_id`, decided only in `get_current_actor`;
+`get_current_company_id` returns it. New code uses `CurrentCompanyId` or `actor.company_id`, never
+`current_user.company_id`. Today the two are equal and nothing planned changes that; the seam exists so
+that cross-company access, if it ever returns, is one function and not a hundred call sites. The access
+token still carries identity only (LP-22 unchanged).
+
+*Consequences.*
+- A guard test fails on `current_user.company_id` in any API file outside an allowlist of today's 18;
+  the follow-up that moves them empties the list.
+
+*Status.* Accepted (LP-MB-Admin-02).

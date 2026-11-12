@@ -1,6 +1,6 @@
 # LP-MB-Admin-02 — Permission keys, and replacing `require_role`
 
-Admin and roles, ticket 2 of 5. **Status: planned, not built.** Needs LP-MB-Admin-01. Next: LP-MB-Admin-03.
+Admin and roles, ticket 2 of 5. **Status: built, not committed (see Result).** Needs LP-MB-Admin-01. Next: LP-MB-Admin-03.
 
 ## What and why
 
@@ -113,3 +113,70 @@ No new screens apart from the settings card. Gating reads permissions.
 - **ADR-443 — one function decides the effective company.** Tenant scope is `actor.company_id`, not
   `user.company_id`. Today they are equal, and nothing planned changes that; the seam exists so that cross-company
   access, if it ever returns, is one function and not a hundred call sites. The access token still carries identity only (LP-22 unchanged).
+
+## Result
+
+**Built**
+- `app/core/permissions.py`: `Permission` (the eleven keys), `ROLE_PERMISSIONS`, `CONFIG_PERMISSIONS`
+  (role → {key: the `CompanySettings` field that grants it}; the two PROCESSOR cells), and
+  `resolve_permissions(roles, settings)`. Pure; imports only `UserRole`. `PermissionDeniedError` lives
+  here too, so `app/core/errors.py` can map it without importing a service.
+- `app/schemas/company.py`: `CompanySettings` (`extra="allow"`), plus `CompanySettingsUpdate`
+  (`extra="forbid"`, all optional) and `CompanySettingsPublic`. `Company.settings_model` parses
+  `settings`. No migration.
+- `app/api/dependencies.py`: `Actor`, `get_current_actor` (no query; the user and company are already
+  loaded), `CurrentActor`, `require_permission`. `get_current_company_id` returns `actor.company_id`.
+  `require_role` is kept, documented as superseded, for `validation_aid.py` only (left untouched apart
+  from a comment saying so).
+- `app/services/authorization.py`: `ensure(actor, key)`. The refusal becomes the same 403 envelope as
+  the route gate through a handler registered in `app/core/errors.py`, where the app's other exception
+  handlers are registered.
+- Routers: `lenders.manage`, `overlays.manage`, `mail.manage`, `evidence.manage` replace
+  `require_role(ADMIN)`; `POST /loan-files` and `POST /loan-files/import-mismo` require `loan.create`.
+- `GET`/`PATCH /company/settings` (`api/company.py`, `company.settings.manage`) through
+  `services/company_settings.update_company_settings(db, actor, update)`: writes `companies.settings`
+  (unknown keys kept), and one `company_settings_changed` audit row with `field_changes` output. A
+  PATCH that changes nothing writes nothing.
+- `UserPublic`: `+permissions` (sorted), `-role`. Built from the `User` in a before-validator, so the
+  model does not import the permission module (which imports the user model).
+- Frontend: `User` has `roles`, `permissions`, `is_owner` and no `role`; `useCan` in
+  `lib/auth/permissions.ts`; `NavItem.requiredPermission` (Administration → `users.manage`);
+  `visibleNavItems(permissions)`; `app/(protected)/admin/layout.tsx` holds the one "available to admins
+  only" gate, and the admin index, lenders list and lender detail lost their copies. The admin index
+  shows each section only to a user holding its key. The validation page gates on
+  `useCan("lenders.manage")`. The settings card (`company-settings-card.tsx`,
+  `lib/api/company-settings.ts`) uses the mockup's copy.
+- Tests: the matrix cell by cell under both setting values (72 cases), union, no roles; the four
+  routers for ADMIN, PROCESSOR+ADMIN, PROCESSOR, LOAN_OFFICER; `loan.create` for processor (default,
+  on, off), LO (on, off) and admin; MISMO import refused with the setting off; settings GET defaults,
+  PATCH audit and unknown-key survival, no-op PATCH, effect on the next request, 403 for PROCESSOR and
+  LO, unknown field 422; `ensure` and its 403 body; the `current_user.company_id` guard (18 files,
+  and a check that the list only shrinks). Frontend: `useCan`, nav with and without `users.manage`,
+  the admin layout for an LO and an admin, admin index sections by key, the settings card (load, save,
+  403 on load and on save).
+- Mutations, each caught: removing the `loan.create` gate; granting processors `mail.manage`;
+  `useCan` returning true for any signed-in user; `visibleNavItems` ignoring the key.
+- Backend: 9970 passed, 12 skipped; ruff, mypy strict clean. Frontend: 2564 passed (208 files) with
+  `CI=true TZ=UTC pnpm test`, `tsc --noEmit` and `biome check .` clean.
+
+**Assumptions and deviations**
+- The ticket's UI section has the validation page keep a derived `role`; the build brief removed
+  `role` entirely, so that page uses `lenders.manage` (held by exactly the admins) as its interim gate.
+- `CONFIG_PERMISSIONS` is keyed role → key → setting name rather than key → (role, setting); same
+  data, and it makes "what does this role get from settings" one lookup.
+- The mail router's admin case is asserted as 404 on an unknown connection (past the gate), because
+  creating a connection is superseded (LP-1011) and its own test is skipped.
+- `flag_modified` is called as asked, but it is not load-bearing: the service assigns a new dict, which
+  SQLAlchemy already counts as a change. Removing the line leaves every test green (measured); the
+  comment says so.
+- The admin layout gates every `/admin/*` page on `users.manage`, the key the nav item uses. Today that
+  is exactly the admins; once a role holds e.g. `lenders.manage` without `users.manage`, the layout's
+  key will need revisiting.
+
+**Deferred**
+- Moving the existing `current_user.company_id` uses (18 files) onto `CurrentCompanyId`; the guard's
+  allowlist is emptied by that follow-up.
+- `restrict_loans_to_team` is stored and returned and enforces nothing (LP-MB-Admin-05 Part 2).
+- `borrower.invite`, `audit.view`, `users.manage` (as an API gate), `loan.view_all`, `loan.team.change`
+  have no call site yet (LP-MB-Admin-03 to 05, and the borrower portal).
+- Deleting `require_role` with the validation aid.

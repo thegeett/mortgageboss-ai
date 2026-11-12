@@ -7,7 +7,9 @@ const USER: User = {
   email: "processor@acme.com",
   first_name: "Pat",
   last_name: "Processor",
-  role: "processor",
+  roles: ["processor"],
+  permissions: ["borrower.invite", "loan.create"],
+  is_owner: false,
   company_id: "22222222-2222-2222-2222-222222222222",
 };
 

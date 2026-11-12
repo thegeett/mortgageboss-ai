@@ -5,9 +5,6 @@
  * can all import these without creating an import cycle.
  */
 
-/** User roles, mirroring the backend `UserRole` enum. */
-export type UserRole = "processor" | "admin";
-
 /**
  * The authenticated user, matching the backend `UserPublic` schema. This is the
  * only user shape the frontend ever sees — it deliberately carries no
@@ -18,7 +15,12 @@ export interface User {
   email: string;
   first_name: string;
   last_name: string;
-  role: UserRole;
+  /** The roles the user holds, for display (ADR-440). Never gate on these. */
+  roles: string[];
+  /** What the user may do, as permission keys (ADR-442). Gate with `useCan`. */
+  permissions: string[];
+  /** The company's owner: the admin the app will not deactivate or demote. */
+  is_owner: boolean;
   company_id: string;
 }
 

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
 from app.models.types import MediumStr, ShortStr
+from app.schemas.company import CompanySettings
 
 if TYPE_CHECKING:
     from app.models.lender import Lender
@@ -56,6 +57,11 @@ class Company(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     owner: Mapped["User | None"] = relationship(foreign_keys=[owner_user_id], post_update=True)
     lenders: Mapped[list["Lender"]] = relationship(back_populates="company")
     loan_files: Mapped[list["LoanFile"]] = relationship(back_populates="company")
+
+    @property
+    def settings_model(self) -> CompanySettings:
+        """`settings` parsed: a missing key takes its default, an unknown one is kept."""
+        return CompanySettings.model_validate(self.settings or {})
 
     def __repr__(self) -> str:
         return f"<Company {self.slug}>"

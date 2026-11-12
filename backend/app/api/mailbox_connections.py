@@ -21,10 +21,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
 
-from app.api.dependencies import CurrentUser, require_role
+from app.api.dependencies import CurrentUser, require_permission
 from app.core.database import DbSession
+from app.core.permissions import Permission
 from app.models.mailbox_connection import MailboxConnection
-from app.models.user import UserRole
 from app.services.mailbox_connections import (
     STALE_AFTER_DAYS,
     await_first_message,
@@ -37,7 +37,7 @@ from app.services.mailbox_connections import (
 
 router = APIRouter(prefix="/mailbox-connections", tags=["mailbox-connections"])
 
-_ADMIN = Depends(require_role(UserRole.ADMIN))
+_MAIL_MANAGE = Depends(require_permission(Permission.MAIL_MANAGE))
 _NOT_FOUND = HTTPException(status.HTTP_404_NOT_FOUND, detail="Mailbox connection not found")
 
 
@@ -168,7 +168,7 @@ async def create(
     payload: CreateConnection,
     db: DbSession,
     current_user: CurrentUser,
-    _: None = _ADMIN,
+    _: None = _MAIL_MANAGE,
 ) -> ConnectionPublic:
     """Mint a company ingest address."""
     connection = await create_connection(
@@ -197,7 +197,7 @@ async def email_steps(
     payload: EmailStepsRequest,
     db: DbSession,
     current_user: CurrentUser,
-    _: None = _ADMIN,
+    _: None = _MAIL_MANAGE,
 ) -> ConnectionPublic:
     """Record a message carrying the steps, addressed to whoever administers the mail.
 
@@ -231,7 +231,7 @@ async def revoke(
     connection_id: UUID,
     db: DbSession,
     current_user: CurrentUser,
-    _: None = _ADMIN,
+    _: None = _MAIL_MANAGE,
 ) -> ConnectionPublic:
     """Stop accepting mail at this address.
 

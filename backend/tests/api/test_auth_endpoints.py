@@ -100,8 +100,10 @@ async def test_login_success_returns_token_and_sets_refresh_cookie(
     assert body["access_token"]
     assert body["token_type"] == "bearer"
     assert body["user"]["email"] == user.email
-    assert body["user"]["role"] == UserRole.PROCESSOR.value
     assert body["user"]["roles"] == [UserRole.PROCESSOR.value]
+    # A processor's two setting-driven keys, both on by default (LP-MB-Admin-02); no `role`.
+    assert body["user"]["permissions"] == ["borrower.invite", "loan.create"]
+    assert "role" not in body["user"]
     assert body["user"]["is_owner"] is False
 
     set_cookie = _set_cookie_header(resp)

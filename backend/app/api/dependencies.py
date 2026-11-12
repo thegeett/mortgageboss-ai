@@ -1,7 +1,7 @@
 """Authentication and authorization dependencies for protected routes (LP-24).
 
 Auth is enforced as **per-route FastAPI dependencies**, not global middleware:
-a route is protected by *declaring* :data:`CurrentUser` (or a ``require_role``
+a route is protected by *declaring* :data:`CurrentUser` (or a ``require_permission``
 dependency); public routes (login, refresh, logout, health) simply don't. See
 ADR for why dependencies beat global-middleware-with-exemptions.
 
@@ -10,9 +10,14 @@ identity (``sub`` = user UUID); role, company, and active-status are read from
 the **live** database record on every request, never from the token. So
 deactivating a user or changing a role takes effect on their next request — this
 is the V1 cutoff mechanism in place of a stateless-JWT revocation store.
+
+Authorization is by permission key (ADR-442): :data:`CurrentActor` carries the
+permissions resolved once per request, and :func:`require_permission` gates a route.
+Roles are compared only in :mod:`app.core.permissions`.
 """
 
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Annotated
 from uuid import UUID
 
@@ -27,6 +32,7 @@ from app.core.jwt import (
     WrongTokenTypeError,
     verify_token,
 )
+from app.core.permissions import Permission, resolve_permissions
 from app.models.loan_file import LoanFile
 from app.models.user import User, UserRole
 from app.services.auth import get_user_by_id
@@ -95,11 +101,64 @@ async def get_current_user_optional(db: DbSession, credentials: BearerCredential
 OptionalCurrentUser = Annotated[User | None, Depends(get_current_user_optional)]
 
 
+@dataclass(frozen=True)
+class Actor:
+    """Who is acting, in which company, with what permissions (LP-MB-Admin-02).
+
+    Built once per request by :func:`get_current_actor`. ``company_id`` is the EFFECTIVE company
+    (ADR-443): today always the user's own, decided in that one function. New services take an
+    ``Actor`` and check it with :func:`app.services.authorization.ensure`.
+    """
+
+    user: User
+    company_id: UUID
+    roles: frozenset[UserRole]
+    permissions: frozenset[Permission]
+    is_owner: bool
+
+
+def get_current_actor(current_user: CurrentUser) -> Actor:
+    """The request's :class:`Actor`, from the user and company already loaded: no query."""
+    return Actor(
+        user=current_user,
+        company_id=current_user.company_id,
+        roles=current_user.role_set,
+        permissions=resolve_permissions(current_user.role_set, current_user.company.settings_model),
+        is_owner=current_user.is_owner,
+    )
+
+
+CurrentActor = Annotated[Actor, Depends(get_current_actor)]
+
+
+def require_permission(permission: Permission) -> Callable[[Actor], Awaitable[Actor]]:
+    """Dependency factory: require the actor to hold ``permission`` (ADR-442).
+
+    Depends on :func:`get_current_actor`, so authentication precedes authorization:
+    no identity is ``401``, a missing permission is ``403``.
+
+    Usage::
+
+        @router.get("/x", dependencies=[Depends(require_permission(Permission.LENDERS_MANAGE))])
+    """
+
+    async def _require_permission(actor: CurrentActor) -> Actor:
+        if permission not in actor.permissions:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions",
+            )
+        return actor
+
+    return _require_permission
+
+
 def require_role(*allowed_roles: UserRole) -> Callable[[User], Awaitable[User]]:
     """Dependency factory: require the current user to hold any of ``allowed_roles``.
 
-    Checks the user's role set (ADR-440). Interim: LP-MB-Admin-02 replaces this with
-    permission keys.
+    SUPERSEDED by :func:`require_permission` (ADR-442) and kept for ONE caller,
+    ``api/validation_aid.py``, whose page is out of the admin work's scope. Delete it
+    with that page. Do not add a caller.
 
     The returned dependency depends on :func:`get_current_user`, so
     authentication always precedes authorization. A wrong role raises ``403``
@@ -122,15 +181,17 @@ def require_role(*allowed_roles: UserRole) -> Callable[[User], Awaitable[User]]:
     return _require_role
 
 
-def get_current_company_id(current_user: CurrentUser) -> UUID:
-    """The request's tenant scope: the authenticated user's ``company_id``.
+def get_current_company_id(actor: CurrentActor) -> UUID:
+    """The request's tenant scope: the actor's effective company (ADR-443).
 
-    This is the non-forgeable company scope every business endpoint passes to
+    The ONLY place that decides it; new code uses :data:`CurrentCompanyId` or
+    ``actor.company_id``, never ``current_user.company_id``. Today it is always the
+    user's own company. This is the non-forgeable company scope every business endpoint passes to
     :func:`app.models.helpers.scope_to_company`. Because it derives from the
     validated token and the live user record, a caller cannot present another
     company's id — which is what activates the Epic 2 multi-tenancy at runtime.
     """
-    return current_user.company_id
+    return actor.company_id
 
 
 CurrentCompanyId = Annotated[UUID, Depends(get_current_company_id)]

@@ -418,13 +418,13 @@ def test_every_mutating_lender_route_is_admin_gated() -> None:
     routers instead, so the failure arrives when the route is added rather than when someone
     notices.
 
-    Detected by dependency IDENTITY — the same `_ADMIN` object every gated route shares — rather
-    than by reading source or matching a name, so a route that merely mentions `require_role` in a
+    Detected by dependency IDENTITY — the same `_LENDERS_MANAGE` object every gated route shares — rather
+    than by reading source or matching a name, so a route that merely mentions `require_permission` in a
     docstring does not count as gated.
     """
-    from app.api.lenders import _ADMIN, file_router, router
+    from app.api.lenders import _LENDERS_MANAGE, file_router, router
 
-    admin_dependency = _ADMIN.dependency
+    admin_dependency = _LENDERS_MANAGE.dependency
     ungated: list[str] = []
 
     for route in [*router.routes, *file_router.routes]:
@@ -441,7 +441,7 @@ def test_every_mutating_lender_route_is_admin_gated() -> None:
             ungated.append(f"{method} {route.path}")
 
     assert not ungated, (
-        "these mutating routes carry no admin gate. Either add `_ADMIN`, or add them to "
+        "these mutating routes carry no `lenders.manage` gate. Either add `_LENDERS_MANAGE`, or add them to "
         f"_UNGATED_BY_DESIGN with the reason: {ungated}"
     )
 
@@ -468,7 +468,7 @@ def test_the_gate_detection_would_notice_an_ungated_route() -> None:
     against a detector that found nothing at all. This builds a route with no gate and asserts the
     detection sees it — the same shape as an unrouted fixture that cannot reach the dangerous case.
     """
-    from app.api.lenders import _ADMIN
+    from app.api.lenders import _LENDERS_MANAGE
     from fastapi import APIRouter
 
     probe = APIRouter()
@@ -478,5 +478,7 @@ def test_the_gate_detection_would_notice_an_ungated_route() -> None:
         return None
 
     (route,) = probe.routes
-    gated = any(dependency.call is _ADMIN.dependency for dependency in route.dependant.dependencies)
+    gated = any(
+        dependency.call is _LENDERS_MANAGE.dependency for dependency in route.dependant.dependencies
+    )
     assert gated is False

@@ -16,11 +16,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.dependencies import CurrentUser, ScopedLoanFile, require_role
+from app.api.dependencies import CurrentUser, ScopedLoanFile, require_permission
 from app.core.database import DbSession
+from app.core.permissions import Permission
 from app.models.lender import Lender
 from app.models.lender_contact import LenderContact
-from app.models.user import UserRole
 from app.schemas.lender import (
     LenderConditionSettingsPublic,
     LenderConditionSettingsUpdate,
@@ -50,8 +50,8 @@ from app.services.lenders import (
 
 router = APIRouter(prefix="/lenders", tags=["lenders"])
 
-#: Admin-only, per route. On the router it would have caught the processor-facing GET too.
-_ADMIN = Depends(require_role(UserRole.ADMIN))
+#: `lenders.manage`, per route. On the router it would have caught the processor-facing GET too.
+_LENDERS_MANAGE = Depends(require_permission(Permission.LENDERS_MANAGE))
 
 _LENDER_NOT_FOUND = HTTPException(status.HTTP_404_NOT_FOUND, detail="Lender not found")
 _CONTACT_NOT_FOUND = HTTPException(status.HTTP_404_NOT_FOUND, detail="Lender contact not found")
@@ -69,7 +69,7 @@ async def create(
     payload: LenderCreate,
     db: DbSession,
     current_user: CurrentUser,
-    _: None = _ADMIN,
+    _: None = _LENDERS_MANAGE,
 ) -> LenderDetail:
     """Add a lender.
 
@@ -109,7 +109,7 @@ async def update(
     payload: LenderUpdate,
     db: DbSession,
     current_user: CurrentUser,
-    _: None = _ADMIN,
+    _: None = _LENDERS_MANAGE,
 ) -> LenderDetail:
     lender = await get_scoped_lender(db, lender_id=lender_id, company_id=current_user.company_id)
     if lender is None:
@@ -149,7 +149,7 @@ async def create_contact(
     payload: LenderContactCreate,
     db: DbSession,
     current_user: CurrentUser,
-    _: None = _ADMIN,
+    _: None = _LENDERS_MANAGE,
 ) -> LenderContactPublic:
     lender = await get_scoped_lender(db, lender_id=lender_id, company_id=current_user.company_id)
     if lender is None:
@@ -183,7 +183,7 @@ async def update_contact(
     payload: LenderContactUpdate,
     db: DbSession,
     current_user: CurrentUser,
-    _: None = _ADMIN,
+    _: None = _LENDERS_MANAGE,
 ) -> LenderContactPublic:
     contact = await get_scoped_contact(
         db, contact_id=contact_id, company_id=current_user.company_id
@@ -211,7 +211,7 @@ async def delete_contact(
     contact_id: UUID,
     db: DbSession,
     current_user: CurrentUser,
-    _: None = _ADMIN,
+    _: None = _LENDERS_MANAGE,
 ) -> None:
     """Soft-delete a contact. Files assigned to them are left naming nobody, not left broken.
 
@@ -312,7 +312,7 @@ async def save_condition_settings(
     payload: LenderConditionSettingsUpdate,
     db: DbSession,
     current_user: CurrentUser,
-    _: None = _ADMIN,
+    _: None = _LENDERS_MANAGE,
 ) -> LenderConditionSettingsPublic:
     """Save changes (admin)."""
     from app.services.lender_settings import SettingsRefused, save_settings, settings_for

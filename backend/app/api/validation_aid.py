@@ -18,6 +18,8 @@ from app.services.validation_aid import build_inventory, record_verdict
 router = APIRouter(
     prefix="/admin/validation",
     tags=["validation-aid"],
+    # Deliberately still `require_role`, not a permission key (LP-MB-Admin-02): the validation aid
+    # is outside the admin work's scope. `require_role` stays for this one caller and goes with it.
     dependencies=[Depends(require_role(UserRole.ADMIN))],  # admin-only surface
 )
 

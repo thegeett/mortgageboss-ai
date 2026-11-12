@@ -24,6 +24,7 @@ from app.api.dependencies import (
 )
 from app.core.database import get_db
 from app.core.jwt import create_access_token, create_refresh_token
+from app.core.permissions import Permission
 from app.core.security import hash_password
 from app.models import Company, User, UserRole
 from fastapi import Depends, FastAPI
@@ -130,23 +131,32 @@ async def test_me_with_valid_token_returns_user(
     assert "hashed_password" not in resp.text
 
 
+_PROCESSOR_DEFAULT = ["borrower.invite", "loan.create"]
+_LOAN_OFFICER = ["borrower.invite", "loan.create", "loan.team.change"]
+_ALL = sorted(p.value for p in Permission)
+
+
 @pytest.mark.parametrize(
-    ("roles", "owner", "derived_role"),
+    ("roles", "owner", "permissions"),
     [
-        ((UserRole.PROCESSOR,), False, "processor"),
-        ((UserRole.LOAN_OFFICER,), False, "processor"),
-        ((UserRole.ADMIN,), True, "admin"),
-        ((UserRole.PROCESSOR, UserRole.ADMIN, UserRole.LOAN_OFFICER), False, "admin"),
+        ((UserRole.PROCESSOR,), False, _PROCESSOR_DEFAULT),
+        ((UserRole.LOAN_OFFICER,), False, _LOAN_OFFICER),
+        ((UserRole.ADMIN,), True, _ALL),
+        ((UserRole.PROCESSOR, UserRole.ADMIN, UserRole.LOAN_OFFICER), False, _ALL),
+        ((), False, []),
     ],
 )
-async def test_me_returns_the_role_set_the_derived_role_and_ownership(
+async def test_me_returns_roles_permissions_and_ownership(
     client: AsyncClient,
     db_session: AsyncSession,
     roles: tuple[UserRole, ...],
     owner: bool,
-    derived_role: str,
+    permissions: list[str],
 ) -> None:
-    """`roles` is the set, `role` is `admin` iff the set holds ADMIN, `is_owner` is the company's."""
+    """`roles` is the set, `permissions` the resolved keys (sorted), `is_owner` the company's.
+
+    The single derived `role` is gone (LP-MB-Admin-02).
+    """
     user = await _make_user(db_session, roles=roles, owner=owner)
     # Expunged, so the request loads the user and company itself, as it would in production:
     # nothing the test session already holds can stand in for an eager load that is missing.
@@ -157,7 +167,8 @@ async def test_me_returns_the_role_set_the_derived_role_and_ownership(
     assert resp.status_code == 200
     body = resp.json()
     assert body["roles"] == sorted(role.value for role in roles)
-    assert body["role"] == derived_role
+    assert body["permissions"] == permissions
+    assert "role" not in body
     assert body["is_owner"] is owner
 
 

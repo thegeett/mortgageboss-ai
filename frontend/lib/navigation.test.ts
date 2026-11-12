@@ -14,8 +14,11 @@ import {
 import { describe, expect, it } from "vitest";
 
 describe("visibleNavItems", () => {
+  // What a processor holds by default (LP-MB-Admin-02): the two setting-driven keys.
+  const PROCESSOR = ["borrower.invite", "loan.create"];
+
   it("shows processors the non-gated items (Dashboard, Inbox, Reminders)", () => {
-    const labels = visibleNavItems("processor").map((item) => item.label);
+    const labels = visibleNavItems(PROCESSOR).map((item) => item.label);
     // "Loan Files" was removed in LP-UI-011: it pointed at a stub, and the
     // dashboard is the list. /loan-files now redirects here.
     //
@@ -27,13 +30,21 @@ describe("visibleNavItems", () => {
     expect(labels).not.toContain("Administration");
   });
 
-  it("shows admins the admin-gated item too", () => {
-    const labels = visibleNavItems("admin").map((item) => item.label);
+  it("shows Administration to a user holding users.manage", () => {
+    const labels = visibleNavItems([...PROCESSOR, "users.manage"]).map((item) => item.label);
     expect(labels).toContain("Administration");
     expect(labels).toEqual(["Dashboard", "Inbox", "Reminders", "Administration"]);
   });
 
-  it("hides role-gated items when the role is unknown", () => {
+  it("hides it from a user holding every other admin key but users.manage", () => {
+    // The gate is the one key, not "looks like an admin".
+    const labels = visibleNavItems(["lenders.manage", "overlays.manage", "mail.manage"]).map(
+      (item) => item.label,
+    );
+    expect(labels).not.toContain("Administration");
+  });
+
+  it("hides gated items when signed out", () => {
     const labels = visibleNavItems(undefined).map((item) => item.label);
     expect(labels).toEqual(["Dashboard", "Inbox", "Reminders"]);
   });

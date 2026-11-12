@@ -26,8 +26,8 @@ export function IconRail({
   onToggleContext: () => void;
 }) {
   const pathname = usePathname();
-  const role = useAuthStore((state) => state.user?.role);
-  const items = visibleNavItems(role);
+  const permissions = useAuthStore((state) => state.user?.permissions);
+  const items = visibleNavItems(permissions);
   // ContextColumn renders nothing on a route with no section (/dev/*), and an
   // aria-controls pointing at an element that is not in the document is worse
   // than none at all.

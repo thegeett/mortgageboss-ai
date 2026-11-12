@@ -6,17 +6,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const useOverlayLenders = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/overlay-admin", () => ({ useOverlayLenders }));
 
-const authState = vi.hoisted(() => ({ role: "admin" as string | undefined }));
-vi.mock("@/lib/stores/auth-store", () => ({
-  useAuthStore: (selector: (s: unknown) => unknown) => selector({ user: { role: authState.role } }),
-}));
-
 import AdminLendersPage from "./page";
 
 afterEach(() => {
   cleanup();
   useOverlayLenders.mockReset();
-  authState.role = "admin";
 });
 
 function lender(overrides: Partial<OverlayLenderSummary> = {}): OverlayLenderSummary {
@@ -80,14 +74,6 @@ describe("Admin lenders list (LP-UI-025)", () => {
     expect(screen.getByRole("link", { name: "UWM" }).getAttribute("href")).toBe(
       "/admin/lenders/abc",
     );
-  });
-
-  it("tells a non-admin why the page is empty", () => {
-    authState.role = "processor";
-    loaded([lender()]);
-    render(<AdminLendersPage />);
-    expect(screen.getByText(/available to admins only/)).toBeTruthy();
-    expect(screen.queryByRole("table")).toBeNull();
   });
 
   it("distinguishes no lenders from a failed load", () => {

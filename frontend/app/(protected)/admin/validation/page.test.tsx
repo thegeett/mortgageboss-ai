@@ -11,8 +11,8 @@ vi.mock("@/lib/api/validation-aid", () => ({
   useRecordVerdict: () => ({ mutate: recordMutate, isPending: false }),
 }));
 vi.mock("@/lib/stores/auth-store", () => ({
-  useAuthStore: (sel: (s: { user: { role: string } }) => unknown) =>
-    sel({ user: { role: "admin" } }),
+  useAuthStore: (sel: (s: { user: { permissions: string[] } }) => unknown) =>
+    sel({ user: { permissions: ["lenders.manage"] } }),
 }));
 
 import ValidationAidPage from "./page";

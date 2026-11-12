@@ -25,6 +25,8 @@ class AuditAction(StrEnum):
     OWNER_TRANSFERRED = "owner_transferred"
     #: The LP-MB-Admin-01 migration copied `users.role` into `user_roles` and set the owner.
     ROLE_BACKFILLED = "role_backfilled"
+    #: An admin changed `companies.settings` (`PATCH /company/settings`, LP-MB-Admin-02).
+    COMPANY_SETTINGS_CHANGED = "company_settings_changed"
 
 
 async def log_company_action(

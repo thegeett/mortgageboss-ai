@@ -11,11 +11,13 @@ credentials in the body; refresh takes its token from the cookie; so there is
 no ``RefreshRequest``.
 """
 
+from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, computed_field, field_validator
+from pydantic import BaseModel, EmailStr, model_validator
 
-from app.models.user import UserRole
+from app.core.permissions import resolve_permissions
+from app.models.user import User, UserRole
 
 
 class LoginRequest(BaseModel):
@@ -28,36 +30,42 @@ class LoginRequest(BaseModel):
 class UserPublic(BaseModel):
     """The safe, public view of a user returned in auth responses.
 
-    Built from a ``User`` ORM instance via ``model_validate`` (``from_attributes``).
-    Carries identity and display fields only — never ``hashed_password``,
-    ``is_active``, timestamps, or other internal state.
+    Built from a ``User`` ORM instance via ``model_validate``. Carries identity and
+    display fields only — never ``hashed_password``, ``is_active``, timestamps, or
+    other internal state.
 
-    ``roles`` is the set the user holds (ADR-440). ``role`` is kept for the frontend, which
-    still reads one role, and is derived from the set rather than read from ``users.role``.
+    ``roles`` is the set the user holds (ADR-440), for display. ``permissions`` is what
+    the frontend gates on (ADR-442), resolved by the same function the API checks with,
+    so the UI and the boundary cannot disagree. The single derived ``role`` is gone
+    (LP-MB-Admin-02). The user's company must be loaded (``get_user_by_id`` and
+    ``authenticate_user`` load it).
     """
 
     id: UUID
     email: EmailStr
     first_name: str
     last_name: str
-    # From `User.role_set`: `User.roles` holds the assignment rows, not the roles.
-    roles: list[UserRole] = Field(validation_alias="role_set")
+    roles: list[UserRole]
+    permissions: list[str]
     is_owner: bool
     company_id: UUID
 
-    model_config = {"from_attributes": True}
-
-    @field_validator("roles", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def _sorted(cls, value: frozenset[UserRole]) -> list[UserRole]:
-        """A set has no order; the response does."""
-        return sorted(value)
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def role(self) -> UserRole:
-        """``admin`` if the user holds ADMIN, else ``processor`` (the pre-set contract)."""
-        return UserRole.ADMIN if UserRole.ADMIN in self.roles else UserRole.PROCESSOR
+    def _from_user(cls, data: Any) -> Any:
+        """A ``User`` → its fields, with ``roles`` and ``permissions`` sorted (a set has no order)."""
+        if not isinstance(data, User):
+            return data
+        return {
+            "id": data.id,
+            "email": data.email,
+            "first_name": data.first_name,
+            "last_name": data.last_name,
+            "roles": sorted(data.role_set),
+            "permissions": sorted(resolve_permissions(data.role_set, data.company.settings_model)),
+            "is_owner": data.is_owner,
+            "company_id": data.company_id,
+        }
 
 
 class TokenResponse(BaseModel):
