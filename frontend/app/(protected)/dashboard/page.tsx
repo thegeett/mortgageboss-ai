@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useLoanFiles } from "@/lib/api/loan-files";
 import { useSavedViews } from "@/lib/api/saved-views";
+import { useCan } from "@/lib/auth/permissions";
 import { byAttention } from "@/lib/loan-files/attention";
 import {
   carriesSearchTerm,
@@ -129,6 +130,9 @@ export default function DashboardPage() {
 
   const goToFile = (file: LoanFileSummary) => router.push(`/loan-files/${file.display_id}`);
   const newFile = () => router.push("/loan-files/new");
+  // `loan.create` is switched off for processors by a company setting (LP-MB-Admin-02), so the
+  // way in is hidden rather than offered and then refused.
+  const canCreate = useCan("loan.create");
 
   return (
     <div className="space-y-6">
@@ -143,10 +147,12 @@ export default function DashboardPage() {
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">Your loan file worklist.</p>
         </div>
-        <Button type="button" onClick={newFile} className="gap-2 self-start sm:self-auto">
-          <Plus className="h-4 w-4" />
-          New file
-        </Button>
+        {canCreate ? (
+          <Button type="button" onClick={newFile} className="gap-2 self-start sm:self-auto">
+            <Plus className="h-4 w-4" />
+            New file
+          </Button>
+        ) : null}
       </div>
 
       <Card className="border-border/80">
@@ -169,7 +175,7 @@ export default function DashboardPage() {
           filterSummary={filterSummary}
           onClearFilters={clearFilters}
           onSelect={goToFile}
-          onNewFile={newFile}
+          onNewFile={canCreate ? newFile : undefined}
         />
 
         {!isError && total > 0 && (

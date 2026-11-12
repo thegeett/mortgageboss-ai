@@ -286,3 +286,31 @@ async def test_patch_refuses_an_unknown_field(
     resp = await client.patch(SETTINGS, json={"processors_can_fly": True}, headers=headers)
 
     assert resp.status_code == 422
+
+
+async def test_patch_refuses_an_explicit_null(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """`null` used to read as "omitted": 200 and nothing changed (review finding 7)."""
+    company = await _company(db_session)
+    headers = await _headers(db_session, company, UserRole.ADMIN)
+
+    resp = await client.patch(SETTINGS, json={"restrict_loans_to_team": None}, headers=headers)
+
+    assert resp.status_code == 422
+
+
+async def test_a_bad_stored_setting_does_not_lock_the_company_out(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Review finding 3: a stored `null` used to 500 every request, login and `/auth/me` included."""
+    company = await _company(db_session, {"processors_can_create_loans": None})
+    headers = await _headers(db_session, company, UserRole.PROCESSOR)
+
+    me = await client.get(f"{API}/auth/me", headers=headers)
+    created = await client.post(f"{API}/loan-files", json={}, headers=headers)
+
+    assert me.status_code == 200
+    # The bad setting reads as its default (on), so the processor keeps `loan.create`.
+    assert "loan.create" in me.json()["permissions"]
+    assert created.status_code == 201

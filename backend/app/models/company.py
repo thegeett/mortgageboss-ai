@@ -12,9 +12,9 @@ from uuid import UUID
 from sqlalchemy import JSON, Boolean, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.company_settings import CompanySettings, parse_stored_settings
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
 from app.models.types import MediumStr, ShortStr
-from app.schemas.company import CompanySettings
 
 if TYPE_CHECKING:
     from app.models.lender import Lender
@@ -60,8 +60,9 @@ class Company(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
 
     @property
     def settings_model(self) -> CompanySettings:
-        """`settings` parsed: a missing key takes its default, an unknown one is kept."""
-        return CompanySettings.model_validate(self.settings or {})
+        """`settings` parsed: a missing key takes its default, an unknown one is kept, and a bad
+        value takes its default rather than failing the request (see `parse_stored_settings`)."""
+        return parse_stored_settings(self.settings, company_id=self.id)
 
     def __repr__(self) -> str:
         return f"<Company {self.slug}>"

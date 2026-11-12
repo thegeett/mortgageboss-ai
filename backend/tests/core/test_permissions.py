@@ -5,9 +5,9 @@ copy, and a change to it that was not meant shows up here as a failing row. Chan
 """
 
 import pytest
-from app.core.permissions import Permission, resolve_permissions
+from app.core.company_settings import CompanySettings
+from app.core.permissions import ROLE_PERMISSIONS, Permission, resolve_permissions
 from app.models.user import UserRole
-from app.schemas.company import CompanySettings
 
 A, LO, P = UserRole.ADMIN, UserRole.LOAN_OFFICER, UserRole.PROCESSOR
 #: Granted only by its company setting. `loan.team.change` for a loan officer is "own files"; the
@@ -96,3 +96,8 @@ def test_settings_default_and_keep_unknown_keys() -> None:
     )
     parsed = CompanySettings.model_validate({"some_future_flag": 3})
     assert parsed.model_dump()["some_future_flag"] == 3
+
+
+def test_every_role_has_a_row() -> None:
+    """A role with no row would raise on every request of anyone holding it: fail here instead."""
+    assert set(ROLE_PERMISSIONS) == set(UserRole)

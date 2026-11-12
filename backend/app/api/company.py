@@ -7,9 +7,10 @@ the actor's effective company (ADR-443); there is no company id in the path.
 from fastapi import APIRouter, Depends
 
 from app.api.dependencies import CurrentActor, require_permission
+from app.core.company_settings import CompanySettings
 from app.core.database import DbSession
 from app.core.permissions import Permission
-from app.schemas.company import CompanySettings, CompanySettingsPublic, CompanySettingsUpdate
+from app.schemas.company import CompanySettingsPublic, CompanySettingsUpdate
 from app.services.company_settings import update_company_settings
 
 router = APIRouter(

@@ -9,8 +9,9 @@ from typing import TYPE_CHECKING
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.core.company_settings import CompanySettings
 from app.core.permissions import Permission
-from app.schemas.company import CompanySettings, CompanySettingsUpdate
+from app.schemas.company import CompanySettingsUpdate
 from app.services.activity_log import field_changes
 from app.services.authorization import ensure
 from app.services.company_audit import AuditAction, log_company_action
@@ -26,11 +27,17 @@ async def update_company_settings(
 
     An omitted field is left as it is, and an unknown key already stored survives. A request that
     changes nothing writes nothing, not even an audit row.
+
+    The row is RE-READ under ``FOR UPDATE`` first. The company was loaded at the start of the
+    request, and the whole JSON column is written back, so without the lock two saves at once (or
+    another feature writing its own key meanwhile) would each write their stale copy and the last
+    would silently undo the other, while the audit log recorded both.
     """
     ensure(actor, Permission.COMPANY_SETTINGS_MANAGE)
     company = actor.user.company
+    await db.refresh(company, attribute_names=["settings"], with_for_update=True)
     current = company.settings_model
-    sent = update.model_dump(exclude_none=True)
+    sent = update.model_dump(exclude_unset=True)
     changes = field_changes(
         {field: getattr(current, field) for field in sent},
         sent,

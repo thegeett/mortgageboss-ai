@@ -1,34 +1,35 @@
-"""Company settings (LP-MB-Admin-02): the typed view of ``companies.settings``.
+"""Company settings over the API (LP-MB-Admin-02).
 
-The column is free JSON and was ``{}`` everywhere before this ticket, so a missing key takes its
-default and no data migration is needed. Unknown keys are KEPT (``extra="allow"``): another feature may
-store its own, and a round-trip through this model must not drop them.
+The settings model itself is :class:`app.core.company_settings.CompanySettings`; these are the
+request and response shapes of ``/company/settings``.
 """
 
-from pydantic import BaseModel, ConfigDict
+from typing import Any
 
-
-class CompanySettings(BaseModel):
-    """The three switches an admin sets for the whole company."""
-
-    model_config = ConfigDict(extra="allow")
-
-    #: Processors hold `loan.create` (ADR-442). Off: only admins and loan officers create files.
-    processors_can_create_loans: bool = True
-    #: Processors hold `borrower.invite`. Takes effect when the borrower portal ships.
-    processors_can_invite_borrowers: bool = True
-    #: Stored and read back only; LP-MB-Admin-05 Part 2 enforces it. Changes nothing until then.
-    restrict_loans_to_team: bool = False
+from pydantic import BaseModel, ConfigDict, model_validator
 
 
 class CompanySettingsUpdate(BaseModel):
-    """``PATCH /company/settings``: any of the three; an omitted field is left as it is."""
+    """``PATCH /company/settings``: any of the three; an omitted field is left as it is.
+
+    Strict: an unknown field and an explicit ``null`` are both refused (422). ``null`` would
+    otherwise read as "omitted" and change nothing while returning 200.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     processors_can_create_loans: bool | None = None
     processors_can_invite_borrowers: bool | None = None
     restrict_loans_to_team: bool | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_explicit_null(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            nulls = sorted(key for key, value in data.items() if value is None)
+            if nulls:
+                raise ValueError(f"must be true or false, not null: {', '.join(nulls)}")
+        return data
 
 
 class CompanySettingsPublic(BaseModel):

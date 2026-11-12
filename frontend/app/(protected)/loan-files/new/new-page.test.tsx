@@ -11,9 +11,28 @@ vi.mock("@/components/intake/intake-form", () => ({
   IntakeForm: () => <div data-testid="intake-form">Manual form</div>,
 }));
 
+const held = vi.hoisted(() => ({ permissions: ["loan.create"] as string[] }));
+vi.mock("@/lib/stores/auth-store", () => ({
+  useAuthStore: (selector: (s: unknown) => unknown) =>
+    selector({ user: { permissions: held.permissions } }),
+}));
+
 import NewLoanFilePage from "./page";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  held.permissions = ["loan.create"];
+});
+
+describe("New loan file page — loan.create (LP-MB-Admin-02 review, finding 1)", () => {
+  it("offers neither way in to a user who may not create files", () => {
+    held.permissions = ["borrower.invite"];
+    render(<NewLoanFilePage />);
+    expect(screen.getByText(/admins and loan officers create loan files/)).toBeTruthy();
+    expect(screen.queryByTestId("mismo-upload")).toBeNull();
+    expect(screen.queryByTestId("intake-form")).toBeNull();
+  });
+});
 
 /**
  * These two tests used to pin a TOGGLE: manual entry replaced the dropzone and

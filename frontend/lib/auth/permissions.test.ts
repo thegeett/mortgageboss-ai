@@ -32,6 +32,12 @@ describe("useCan", () => {
     expect(renderHook(() => useCan("company.settings.manage")).result.current).toBe(false);
   });
 
+  it("is false, not a crash, for a user sent without permissions (an older backend)", () => {
+    const { permissions: _dropped, ...older } = USER;
+    useAuthStore.setState({ accessToken: "t", user: older as User });
+    expect(renderHook(() => useCan("loan.create")).result.current).toBe(false);
+  });
+
   it("is false while signed out", () => {
     expect(renderHook(() => useCan("loan.create")).result.current).toBe(false);
   });

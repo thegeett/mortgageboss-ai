@@ -7,6 +7,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const get = vi.hoisted(() => vi.fn());
 const patch = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/client", () => ({ apiClient: { get, patch } }));
+const fetchCurrentUser = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/api/auth", () => ({ fetchCurrentUser }));
+
+import { useAuthStore } from "@/lib/stores/auth-store";
 
 import { CompanySettingsCard } from "./company-settings-card";
 
@@ -37,9 +41,53 @@ afterEach(() => {
   cleanup();
   get.mockReset();
   patch.mockReset();
+  fetchCurrentUser.mockReset();
+  useAuthStore.setState({ user: null });
 });
 
 describe("CompanySettingsCard", () => {
+  it("never shows an error while loading successfully (review finding 2)", async () => {
+    // The flash lasted one render, gone before any `findBy` could see it, so watch the DOM.
+    const alerts: string[] = [];
+    const observer = new MutationObserver(() => {
+      for (const node of document.querySelectorAll('[role="alert"]')) {
+        alerts.push(node.textContent ?? "");
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    get.mockResolvedValueOnce({ data: DEFAULTS });
+    renderCard();
+
+    await screen.findByRole("checkbox", { name: /Processors may create loan files/ });
+    observer.disconnect();
+
+    expect(alerts).toEqual([]);
+  });
+
+  it("re-reads the signed-in user after a save, so their permissions follow the setting", async () => {
+    get.mockResolvedValueOnce({ data: DEFAULTS });
+    patch.mockResolvedValueOnce({ data: { ...DEFAULTS, processors_can_create_loans: false } });
+    const refreshed = {
+      id: "u1",
+      email: "a@acme.com",
+      first_name: "A",
+      last_name: "D",
+      roles: ["admin", "processor"],
+      permissions: ["company.settings.manage"],
+      is_owner: true,
+      company_id: "c1",
+    };
+    fetchCurrentUser.mockResolvedValueOnce(refreshed);
+    renderCard();
+
+    fireEvent.click(
+      await screen.findByRole("checkbox", { name: /Processors may create loan files/ }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+
+    await waitFor(() => expect(useAuthStore.getState().user).toEqual(refreshed));
+  });
+
   it("loads the three settings into checkboxes", async () => {
     get.mockResolvedValueOnce({ data: DEFAULTS });
     renderCard();

@@ -314,7 +314,8 @@ export function FileTable({
   filterSummary?: { search: string; statusLabel: string | null; unfilteredTotal: number | null };
   onClearFilters?: () => void;
   onSelect: (file: LoanFileSummary) => void;
-  onNewFile: () => void;
+  /** Absent when the user may not create files (`loan.create`): no button, and no invitation to. */
+  onNewFile?: () => void;
 }) {
   // The file pending deletion drives the confirmation dialog; the mutation invalidates
   // the list query on success, so the deleted row simply drops out on the next render.
@@ -384,14 +385,18 @@ export function FileTable({
           kind="nothing-yet"
           title="No loan files yet"
           action={
-            <Button type="button" onClick={onNewFile} className="gap-2">
-              <FolderPlus className="h-4 w-4" />
-              Create your first file
-            </Button>
+            onNewFile ? (
+              <Button type="button" onClick={onNewFile} className="gap-2">
+                <FolderPlus className="h-4 w-4" />
+                Create your first file
+              </Button>
+            ) : undefined
           }
         >
-          A file holds the documents, the extracted data and the conditions for one loan. Create one
-          and it starts assembling itself.
+          A file holds the documents, the extracted data and the conditions for one loan.{" "}
+          {onNewFile
+            ? "Create one and it starts assembling itself."
+            : "In your company, admins and loan officers create them."}
         </EmptyState>
       </StatePanel>
     );

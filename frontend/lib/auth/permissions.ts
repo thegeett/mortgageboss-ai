@@ -7,7 +7,13 @@
  */
 import { useAuthStore } from "@/lib/stores/auth-store";
 
-/** True if the signed-in user holds `permission` (false while signed out). */
+/**
+ * True if the signed-in user holds `permission` (false while signed out).
+ *
+ * `permissions?.` although the type says it is always there: a backend from before LP-MB-Admin-02
+ * sends a user without it (a frontend deployed first meets one), and a missing list must read as
+ * "holds nothing", not crash every page that asks.
+ */
 export function useCan(permission: string): boolean {
-  return useAuthStore((state) => state.user?.permissions.includes(permission) ?? false);
+  return useAuthStore((state) => state.user?.permissions?.includes(permission) ?? false);
 }

@@ -2,6 +2,7 @@
 
 import { IntakeForm } from "@/components/intake/intake-form";
 import { MismoUpload } from "@/components/intake/mismo-upload";
+import { useCan } from "@/lib/auth/permissions";
 
 /**
  * New loan file (LP-55, redesigned in LP-UI-023).
@@ -21,6 +22,18 @@ import { MismoUpload } from "@/components/intake/mismo-upload";
  * this redesign puts it (LP-UI-016).
  */
 export default function NewLoanFilePage() {
+  // Both ways in create a file, and both API routes require `loan.create` (LP-MB-Admin-02). Said
+  // here, before a processor fills in a form or drops a MISMO only to be refused on submit.
+  const canCreate = useCan("loan.create");
+
+  if (!canCreate) {
+    return (
+      <div className="mx-auto max-w-4xl rounded-lg border border-dashed border-input bg-card px-6 py-16 text-center text-sm text-muted-foreground">
+        In your company, admins and loan officers create loan files.
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <MismoUpload />

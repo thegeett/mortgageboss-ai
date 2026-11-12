@@ -352,3 +352,18 @@ describe("FileTable — the column ladder reaches every cell", () => {
     expect(compared).toBe(COLUMNS.length);
   });
 });
+
+describe("FileTable — an empty pipeline and loan.create (LP-MB-Admin-02 review, finding 1)", () => {
+  it("invites a user who may create files to create the first one", () => {
+    renderTable({ files: [] });
+    expect(screen.getByRole("button", { name: "Create your first file" })).toBeTruthy();
+    expect(screen.getByText(/Create one and it starts assembling itself/)).toBeTruthy();
+  });
+
+  it("neither offers nor suggests it to a user who may not", () => {
+    renderTable({ files: [], onNewFile: undefined });
+    expect(screen.queryByRole("button", { name: "Create your first file" })).toBeNull();
+    expect(screen.queryByText(/Create one/)).toBeNull();
+    expect(screen.getByText(/admins and loan officers create them/)).toBeTruthy();
+  });
+});

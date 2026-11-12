@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 import { useCompanySettings, useUpdateCompanySettings } from "@/lib/api/company-settings";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import type { CompanySettings } from "@/lib/types/company-settings";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 /**
  * The company's three settings, on the admin overview (LP-MB-Admin-02, mockup 01).
@@ -34,12 +34,10 @@ const SETTINGS: { key: keyof CompanySettings; label: string; hint: string }[] = 
 export function CompanySettingsCard() {
   const { data, isPending, isError, error } = useCompanySettings();
   const update = useUpdateCompanySettings();
+  // The user's unsaved edits, or null for none. The form shows `draft ?? data`, so it is filled
+  // on the same render the data arrives: there is no frame where the form has nothing to show.
   const [draft, setDraft] = useState<CompanySettings | null>(null);
-
-  // The form starts from what the server holds, and again after each save.
-  useEffect(() => {
-    if (data) setDraft(data);
-  }, [data]);
+  const shown = draft ?? data;
 
   const changed =
     data !== undefined && draft !== null && SETTINGS.some(({ key }) => draft[key] !== data[key]);
@@ -54,7 +52,7 @@ export function CompanySettingsCard() {
           <p className="text-sm text-muted-foreground" aria-busy>
             Loading…
           </p>
-        ) : isError || draft === null ? (
+        ) : isError || shown === undefined ? (
           <p className="text-sm text-muted-foreground" role="alert">
             {getErrorMessage(error)}
           </p>
@@ -63,7 +61,7 @@ export function CompanySettingsCard() {
             className="space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
-              update.mutate(draft);
+              update.mutate(shown, { onSuccess: () => setDraft(null) });
             }}
           >
             {SETTINGS.map(({ key, label, hint }) => (
@@ -71,8 +69,8 @@ export function CompanySettingsCard() {
                 <input
                   type="checkbox"
                   className="mt-1 accent-primary"
-                  checked={draft[key]}
-                  onChange={(event) => setDraft({ ...draft, [key]: event.target.checked })}
+                  checked={shown[key]}
+                  onChange={(event) => setDraft({ ...shown, [key]: event.target.checked })}
                 />
                 <span>
                   <span className="block text-sm text-foreground">{label}</span>

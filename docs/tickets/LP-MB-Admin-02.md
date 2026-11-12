@@ -121,9 +121,10 @@ No new screens apart from the settings card. Gating reads permissions.
   (role → {key: the `CompanySettings` field that grants it}; the two PROCESSOR cells), and
   `resolve_permissions(roles, settings)`. Pure; imports only `UserRole`. `PermissionDeniedError` lives
   here too, so `app/core/errors.py` can map it without importing a service.
-- `app/schemas/company.py`: `CompanySettings` (`extra="allow"`), plus `CompanySettingsUpdate`
-  (`extra="forbid"`, all optional) and `CompanySettingsPublic`. `Company.settings_model` parses
-  `settings`. No migration.
+- `app/core/company_settings.py`: `CompanySettings` (`extra="allow"`) and `parse_stored_settings`,
+  which `Company.settings_model` uses (in `app.core`, not `app.schemas`, so the model does not import
+  the API layer). `app/schemas/company.py`: `CompanySettingsUpdate` (`extra="forbid"`, all optional,
+  explicit `null` refused) and `CompanySettingsPublic`. No migration.
 - `app/api/dependencies.py`: `Actor`, `get_current_actor` (no query; the user and company are already
   loaded), `CurrentActor`, `require_permission`. `get_current_company_id` returns `actor.company_id`.
   `require_role` is kept, documented as superseded, for `validation_aid.py` only (left untouched apart
@@ -180,3 +181,25 @@ No new screens apart from the settings card. Gating reads permissions.
 - `borrower.invite`, `audit.view`, `users.manage` (as an API gate), `loan.view_all`, `loan.team.change`
   have no call site yet (LP-MB-Admin-03 to 05, and the borrower portal).
 - Deleting `require_role` with the validation aid.
+
+**Review fixes (after `db2e9815`)**
+1. The way in to a new file follows `loan.create`: the dashboard's New file button, the empty
+   pipeline's "Create your first file" (and its sentence), and `/loan-files/new` itself, which now
+   says who creates files instead of offering a form the API refuses.
+2. The settings card no longer shows an error for one render while loading successfully: the form
+   reads `draft ?? data`, so it is filled on the render the data arrives.
+3. A stored setting that does not parse no longer fails every request in the company (login
+   included). `parse_stored_settings` gives that setting its default and logs its name; writes stay
+   strict.
+4. Saving settings re-reads the company row under `FOR UPDATE`, so two saves at once, or another
+   writer's key, are not overwritten by a stale copy.
+6. After a save, the card re-reads the signed-in user, so that admin's permissions follow the setting
+   at once. Other signed-in users pick it up on their next session refresh; the API is current for
+   everyone.
+7. `PATCH /company/settings` refuses an explicit `null` (422) instead of treating it as omitted.
+8. `CompanySettings` moved to `app/core/company_settings.py` (models no longer import schemas).
+9. A test that every `UserRole` has a `ROLE_PERMISSIONS` row.
+Also: `useCan` reads a user sent without `permissions` (a backend from before this ticket, if the
+frontend deploys first) as holding nothing, rather than crashing every page that asks.
+Not changed: 5 (the admin layout's single key, recorded above) and 10 (settings parsed more than once
+per request; small).

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from app.models.user import UserRole
 
 if TYPE_CHECKING:
-    from app.schemas.company import CompanySettings
+    from app.core.company_settings import CompanySettings
 
 
 class Permission(StrEnum):
