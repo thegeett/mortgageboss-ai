@@ -16957,3 +16957,50 @@ from `receipt.recipients`, where SES says it delivered, not from anything the se
 - Replaces the "reaches no processor yet" consequence of ADR-420; the rest of ADR-420 stands.
 
 *Status.* Accepted (LP-1009).
+
+## ADR-440
+
+**Roles are an additive set. Owner is not a role. Supersedes the single `users.role` of LP-12.**
+
+*Context.* A user had exactly one role (`users.role`: processor or admin). A broker shop's owner is
+also a loan officer and often processes files, so one person has to hold several roles.
+
+*Decision (LP-MB-Admin-01).*
+- **A user holds one or more roles; capability is the union.** The set lives in `user_roles`, one row
+  per role. `UserRole` gains `LOAN_OFFICER`. `User.role_set` is the one accessor.
+- **Owner is NOT a role.** `companies.owner_user_id` names one admin whom the app refuses to
+  deactivate or demote. Owner and admin have identical capability; the owner is the account the
+  platform created at onboarding and the one guaranteed to remain. Changing it is a platform script
+  (`scripts/transfer_owner`), never an API.
+- **Admins may make and unmake other admins freely;** the company must always keep at least one
+  active admin, which the owner guarantees.
+
+*Consequences.*
+- `users.role` is no longer read or written. It stays (nullable) for one release so the migration can
+  roll back; downgrade copies the set back as `admin` if the user holds admin, else `processor`.
+- `/auth/me`, login and refresh return `roles` and `is_owner`; `role` stays, derived from the set.
+- A company the migration found with no active admin has no owner until `transfer_owner` sets one.
+
+*Status.* Accepted (LP-MB-Admin-01).
+
+## ADR-441
+
+**Admin actions go to `company_audit_log`, not `activity_logs`. Its `action` has no CHECK: a stated
+exception to ADR-037.**
+
+*Context.* The activity log is a loan file's timeline (ADR-052, ADR-071): owned by the file, deleted
+with it, no `company_id`. A company-level action, such as inviting a user or moving the owner, has no
+file.
+
+*Decision (LP-MB-Admin-01).* A separate, append-only `company_audit_log` keyed by company, written only
+through `log_company_action`, with `detail` carrying `field_changes` output like the activity log.
+`action` deliberately has **no CHECK constraint**: every ticket in this series adds values, and the
+CHECK-swap pattern has already caused two incidents on `ActivityType` (LP-637, LP-UI-033). The
+`AuditAction` StrEnum is the only writer.
+
+*Consequences.*
+- Adding an `AuditAction` member needs no migration. Nothing in the database stops a value outside the
+  enum, so no code may write `action` except through `log_company_action`.
+- No update or delete path, no `updated_at`, no `deleted_at`.
+
+*Status.* Accepted (LP-MB-Admin-01).

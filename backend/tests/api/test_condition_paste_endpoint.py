@@ -15,13 +15,14 @@ from app.core.database import get_db
 from app.core.jwt import create_access_token
 from app.core.security import hash_password
 from app.main import app
-from app.models import Company, User, UserRole
+from app.models import Company, UserRole
 from app.models.condition_round import ConditionRoundCompleteness, ConditionRoundStatus
 from app.schemas.condition import MAX_PASTE_CHARS
 from app.services.loan_files import create_loan_file
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.conditions.fixture_helpers import portal_excerpt
+from tests.user_factory import make_user
 
 
 @pytest.fixture
@@ -47,13 +48,13 @@ async def _user(db: AsyncSession, *, slug: str) -> tuple[Company, str]:
     company = Company(name=slug.title(), slug=slug)
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"u@{slug}.com",
         hashed_password=hash_password("irrelevant"),
         first_name="Test",
         last_name="User",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db.add(user)

@@ -1739,11 +1739,14 @@ stage_add_user() {
   email=$(ask_required "Email")
   first=$(ask_required "First name")
   last=$(ask_required "Last name")
-  role=$(ask_required "Role (ADMIN or PROCESSOR)")
-  case "$(printf '%s' "$role" | tr '[:upper:]' '[:lower:]')" in
-    admin | processor) ;;
-    *) die "Role must be ADMIN or PROCESSOR, got '$role'." "Nothing was run." ;;
-  esac
+  role=$(ask_required "Role(s), comma-separated (ADMIN, PROCESSOR, LOAN_OFFICER)")
+  local r
+  for r in $(printf '%s' "$role" | tr '[:upper:]' '[:lower:]' | tr ',' ' '); do
+    case "$r" in
+      admin | processor | loan_officer) ;;
+      *) die "Each role must be ADMIN, PROCESSOR or LOAN_OFFICER, got '$r'." "Nothing was run." ;;
+    esac
+  done
   coslug=$(ask_required "Company slug (must already exist)")
 
   info ""

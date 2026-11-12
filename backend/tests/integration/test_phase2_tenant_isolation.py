@@ -20,13 +20,14 @@ from app.core.database import get_db
 from app.core.jwt import create_access_token
 from app.core.security import hash_password
 from app.main import app
-from app.models import Company, User, UserRole
+from app.models import Company, UserRole
 from app.models.document import Document, DocumentStatus, UploadSource
 from app.services.loan_files import create_loan_file
 from app.services.needs_items import create_needs_item
 from app.storage import get_storage_backend
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 
 @pytest.fixture(autouse=True)
@@ -59,13 +60,13 @@ async def _company_user(db: AsyncSession, slug: str) -> tuple[Company, str]:
     company = Company(name=slug.title(), slug=slug)
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"u@{slug}.com",
         hashed_password=hash_password("x"),
         first_name="T",
         last_name="U",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db.add(user)

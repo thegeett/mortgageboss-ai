@@ -20,7 +20,6 @@ from app.models import (
     FindingOrigin,
     FindingStatus,
     LoanFile,
-    User,
     UserRole,
 )
 from app.models.finding import FindingResolutionStatus
@@ -28,6 +27,7 @@ from app.services.loan_files import create_loan_file
 from app.services.reconciliation import _ROW_RULE, reconcile_loan_file
 from app.verification.cross_source.rules import CROSS_SOURCE_RULES
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 RULE_SPEC_DIR = Path(__file__).resolve().parents[2] / "app" / "verification" / "rules" / "specs"
 
@@ -45,13 +45,13 @@ async def _company(db_session: AsyncSession) -> Company:
     db_session.add(company)
     await db_session.flush()
     db_session.add(
-        User(
+        make_user(
             company_id=company.id,
             email="u@acme.com",
             hashed_password="x",  # pragma: allowlist secret
             first_name="T",
             last_name="U",
-            role=UserRole.PROCESSOR,
+            roles=[UserRole.PROCESSOR],
             is_active=True,
         )
     )

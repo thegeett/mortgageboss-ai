@@ -23,6 +23,7 @@ from app.services.documents import (
 )
 from app.services.loan_files import create_loan_file
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 # Minimal valid magic-byte headers — enough for the signature checks.
 PDF_BYTES = b"%PDF-1.7\n%minimal\n"
@@ -34,13 +35,13 @@ async def _company(db: AsyncSession, *, slug: str) -> tuple[Company, User]:
     company = Company(name=slug.title(), slug=slug)
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"u@{slug}.com",
         hashed_password=hash_password("irrelevant"),
         first_name="Test",
         last_name="User",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db.add(user)

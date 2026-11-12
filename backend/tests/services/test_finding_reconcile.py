@@ -34,6 +34,7 @@ from app.verification.cross_source import CrossSourceFacts
 from app.verification.cross_source.facts import ObligationRef
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 # LP-606 — RE-POINTED from `xsrc.income.employer_name_consistency`, which is retired (superseded by
 # IN-5, which does the same comparison with the formatting tolerance a literal `_norm` cannot have).
@@ -54,13 +55,13 @@ async def _company(db: AsyncSession, slug: str = "acme") -> Company:
 
 
 async def _user(db: AsyncSession, company: Company) -> User:
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"u@{company.slug}.test",
         hashed_password="h",  # pragma: allowlist secret
         first_name="Pro",
         last_name="Cessor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db.add(user)
     await db.flush()

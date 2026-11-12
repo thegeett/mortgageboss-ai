@@ -31,12 +31,13 @@ from app.core.database import get_db
 from app.core.jwt import create_access_token
 from app.core.security import hash_password
 from app.main import app
-from app.models import User, UserRole
+from app.models import UserRole
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.schemas.condition import ConditionEventPublic
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.models.conftest_helpers import make_company, make_condition, make_loan_file, make_round
+from tests.user_factory import make_user
 
 API = "/api/v1"
 
@@ -281,13 +282,13 @@ async def test_the_actor_is_named_and_a_system_event_is_not(
     condition = await make_condition(
         db_session, company=company, loan_file=loan_file, round_=round_
     )
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"u-{uuid4().hex[:8]}@example.com",
         hashed_password=hash_password("irrelevant"),
         first_name="Priya",
         last_name="Raman",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db_session.add(user)
@@ -340,13 +341,13 @@ async def test_the_round_number_comes_from_the_events_round_not_from_detail(
     condition = await make_condition(
         db_session, company=company, loan_file=loan_file, round_=round_
     )
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"u-{uuid4().hex[:8]}@example.com",
         hashed_password=hash_password("irrelevant"),
         first_name="Test",
         last_name="Processor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db_session.add(user)
@@ -382,13 +383,13 @@ async def test_another_company_cannot_read_a_conditions_history(
     )
 
     stranger_company = await make_company(db_session, name="Stranger")
-    stranger = User(
+    stranger = make_user(
         company_id=stranger_company.id,
         email=f"u-{uuid4().hex[:8]}@example.com",
         hashed_password=hash_password("irrelevant"),
         first_name="Not",
         last_name="Yours",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db_session.add(stranger)
@@ -417,13 +418,13 @@ async def test_a_real_move_reaches_the_history_with_its_target_and_owner(
     condition = await make_condition(
         db_session, company=company, loan_file=loan_file, round_=round_
     )
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"u-{uuid4().hex[:8]}@example.com",
         hashed_password=hash_password("irrelevant"),
         first_name="Priya",
         last_name="Raman",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db_session.add(user)

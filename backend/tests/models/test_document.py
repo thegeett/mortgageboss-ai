@@ -30,6 +30,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from tests.user_factory import make_user
 
 
 async def _make_company(db_session: AsyncSession, slug: str) -> Company:
@@ -40,13 +41,13 @@ async def _make_company(db_session: AsyncSession, slug: str) -> Company:
 
 
 async def _make_user(db_session: AsyncSession, company: Company, email: str) -> User:
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=email,
         hashed_password="h",
         first_name="Up",
         last_name="Loader",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db_session.add(user)
     await db_session.flush()

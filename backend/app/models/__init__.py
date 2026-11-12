@@ -24,6 +24,7 @@ from app.models.communication import (
 from app.models.communication_evidence import CommunicationEvidence, EvidenceEvent
 from app.models.communication_needs_item import CommunicationNeedsItem
 from app.models.company import Company
+from app.models.company_audit_log import CompanyAuditLog
 from app.models.company_mail_domain import CompanyMailDomain, MailDomainStatus
 from app.models.condition import (
     BucketKind,
@@ -136,7 +137,7 @@ from app.models.types import (
     ShortStr,
 )
 from app.models.upload_link import UploadLink
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, UserRoleAssignment
 from app.models.validation_verdict import ValidationVerdict, VerdictKind
 from app.models.verification import (
     Verification,
@@ -161,6 +162,7 @@ __all__ = [
     "CommunicationNeedsItem",
     "CommunicationStatus",
     "Company",
+    "CompanyAuditLog",
     "CompanyMailDomain",
     "Condition",
     "ConditionDraft",
@@ -280,6 +282,7 @@ __all__ = [
     "UploadSource",
     "User",
     "UserRole",
+    "UserRoleAssignment",
     "ValidationVerdict",
     "VerdictKind",
     "Verification",

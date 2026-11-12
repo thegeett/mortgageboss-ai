@@ -36,22 +36,23 @@ from app.services.finding_resolution import request_docs_for_finding, request_do
 from app.verification.rule_engine.result import UNIDENTIFIED_DOCUMENTS_RULE_ID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 
 async def _loan_file(db: AsyncSession):
-    from app.models import User, UserRole
+    from app.models import UserRole
     from app.services.loan_files import create_loan_file
 
     company = Company(name="Acme", slug=f"acme-{uuid4().hex[:8]}")
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"p-{uuid4().hex[:8]}@example.com",
         hashed_password="x",  # pragma: allowlist secret
         first_name="Pat",
         last_name="Processor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db.add(user)
     await db.flush()

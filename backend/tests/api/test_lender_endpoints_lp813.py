@@ -19,12 +19,13 @@ from uuid import uuid4
 import pytest_asyncio
 from app.core.database import get_db
 from app.main import app
-from app.models import Company, LoanProgram, User, UserRole
+from app.models import Company, LoanProgram, UserRole
 from app.models.lender import Lender
 from app.models.lender_contact import LenderContact, LenderContactRole
 from app.services.loan_files import create_loan_file
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from tests.user_factory import make_user
 
 LENDERS = "/api/v1/lenders"
 FILES = "/api/v1/loan-files"
@@ -74,13 +75,13 @@ async def _company_with_users(db: AsyncSession, *, slug: str):
     await db.flush()
     tokens = {}
     for role in (UserRole.ADMIN, UserRole.PROCESSOR):
-        user = User(
+        user = make_user(
             company_id=company.id,
             email=f"{role.value}-{uuid4().hex[:6]}@{slug}.com",
             hashed_password="x",  # pragma: allowlist secret
             first_name="Pat",
             last_name=role.value.title(),
-            role=role,
+            roles=[role],
         )
         db.add(user)
         await db.flush()

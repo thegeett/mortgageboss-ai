@@ -18,12 +18,13 @@ from uuid import uuid4
 import pytest_asyncio
 from app.core.database import get_db
 from app.main import app
-from app.models import Company, LoanProgram, User, UserRole
+from app.models import Company, LoanProgram, UserRole
 from app.models.loan_file_participant import LoanFileParticipant
 from app.services.loan_files import create_loan_file
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from tests.user_factory import make_user
 
 API = "/api/v1/loan-files"
 TYPED = "someone.typed@borrower.example"
@@ -65,13 +66,13 @@ async def _company_user_token(db: AsyncSession, *, slug: str):
     company = Company(name=slug, slug=f"{slug}-{uuid4().hex[:6]}")
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"u-{uuid4().hex[:6]}@{slug}.com",
         hashed_password="x",  # pragma: allowlist secret
         first_name="Pat",
         last_name="Processor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db.add(user)
     await db.flush()

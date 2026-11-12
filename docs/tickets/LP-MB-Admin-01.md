@@ -1,6 +1,6 @@
 # LP-MB-Admin-01 — Roles as a set (`user_roles`), the company owner, and the company audit log
 
-Admin and roles, ticket 1 of 5. **Status: planned, not built.** Next: LP-MB-Admin-02 (permission keys).
+Admin and roles, ticket 1 of 5. **Status: built, not committed (see Result).** Next: LP-MB-Admin-02 (permission keys).
 Use cases: `docs/design/admin/company-admin-and-roles-use-cases.md` (section 12 is the current state; earlier sections are the original brief).
 
 ## What and why
@@ -125,3 +125,68 @@ None. The series' screens are in `docs/design/admin/` (README there); this ticke
   company-level action has no file. `action` deliberately has **no CHECK constraint**, a stated
   exception to ADR-037: every ticket in this series adds values, and the CHECK-swap pattern has already
   caused two incidents on `ActivityType` (LP-637, LP-UI-033). The StrEnum is the only writer.
+
+## Result
+
+**Count before changing anything:** 127 constructions of `User(role=...)` (122 in tests across 116
+files, 5 in `app/scripts/`), plus 3 reads of `user.role` in `app/` (`User.__repr__`, `add_user`'s
+success line, `require_role`) and 1 in tests (`test_add_user`). The 122 test sites now go through
+`tests/user_factory.make_user`; the two existing wrappers (`tests/integration/factories.make_user`,
+`test_dependencies._make_user`) call it.
+
+**Built**
+- Models: `UserRole.LOAN_OFFICER`; `UserRoleAssignment` (`user_roles`, unique `(user_id, role)`);
+  `User.roles` (`lazy="selectin"`); `User.role_set` (the one accessor) and `User.is_owner`;
+  `users.role` is `UserRole | None` with no default and is read or written nowhere in `app/`.
+  `Company.owner_user_id` (FK users, RESTRICT, `use_alter`), with `foreign_keys=` on `Company.users`,
+  `User.company` and the new `Company.owner` (`post_update`, since the two rows reference each other).
+  `CompanyAuditLog` (`company_audit_log`, `action` VARCHAR(64) with no CHECK, index
+  `(company_id, created_at DESC)`).
+- Migration `0a7332974687` on `e3a9d4c7b512`: steps 1-5 as listed, backfill in SQL. It also swaps
+  `ck_users_userrole` to admit `loan_officer` (restored on downgrade), because
+  `test_migrated_checks_match_models` requires a migrated CHECK to match the model and the model
+  shares `UserRole` with `user_roles.role`. It prints each company left with NULL `owner_user_id`.
+- `app/services/company_audit.py`: `log_company_action` (flush, never commit) and `AuditAction`
+  (`owner_transferred`, `role_backfilled`). The migration writes one `role_backfilled` row per company.
+- `get_user_by_id` and `authenticate_user` load `User.company` with `selectinload` (login returns
+  `is_owner`, so it needs the company too). `require_role` checks `role_set`.
+  `UserPublic` gains `roles` (sorted) and `is_owner`; `role` is computed (`admin` iff ADMIN held).
+- Scripts: `add_company` and `bootstrap_admin` make the first user an ADMIN and the owner (user flushed
+  first). `add_user` takes several roles. `seed_dev` / `seed_dev_data`: the admin also holds PROCESSOR
+  and is the owner, and a loan officer is added (`lo@demo.com`, `jordan@summit-demo.com`);
+  `seed_dev_data --reset` clears the owner and the company's audit rows before deleting users.
+  New `scripts/transfer_owner` (env vars, staging-only allowlist, refusal style of `add_user`).
+- Tests: factory; role set round-trip and duplicate refused; `require_role` (ADMIN, PROCESSOR+ADMIN
+  pass; PROCESSOR, LOAN_OFFICER, PROCESSOR+LOAN_OFFICER 403); `/auth/me` and login shape;
+  `log_company_action`; `add_user`, `add_company`, `bootstrap_admin`, `transfer_owner`; and the
+  `migrated_db` fixture (session-scoped, in `tests/conftest.py`, about 50 lines) with
+  `test_user_roles_migration.py`. Three mutations were each caught: dropping `is_active` from the
+  owner query, reverting `require_role` to a single-role check, and removing the company eager load.
+- Full suite: 9858 passed, 2 failed, 12 skipped. The two failures were the readonly guard, now
+  fixed (see below) and re-run with the migration test: 84 passed. ruff, mypy strict on `app/`, and
+  pre-commit on all changed files are clean.
+
+**Assumptions and deviations**
+- `make_user` builds and does not take `db`: every call site already added and flushed its user, so
+  a builder kept each test's transaction order unchanged.
+- `add_user` is driven by environment variables from `./scripts/deploy add-user`, not argv, so
+  "repeatable `--role`" is `ADD_USER_ROLE` as a comma-separated list (`ADMIN,PROCESSOR`); a repeat is
+  dropped, an unknown or empty item refuses. The deploy stage's prompt and check accept the same.
+- `migrated_db` yields the database at head plus an `alembic(...)` runner; the seeding is in the test,
+  which steps back to `e3a9d4c7b512`, seeds the OLD column, upgrades, asserts, downgrades, and leaves
+  the fixture empty and at head. A backfill has to be seeded before its migration runs, and
+  LP-MB-Admin-05 will seed differently. Revisions are named rather than `-1` so a later migration on
+  top does not move the test.
+- "Active" admin for the owner means `is_active` and not soft-deleted; ties on `created_at` break by id.
+- `user_roles`, `company_audit_log` and `companies.owner_user_id` are listed as excluded in
+  `tests/test_readonly_query.py` (no readonly view, as the ticket says), with the reason.
+- A user created without roles now holds none (there was a PROCESSOR default on the column).
+- `backend/.env` in this worktree is a gitignored symlink to the main checkout's, and the tests ran
+  against their own `mortgageboss_admin01_test` database via `TEST_DATABASE_URL`.
+
+**Deferred**
+- The owner guard itself: no code path deactivates a user or removes a role yet, so there was nothing
+  to refuse. It lands with the role and deactivation API (LP-MB-Admin-03).
+- Dropping `users.role`; readonly views for the new tables; logging the existing admin screens.
+- The seed scripts have no tests of their own (they open their own session against the dev
+  database); they were changed but not run.

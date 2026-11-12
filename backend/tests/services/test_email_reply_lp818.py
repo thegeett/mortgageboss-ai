@@ -19,7 +19,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
-from app.models import Company, LoanProgram, User, UserRole
+from app.models import Company, LoanProgram, UserRole
 from app.models.base import utcnow
 from app.models.communication import (
     Communication,
@@ -39,6 +39,7 @@ from app.services.email_reply import (
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.mail_address import deliver, file_mail_address
+from tests.user_factory import make_user
 
 _PDF = (Path(__file__).resolve().parents[1] / "fixtures" / "attachments" / "clean.pdf").read_bytes()
 
@@ -56,13 +57,13 @@ async def _company_and_file(db: AsyncSession, *, slug: str):
 
 
 async def _actor(db: AsyncSession, company) -> UUID:
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"p-{uuid4().hex[:8]}@example.com",
         hashed_password="x",  # pragma: allowlist secret
         first_name="Pat",
         last_name="Processor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db.add(user)
     await db.flush()

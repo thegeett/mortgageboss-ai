@@ -65,6 +65,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from tests.outbound_send import FakeSender, FakeStorage, Ready, ready_to_send
+from tests.user_factory import make_user
 
 TO = "borrower@example.test"
 TITLE = "title@title-co.example.test"
@@ -267,13 +268,13 @@ def _text(message: Message) -> str:
 
 
 async def _user(db: AsyncSession, company: Company, first: str) -> User:
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"{first.lower()}-{uuid4().hex[:6]}@example.test",
         hashed_password="x",  # pragma: allowlist secret
         first_name=first,
         last_name="Clicker",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db.add(user)
     await db.flush()

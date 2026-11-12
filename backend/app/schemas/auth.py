@@ -13,7 +13,7 @@ no ``RefreshRequest``.
 
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field, computed_field, field_validator
 
 from app.models.user import UserRole
 
@@ -31,16 +31,33 @@ class UserPublic(BaseModel):
     Built from a ``User`` ORM instance via ``model_validate`` (``from_attributes``).
     Carries identity and display fields only — never ``hashed_password``,
     ``is_active``, timestamps, or other internal state.
+
+    ``roles`` is the set the user holds (ADR-440). ``role`` is kept for the frontend, which
+    still reads one role, and is derived from the set rather than read from ``users.role``.
     """
 
     id: UUID
     email: EmailStr
     first_name: str
     last_name: str
-    role: UserRole
+    # From `User.role_set`: `User.roles` holds the assignment rows, not the roles.
+    roles: list[UserRole] = Field(validation_alias="role_set")
+    is_owner: bool
     company_id: UUID
 
     model_config = {"from_attributes": True}
+
+    @field_validator("roles", mode="before")
+    @classmethod
+    def _sorted(cls, value: frozenset[UserRole]) -> list[UserRole]:
+        """A set has no order; the response does."""
+        return sorted(value)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def role(self) -> UserRole:
+        """``admin`` if the user holds ADMIN, else ``processor`` (the pre-set contract)."""
+        return UserRole.ADMIN if UserRole.ADMIN in self.roles else UserRole.PROCESSOR
 
 
 class TokenResponse(BaseModel):

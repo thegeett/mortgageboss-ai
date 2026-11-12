@@ -34,6 +34,7 @@ import pytest
 import sqlalchemy as sa
 from app.models.base import Base
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from tests.user_factory import make_user
 
 
 def _view_module(revision: str):
@@ -131,20 +132,20 @@ async def test_the_saved_views_view_actually_scrubs_its_filter_payload(
     what runs.
     """
     from app.core.security import hash_password
-    from app.models import Company, User, UserRole
+    from app.models import Company, UserRole
     from app.models.saved_view import SavedView
 
     module = _migration_module()
     company = Company(name="Acme", slug="acme-scrub")
     db_session.add(company)
     await db_session.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email="scrub@acme.com",
         hashed_password=hash_password("x"),  # pragma: allowlist secret
         first_name="T",
         last_name="U",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db_session.add(user)
@@ -382,7 +383,10 @@ EXCLUDED: dict[str, frozenset[str]] = {
     ),
     "mismo_imports": frozenset({"catch_all", "raw_file_path"}),
     "findings": frozenset({"source_snippet"}),
-    "companies": frozenset({"settings"}),
+    # LP-MB-Admin-01 adds `owner_user_id`: deferred with the two new tables below (the ticket puts a
+    # readonly view for roles and ownership out of scope until someone needs to query them). An id,
+    # not sensitive, so this is a scope decision rather than a privacy one.
+    "companies": frozenset({"settings", "owner_user_id"}),
     # `reviewer_pane_split` is a UI preference, not data anyone queries staging for
     # (LP-UI-030) — kept out for noise, not for privacy. Reason in that migration.
     # LP-855 adds `mail_client`, on LP-UI-030's reasoning for `reviewer_pane_split`: the readonly
@@ -790,6 +794,14 @@ EXCLUDED_TABLES: dict[str, str] = {
         "LP-922 — links a round's conditions to their draft emails (the `communications` rows, "
         "whose readonly view already carries the send metadata). Only ids, a recipient and "
         "timestamps, which that view answers; excluded rather than a second view of the same sends."
+    ),
+    "user_roles": (
+        "LP-MB-Admin-01 — which roles each user holds. No view yet: out of the ticket's scope, add "
+        "one when someone needs to query roles on staging. Ids, a role word and a timestamp only."
+    ),
+    "company_audit_log": (
+        "LP-MB-Admin-01 — admin actions per company. No view yet, as `user_roles`. When one is "
+        "added, `summary` and `detail` are prose and before/after values, so they need the scrub."
     ),
 }
 

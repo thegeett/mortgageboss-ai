@@ -14,7 +14,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.jwt import create_access_token
 from app.main import app
-from app.models import Company, LoanProgram, User, UserRole
+from app.models import Company, LoanProgram, UserRole
 from app.models.inbound_attachment import InboundAttachment
 from app.models.inbound_message import InboundMessage, InboundRoutingState
 from app.models.loan_file import LoanFile
@@ -24,6 +24,7 @@ from app.storage import get_mail_storage, get_storage_backend
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 _PDF = (Path(__file__).resolve().parents[1] / "fixtures" / "attachments" / "clean.pdf").read_bytes()
 _INJECT = "/api/v1/dev/inbound/inject"
@@ -54,13 +55,13 @@ async def _setup(db: AsyncSession) -> tuple[dict[str, str], list[LoanFile], str]
     company = Company(name="Summit", slug=f"summit-{uuid4().hex[:6]}")
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"u-{uuid4().hex[:6]}@example.test",
         hashed_password="x",  # pragma: allowlist secret
         first_name="Pat",
         last_name="Processor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db.add(user)
     domain = f"mb-{uuid4().hex[:8]}.example.test"

@@ -23,7 +23,7 @@ from app.ai.extraction.pay_stub import PayStubExtraction, PayStubExtractionResul
 from app.ai.extraction.shape import TypedField
 from app.ai.extraction.w2 import W2Extraction, W2ExtractionResult
 from app.core.security import hash_password
-from app.models import Company, User, UserRole
+from app.models import Company, UserRole
 from app.models.activity_log import ActivityLog
 from app.models.document import Document, DocumentCategory, DocumentStatus, Tier
 from app.models.document_finding import DocumentFindingType
@@ -38,6 +38,7 @@ from app.services.loan_files import create_loan_file
 from app.tasks import document_processing as pipeline
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 PDF_BYTES = b"%PDF-1.7 dummy"
 
@@ -46,13 +47,13 @@ async def _setup_document(db: AsyncSession, *, slug: str = "acme") -> Document:
     company = Company(name=slug.title(), slug=slug)
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"u@{slug}.com",
         hashed_password=hash_password("x"),
         first_name="T",
         last_name="U",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db.add(user)

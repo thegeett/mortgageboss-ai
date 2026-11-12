@@ -35,6 +35,7 @@ from tests.conditions.fixture_helpers import UWM_ROUND_1
 from tests.conditions.reading_fixture import canned_response, fake_complete
 from tests.conditions.uwm_pdf_fixture import render_uwm_pdf
 from tests.models.conftest_helpers import make_lender, make_loan_file
+from tests.user_factory import make_user
 
 
 async def _file_with_round(
@@ -71,15 +72,15 @@ async def _by_code(db: AsyncSession, loan_file: LoanFile) -> dict[str, Condition
 
 async def _user_id(db: AsyncSession, loan_file: LoanFile) -> Any:
     from app.core.security import hash_password
-    from app.models import User, UserRole
+    from app.models import UserRole
 
-    user = User(
+    user = make_user(
         company_id=loan_file.company_id,
         email=f"u-{uuid4().hex[:8]}@example.com",
         hashed_password=hash_password("irrelevant"),
         first_name="Priya",
         last_name="Raman",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db.add(user)
@@ -317,16 +318,16 @@ async def _client_for(db: AsyncSession, loan_file: LoanFile) -> tuple[Any, dict[
     from app.core.jwt import create_access_token
     from app.core.security import hash_password
     from app.main import app
-    from app.models import User, UserRole
+    from app.models import UserRole
     from httpx import ASGITransport, AsyncClient
 
-    user = User(
+    user = make_user(
         company_id=loan_file.company_id,
         email=f"p-{uuid4().hex[:8]}@example.com",
         hashed_password=hash_password("irrelevant"),
         first_name="Priya",
         last_name="Raman",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db.add(user)

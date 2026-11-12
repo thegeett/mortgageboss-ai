@@ -21,6 +21,7 @@ from app.services.mail_domain import set_email_sending
 from app.services.mail_sender import MailSender
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.mail_address import link_mail_domain
+from tests.user_factory import make_user
 
 
 @dataclass
@@ -37,13 +38,13 @@ async def ready_to_send(db: AsyncSession, *, with_domain: bool = True) -> Ready:
     company = Company(name="Summit Mortgage Processing", slug=f"summit-{uuid4().hex[:8]}")
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"pat-{uuid4().hex[:8]}@example.test",
         hashed_password="x",  # pragma: allowlist secret
         first_name="Pat",
         last_name="Processor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db.add(user)
     await db.flush()

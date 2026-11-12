@@ -24,6 +24,7 @@ from app.services.dti import build_dti_calculation
 from app.services.loan_files import create_loan_file
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.services.test_dti import _seed_housing
+from tests.user_factory import make_user
 
 
 async def _file_with(db: AsyncSession, slug: str, liabilities: list[StatedLiability]):
@@ -183,15 +184,15 @@ async def test_an_override_re_includes_an_excluded_debt(db_session: AsyncSession
     assert item.excluded is True and calc.monthly_debts == Decimal("0.00")
 
     from app.core.security import hash_password
-    from app.models import User, UserRole
+    from app.models import UserRole
 
-    actor = User(
+    actor = make_user(
         company_id=loan_file.company_id,
         email="p@reinclude.com",
         hashed_password=hash_password("x"),
         first_name="P",
         last_name="R",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db_session.add(actor)

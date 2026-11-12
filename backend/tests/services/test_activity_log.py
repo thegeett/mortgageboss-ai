@@ -1,9 +1,10 @@
 """Tests for the activity log service (LP-20)."""
 
-from app.models import ActivityType, Company, User, UserRole
+from app.models import ActivityType, Company, UserRole
 from app.services.activity_log import log_activity
 from app.services.loan_files import create_loan_file
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 
 async def test_log_activity_creates_entry_with_detail(db_session: AsyncSession) -> None:
@@ -11,13 +12,13 @@ async def test_log_activity_creates_entry_with_detail(db_session: AsyncSession) 
     company = Company(name="Acme", slug="acme")
     db_session.add(company)
     await db_session.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email="a@acme.test",
         hashed_password="h",
         first_name="Act",
         last_name="Or",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db_session.add(user)
     await db_session.flush()

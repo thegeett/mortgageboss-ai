@@ -20,19 +20,20 @@ from app.models import (
 from app.services.findings import resolve_finding
 from app.services.loan_files import create_loan_file
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 
 async def _setup(db_session: AsyncSession) -> tuple[Finding, User]:
     company = Company(name="Acme", slug="acme")
     db_session.add(company)
     await db_session.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email="u@acme.test",
         hashed_password="h",
         first_name="Re",
         last_name="Solver",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db_session.add(user)
     await db_session.flush()

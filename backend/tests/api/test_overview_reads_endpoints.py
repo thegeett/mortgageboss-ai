@@ -18,6 +18,7 @@ from app.models.lender import LoanProgram
 from app.services.loan_files import create_loan_file, create_loan_file_with_setup
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 
 @pytest_asyncio.fixture
@@ -37,13 +38,13 @@ async def _make_user(db: AsyncSession, *, slug: str, email: str) -> tuple[Compan
     company = Company(name=slug.title(), slug=slug)
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=email,
         hashed_password=hash_password("irrelevant"),
         first_name="Test",
         last_name="User",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db.add(user)

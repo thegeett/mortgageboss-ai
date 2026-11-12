@@ -16,6 +16,7 @@ from app.services.auth import (
     get_user_by_id,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 PASSWORD = "correct horse battery staple"  # pragma: allowlist secret
 WRONG_PASSWORD = "Tr0ub4dor&3"  # pragma: allowlist secret
@@ -31,13 +32,13 @@ async def _make_user(
     company = Company(name="Acme", slug="acme")
     db_session.add(company)
     await db_session.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=email,
         hashed_password=hash_password(password),
         first_name="Pat",
         last_name="Processor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=is_active,
     )
     db_session.add(user)

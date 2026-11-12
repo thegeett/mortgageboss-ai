@@ -37,6 +37,7 @@ from app.verification.cross_source import CrossSourceFacts
 from app.verification.cross_source.facts import ObligationRef
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 # The two documented-employer strings differ ONLY in case + dash type (en vs em).
 _EMP_A = "Thermofisher Life Science – PPD Development LP."  # en-dash
@@ -53,13 +54,13 @@ async def _company(db: AsyncSession, slug: str = "acme") -> Company:
 
 
 async def _user(db: AsyncSession, company: Company) -> User:
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"u@{company.slug}.test",
         hashed_password="h",  # pragma: allowlist secret
         first_name="Pro",
         last_name="Cessor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db.add(user)
     await db.flush()

@@ -31,6 +31,7 @@ from app.services.finding_resolution import CannotApplyError, apply_finding
 from app.services.loan_files import create_loan_file
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.services.test_dti import _seed_housing
+from tests.user_factory import make_user
 
 
 async def _file(db: AsyncSession, slug: str):
@@ -38,15 +39,15 @@ async def _file(db: AsyncSession, slug: str):
     db.add(company)
     await db.flush()
     from app.core.security import hash_password
-    from app.models import User, UserRole
+    from app.models import UserRole
 
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"p-{uuid4().hex[:8]}@example.com",
         hashed_password=hash_password("x"),
         first_name="Pat",
         last_name="P",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db.add(user)
     await db.flush()

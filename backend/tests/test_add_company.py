@@ -22,8 +22,9 @@ from app.scripts.add_company import (
     validate_slug,
 )
 from app.services.auth import authenticate_user
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 PASSWORD = "correct horse battery staple"  # pragma: allowlist secret  (test-only)
 
@@ -34,13 +35,13 @@ async def _existing(db: AsyncSession, *, slug: str = "first", name: str = "First
     db.add(company)
     await db.flush()
     db.add(
-        User(
+        make_user(
             company_id=company.id,
             email=f"admin@{slug}.example.com",
             hashed_password=hash_password(PASSWORD),
             first_name="First",
             last_name="Admin",
-            role=UserRole.ADMIN,
+            roles=[UserRole.ADMIN],
             is_active=True,
         )
     )
@@ -95,7 +96,12 @@ async def test_creates_a_second_company_and_its_admin(db_session: AsyncSession) 
         True,
     )
     assert user.company_id == company.id
-    assert user.role is UserRole.ADMIN
+    # The first admin is the company's owner (ADR-440), stored, not just set on the object.
+    assert user.role_set == {UserRole.ADMIN}
+    stored_owner = await db_session.scalar(
+        text("SELECT owner_user_id FROM companies WHERE id = :id"), {"id": company.id}
+    )
+    assert stored_owner == user.id
     assert user.is_active is True
     assert await _counts(db_session) == (2, 2)
 

@@ -24,7 +24,7 @@ from app.ai.extraction.shape import TypedField
 from app.ai.generic_analyzer import AnalyzedFinding, GenericAnalysis
 from app.core.config import settings
 from app.core.security import hash_password
-from app.models import Company, User, UserRole
+from app.models import Company, UserRole
 from app.models.document import Document, DocumentStatus
 from app.models.extraction import Extraction, ExtractionStatus
 from app.models.needs_item import NeedsItemStatus
@@ -35,6 +35,7 @@ from app.storage import get_storage_backend
 from app.tasks import document_processing as pipeline
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 PDF_BYTES = b"%PDF-1.7\n%synthetic pay stub\n"
 
@@ -61,13 +62,13 @@ async def _loan_file(db: AsyncSession, slug: str = "acme"):
     db.add(company)
     await db.flush()
     db.add(
-        User(
+        make_user(
             company_id=company.id,
             email=f"u@{slug}.com",
             hashed_password=hash_password("x"),
             first_name="T",
             last_name="U",
-            role=UserRole.PROCESSOR,
+            roles=[UserRole.PROCESSOR],
             is_active=True,
         )
     )

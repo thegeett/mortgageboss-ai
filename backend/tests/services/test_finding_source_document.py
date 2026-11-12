@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from app.ai.cross_source import CrossSourceRawFinding
 from app.core.security import hash_password
-from app.models import Company, User, UserRole
+from app.models import Company, UserRole
 from app.models.document import Document, DocumentStatus
 from app.models.finding import Finding, FindingCategory, FindingOrigin, FindingStatus
 from app.models.helpers import only_active
@@ -26,6 +26,7 @@ from app.services.verification_engine import _source_location_fields
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from tests.user_factory import make_user
 
 
 async def _loan_file(db: AsyncSession, *, slug: str = "acme") -> LoanFile:
@@ -33,13 +34,13 @@ async def _loan_file(db: AsyncSession, *, slug: str = "acme") -> LoanFile:
     db.add(company)
     await db.flush()
     db.add(
-        User(
+        make_user(
             company_id=company.id,
             email=f"u@{slug}.com",
             hashed_password=hash_password("x"),
             first_name="T",
             last_name="U",
-            role=UserRole.PROCESSOR,
+            roles=[UserRole.PROCESSOR],
             is_active=True,
         )
     )

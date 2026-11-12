@@ -22,7 +22,7 @@ import pytest_asyncio
 from app.core.config import settings
 from app.core.database import get_db
 from app.main import app
-from app.models import Company, LoanProgram, User, UserRole
+from app.models import Company, LoanProgram, UserRole
 from app.models.base import utcnow
 from app.models.document import Document, UploadSource
 from app.models.upload_link import UploadLink, hash_token
@@ -31,6 +31,7 @@ from app.services.upload_links import mint_upload_link
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from tests.user_factory import make_user
 
 API = "/api/v1"
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "attachments"
@@ -93,13 +94,13 @@ async def _company_user_token(db: AsyncSession, *, slug: str):
     company = Company(name=slug, slug=f"{slug}-{uuid4().hex[:6]}")
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"u-{uuid4().hex[:6]}@{slug}.com",
         hashed_password="x",  # pragma: allowlist secret
         first_name="Pat",
         last_name="Processor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db.add(user)
     await db.flush()

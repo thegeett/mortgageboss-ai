@@ -18,13 +18,14 @@ from uuid import uuid4
 import pytest_asyncio
 from app.core.database import get_db
 from app.main import app
-from app.models import Borrower, Company, LoanProgram, User, UserRole
+from app.models import Borrower, Company, LoanProgram, UserRole
 from app.models.communication import Communication
 from app.models.needs_item import NeedsItem, NeedsItemOrigin
 from app.services.email_draft import add_needs_to_draft
 from app.services.loan_files import create_loan_file
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from tests.user_factory import make_user
 
 API = "/api/v1/loan-files"
 
@@ -67,13 +68,13 @@ async def _company_user_token(db: AsyncSession, *, first: str = "Pat", last: str
     company = Company(name="Acme", slug=f"acme-{uuid4().hex[:6]}")
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"u-{uuid4().hex[:6]}@acme.com",
         hashed_password="x",  # pragma: allowlist secret
         first_name=first,
         last_name=last,
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db.add(user)
     await db.flush()
@@ -174,13 +175,13 @@ async def test_two_processors_each_see_their_own_name(
 
     from app.core.jwt import create_access_token
 
-    user_b = User(
+    user_b = make_user(
         company_id=company.id,
         email=f"b-{uuid4().hex[:6]}@acme.com",
         hashed_password="x",  # pragma: allowlist secret
         first_name="Marco",
         last_name="Silva",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db.add(user_b)
     await db.flush()

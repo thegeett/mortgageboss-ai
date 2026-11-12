@@ -15,6 +15,7 @@ from collections.abc import AsyncIterator
 from typing import Annotated
 from uuid import uuid4
 
+import pytest
 import pytest_asyncio
 from app.api.auth import router as auth_router
 from app.api.dependencies import (
@@ -28,6 +29,7 @@ from app.models import Company, User, UserRole
 from fastapi import Depends, FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 ME_URL = "/api/v1/auth/me"
 ADMIN_URL = "/admin-only"
@@ -82,23 +84,27 @@ async def _make_user(
     db_session: AsyncSession,
     *,
     email: str = "processor@acme.com",
-    role: UserRole = UserRole.PROCESSOR,
+    roles: tuple[UserRole, ...] = (UserRole.PROCESSOR,),
     is_active: bool = True,
+    owner: bool = False,
 ) -> User:
     company = Company(name="Acme", slug="acme")
     db_session.add(company)
     await db_session.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=email,
         hashed_password=hash_password(PASSWORD),
         first_name="Pat",
         last_name="Processor",
-        role=role,
+        roles=roles,
         is_active=is_active,
     )
     db_session.add(user)
     await db_session.flush()
+    if owner:
+        company.owner_user_id = user.id
+        await db_session.flush()
     return user
 
 
@@ -122,6 +128,37 @@ async def test_me_with_valid_token_returns_user(
     assert body["id"] == str(user.id)
     assert body["email"] == user.email
     assert "hashed_password" not in resp.text
+
+
+@pytest.mark.parametrize(
+    ("roles", "owner", "derived_role"),
+    [
+        ((UserRole.PROCESSOR,), False, "processor"),
+        ((UserRole.LOAN_OFFICER,), False, "processor"),
+        ((UserRole.ADMIN,), True, "admin"),
+        ((UserRole.PROCESSOR, UserRole.ADMIN, UserRole.LOAN_OFFICER), False, "admin"),
+    ],
+)
+async def test_me_returns_the_role_set_the_derived_role_and_ownership(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    roles: tuple[UserRole, ...],
+    owner: bool,
+    derived_role: str,
+) -> None:
+    """`roles` is the set, `role` is `admin` iff the set holds ADMIN, `is_owner` is the company's."""
+    user = await _make_user(db_session, roles=roles, owner=owner)
+    # Expunged, so the request loads the user and company itself, as it would in production:
+    # nothing the test session already holds can stand in for an eager load that is missing.
+    db_session.expunge_all()
+
+    resp = await client.get(ME_URL, headers=_bearer(create_access_token(user.id)))
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["roles"] == sorted(role.value for role in roles)
+    assert body["role"] == derived_role
+    assert body["is_owner"] is owner
 
 
 async def test_me_without_token_is_401(client: AsyncClient) -> None:
@@ -214,23 +251,26 @@ async def test_token_for_unknown_subject_is_401(client: AsyncClient) -> None:
 # --------------------------------------------------------------------------- #
 
 
-async def test_require_role_admin_allows_admin(
-    client: AsyncClient, db_session: AsyncSession
+@pytest.mark.parametrize(
+    ("roles", "status"),
+    [
+        ((UserRole.ADMIN,), 200),
+        ((UserRole.PROCESSOR, UserRole.ADMIN), 200),
+        ((UserRole.PROCESSOR,), 403),  # NOT 401 — they are authenticated
+        ((UserRole.LOAN_OFFICER,), 403),
+        ((UserRole.PROCESSOR, UserRole.LOAN_OFFICER), 403),
+    ],
+)
+async def test_require_role_admin_checks_the_role_set(
+    client: AsyncClient, db_session: AsyncSession, roles: tuple[UserRole, ...], status: int
 ) -> None:
-    """An ADMIN user passes an admin-only route."""
-    admin = await _make_user(db_session, email="admin@acme.com", role=UserRole.ADMIN)
-    resp = await client.get(ADMIN_URL, headers=_bearer(create_access_token(admin.id)))
-    assert resp.status_code == 200
-    assert resp.json()["id"] == str(admin.id)
-
-
-async def test_require_role_admin_forbids_processor_with_403(
-    client: AsyncClient, db_session: AsyncSession
-) -> None:
-    """A PROCESSOR on an admin-only route gets 403 (authenticated, wrong role)."""
-    proc = await _make_user(db_session, role=UserRole.PROCESSOR)
-    resp = await client.get(ADMIN_URL, headers=_bearer(create_access_token(proc.id)))
-    assert resp.status_code == 403  # NOT 401 — they are authenticated
+    """An admin-only route admits any user whose set holds ADMIN, alone or with other roles."""
+    user = await _make_user(db_session, roles=roles)
+    db_session.expunge_all()
+    resp = await client.get(ADMIN_URL, headers=_bearer(create_access_token(user.id)))
+    assert resp.status_code == status
+    if status == 200:
+        assert resp.json()["id"] == str(user.id)
 
 
 async def test_require_role_without_token_is_401(client: AsyncClient) -> None:
@@ -246,7 +286,7 @@ async def test_require_role_allows_any_listed_role(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
     """require_role(ADMIN, PROCESSOR) admits a PROCESSOR (multiple roles)."""
-    proc = await _make_user(db_session, role=UserRole.PROCESSOR)
+    proc = await _make_user(db_session, roles=(UserRole.PROCESSOR,))
     resp = await client.get(STAFF_URL, headers=_bearer(create_access_token(proc.id)))
     assert resp.status_code == 200
 

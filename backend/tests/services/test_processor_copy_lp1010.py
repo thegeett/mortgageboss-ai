@@ -43,6 +43,7 @@ from app.storage import get_storage_backend
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog.testing import capture_logs
+from tests.user_factory import make_user
 
 _PDF = (Path(__file__).resolve().parents[1] / "fixtures" / "attachments" / "clean.pdf").read_bytes()
 _ORIGIN = "https://app.example.test"
@@ -89,13 +90,13 @@ class _File:
 
 
 async def _user(db: AsyncSession, company: Company, first: str) -> User:
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"{first.lower()}-{uuid4().hex[:6]}@summit.example.test",
         hashed_password="x",  # pragma: allowlist secret
         first_name=first,
         last_name="Processor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db.add(user)
     await db.flush()

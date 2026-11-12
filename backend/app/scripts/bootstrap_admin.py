@@ -47,7 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import async_session_maker
 from app.models.company import Company
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, UserRoleAssignment
 from app.scripts._provisioning import (
     ProvisioningError,
     assert_environment_allowed,
@@ -149,10 +149,13 @@ async def bootstrap(
         hashed_password=config.admin_password_hash,
         first_name=config.admin_first_name,
         last_name=config.admin_last_name,
-        role=UserRole.ADMIN,
+        roles=[UserRoleAssignment(role=UserRole.ADMIN)],
         is_active=True,
     )
     db.add(user)
+    # The user's id must exist before the company can name them its owner (ADR-440).
+    await db.flush()
+    company.owner_user_id = user.id
     await db.flush()
 
     return company, user

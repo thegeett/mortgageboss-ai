@@ -42,6 +42,7 @@ from app.verification.snapshot.documents_section import document_filenames_by_co
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from tests.integration import factories
+from tests.user_factory import make_user
 
 API = "/api/v1/loan-files"
 PREFS = "/api/v1/users/me/preferences"
@@ -116,13 +117,13 @@ async def _user_and_token(db: AsyncSession, *, slug: str, email: str) -> tuple[C
     company = Company(name=slug.title(), slug=slug)
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=email,
         hashed_password=hash_password("irrelevant"),
         first_name="Test",
         last_name="User",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db.add(user)

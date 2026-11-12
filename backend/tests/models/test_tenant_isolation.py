@@ -9,6 +9,7 @@ guards the core multi-tenancy guarantee.
 from app.models import Company, User, UserRole, only_active, scope_to_company, utcnow
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 
 async def _company_with_users(db_session: AsyncSession, slug: str, emails: list[str]) -> Company:
@@ -17,13 +18,13 @@ async def _company_with_users(db_session: AsyncSession, slug: str, emails: list[
     await db_session.flush()
     db_session.add_all(
         [
-            User(
+            make_user(
                 company_id=company.id,
                 email=email,
                 hashed_password="h",
                 first_name="F",
                 last_name="L",
-                role=UserRole.PROCESSOR,
+                roles=[UserRole.PROCESSOR],
             )
             for email in emails
         ]

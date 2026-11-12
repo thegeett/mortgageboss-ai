@@ -7,7 +7,11 @@ never commit and never see each other's data.
 """
 
 import os
+import subprocess
+import sys
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -208,3 +212,55 @@ async def db_session(test_engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
         await session.close()
         await transaction.rollback()
         await connection.close()
+
+
+@dataclass(frozen=True)
+class MigratedDb:
+    """A scratch database built by `alembic upgrade head`, and a way to move it between revisions."""
+
+    engine: AsyncEngine
+    url: URL
+
+    def alembic(self, *args: str) -> str:
+        """Run `alembic <args>` against this database; returns its stdout, fails on non-zero.
+
+        A subprocess because `alembic/env.py` reads the URL from settings at import time;
+        `DATABASE_URL` in the child's environment is how it is pointed here.
+        """
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic", *args],
+            cwd=Path(__file__).resolve().parent.parent,
+            env={**os.environ, "DATABASE_URL": self.url.render_as_string(hide_password=False)},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, f"alembic {' '.join(args)} failed:\n{result.stderr[-4000:]}"
+        return result.stdout
+
+
+@pytest_asyncio.fixture(scope="session")
+async def migrated_db() -> AsyncIterator[MigratedDb]:
+    """A database built by migrations, not `create_all` (LP-MB-Admin-01), for testing a backfill.
+
+    Created once per session beside the test database and dropped afterwards. A test that moves
+    it to another revision must leave it at head.
+    """
+    test_url = _test_database_url()
+    url = test_url.set(database=f"{test_url.database}_migrated_db")
+    admin = create_async_engine(
+        url.set(database="postgres"), isolation_level="AUTOCOMMIT", poolclass=NullPool
+    )
+    async with admin.connect() as conn:
+        await conn.execute(text(f'DROP DATABASE IF EXISTS "{url.database}"'))
+        await conn.execute(text(f'CREATE DATABASE "{url.database}"'))
+    engine = create_async_engine(url, poolclass=NullPool)
+    db = MigratedDb(engine=engine, url=url)
+    try:
+        db.alembic("upgrade", "head")
+        yield db
+    finally:
+        await engine.dispose()
+        async with admin.connect() as conn:
+            await conn.execute(text(f'DROP DATABASE IF EXISTS "{url.database}"'))
+        await admin.dispose()

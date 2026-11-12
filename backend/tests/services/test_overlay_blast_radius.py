@@ -24,7 +24,6 @@ from app.models import (
     LoanProgram,
     StatedIncomeItem,
     StatedLiability,
-    User,
     UserRole,
 )
 from app.schemas.overlay_admin import OverlayOverrideInput
@@ -32,6 +31,7 @@ from app.services.loan_files import create_loan_file
 from app.services.overlay_blast_radius import estimate_blast_radius
 from app.verification.registry import default_registry
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 
 async def _company(db: AsyncSession) -> Company:
@@ -39,13 +39,13 @@ async def _company(db: AsyncSession) -> Company:
     db.add(company)
     await db.flush()
     db.add(
-        User(
+        make_user(
             company_id=company.id,
             email=f"u{uuid4().hex[:6]}@acme.com",
             hashed_password="x",  # pragma: allowlist secret
             first_name="T",
             last_name="U",
-            role=UserRole.ADMIN,
+            roles=[UserRole.ADMIN],
             is_active=True,
         )
     )

@@ -37,6 +37,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.mail_address import deliver, file_mail_address
+from tests.user_factory import make_user
 
 
 @pytest.fixture
@@ -68,13 +69,13 @@ async def _user(db: AsyncSession, *, slug: str) -> tuple[Company, User, str]:
     company = Company(name=slug.title(), slug=slug)
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"u@{slug}.com",
         hashed_password=hash_password("irrelevant"),
         first_name="Test",
         last_name="User",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db.add(user)

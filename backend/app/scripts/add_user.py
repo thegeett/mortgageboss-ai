@@ -14,7 +14,8 @@ Environment variables, ALL REQUIRED, no defaults:
     ADD_USER_PASSWORD_HASH      a bcrypt hash -- NEVER a password
     ADD_USER_FIRST_NAME
     ADD_USER_LAST_NAME
-    ADD_USER_ROLE               ADMIN | PROCESSOR, explicit -- there is no default
+    ADD_USER_ROLE               one or more of ADMIN, PROCESSOR, LOAN_OFFICER, comma-separated
+                                (e.g. ``ADMIN,PROCESSOR``), explicit -- there is no default
     ADD_USER_COMPANY_SLUG       must already exist
 
     ADD_USER_ALLOWED_ENVIRONMENTS   comma-separated, defaults to "staging"
@@ -52,7 +53,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import async_session_maker
 from app.models.company import Company
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, UserRoleAssignment
 from app.scripts._provisioning import (
     ProvisioningError,
     assert_email_unused,
@@ -76,24 +77,31 @@ class AddUserConfig:
     password_hash: str
     first_name: str
     last_name: str
-    role: UserRole
+    roles: tuple[UserRole, ...]
     company_slug: str
 
 
-def parse_role(raw: str) -> UserRole:
-    """Parse the role, accepting either case. No default: it must be explicit.
+def parse_roles(raw: str) -> tuple[UserRole, ...]:
+    """Parse a comma-separated set of roles, accepting either case. No default.
 
-    Defaulting would mean a typo silently producing the *less* privileged role
-    (confusing) or the *more* privileged one (dangerous). Both are worse than a
-    refusal.
+    A user holds one or more roles (ADR-440). Defaulting would mean a typo
+    silently producing the *less* privileged role (confusing) or the *more*
+    privileged one (dangerous). Both are worse than a refusal, so an empty item
+    or an unknown role refuses the whole list. A repeat is dropped, not refused.
     """
-    try:
-        return UserRole(raw.strip().lower())
-    except ValueError as exc:
-        valid = ", ".join(sorted(r.value.upper() for r in UserRole))
-        raise ProvisioningError(
-            f"ADD_USER_ROLE must be one of: {valid}. Got {raw.strip()!r}."
-        ) from exc
+    roles: list[UserRole] = []
+    for item in raw.split(","):
+        try:
+            role = UserRole(item.strip().lower())
+        except ValueError as exc:
+            valid = ", ".join(sorted(r.value.upper() for r in UserRole))
+            raise ProvisioningError(
+                f"ADD_USER_ROLE must be one or more of {valid}, comma-separated. "
+                f"Got {raw.strip()!r}."
+            ) from exc
+        if role not in roles:
+            roles.append(role)
+    return tuple(roles)
 
 
 def config_from_env() -> AddUserConfig:
@@ -105,7 +113,7 @@ def config_from_env() -> AddUserConfig:
         ),
         first_name=require_env("ADD_USER_FIRST_NAME"),
         last_name=require_env("ADD_USER_LAST_NAME"),
-        role=parse_role(require_env("ADD_USER_ROLE")),
+        roles=parse_roles(require_env("ADD_USER_ROLE")),
         company_slug=require_env("ADD_USER_COMPANY_SLUG"),
     )
 
@@ -167,7 +175,7 @@ async def add_user(
         hashed_password=config.password_hash,
         first_name=config.first_name,
         last_name=config.last_name,
-        role=config.role,
+        roles=[UserRoleAssignment(role=role) for role in config.roles],
         is_active=True,
     )
     db.add(user)
@@ -186,7 +194,8 @@ def success_line(user: User, company_slug: str) -> str:
     Its own function so a test can assert what it does and does not contain:
     these logs live in CloudWatch for 30 days.
     """
-    return f"created user {user.email} as {user.role.value} in {company_slug}"
+    roles = ", ".join(sorted(user.role_set))
+    return f"created user {user.email} as {roles} in {company_slug}"
 
 
 async def _run() -> None:

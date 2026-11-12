@@ -22,6 +22,7 @@ from app.main import app
 from app.models import Company, User, UserRole
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 LOGIN_URL = "/api/v1/auth/login"
 REFRESH_URL = "/api/v1/auth/refresh"
@@ -56,13 +57,13 @@ async def _make_user(
     company = Company(name="Acme", slug="acme")
     db_session.add(company)
     await db_session.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=email,
         hashed_password=hash_password(password),
         first_name="Pat",
         last_name="Processor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=is_active,
     )
     db_session.add(user)
@@ -100,6 +101,8 @@ async def test_login_success_returns_token_and_sets_refresh_cookie(
     assert body["token_type"] == "bearer"
     assert body["user"]["email"] == user.email
     assert body["user"]["role"] == UserRole.PROCESSOR.value
+    assert body["user"]["roles"] == [UserRole.PROCESSOR.value]
+    assert body["user"]["is_owner"] is False
 
     set_cookie = _set_cookie_header(resp)
     assert REFRESH_TOKEN_COOKIE in set_cookie

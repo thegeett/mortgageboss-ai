@@ -10,19 +10,20 @@ from datetime import UTC, datetime
 import pytest
 from app.core.security import hash_password
 from app.models.company import Company
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, UserRoleAssignment
 from app.schemas.auth import LoginRequest
 from app.scripts._provisioning import ProvisioningError
 from app.scripts.add_user import (
     ALLOWLIST_VAR,
     AddUserConfig,
     add_user,
-    parse_role,
+    parse_roles,
     success_line,
 )
 from app.services.auth import authenticate_user
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 PASSWORD = "correct horse battery staple"  # pragma: allowlist secret  (test-only)
 
@@ -40,7 +41,7 @@ def _config(**overrides: object) -> AddUserConfig:
         "password_hash": hash_password(PASSWORD),
         "first_name": "Grace",
         "last_name": "Hopper",
-        "role": UserRole.PROCESSOR,
+        "roles": (UserRole.PROCESSOR,),
         "company_slug": "example",
     }
     base.update(overrides)
@@ -57,18 +58,34 @@ async def _add(db: AsyncSession, config: AddUserConfig, **kw: str) -> User:
 
 
 # --------------------------------------------------------------------------- #
-# The happy path, both roles
+# The happy path, any role and several at once
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("role", [UserRole.ADMIN, UserRole.PROCESSOR])
-async def test_creates_a_user_in_either_role(db_session: AsyncSession, role: UserRole) -> None:
+@pytest.mark.parametrize(
+    "roles",
+    [
+        (UserRole.ADMIN,),
+        (UserRole.PROCESSOR,),
+        (UserRole.LOAN_OFFICER,),
+        (UserRole.ADMIN, UserRole.PROCESSOR, UserRole.LOAN_OFFICER),
+    ],
+)
+async def test_creates_a_user_holding_the_given_roles(
+    db_session: AsyncSession, roles: tuple[UserRole, ...]
+) -> None:
     company = await _company(db_session)
 
-    user = await _add(db_session, _config(role=role))
+    user = await _add(db_session, _config(roles=roles))
 
     assert user.company_id == company.id
-    assert user.role is role
+    assert user.role_set == set(roles)
+    stored = await db_session.scalars(
+        select(UserRoleAssignment.role).where(UserRoleAssignment.user_id == user.id)
+    )
+    assert sorted(stored) == sorted(roles)
+    # LP-12's column is no longer written.
+    assert user.role is None
     assert user.is_active is True
 
 
@@ -86,13 +103,13 @@ async def test_adds_to_a_populated_database(db_session: AsyncSession) -> None:
     """Unlike bootstrap_admin, existing users are not an obstacle."""
     company = await _company(db_session)
     db_session.add(
-        User(
+        make_user(
             company_id=company.id,
             email="first@example.com",
             hashed_password=hash_password(PASSWORD),
             first_name="First",
             last_name="User",
-            role=UserRole.ADMIN,
+            roles=[UserRole.ADMIN],
             is_active=True,
         )
     )
@@ -250,24 +267,34 @@ async def test_refuses_a_malformed_email_before_any_write(db_session: AsyncSessi
         ("PROCESSOR", UserRole.PROCESSOR),
         ("processor", UserRole.PROCESSOR),
         ("  Admin  ", UserRole.ADMIN),
+        ("loan_officer", UserRole.LOAN_OFFICER),
     ],
 )
-def test_parse_role_accepts_either_case(raw: str, expected: UserRole) -> None:
-    assert parse_role(raw) is expected
+def test_parse_roles_accepts_either_case(raw: str, expected: UserRole) -> None:
+    assert parse_roles(raw) == (expected,)
 
 
-@pytest.mark.parametrize("raw", ["", "owner", "ADMINISTRATOR", "admin,processor", "1"])
-def test_parse_role_refuses_anything_else(raw: str) -> None:
-    with pytest.raises(ProvisioningError, match="ADD_USER_ROLE must be one of"):
-        parse_role(raw)
+def test_parse_roles_takes_several_and_drops_a_repeat() -> None:
+    assert parse_roles("ADMIN, processor,admin,LOAN_OFFICER") == (
+        UserRole.ADMIN,
+        UserRole.PROCESSOR,
+        UserRole.LOAN_OFFICER,
+    )
 
 
-def test_parse_role_error_lists_the_valid_values() -> None:
+@pytest.mark.parametrize("raw", ["", "owner", "ADMINISTRATOR", "admin,", "admin,owner", "1"])
+def test_parse_roles_refuses_anything_else(raw: str) -> None:
+    with pytest.raises(ProvisioningError, match="ADD_USER_ROLE must be one or more of"):
+        parse_roles(raw)
+
+
+def test_parse_roles_error_lists_the_valid_values() -> None:
     with pytest.raises(ProvisioningError) as excinfo:
-        parse_role("owner")
+        parse_roles("owner")
     message = str(excinfo.value)
     assert "ADMIN" in message
     assert "PROCESSOR" in message
+    assert "LOAN_OFFICER" in message
 
 
 # --------------------------------------------------------------------------- #
@@ -320,6 +347,15 @@ async def test_success_line_contains_no_secret(db_session: AsyncSession) -> None
     assert PASSWORD not in line
     assert "$2" not in line
     assert line == "created user processor@example.com as processor in example"
+
+
+async def test_success_line_names_every_role(db_session: AsyncSession) -> None:
+    await _company(db_session)
+    user = await _add(db_session, _config(roles=(UserRole.PROCESSOR, UserRole.ADMIN)))
+
+    assert success_line(user, "example") == (
+        "created user processor@example.com as admin, processor in example"
+    )
 
 
 async def test_refusal_messages_contain_no_secret(db_session: AsyncSession) -> None:

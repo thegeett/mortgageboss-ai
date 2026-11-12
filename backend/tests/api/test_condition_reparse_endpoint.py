@@ -30,7 +30,7 @@ from app.core.database import get_db
 from app.core.jwt import create_access_token
 from app.core.security import hash_password
 from app.main import app
-from app.models import Company, User, UserRole
+from app.models import Company, UserRole
 from app.models.base import utcnow
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_round import (
@@ -50,6 +50,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.conditions.fixture_helpers import UWM_ROUND_1, portal_excerpt
 from tests.conditions.uwm_pdf_fixture import render_uwm_pdf
+from tests.user_factory import make_user
 
 
 @pytest.fixture
@@ -96,13 +97,13 @@ async def _user(db: AsyncSession, *, slug: str) -> tuple[Company, str]:
     company = Company(name=slug.title(), slug=f"{slug}-{uuid4().hex[:6]}")
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"u-{uuid4().hex[:8]}@example.com",
         hashed_password=hash_password("irrelevant"),
         first_name="Test",
         last_name="User",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db.add(user)

@@ -18,7 +18,7 @@ from app.scripts.bootstrap_admin import (
     success_line,
 )
 from app.services.auth import authenticate_user
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 PASSWORD = "correct horse battery staple"  # pragma: allowlist secret  (test-only)
@@ -57,7 +57,12 @@ async def test_creates_one_company_and_one_admin(db_session: AsyncSession) -> No
     assert company.slug == "example"
     assert company.is_active is True
     assert user.company_id == company.id
-    assert user.role is UserRole.ADMIN
+    # The first admin is the company's owner (ADR-440), stored, not just set on the object.
+    assert user.role_set == {UserRole.ADMIN}
+    stored_owner = await db_session.scalar(
+        text("SELECT owner_user_id FROM companies WHERE id = :id"), {"id": company.id}
+    )
+    assert stored_owner == user.id
     assert user.is_active is True
 
     assert await db_session.scalar(select(func.count()).select_from(Company)) == 1
@@ -76,7 +81,8 @@ async def test_created_user_authenticates_through_the_app(db_session: AsyncSessi
         db_session, email="admin@example.com", password=PASSWORD
     )
     assert authenticated.id == user.id
-    assert authenticated.role is UserRole.ADMIN
+    assert authenticated.role_set == {UserRole.ADMIN}
+    assert authenticated.is_owner is True
 
 
 async def test_the_supplied_hash_is_stored_verbatim(db_session: AsyncSession) -> None:

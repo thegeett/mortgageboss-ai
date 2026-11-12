@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import pytest
 from app.core.security import hash_password
-from app.models import Company, User, UserRole
+from app.models import Company, UserRole
 from app.models.document import DocumentStatus
 from app.models.document_finding import DocumentFindingType
 from app.models.loan_file import LoanFile, LoanPurpose
@@ -28,6 +28,7 @@ from app.services.needs_dedup import (
 )
 from app.services.needs_items import create_needs_item, list_needs_items
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 
 async def _loan_file(db: AsyncSession, *, slug: str = "acme") -> LoanFile:
@@ -35,13 +36,13 @@ async def _loan_file(db: AsyncSession, *, slug: str = "acme") -> LoanFile:
     db.add(company)
     await db.flush()
     db.add(
-        User(
+        make_user(
             company_id=company.id,
             email=f"u@{slug}.com",
             hashed_password=hash_password("x"),
             first_name="T",
             last_name="U",
-            role=UserRole.PROCESSOR,
+            roles=[UserRole.PROCESSOR],
             is_active=True,
         )
     )

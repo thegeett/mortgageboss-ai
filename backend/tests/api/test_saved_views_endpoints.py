@@ -27,6 +27,7 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from tests.user_factory import make_user
 
 URL = "/api/v1/saved-views"
 
@@ -56,13 +57,13 @@ async def _user(db: AsyncSession, *, slug: str, email: str) -> tuple[Company, Us
     company = Company(name=slug.title(), slug=slug)
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=email,
         hashed_password=hash_password("irrelevant"),  # pragma: allowlist secret
         first_name="Test",
         last_name="User",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db.add(user)
@@ -71,13 +72,13 @@ async def _user(db: AsyncSession, *, slug: str, email: str) -> tuple[Company, Us
 
 
 async def _second_user(db: AsyncSession, company: Company, email: str) -> tuple[User, str]:
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=email,
         hashed_password=hash_password("irrelevant"),  # pragma: allowlist secret
         first_name="Other",
         last_name="User",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db.add(user)

@@ -36,6 +36,7 @@ from app.services.inbound_triage import (
 )
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 _PDF = (Path(__file__).resolve().parents[1] / "fixtures" / "attachments" / "clean.pdf").read_bytes()
 
@@ -52,19 +53,19 @@ def _message_bytes(*, message_id: str, filename: str = "statement.pdf") -> bytes
 
 
 async def _company_user_file(db: AsyncSession, *, slug: str):
-    from app.models import User, UserRole
+    from app.models import UserRole
     from app.services.loan_files import create_loan_file
 
     company = Company(name=slug.title(), slug=f"{slug}-{uuid4().hex[:8]}")
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"p-{uuid4().hex[:8]}@example.com",
         hashed_password="x",  # pragma: allowlist secret
         first_name="Pat",
         last_name="Processor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db.add(user)
     await db.flush()

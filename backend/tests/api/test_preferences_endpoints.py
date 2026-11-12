@@ -19,6 +19,7 @@ from app.models.user import RowDensity
 from app.verification.confidence import AggressionLevel
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from tests.user_factory import make_user
 
 PREFS = "/api/v1/users/me/preferences"
 
@@ -55,13 +56,13 @@ async def _user_and_token(db: AsyncSession, *, email: str = "u@acme.com") -> tup
     company = Company(name="Acme", slug="acme")
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=email,
         hashed_password=hash_password("irrelevant"),  # pragma: allowlist secret
         first_name="Test",
         last_name="User",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db.add(user)

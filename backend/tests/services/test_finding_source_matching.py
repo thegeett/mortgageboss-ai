@@ -8,7 +8,7 @@ honest by construction (a common token that only coincides does NOT over-include
 from uuid import uuid4
 
 from app.core.security import hash_password
-from app.models import Company, User, UserRole
+from app.models import Company, UserRole
 from app.models.document import Document, DocumentStatus
 from app.models.extraction import ExtractionStatus
 from app.models.finding import Finding, FindingCategory, FindingOrigin, FindingStatus
@@ -23,6 +23,7 @@ from app.services.finding_source_matching import (
 from app.services.loan_files import create_loan_file
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 
 async def _loan_file(db: AsyncSession, *, slug: str = "acme") -> LoanFile:
@@ -30,13 +31,13 @@ async def _loan_file(db: AsyncSession, *, slug: str = "acme") -> LoanFile:
     db.add(company)
     await db.flush()
     db.add(
-        User(
+        make_user(
             company_id=company.id,
             email=f"u@{slug}.com",
             hashed_password=hash_password("x"),
             first_name="T",
             last_name="U",
-            role=UserRole.PROCESSOR,
+            roles=[UserRole.PROCESSOR],
             is_active=True,
         )
     )

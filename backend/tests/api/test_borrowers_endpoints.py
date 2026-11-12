@@ -18,12 +18,13 @@ from app.core.database import get_db
 from app.core.jwt import create_access_token
 from app.core.security import hash_password
 from app.main import app
-from app.models import Company, User, UserRole
+from app.models import Company, UserRole
 from app.models.loan_file import LoanFile
 from app.services.loan_files import create_loan_file
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from tests.user_factory import make_user
 
 SSN = "123-45-6789"  # pragma: allowlist secret
 SSN_DIGITS = "123456789"
@@ -62,13 +63,13 @@ async def _user_and_token(db: AsyncSession, *, slug: str, email: str) -> tuple[C
     company = Company(name=slug.title(), slug=slug)
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=email,
         hashed_password=hash_password("irrelevant"),
         first_name="Test",
         last_name="User",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db.add(user)

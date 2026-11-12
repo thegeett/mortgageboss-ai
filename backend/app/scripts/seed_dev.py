@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import async_session_maker
 from app.core.security import hash_password
 from app.models.company import Company
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, UserRoleAssignment
 
 # DEV-ONLY default credentials (override via env). Do NOT use in production.
 # These are local-dev conveniences, not secrets.
@@ -37,6 +37,10 @@ ADMIN_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD", "adminpass123")  # pragma: all
 PROCESSOR_EMAIL = os.getenv("SEED_PROCESSOR_EMAIL", "processor@demo.com")
 PROCESSOR_PASSWORD = os.getenv(
     "SEED_PROCESSOR_PASSWORD", "processorpass123"
+)  # pragma: allowlist secret
+LOAN_OFFICER_EMAIL = os.getenv("SEED_LOAN_OFFICER_EMAIL", "lo@demo.com")
+LOAN_OFFICER_PASSWORD = os.getenv(
+    "SEED_LOAN_OFFICER_PASSWORD", "lopass123"
 )  # pragma: allowlist secret
 COMPANY_NAME = os.getenv("SEED_COMPANY_NAME", "Demo Mortgage Processing")
 COMPANY_SLUG = os.getenv("SEED_COMPANY_SLUG", "demo")
@@ -61,7 +65,7 @@ async def _get_or_create_user(
     password: str,
     first_name: str,
     last_name: str,
-    role: UserRole,
+    roles: list[UserRole],
 ) -> tuple[User, bool]:
     """Return the user with this (globally unique) email, creating it if absent.
 
@@ -77,7 +81,7 @@ async def _get_or_create_user(
         hashed_password=hash_password(password),
         first_name=first_name,
         last_name=last_name,
-        role=role,
+        roles=[UserRoleAssignment(role=role) for role in roles],
         is_active=True,
     )
     db.add(user)
@@ -89,15 +93,19 @@ async def seed() -> None:
     """Seed the minimal dev dataset (idempotent) and print the credentials."""
     async with async_session_maker() as db:
         company, company_created = await _get_or_create_company(db)
-        _admin, admin_created = await _get_or_create_user(
+        # The admin is also a processor and the company's owner (ADR-440), so later tickets have a
+        # user holding two roles and an owner to refuse demoting.
+        admin, admin_created = await _get_or_create_user(
             db,
             company_id=company.id,
             email=ADMIN_EMAIL,
             password=ADMIN_PASSWORD,
             first_name="Demo",
             last_name="Admin",
-            role=UserRole.ADMIN,
+            roles=[UserRole.ADMIN, UserRole.PROCESSOR],
         )
+        if company.owner_user_id is None:
+            company.owner_user_id = admin.id
         _processor, processor_created = await _get_or_create_user(
             db,
             company_id=company.id,
@@ -105,7 +113,16 @@ async def seed() -> None:
             password=PROCESSOR_PASSWORD,
             first_name="Demo",
             last_name="Processor",
-            role=UserRole.PROCESSOR,
+            roles=[UserRole.PROCESSOR],
+        )
+        _loan_officer, loan_officer_created = await _get_or_create_user(
+            db,
+            company_id=company.id,
+            email=LOAN_OFFICER_EMAIL,
+            password=LOAN_OFFICER_PASSWORD,
+            first_name="Demo",
+            last_name="LoanOfficer",
+            roles=[UserRole.LOAN_OFFICER],
         )
         # Standalone script: commit our own transaction (services flush and let
         # the request handler commit; here there is no handler).
@@ -119,6 +136,10 @@ async def seed() -> None:
     print(f"Admin login:     {ADMIN_EMAIL} / {ADMIN_PASSWORD} [{_status(admin_created)}]")
     print(
         f"Processor login: {PROCESSOR_EMAIL} / {PROCESSOR_PASSWORD} [{_status(processor_created)}]"
+    )
+    print(
+        f"Loan officer login: {LOAN_OFFICER_EMAIL} / {LOAN_OFFICER_PASSWORD} "
+        f"[{_status(loan_officer_created)}]"
     )
     print("(DEV ONLY — these default passwords are for local development.)")
 

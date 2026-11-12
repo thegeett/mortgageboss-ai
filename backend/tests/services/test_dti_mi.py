@@ -32,6 +32,7 @@ from app.services.dti import (
 from app.services.loan_files import create_loan_file
 from app.services.mi import compute_loan_mi
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 
 async def _company(db: AsyncSession, slug: str = "acme") -> Company:
@@ -42,13 +43,13 @@ async def _company(db: AsyncSession, slug: str = "acme") -> Company:
 
 
 async def _user(db: AsyncSession, company: Company) -> User:
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"u@{company.slug}.test",
         hashed_password="h",  # pragma: allowlist secret
         first_name="Pro",
         last_name="Cessor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db.add(user)
     await db.flush()

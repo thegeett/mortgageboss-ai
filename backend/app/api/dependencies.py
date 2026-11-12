@@ -96,7 +96,10 @@ OptionalCurrentUser = Annotated[User | None, Depends(get_current_user_optional)]
 
 
 def require_role(*allowed_roles: UserRole) -> Callable[[User], Awaitable[User]]:
-    """Dependency factory: require the current user to hold one of ``allowed_roles``.
+    """Dependency factory: require the current user to hold any of ``allowed_roles``.
+
+    Checks the user's role set (ADR-440). Interim: LP-MB-Admin-02 replaces this with
+    permission keys.
 
     The returned dependency depends on :func:`get_current_user`, so
     authentication always precedes authorization. A wrong role raises ``403``
@@ -109,7 +112,7 @@ def require_role(*allowed_roles: UserRole) -> Callable[[User], Awaitable[User]]:
     """
 
     async def _require_role(current_user: CurrentUser) -> User:
-        if current_user.role not in allowed_roles:
+        if current_user.role_set.isdisjoint(allowed_roles):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Insufficient permissions",

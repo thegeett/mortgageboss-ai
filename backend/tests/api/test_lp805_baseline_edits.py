@@ -25,7 +25,6 @@ from app.models import (
     Lender,
     LoanProgram,
     StatedLiability,
-    User,
     UserRole,
 )
 from app.models.loan_file import LoanFile
@@ -34,6 +33,7 @@ from app.services.loan_files import create_loan_file
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from tests.user_factory import make_user
 
 V1 = "/api/v1"
 
@@ -70,13 +70,13 @@ async def _user_and_token(db: AsyncSession, *, slug: str, email: str) -> tuple[C
     company = Company(name=slug.title(), slug=slug)
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=email,
         hashed_password=hash_password("x"),
         first_name="Pro",
         last_name="Cessor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db.add(user)

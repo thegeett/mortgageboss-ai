@@ -11,9 +11,10 @@ from app.core.database import get_db
 from app.core.jwt import create_access_token
 from app.core.security import hash_password
 from app.main import app
-from app.models import Company, Lender, User, UserRole
+from app.models import Company, Lender, UserRole
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 LENDERS_URL = "/api/v1/lenders"
 
@@ -35,13 +36,13 @@ async def _user_and_token(db: AsyncSession, *, slug: str, email: str) -> tuple[C
     company = Company(name=slug.title(), slug=slug)
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=email,
         hashed_password=hash_password("irrelevant"),
         first_name="Test",
         last_name="User",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db.add(user)

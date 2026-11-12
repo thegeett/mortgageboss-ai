@@ -18,6 +18,7 @@ from app.services.condition_plan import lender_condition_settings
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.conditions.test_condition_reading import _file_with_round
+from tests.user_factory import make_user
 
 CLAUSE = (
     "United Wholesale Mortgage ISAOA, ATIMA PO BOX 202175 FLORENCE, SC 29502 Phone: (800) 981-8898"
@@ -32,18 +33,18 @@ async def _clients(
     from app.core.jwt import create_access_token
     from app.core.security import hash_password
     from app.main import app
-    from app.models import User, UserRole
+    from app.models import UserRole
     from httpx import ASGITransport, AsyncClient
 
     tokens: dict[str, str] = {}
     for role in (UserRole.ADMIN, UserRole.PROCESSOR):
-        user = User(
+        user = make_user(
             company_id=loan_file.company_id,
             email=f"{role.value}-{uuid4().hex[:6]}@example.com",
             hashed_password=hash_password("irrelevant"),
             first_name="Test",
             last_name=role.value,
-            role=role,
+            roles=[role],
             is_active=True,
         )
         db.add(user)

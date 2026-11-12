@@ -18,6 +18,7 @@ from app.models.needs_item import NeedsItem, NeedsItemOrigin
 from app.services.email_draft import add_needs_to_draft, compose_open_draft_prose
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 #: The template's own sentence, unchanged by composition. These companies have no mail domain, so
 #: it ends without an address (LP-991).
@@ -31,19 +32,19 @@ _COMPOSED = DraftComposition(
 
 
 async def _setup(db: AsyncSession):
-    from app.models import User, UserRole
+    from app.models import UserRole
     from app.services.loan_files import create_loan_file
 
     company = Company(name="Acme", slug=f"acme-{uuid4().hex[:8]}")
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"p-{uuid4().hex[:8]}@example.com",
         hashed_password="x",  # pragma: allowlist secret
         first_name="Pat",
         last_name="Processor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db.add(user)
     await db.flush()

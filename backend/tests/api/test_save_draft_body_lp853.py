@@ -16,11 +16,12 @@ import pytest_asyncio
 from app.core.config import settings
 from app.core.database import get_db
 from app.main import app
-from app.models import Borrower, Company, LoanProgram, User, UserRole
+from app.models import Borrower, Company, LoanProgram, UserRole
 from app.models.communication import BodyFormat, Communication
 from app.services.loan_files import create_loan_file
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from tests.user_factory import make_user
 
 API = "/api/v1/loan-files"
 
@@ -63,13 +64,13 @@ async def _file(db: AsyncSession):
     company = Company(name="Acme", slug=f"acme-{uuid4().hex[:6]}")
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"u-{uuid4().hex[:6]}@acme.com",
         hashed_password="x",  # pragma: allowlist secret
         first_name="Dana",
         last_name="Reyes",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db.add(user)
     await db.flush()

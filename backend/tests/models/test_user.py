@@ -1,7 +1,7 @@
 """Tests for the User model (LP-11).
 
 Covers create/read, the User↔Company relationship in both directions, the
-globally-unique email (even across companies), and the role enum round-trip.
+globally-unique email (even across companies), and the role set (LP-MB-Admin-01).
 Relationships are loaded eagerly with ``selectinload`` because lazy loading is
 not available under async sessions.
 """
@@ -12,6 +12,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from tests.user_factory import make_user
 
 
 async def _make_company(db_session: AsyncSession, slug: str) -> Company:
@@ -41,8 +42,9 @@ async def test_create_user_with_defaults(db_session: AsyncSession) -> None:
     assert user.first_name == "Pat"
     assert user.last_name == "Processor"
     assert user.full_name == "Pat Processor"
-    # role defaults to PROCESSOR; is_active defaults to True.
-    assert user.role is UserRole.PROCESSOR
+    # No role is implied (the set is what was granted) and LP-12's column is no longer written.
+    assert user.role_set == frozenset()
+    assert user.role is None
     assert user.is_active is True
     assert user.deleted_at is None
 
@@ -129,23 +131,45 @@ async def test_email_is_globally_unique_across_companies(db_session: AsyncSessio
             await db_session.flush()
 
 
-async def test_role_enum_roundtrips(db_session: AsyncSession) -> None:
-    """The role enum round-trips and is stored as its string value."""
+async def test_roles_roundtrip_as_a_set(db_session: AsyncSession) -> None:
+    """A user holds several roles, one `user_roles` row each, stored as the enum's value."""
     company = await _make_company(db_session, "delta")
-    user = User(
+    user = make_user(
         company_id=company.id,
         email="admin@delta.test",
         hashed_password="h",
         first_name="Ada",
         last_name="Admin",
-        role=UserRole.ADMIN,
+        roles=[UserRole.ADMIN, UserRole.PROCESSOR],
     )
     db_session.add(user)
     await db_session.flush()
-    await db_session.refresh(user)
+    db_session.expunge(user)
 
-    assert user.role is UserRole.ADMIN
+    loaded = (await db_session.scalars(select(User).where(User.id == user.id))).one()
+    assert loaded is not user
+    # Loaded with the user (`lazy="selectin"`): reading it here would raise if it were lazy.
+    assert loaded.role_set == {UserRole.ADMIN, UserRole.PROCESSOR}
 
     # native_enum=False persists the value (not the member name).
-    raw = await db_session.scalar(text("SELECT role FROM users WHERE id = :id"), {"id": user.id})
-    assert raw == "admin"
+    raw = await db_session.scalars(
+        text("SELECT role FROM user_roles WHERE user_id = :id ORDER BY role"), {"id": user.id}
+    )
+    assert list(raw) == ["admin", "processor"]
+
+
+async def test_the_same_role_twice_is_refused(db_session: AsyncSession) -> None:
+    company = await _make_company(db_session, "epsilon")
+    with pytest.raises(IntegrityError):
+        async with db_session.begin_nested():
+            db_session.add(
+                make_user(
+                    company_id=company.id,
+                    email="twice@epsilon.test",
+                    hashed_password="h",
+                    first_name="T",
+                    last_name="W",
+                    roles=[UserRole.ADMIN, UserRole.ADMIN],
+                )
+            )
+            await db_session.flush()

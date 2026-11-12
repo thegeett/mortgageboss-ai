@@ -39,6 +39,7 @@ from app.services.inbound_triage import (
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.mail_address import deliver, file_mail_address
+from tests.user_factory import make_user
 
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "attachments"
 _PDF = (_FIXTURES / "clean.pdf").read_bytes()
@@ -65,15 +66,15 @@ async def _company_and_file(db: AsyncSession, *, slug: str):
 async def _processor(db: AsyncSession, company) -> UUID:
     """A REAL user row. `activity_logs.actor_user_id` is a foreign key, so a bare uuid4() fails at
     flush and the failure reads like a bug in whatever was being tested."""
-    from app.models import User, UserRole
+    from app.models import UserRole
 
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"p-{uuid4().hex[:8]}@example.com",
         hashed_password="x",  # pragma: allowlist secret
         first_name="Pat",
         last_name="Processor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db.add(user)
     await db.flush()

@@ -23,6 +23,7 @@ from app.services.loan_files import (
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 
 async def _company(db: AsyncSession, slug: str = "acme") -> Company:
@@ -33,13 +34,13 @@ async def _company(db: AsyncSession, slug: str = "acme") -> Company:
 
 
 async def _user(db: AsyncSession, company: Company) -> User:
-    user = User(
+    user = make_user(
         company_id=company.id,
         email="actor@acme.com",
         hashed_password=hash_password("x"),
         first_name="Act",
         last_name="Or",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db.add(user)

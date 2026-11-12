@@ -39,6 +39,7 @@ from app.verification.cross_source import CrossSourceFacts, ObligationRef
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.integration.factories import make_document, make_extraction, make_property
+from tests.user_factory import make_user
 
 _SUBJECT = "123 Main St, Springfield, IL, 62704"
 
@@ -78,13 +79,13 @@ async def _company(db: AsyncSession) -> Company:
 
 
 async def _user(db: AsyncSession, company: Company) -> User:
-    user = User(
+    user = make_user(
         company_id=company.id,
         email="u@acme.test",
         hashed_password="h",  # pragma: allowlist secret
         first_name="Pro",
         last_name="Cessor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db.add(user)
     await db.flush()

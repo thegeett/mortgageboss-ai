@@ -40,6 +40,7 @@ from app.services.mail_domain import set_company_mail_domain
 from app.storage import StorageError, get_mail_storage, get_storage_backend
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 _PDF = (Path(__file__).resolve().parents[1] / "fixtures" / "attachments" / "clean.pdf").read_bytes()
 
@@ -385,15 +386,15 @@ async def test_stored_raw_mail_is_under_inbound_in_mail_storage(db_session: Asyn
 
 
 async def test_accept_and_preview_read_from_mail_storage(db_session: AsyncSession) -> None:
-    from app.models.user import User, UserRole
+    from app.models.user import UserRole
 
     loan_file, _message_row, attachment = await _routed_attachment(db_session)
-    user = User(
+    user = make_user(
         company_id=loan_file.company_id,
         email=f"{uuid4().hex[:8]}@example.test",
         first_name="Pat",
         last_name="Processor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         hashed_password="x",  # pragma: allowlist secret
     )
     db_session.add(user)

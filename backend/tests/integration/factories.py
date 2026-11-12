@@ -29,6 +29,7 @@ from app.models.needs_item import (
 from app.services.loan_files import create_loan_file
 from app.storage import get_storage_backend
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests import user_factory
 
 # A known password so login-flow tests can authenticate the created user.
 DEFAULT_PASSWORD = "Sup3r-secret-pw"  # pragma: allowlist secret
@@ -51,13 +52,13 @@ async def make_user(
     role: UserRole = UserRole.PROCESSOR,
     password: str = DEFAULT_PASSWORD,
 ) -> User:
-    user = User(
+    user = user_factory.make_user(
         company_id=company.id,
         email=email or f"user-{uuid4().hex[:8]}@{company.slug}.com",
         hashed_password=hash_password(password),
         first_name="Test",
         last_name="User",
-        role=role,
+        roles=[role],
         is_active=True,
     )
     db.add(user)

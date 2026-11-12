@@ -40,6 +40,7 @@ from tests.conditions.fixture_helpers import UWM_ROUND_2
 from tests.conditions.reading_fixture import fake_complete
 from tests.conditions.test_condition_reading import _file_with_round
 from tests.conditions.uwm_pdf_fixture import render_uwm_pdf
+from tests.user_factory import make_user
 
 
 @pytest.fixture(autouse=True)
@@ -67,15 +68,15 @@ async def _credit_invoice(db: AsyncSession, loan_file: LoanFile) -> Document:
 
 async def _actor(db: AsyncSession, loan_file: LoanFile) -> Any:
     from app.core.security import hash_password
-    from app.models import User, UserRole
+    from app.models import UserRole
 
-    user = User(
+    user = make_user(
         company_id=loan_file.company_id,
         email=f"a-{uuid4().hex[:8]}@example.com",
         hashed_password=hash_password("irrelevant"),
         first_name="Priya",
         last_name="Raman",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db.add(user)

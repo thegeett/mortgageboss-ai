@@ -43,7 +43,7 @@ from uuid import UUID, uuid4
 
 import structlog
 from lxml import etree
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.extraction.bank_statement import BankStatementExtraction, Transaction
@@ -59,6 +59,7 @@ from app.models.activity_log import ActivityType
 from app.models.base import utcnow
 from app.models.borrower import Borrower, MaritalStatus
 from app.models.company import Company
+from app.models.company_audit_log import CompanyAuditLog
 from app.models.company_mail_domain import CompanyMailDomain
 from app.models.document import Document, DocumentCategory, DocumentStatus, UploadSource
 from app.models.extraction import ExtractionStatus
@@ -72,7 +73,7 @@ from app.models.needs_item import (
     NeedsItemStatus,
 )
 from app.models.property import OccupancyType, Property, PropertyType
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, UserRoleAssignment
 from app.services.activity_log import log_activity
 from app.services.extractions import create_extraction_version
 from app.services.loan_files import create_loan_file
@@ -89,6 +90,7 @@ _COMPANY_SLUG = "summit"
 _MAIL_DOMAIN = "mb-mail.localhost"
 _ADMIN_EMAIL = "admin@summit-demo.com"
 _PROCESSOR_EMAIL = "priya@summit-demo.com"
+_LOAN_OFFICER_EMAIL = "jordan@summit-demo.com"
 _SEED_PASSWORD = "DevPassword123!"  # pragma: allowlist secret  (DEV-ONLY, documented)
 _MODEL_USED = "claude-sonnet-4-6"  # plausible placeholder for seeded extractions
 
@@ -278,7 +280,7 @@ async def _get_or_create_user(
     email: str,
     first_name: str,
     last_name: str,
-    role: UserRole,
+    roles: list[UserRole],
 ) -> tuple[User, bool]:
     existing = await db.scalar(select(User).where(User.email == email))
     if existing is not None:
@@ -289,7 +291,7 @@ async def _get_or_create_user(
         hashed_password=hash_password(_SEED_PASSWORD),
         first_name=first_name,
         last_name=last_name,
-        role=role,
+        roles=[UserRoleAssignment(role=role) for role in roles],
         is_active=True,
     )
     db.add(user)
@@ -998,6 +1000,9 @@ async def _clear_seed(db: AsyncSession) -> None:
         delete(InboundMessage).where(InboundMessage.ingest_key.in_(_SEEDED_INGEST_KEYS))
     )
     await db.execute(delete(LoanFile).where(LoanFile.company_id == company_id))
+    # The owner points at a user (RESTRICT), and audit rows at the company: clear both first.
+    await db.execute(update(Company).where(Company.id == company_id).values(owner_user_id=None))
+    await db.execute(delete(CompanyAuditLog).where(CompanyAuditLog.company_id == company_id))
     await db.execute(delete(User).where(User.company_id == company_id))
     await db.execute(delete(Lender).where(Lender.company_id == company_id))
     await db.execute(delete(Company).where(Company.id == company_id))
@@ -1034,15 +1039,26 @@ async def seed(*, reset: bool) -> None:
             email=_ADMIN_EMAIL,
             first_name="Avery",
             last_name="Stone",
-            role=UserRole.ADMIN,
+            # Also a processor, and the owner (ADR-440): later tickets need both.
+            roles=[UserRole.ADMIN, UserRole.PROCESSOR],
         )
+        if company.owner_user_id is None:
+            company.owner_user_id = admin.id
         processor, processor_created = await _get_or_create_user(
             db,
             company_id=company.id,
             email=_PROCESSOR_EMAIL,
             first_name="Priya",
             last_name="Desai",
-            role=UserRole.PROCESSOR,
+            roles=[UserRole.PROCESSOR],
+        )
+        _loan_officer, loan_officer_created = await _get_or_create_user(
+            db,
+            company_id=company.id,
+            email=_LOAN_OFFICER_EMAIL,
+            first_name="Jordan",
+            last_name="Reyes",
+            roles=[UserRole.LOAN_OFFICER],
         )
         uwm, uwm_created = await _get_or_create_lender(
             db,
@@ -1075,6 +1091,7 @@ async def seed(*, reset: bool) -> None:
         company_created=company_created,
         admin_created=admin_created,
         processor_created=processor_created,
+        loan_officer_created=loan_officer_created,
         uwm_created=uwm_created,
         sunwest_created=sunwest_created,
         loan_files_created=files_created,
@@ -1102,6 +1119,7 @@ def _print_summary(
     print("Login (DEV-ONLY passwords):")
     print(f"  Admin:     {_ADMIN_EMAIL} / {_SEED_PASSWORD}")
     print(f"  Processor: {_PROCESSOR_EMAIL} / {_SEED_PASSWORD}")
+    print(f"  Loan officer: {_LOAN_OFFICER_EMAIL} / {_SEED_PASSWORD}")
     print("Extractions are pre-canned (no AI); all PII is synthetic.")
 
 

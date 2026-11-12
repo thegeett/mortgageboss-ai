@@ -1,19 +1,24 @@
-"""User model — a person who uses the system (processor or admin).
+"""User model — a person who uses the system — and the roles they hold.
 
-Each user belongs to exactly one company. Email is globally unique (ADR-042):
+Each user belongs to exactly one company and holds one or more roles (ADR-440): the set lives in
+``user_roles``, one row per role, and capability is the union. ``users.role`` is the single role of
+LP-12, kept unread and unwritten for one release so the migration can be rolled back.
+
+Email is globally unique (ADR-042):
 it identifies the user across the whole system and determines their company at
 login. Passwords are stored only as hashes (``hashed_password``); the actual
 authentication logic arrives in LP-22.
 """
 
+from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import JSON, ForeignKey, String
+from sqlalchemy import JSON, DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
+from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin, utcnow
 from app.models.enums import str_enum
 from app.models.types import MediumStr, ShortStr
 from app.verification.confidence import DEFAULT_AGGRESSION, AggressionLevel
@@ -72,14 +77,19 @@ if TYPE_CHECKING:
 
 
 class UserRole(StrEnum):
-    """User roles determining permissions.
+    """User roles determining permissions. A user holds one or more (ADR-440).
 
     PROCESSOR: does loan processing work.
     ADMIN: additionally manages users and lender configuration.
+    LOAN_OFFICER: originates the loan; what it may do arrives with permission keys (LP-MB-Admin-02).
+
+    Owner is not a role: ``companies.owner_user_id`` names one admin the app refuses to deactivate
+    or demote.
     """
 
     PROCESSOR = "processor"
     ADMIN = "admin"
+    LOAN_OFFICER = "loan_officer"
 
 
 class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
@@ -96,11 +106,9 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     first_name: Mapped[ShortStr] = mapped_column(nullable=False)
     last_name: Mapped[ShortStr] = mapped_column(nullable=False)
-    role: Mapped[UserRole] = mapped_column(
-        str_enum(UserRole),
-        default=UserRole.PROCESSOR,
-        nullable=False,
-    )
+    # LP-12's single role. Neither read nor written since LP-MB-Admin-01: `roles` is the source.
+    # Kept (nullable) for one release so the migration can roll back; a later ticket drops it.
+    role: Mapped[UserRole | None] = mapped_column(str_enum(UserRole), nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
     # The user's default verification thoroughness (LP-79's aggression dial). A
     # per-file override can dial a specific file up/down; absent an override this
@@ -136,11 +144,55 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     )
 
     # Relationships
-    company: Mapped["Company"] = relationship(back_populates="users")
+    # `foreign_keys` because `companies.owner_user_id` points back here, so the two tables are joined
+    # by two paths and SQLAlchemy will not pick one.
+    company: Mapped["Company"] = relationship(back_populates="users", foreign_keys=[company_id])
+    # Loaded with the user: the app is async, and `get_current_user` must not lazy-load.
+    roles: Mapped[list["UserRoleAssignment"]] = relationship(
+        back_populates="user",
+        foreign_keys="UserRoleAssignment.user_id",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
     @property
     def full_name(self) -> str:
         return f"{self.first_name} {self.last_name}"
 
+    @property
+    def role_set(self) -> frozenset[UserRole]:
+        """The roles this user holds. The one accessor: nothing reads `roles` rows or `role`."""
+        return frozenset(assignment.role for assignment in self.roles)
+
+    @property
+    def is_owner(self) -> bool:
+        """Whether this user is their company's owner. Needs `company` loaded."""
+        return self.company.owner_user_id == self.id
+
     def __repr__(self) -> str:
-        return f"<User {self.email} ({self.role})>"
+        return f"<User {self.email} ({', '.join(sorted(self.role_set))})>"
+
+
+class UserRoleAssignment(Base, UUIDMixin):
+    """One role one user holds (ADR-440).
+
+    No soft delete and no `updated_at`: revoking a role deletes the row, and the company audit log
+    keeps the history.
+    """
+
+    __tablename__ = "user_roles"
+    __table_args__ = (UniqueConstraint("user_id", "role", name="uq_user_roles_user_id_role"),)
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    role: Mapped[UserRole] = mapped_column(str_enum(UserRole), nullable=False)
+    #: Who granted it; NULL = the system or the migration.
+    granted_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+    user: Mapped[User] = relationship(back_populates="roles", foreign_keys=[user_id])

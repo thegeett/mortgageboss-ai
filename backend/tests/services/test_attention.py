@@ -30,19 +30,20 @@ from app.services.attention import AttentionTone, attention_for_files
 from app.services.loan_files import create_loan_file
 from app.verification.confidence import AggressionLevel
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 
 async def _company_and_user(db_session: AsyncSession) -> tuple[Company, User]:
     company = Company(name="Acme", slug="acme")
     db_session.add(company)
     await db_session.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email="u@acme.com",
         hashed_password="x",  # pragma: allowlist secret
         first_name="Test",
         last_name="User",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db_session.add(user)

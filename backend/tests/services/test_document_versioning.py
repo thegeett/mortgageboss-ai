@@ -8,13 +8,14 @@ the satisfied need re-opens to re-evaluate); new uploads are standalone/current
 from uuid import uuid4
 
 from app.core.security import hash_password
-from app.models import Company, User, UserRole
+from app.models import Company, UserRole
 from app.models.document import Document, DocumentStatus, UploadSource
 from app.models.needs_item import NeedsItemStatus
 from app.services.document_versioning import supersede_document, version_count
 from app.services.loan_files import create_loan_file
 from app.services.needs_items import create_needs_item
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.user_factory import make_user
 
 
 async def _loan_file(db: AsyncSession, slug: str = "acme"):
@@ -22,13 +23,13 @@ async def _loan_file(db: AsyncSession, slug: str = "acme"):
     db.add(company)
     await db.flush()
     db.add(
-        User(
+        make_user(
             company_id=company.id,
             email=f"u@{slug}.com",
             hashed_password=hash_password("x"),
             first_name="T",
             last_name="U",
-            role=UserRole.PROCESSOR,
+            roles=[UserRole.PROCESSOR],
             is_active=True,
         )
     )

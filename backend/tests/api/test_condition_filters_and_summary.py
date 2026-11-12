@@ -28,7 +28,7 @@ from app.core.database import get_db
 from app.core.jwt import create_access_token
 from app.core.security import hash_password
 from app.main import app
-from app.models import Company, User, UserRole
+from app.models import Company, UserRole
 from app.models.condition import Condition, ConditionLenderStatus, ConditionPrepStatus
 from app.models.loan_file import LoanFile
 from app.services import condition_reading
@@ -44,6 +44,7 @@ from tests.conditions.fixture_helpers import UWM_ROUND_1, portal_excerpt
 from tests.conditions.reading_fixture import fake_complete
 from tests.conditions.uwm_pdf_fixture import render_uwm_pdf
 from tests.models.conftest_helpers import make_lender
+from tests.user_factory import make_user
 
 API = "/api/v1"
 
@@ -92,13 +93,13 @@ async def _company_user(db: AsyncSession, *, slug: str) -> tuple[Company, dict[s
     company = Company(name=slug.title(), slug=f"{slug}-{uuid4().hex[:6]}")
     db.add(company)
     await db.flush()
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"u-{uuid4().hex[:8]}@example.com",
         hashed_password=hash_password("irrelevant"),
         first_name="Test",
         last_name="Processor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
         is_active=True,
     )
     db.add(user)

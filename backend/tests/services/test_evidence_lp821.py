@@ -40,6 +40,7 @@ from app.services.evidence import (
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.mail_address import deliver, file_mail_address
+from tests.user_factory import make_user
 
 
 async def _company_and_file(db: AsyncSession, *, slug: str):
@@ -55,13 +56,13 @@ async def _company_and_file(db: AsyncSession, *, slug: str):
 
 
 async def _actor(db: AsyncSession, company) -> User:
-    user = User(
+    user = make_user(
         company_id=company.id,
         email=f"p-{uuid4().hex[:8]}@example.com",
         hashed_password="x",  # pragma: allowlist secret
         first_name="Pat",
         last_name="Processor",
-        role=UserRole.PROCESSOR,
+        roles=[UserRole.PROCESSOR],
     )
     db.add(user)
     await db.flush()
