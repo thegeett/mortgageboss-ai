@@ -1,7 +1,7 @@
 # LP-MB-Admin-01 — Roles as a set (`user_roles`), the company owner, and the company audit log
 
 Admin and roles, ticket 1 of 5. **Status: planned, not built.** Next: LP-MB-Admin-02 (permission keys).
-Use cases: project doc `claude/company-admin-and-roles-use-cases.md`.
+Use cases: `docs/design/admin/company-admin-and-roles-use-cases.md` (section 12 is the current state; earlier sections are the original brief).
 
 ## What and why
 
