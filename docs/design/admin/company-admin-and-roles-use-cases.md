@@ -156,9 +156,9 @@ Added after a second pass: the two tenant kinds; an **Owner** role with guardrai
 - Every admin action writes to the activity log with actor, target and before/after values (reuse `field_changes` / `audit_value`).
 - Sequencing: people management, roles and loan teams first (the borrower invite flow needs an LO identity on the loan); company grants second (existing processing-company customers need them); integration credentials arrive with each vendor; templates, reports, billing later.
 
-## 12. Decisions after checking the repo (2026-11-11, updated 2026-11-12)
+## 12. Decisions after checking the repo (2026-11-11, updated 2026-11-13 after the build)
 
-Where this section and sections 3 to 11 disagree, this section is current. Tickets: `docs/tickets/LP-MB-Admin-01.md` to `LP-MB-Admin-05.md`; screens: `docs/design/admin/` (README there). ADRs reserved: ADR-440 to ADR-445. Committed to `mbai-admin-panel` as `bb678090`.
+Where this section and sections 3 to 11 disagree, this section is current. Tickets: `docs/tickets/LP-MB-Admin-01.md` to `LP-MB-Admin-05.md`; screens: `docs/design/admin/` (README there). ADRs reserved: ADR-440 to ADR-445. Tickets committed as `bb678090`; the build as `da020dcd` … `8dbabe01`.
 
 **Roles and the owner**
 - Roles are an additive set in `user_roles`: Admin, Loan officer, Processor. No Owner role and no Contract processor role.
@@ -185,6 +185,26 @@ Where this section and sections 3 to 11 disagree, this section is current. Ticke
 
 **Numbering**: `LP-MB-Admin-NN` ticket ids and ADR-440 onward, because `mbai-arive` and `improve_communication_feature` branch from the same commit (last LP-1015, ADR-421).
 
-**Build order**: 01 roles, owner and audit log → 02 permission keys and company settings → 03 user management and `/admin/people` → 04 invites → 05 loan teams (Part 1 team; Part 2 restriction waits for a broker shop). Ticket 01 also adds the migrated-database test fixture the repo lacks.
+**Build state (2026-11-13)**: all five tickets built and committed on `mbai-admin-panel` (`da020dcd` … `8dbabe01`), not pushed. Backend 10093 tests, frontend 2627, ruff/mypy/biome/tsc clean. Each ticket's Result section records what was built, assumptions and review fixes.
+
+**Decided during the build** (each recorded in its ticket):
+- A loan officer may change the team only on files where they are the LO; "holds `loan.team.change`" alone is not enough. Encoded as data (`OWN_FILES_ONLY`) plus one pure function `may_change_team` in `core/permissions.py`.
+- A role a person still uses on files cannot be removed (409 naming the file count); move their files first.
+- Renaming a person updates the locked loan-officer text on every file they are LO of. Replacing an LO soft-deletes the old LO's participant row unless it was hand-trusted.
+- A creator holding Loan officer becomes the file's LO only when the file names no other loan officer.
+- Invite tokens travel in the URL fragment and request body (never a path), unlike upload links; ADR-444 says why. The raw token sits in the Celery broker until sent.
+- Invite addresses are stored the way login looks them up (domain lowercased, local part as typed).
+- `readonly.users` no longer exposes `role`; `readonly.user_roles` and `readonly.loan_teams` exist. `phone`, `nmls_id`, `user_invites` and `company_audit_log` have no readonly view (identifiers or prose).
+- A `migrated_db` test fixture runs the real Alembic migrations against a scratch database; the repo had none before.
+
+**Part 2 of loan teams (restrict files to team) is parked, with a measured cost.** The survey (`docs/tickets/LP-MB-Admin-05-survey.md`) found 223 doors to a loan file: 68 through `ScopedLoanFile`, 69 through `get_loan_file` directly (29 of them in the conditions router's own dependency), 70 by child id or company-wide query, 16 Celery tasks. The original "98 uses, one fix" estimate was wrong. Part 2 needs about ten enforcement points, a signature change to `get_loan_file`, a decision on the processor-copy job, and a per-route test. It is its own ticket when a broker tenant exists.
+
+**Loose ends outside the five tickets**:
+- Staging sends from `noreply@mortgageboss.ai`, which is not a verified SES identity, and `MAIL_TRANSPORT=ses` there, so invites on staging neither send nor show a link. Fix: `SMTP_FROM_EMAIL = "noreply@mail.staging.mortgageboss.ai"` in `infra/envs/staging/main.tf` (an INFRA change), or verify the root domain.
+- `/admin/email` is still a 404 stub; the mail-domain state and mailbox-connections component need a small wiring ticket.
+- Deploy order: for 01, migrate the database before deploying the code (older code requires `users.role`); for 02, deploy the frontend with or before the backend (`UserPublic` lost `role`).
+- Before merging: run `alembic upgrade head` against a copy of the real staging database and read the list of companies left with no owner; reconcile the Alembic head with whichever of `mbai-arive` / `improve_communication_feature` merges first.
+
+**Build order** (as built): 01 roles, owner and audit log → 02 permission keys and company settings → 03 user management and `/admin/people` → 04 invites → 05 loan teams Part 1 + Part 2 survey.
 
 **Still open**: whether a processor may hand a file to another processor; whether `noreply@mortgageboss.ai` is a verified SES identity in staging (invite email; copy-the-link mode until then).
