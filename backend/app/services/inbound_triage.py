@@ -26,15 +26,16 @@ from dataclasses import dataclass
 from enum import StrEnum
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.file_scope import FileScope
 from app.core.logging import get_logger
 from app.models.activity_log import ActivityType
 from app.models.condition_round import ConditionRound
 from app.models.document import Document, UploadSource
-from app.models.helpers import only_active
+from app.models.helpers import only_active, scope_files
 from app.models.inbound_attachment import (
     AttachmentDisposition,
     AttachmentSafetyState,
@@ -577,15 +578,16 @@ async def attachment_preview(db: AsyncSession, *, attachment: InboundAttachment)
 async def move_unrouted_message(
     db: AsyncSession,
     *,
-    company_id: UUID,
+    scope: FileScope,
     message_id: UUID,
     file_identifier: str,
     actor_user_id: UUID,
 ) -> InboundMessage | None:
-    """Put this company's unrouted message on this company's file. ``flush`` only (LP-1009).
+    """Put this company's unrouted message on a file the caller may see. ``flush`` only (LP-1009).
 
-    None when the message or the file is not this company's, or does not exist: the caller answers
-    404 for all of them, so the answer says nothing about another company's rows. Locked, so two
+    None when the message is not this company's, the file is outside ``scope`` (another company's,
+    or on a team the caller is restricted away from, ADR-446), or either does not exist: the caller
+    answers 404 for all of them, so the answer says nothing about rows the caller cannot see. Locked, so two
     people moving one message cannot write two correspondence records.
     """
     from app.services.inbound_routing import move_message_to_file
@@ -595,7 +597,10 @@ async def move_unrouted_message(
         await db.execute(
             only_active(
                 select(InboundMessage)
-                .where(InboundMessage.id == message_id, InboundMessage.company_id == company_id)
+                .where(
+                    InboundMessage.id == message_id,
+                    InboundMessage.company_id == scope.company_id,
+                )
                 .with_for_update(),
                 InboundMessage,
             )
@@ -605,7 +610,7 @@ async def move_unrouted_message(
         return None
     if message.routing_state is not InboundRoutingState.UNROUTED:
         raise CannotAcceptError("This message is already on a file.")
-    loan_file = await get_loan_file(db, company_id=company_id, identifier=file_identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=file_identifier)
     if loan_file is None:
         return None
     await move_message_to_file(
@@ -648,8 +653,13 @@ async def dismiss_unrouted_message(
     return message
 
 
-async def list_triage_queue(db: AsyncSession, *, company_id: UUID) -> list[InboundMessage]:
+async def list_triage_queue(db: AsyncSession, *, scope: FileScope) -> list[InboundMessage]:
     """Messages for one company, and only that company.
+
+    A MESSAGE ON A FILE IS LISTED ONLY IF THE FILE IS IN ``scope`` (LP-MB-Admin-06): under "restrict
+    loan files to their team", mail on another team's file is not this caller's to see, and on a
+    deleted file it is nobody's. A message on NO file stays for everyone in the company: the Inbox is
+    where unmatched mail gets a file, and nobody is on a team for mail with none (ADR-421).
 
     A MESSAGE WITH NO COMPANY IS RETURNED TO NOBODY (LP-1008). It used to be returned to every
     company with the sender's words stripped, which still showed one company a trace of another's
@@ -662,7 +672,13 @@ async def list_triage_queue(db: AsyncSession, *, company_id: UUID) -> list[Inbou
                 only_active(
                     select(InboundMessage)
                     .where(
-                        InboundMessage.company_id == company_id,
+                        InboundMessage.company_id == scope.company_id,
+                        or_(
+                            InboundMessage.loan_file_id.is_(None),
+                            InboundMessage.loan_file_id.in_(
+                                scope_files(select(LoanFile.id), scope)
+                            ),
+                        ),
                         # LP-1011 — a dismissed message (rejected, no file) leaves the Inbox.
                         ~(
                             (InboundMessage.routing_state == InboundRoutingState.REJECTED)

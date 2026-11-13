@@ -18,6 +18,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+from app.core.file_scope import FileScope
 from app.models import Company, LoanProgram
 from app.models.document import Document, UploadSource
 from app.models.inbound_attachment import (
@@ -386,8 +387,8 @@ async def test_the_queue_is_scoped_to_the_company(db_session: AsyncSession) -> N
     mine, _my_user, _my_file = await _company_user_file(db_session, slug="mine")
     await _routed_attachment(db_session, loan_file=their_file, message_id="queue-1@example.com")
 
-    theirs_queue = await list_triage_queue(db_session, company_id=theirs.id)
-    mine_queue = await list_triage_queue(db_session, company_id=mine.id)
+    theirs_queue = await list_triage_queue(db_session, scope=FileScope.system(theirs.id))
+    mine_queue = await list_triage_queue(db_session, scope=FileScope.system(mine.id))
 
     assert len(theirs_queue) == 1
     assert mine_queue == []
@@ -403,7 +404,7 @@ async def test_a_message_with_no_company_is_in_no_companys_queue(db_session: Asy
         db_session, raw=raw, raw_storage_path=None, ses_message_id="ses-unrouted-1"
     )
 
-    queue = await list_triage_queue(db_session, company_id=theirs.id)
+    queue = await list_triage_queue(db_session, scope=FileScope.system(theirs.id))
 
     assert len(queue) == 1
     assert queue[0].company_id == theirs.id

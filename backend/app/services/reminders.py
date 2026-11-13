@@ -38,6 +38,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.file_scope import FileScope
 from app.models.activity_log import ActivityLog
 from app.models.base import utcnow
 from app.models.communication import (
@@ -45,7 +46,7 @@ from app.models.communication import (
     CommunicationDirection,
     CommunicationStatus,
 )
-from app.models.helpers import only_active
+from app.models.helpers import only_active, scope_files
 from app.models.loan_file import LoanFile, LoanFileStatus
 from app.models.needs_item import NeedsItem, NeedsItemStatus
 from app.models.reminder_snooze import ReminderKind, ReminderSnooze
@@ -102,18 +103,19 @@ async def _snoozes(db: AsyncSession, *, loan_file_ids: list[UUID]) -> list[Remin
 
 
 async def _open_files(
-    db: AsyncSession, *, company_id: UUID, loan_file: LoanFile | None
+    db: AsyncSession, *, scope: FileScope, loan_file: LoanFile | None
 ) -> list[LoanFile]:
-    """The files these rules run over.
+    """The files these rules run over: the ones ``scope`` may see (ADR-446).
 
-    COMPANY-SCOPED ALWAYS, even when one file is named: the caller passes a file that a scoped route
-    already resolved, and re-checking costs one comparison against the alternative of a suggestion
-    list built from a file somebody else owns.
+    SCOPED ALWAYS, even when one file is named: the caller passes a file that a scoped route already
+    resolved, and re-checking costs one query against the alternative of a suggestion list built
+    from a file somebody else owns. In the query, by `scope_files`, so the team rule is the same one
+    every other gate applies.
     """
+    stmt = scope_files(select(LoanFile), scope)
     if loan_file is not None:
-        return [loan_file] if loan_file.company_id == company_id else []
-    stmt = select(LoanFile).where(LoanFile.company_id == company_id)
-    return list((await db.execute(only_active(stmt, LoanFile))).scalars().all())
+        stmt = stmt.where(LoanFile.id == loan_file.id)
+    return list((await db.execute(stmt)).scalars().all())
 
 
 async def _pending_needs(
@@ -342,7 +344,7 @@ def _is_suppressed(
 async def build_suggestions(
     db: AsyncSession,
     *,
-    company_id: UUID,
+    scope: FileScope,
     loan_file: LoanFile | None = None,
     now: datetime | None = None,
 ) -> list[Suggestion]:
@@ -354,7 +356,7 @@ async def build_suggestions(
     whole list.
     """
     moment = now or utcnow()
-    files = await _open_files(db, company_id=company_id, loan_file=loan_file)
+    files = await _open_files(db, scope=scope, loan_file=loan_file)
     files = [f for f in files if f.status not in _CLOSED]
     if not files:
         return []

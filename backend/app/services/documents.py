@@ -8,7 +8,7 @@ Two scoping shapes are served here:
     ``loan_file`` / ``loan_file_id`` — the endpoint resolves the parent file with
     the caller's company first (the LP-29 file gate).
   * **Flat** operations (get/download/delete by document id) have no file in the
-    path, so :func:`get_document_for_company` resolves the document's company by
+    path, so :func:`get_document` resolves the document's company by
     **joining through its loan file** and returns ``None`` unless that file
     belongs to the caller's company. A flat route must NEVER load a document by
     id alone — that is the cross-tenant leak this guards against.
@@ -26,6 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.file_scope import FileScope
 from app.documents.naming import standard_name
 from app.documents.period import document_period
 from app.documents.schema_fields import fields_for
@@ -34,7 +35,7 @@ from app.models.base import utcnow
 from app.models.document import Document, DocumentStatus, StalenessResolution, UploadSource
 from app.models.extraction import Extraction
 from app.models.field_review import FieldReview, FieldVerdict
-from app.models.helpers import only_active
+from app.models.helpers import only_active, scope_files
 from app.models.loan_file import LoanFile
 from app.schemas.document import (
     DocumentDetailResponse,
@@ -203,24 +204,24 @@ async def resolve_staleness(db: AsyncSession, *, document: Document, action: str
     return document
 
 
-async def get_document_for_company(
-    db: AsyncSession, *, document_id: UUID, company_id: UUID
-) -> Document | None:
-    """Fetch an active document **only if** its loan file is the company's.
+async def get_document(db: AsyncSession, *, document_id: UUID, scope: FileScope) -> Document | None:
+    """Fetch an active document **only if** its loan file is in ``scope``.
 
-    The flat-route tenant gate: documents have no ``company_id``, so this joins
-    ``Document -> LoanFile`` and filters on the file's company. Returns ``None``
-    if the document doesn't exist, is soft-deleted, lives under a soft-deleted
-    file, or belongs to another company — the endpoint turns that into ``404``,
-    so a cross-tenant id is indistinguishable from a missing one.
+    The flat-route gate: documents have no ``company_id``, so this joins
+    ``Document -> LoanFile`` and applies :func:`scope_files` to the file (its
+    company, live, and its team when the scope is restricted, ADR-446). Returns
+    ``None`` if the document doesn't exist, is soft-deleted, lives under a
+    soft-deleted file, belongs to another company, or is on a file the caller is
+    restricted away from — the endpoint turns that into ``404``, so a hidden id is
+    indistinguishable from a missing one.
     """
     stmt = (
         select(Document)
         .join(LoanFile, Document.loan_file_id == LoanFile.id)
-        .where(Document.id == document_id, LoanFile.company_id == company_id)
+        .where(Document.id == document_id)
     )
     stmt = only_active(stmt, Document)
-    stmt = only_active(stmt, LoanFile)
+    stmt = scope_files(stmt, scope)
     document: Document | None = await db.scalar(stmt)
     return document
 

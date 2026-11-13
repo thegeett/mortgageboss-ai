@@ -152,7 +152,8 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     licensed_states: Mapped[list[str]] = mapped_column(
         JSON, default=list, server_default=text("'[]'"), nullable=False
     )
-    #: Sees every company file when files are restricted to their team (read by LP-MB-Admin-05).
+    #: Sees every company file when files are restricted to their team (`FileScope.for_actor`,
+    #: LP-MB-Admin-06).
     sees_all_loans: Mapped[bool] = mapped_column(
         default=False, server_default=false(), nullable=False
     )

@@ -2,6 +2,8 @@
 
 Date: 2026-11-13
 
+Enforced by LP-MB-Admin-06; `tests/api/file_doors.py` is now the list of record.
+
 This lists every API route in `backend/app/api/*.py` and every Celery task in `backend/app/tasks/*.py` that
 reaches a loan file or one of its children, grouped by how it gets there, so that Part 2 ("restrict
 files to their team") can be enforced at every door before any enforcement code is written. Group C is

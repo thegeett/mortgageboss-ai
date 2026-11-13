@@ -27,7 +27,7 @@ import structlog
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
-from app.api.dependencies import CurrentUser
+from app.api.dependencies import CurrentScope, CurrentUser
 from app.core.database import DbSession
 from app.models.activity_log import ActivityType
 from app.models.base import utcnow
@@ -52,10 +52,10 @@ from app.services.activity_log import audit_value, field_changes, log_activity
 from app.services.borrowers import get_borrower
 from app.services.loan_files import get_loan_file
 from app.services.stated_financials import (
-    get_stated_asset_for_company,
-    get_stated_employer_for_company,
-    get_stated_income_for_company,
-    get_stated_liability_for_company,
+    get_stated_asset_scoped,
+    get_stated_employer_scoped,
+    get_stated_income_scoped,
+    get_stated_liability_scoped,
 )
 from app.services.verifications import mark_verification_stale
 
@@ -136,11 +136,13 @@ def _stamp_payoff_source(row: StatedLiability) -> None:
     status_code=status.HTTP_201_CREATED,
 )
 async def add_stated_liability(
-    file_identifier: str, body: StatedLiabilityInput, current_user: CurrentUser, db: DbSession
+    file_identifier: str,
+    body: StatedLiabilityInput,
+    current_user: CurrentUser,
+    scope: CurrentScope,
+    db: DbSession,
 ) -> StatedLiabilityPublic:
-    loan_file = await get_loan_file(
-        db, company_id=current_user.company_id, identifier=file_identifier
-    )
+    loan_file = await get_loan_file(db, scope=scope, identifier=file_identifier)
     if loan_file is None:
         raise _NOT_FOUND
     row = StatedLiability(loan_file_id=loan_file.id, **body.model_dump())
@@ -160,11 +162,13 @@ async def add_stated_liability(
 
 @router.patch("/stated-liabilities/{item_id}", response_model=StatedLiabilityPublic)
 async def update_stated_liability(
-    item_id: UUID, body: StatedLiabilityInput, current_user: CurrentUser, db: DbSession
+    item_id: UUID,
+    body: StatedLiabilityInput,
+    current_user: CurrentUser,
+    scope: CurrentScope,
+    db: DbSession,
 ) -> StatedLiabilityPublic:
-    row = await get_stated_liability_for_company(
-        db, item_id=item_id, company_id=current_user.company_id
-    )
+    row = await get_stated_liability_scoped(db, item_id=item_id, scope=scope)
     if row is None:
         raise _NOT_FOUND
     changes = _apply_update(row, body)
@@ -182,10 +186,10 @@ async def update_stated_liability(
 
 
 @router.delete("/stated-liabilities/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_stated_liability(item_id: UUID, current_user: CurrentUser, db: DbSession) -> None:
-    row = await get_stated_liability_for_company(
-        db, item_id=item_id, company_id=current_user.company_id
-    )
+async def delete_stated_liability(
+    item_id: UUID, current_user: CurrentUser, scope: CurrentScope, db: DbSession
+) -> None:
+    row = await get_stated_liability_scoped(db, item_id=item_id, scope=scope)
     if row is None:
         raise _NOT_FOUND
     removed = {"liability_type": row.liability_type, "monthly_payment": row.monthly_payment}
@@ -212,11 +216,13 @@ async def delete_stated_liability(item_id: UUID, current_user: CurrentUser, db: 
     status_code=status.HTTP_201_CREATED,
 )
 async def add_stated_asset(
-    file_identifier: str, body: StatedAssetInput, current_user: CurrentUser, db: DbSession
+    file_identifier: str,
+    body: StatedAssetInput,
+    current_user: CurrentUser,
+    scope: CurrentScope,
+    db: DbSession,
 ) -> StatedAssetPublic:
-    loan_file = await get_loan_file(
-        db, company_id=current_user.company_id, identifier=file_identifier
-    )
+    loan_file = await get_loan_file(db, scope=scope, identifier=file_identifier)
     if loan_file is None:
         raise _NOT_FOUND
     row = StatedAsset(loan_file_id=loan_file.id, **body.model_dump())
@@ -235,11 +241,13 @@ async def add_stated_asset(
 
 @router.patch("/stated-assets/{item_id}", response_model=StatedAssetPublic)
 async def update_stated_asset(
-    item_id: UUID, body: StatedAssetInput, current_user: CurrentUser, db: DbSession
+    item_id: UUID,
+    body: StatedAssetInput,
+    current_user: CurrentUser,
+    scope: CurrentScope,
+    db: DbSession,
 ) -> StatedAssetPublic:
-    row = await get_stated_asset_for_company(
-        db, item_id=item_id, company_id=current_user.company_id
-    )
+    row = await get_stated_asset_scoped(db, item_id=item_id, scope=scope)
     if row is None:
         raise _NOT_FOUND
     changes = _apply_update(row, body)
@@ -256,10 +264,10 @@ async def update_stated_asset(
 
 
 @router.delete("/stated-assets/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_stated_asset(item_id: UUID, current_user: CurrentUser, db: DbSession) -> None:
-    row = await get_stated_asset_for_company(
-        db, item_id=item_id, company_id=current_user.company_id
-    )
+async def delete_stated_asset(
+    item_id: UUID, current_user: CurrentUser, scope: CurrentScope, db: DbSession
+) -> None:
+    row = await get_stated_asset_scoped(db, item_id=item_id, scope=scope)
     if row is None:
         raise _NOT_FOUND
     removed = {"asset_type": row.asset_type, "value": row.value}
@@ -290,11 +298,10 @@ async def add_stated_income(
     borrower_id: UUID,
     body: StatedIncomeItemInput,
     current_user: CurrentUser,
+    scope: CurrentScope,
     db: DbSession,
 ) -> StatedIncomeItemPublic:
-    loan_file = await get_loan_file(
-        db, company_id=current_user.company_id, identifier=file_identifier
-    )
+    loan_file = await get_loan_file(db, scope=scope, identifier=file_identifier)
     if loan_file is None:
         raise _NOT_FOUND
     borrower = await get_borrower(db, loan_file_id=loan_file.id, borrower_id=borrower_id)
@@ -316,11 +323,13 @@ async def add_stated_income(
 
 @router.patch("/stated-income-items/{item_id}", response_model=StatedIncomeItemPublic)
 async def update_stated_income(
-    item_id: UUID, body: StatedIncomeItemInput, current_user: CurrentUser, db: DbSession
+    item_id: UUID,
+    body: StatedIncomeItemInput,
+    current_user: CurrentUser,
+    scope: CurrentScope,
+    db: DbSession,
 ) -> StatedIncomeItemPublic:
-    row = await get_stated_income_for_company(
-        db, item_id=item_id, company_id=current_user.company_id
-    )
+    row = await get_stated_income_scoped(db, item_id=item_id, scope=scope)
     if row is None:
         raise _NOT_FOUND
     changes = _apply_update(row, body)
@@ -338,10 +347,10 @@ async def update_stated_income(
 
 
 @router.delete("/stated-income-items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_stated_income(item_id: UUID, current_user: CurrentUser, db: DbSession) -> None:
-    row = await get_stated_income_for_company(
-        db, item_id=item_id, company_id=current_user.company_id
-    )
+async def delete_stated_income(
+    item_id: UUID, current_user: CurrentUser, scope: CurrentScope, db: DbSession
+) -> None:
+    row = await get_stated_income_scoped(db, item_id=item_id, scope=scope)
     if row is None:
         raise _NOT_FOUND
     removed = {"income_type": row.income_type, "monthly_amount": row.monthly_amount}
@@ -373,11 +382,10 @@ async def add_stated_employer(
     borrower_id: UUID,
     body: StatedEmployerInput,
     current_user: CurrentUser,
+    scope: CurrentScope,
     db: DbSession,
 ) -> StatedEmployerPublic:
-    loan_file = await get_loan_file(
-        db, company_id=current_user.company_id, identifier=file_identifier
-    )
+    loan_file = await get_loan_file(db, scope=scope, identifier=file_identifier)
     if loan_file is None:
         raise _NOT_FOUND
     borrower = await get_borrower(db, loan_file_id=loan_file.id, borrower_id=borrower_id)
@@ -399,11 +407,13 @@ async def add_stated_employer(
 
 @router.patch("/stated-employers/{item_id}", response_model=StatedEmployerPublic)
 async def update_stated_employer(
-    item_id: UUID, body: StatedEmployerInput, current_user: CurrentUser, db: DbSession
+    item_id: UUID,
+    body: StatedEmployerInput,
+    current_user: CurrentUser,
+    scope: CurrentScope,
+    db: DbSession,
 ) -> StatedEmployerPublic:
-    row = await get_stated_employer_for_company(
-        db, item_id=item_id, company_id=current_user.company_id
-    )
+    row = await get_stated_employer_scoped(db, item_id=item_id, scope=scope)
     if row is None:
         raise _NOT_FOUND
     changes = _apply_update(row, body)
@@ -421,10 +431,10 @@ async def update_stated_employer(
 
 
 @router.delete("/stated-employers/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_stated_employer(item_id: UUID, current_user: CurrentUser, db: DbSession) -> None:
-    row = await get_stated_employer_for_company(
-        db, item_id=item_id, company_id=current_user.company_id
-    )
+async def delete_stated_employer(
+    item_id: UUID, current_user: CurrentUser, scope: CurrentScope, db: DbSession
+) -> None:
+    row = await get_stated_employer_scoped(db, item_id=item_id, scope=scope)
     if row is None:
         raise _NOT_FOUND
     removed = {"employer_name": row.employer_name}

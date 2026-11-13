@@ -16,6 +16,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, model_validator
 
+from app.core.file_scope import FileScope
 from app.core.permissions import resolve_permissions
 from app.models.user import User, UserRole
 
@@ -37,7 +38,9 @@ class UserPublic(BaseModel):
     ``roles`` is the set the user holds (ADR-440), for display. ``permissions`` is what
     the frontend gates on (ADR-442), resolved by the same function the API checks with,
     so the UI and the boundary cannot disagree. The single derived ``role`` is gone
-    (LP-MB-Admin-02). The user's company must be loaded (``get_user_by_id`` and
+    (LP-MB-Admin-02). ``restricted`` is whether the user sees only the files they are on
+    (LP-MB-Admin-06): the same decision the API's ``FileScope`` makes, so the Team card can warn a
+    loan officer who is about to hand their own file away. The user's company must be loaded (``get_user_by_id`` and
     ``authenticate_user`` load it).
     """
 
@@ -48,6 +51,7 @@ class UserPublic(BaseModel):
     roles: list[UserRole]
     permissions: list[str]
     is_owner: bool
+    restricted: bool
     company_id: UUID
 
     @model_validator(mode="before")
@@ -64,6 +68,7 @@ class UserPublic(BaseModel):
             "roles": sorted(data.role_set),
             "permissions": sorted(resolve_permissions(data.role_set, data.company.settings_model)),
             "is_owner": data.is_owner,
+            "restricted": FileScope.for_user(data).restricted,
             "company_id": data.company_id,
         }
 

@@ -12,6 +12,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
+from app.core.file_scope import FileScope
 from app.models.condition import ConditionPrepStatus
 from app.models.condition_event import ConditionEvent, ConditionEventKind
 from app.models.condition_item import ConditionItem
@@ -188,7 +189,7 @@ def _at(day: date, hour: int) -> datetime:
 async def _waits(db: AsyncSession, loan_file: Any, now: datetime) -> list[Any]:
     return [
         s
-        for s in await build_suggestions(db, company_id=loan_file.company_id, now=now)
+        for s in await build_suggestions(db, scope=FileScope.system(loan_file.company_id), now=now)
         if s.kind is ReminderKind.CONDITION_WAIT_DUE
     ]
 
@@ -448,7 +449,7 @@ async def test_a_wait_that_becomes_an_ask_stops_being_a_wait(db_session: AsyncSe
     kinds = [
         s.kind
         for s in await build_suggestions(
-            db_session, company_id=loan_file.company_id, now=on_the_day
+            db_session, scope=FileScope.system(loan_file.company_id), now=on_the_day
         )
     ]
     assert ReminderKind.CONDITION_WAIT_DUE not in kinds
@@ -476,7 +477,7 @@ async def test_a_wait_on_an_information_line_raises_no_reminder(db_session: Asyn
     kinds = [
         s.kind
         for s in await build_suggestions(
-            db_session, company_id=loan_file.company_id, now=on_the_day
+            db_session, scope=FileScope.system(loan_file.company_id), now=on_the_day
         )
     ]
     assert ReminderKind.CONDITION_WAIT_DUE not in kinds
@@ -487,7 +488,7 @@ async def test_a_wait_on_an_information_line_raises_no_reminder(db_session: Asyn
     kinds = [
         s.kind
         for s in await build_suggestions(
-            db_session, company_id=loan_file.company_id, now=on_the_day
+            db_session, scope=FileScope.system(loan_file.company_id), now=on_the_day
         )
     ]
     assert ReminderKind.CONDITION_WAIT_DUE in kinds

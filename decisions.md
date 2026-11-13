@@ -17096,8 +17096,8 @@ officer was two free-text fields (LP-MB-Admin-05).
 - An Admin may change any file's team; a loan officer only a file where they are the loan officer
   (`OWN_FILES_ONLY` in `core/permissions.py`); a processor none.
 - Team membership decides who SEES a file only when the company turns `restrict_loans_to_team` on.
-  That is Part 2 of LP-MB-Admin-05 and is not built; its survey is
-  `docs/tickets/LP-MB-Admin-05-survey.md`.
+  That was Part 2 of LP-MB-Admin-05, surveyed in `docs/tickets/LP-MB-Admin-05-survey.md` and built
+  by LP-MB-Admin-06 (ADR-446).
 
 *Consequences.*
 - The pipeline filters by `assignee` (`me`, `unassigned`, a user id) in the list and in saved views
@@ -17105,3 +17105,42 @@ officer was two free-text fields (LP-MB-Admin-05).
 - A departing person's places move to another eligible person in one action, audited once.
 
 *Status.* Accepted (LP-MB-Admin-05, Part 1).
+
+## ADR-446
+
+**File visibility is carried by a scope type, not a flag.**
+
+*Context.* `restrict_loans_to_team` (LP-MB-Admin-02) was stored and enforced nothing. Every loan-file
+gate took a bare `company_id: UUID`, and the survey (`docs/tickets/LP-MB-Admin-05-survey.md`) found
+them in several shapes: `get_scoped_loan_file`, the conditions router's own three dependencies,
+`get_document_for_company`, four stated-item lookups, the Inbox, reminders, and saved-view counts. An
+optional team check beside the company id would leave the next route free to pass only the id.
+
+*Decision (LP-MB-Admin-06).*
+- `FileScope(company_id, restricted_to_user_id)` (`app/core/file_scope.py`) replaces `company_id` at
+  every loan-file gate. A caller that still passes a UUID fails mypy; there is no `company_id`
+  overload.
+- `scope_files(stmt, scope)` (`app/models/helpers.py`, next to `scope_to_company`) is the one place
+  the team predicate is written: the company, live files, and, when restricted,
+  `LoanFile.id IN (live loan_teams rows of that user)`. It is applied IN THE QUERY, to `LoanFile`
+  selected or joined from a child, never as a check after a fetch.
+- `FileScope.for_actor` decides once per request, when `get_current_actor` builds the `Actor`
+  (`actor.scope`, `CurrentScope`): unrestricted when the setting is off, or the actor holds
+  `loan.view_all`, or `sees_all_loans`; otherwise the actor's own id. `UserPublic.restricted` is the
+  same decision, for the Team card.
+- Background jobs and system paths declare `FileScope.system(company_id)`, so a grep for `.system(`
+  lists every unrestricted read.
+- A hidden file is the same 404, with the same body, as a missing id on that route. A creator who
+  would land in no team slot is refused at create (422), not added to one.
+
+*Consequences.*
+- `tests/api/file_doors.py` is the list of record of the routes that reach a file; a guard test
+  fails when a route in `app/api` or in the survey is neither a door nor exempt with a reason, and
+  `test_file_doors.py` sends every door as a non-member (404, nothing written) and as four callers
+  who may see it.
+- The processor's copy of incoming mail goes only to a sender still on the file's team while the
+  setting is on.
+- Extends ADR-041/043 (tenant scoping) and ADR-443 (one function decides the company): the same
+  object now decides the company and the visibility, and a caller cannot have one without the other.
+
+*Status.* Accepted (LP-MB-Admin-06).

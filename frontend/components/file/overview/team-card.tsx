@@ -12,8 +12,10 @@ import {
   useTeam,
 } from "@/lib/api/loan-teams";
 import { getErrorMessage } from "@/lib/errors/api-error";
+import { useAuthStore } from "@/lib/stores/auth-store";
 import type { TeamMember } from "@/lib/types/loan-file";
 import { X } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 /**
@@ -23,6 +25,10 @@ import { useState } from "react";
  * Admin, or the loan officer on their own file); everyone else sees it read-only. The loan officer
  * slot is hidden entirely in a company with nobody holding the Loan officer role (a processing
  * company, whose loan officer is at the broker and stays free text), unless one is already set.
+ *
+ * LP-MB-Admin-06 (Decided 1): a restricted loan officer who hands their own file to someone else, or
+ * clears the slot, loses the file on their next request. They are asked first, and taken to the
+ * pipeline afterwards, because the file is now a 404 for them.
  */
 export function TeamCard({ fileId }: { fileId: string }) {
   const team = useTeam(fileId);
@@ -31,6 +37,8 @@ export function TeamCard({ fileId }: { fileId: string }) {
   const setLo = useSetLoanOfficer(fileId);
   const add = useAddProcessor(fileId);
   const remove = useRemoveMember(fileId);
+  const me = useAuthStore((state) => state.user);
+  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [changingLo, setChangingLo] = useState(false);
 
@@ -48,6 +56,17 @@ export function TeamCard({ fileId }: { fileId: string }) {
   const showLoSlot = Boolean(data?.loan_officer) || (officers.data?.length ?? 0) > 0;
   const onTeam = new Set(data?.processors.map((member) => member.user_id) ?? []);
   const addable = (processors.data ?? []).filter((person) => !onTeam.has(person.id));
+  const iAmTheLo = Boolean(me && data?.loan_officer?.user_id === me.id);
+
+  function pickLoanOfficer(userId: string | null) {
+    const handingAway = Boolean(me?.restricted) && iAmTheLo && userId !== me?.id;
+    if (handingAway && !window.confirm("You will no longer see this file.")) return;
+    return run(async () => {
+      await setLo.mutateAsync(userId);
+      setChangingLo(false);
+      if (handingAway) router.push("/dashboard");
+    });
+  }
 
   return (
     <Card className="border-border/80">
@@ -99,12 +118,7 @@ export function TeamCard({ fileId }: { fileId: string }) {
                     placeholder="Choose a loan officer…"
                     hint="Only active people with the Loan officer role."
                     clearLabel={data.loan_officer ? "No loan officer" : undefined}
-                    onPick={(userId) =>
-                      run(async () => {
-                        await setLo.mutateAsync(userId);
-                        setChangingLo(false);
-                      })
-                    }
+                    onPick={pickLoanOfficer}
                     onCancel={() => setChangingLo(false)}
                   />
                 ) : null}

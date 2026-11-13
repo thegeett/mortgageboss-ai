@@ -17,7 +17,7 @@ Roles are compared only in :mod:`app.core.permissions`.
 """
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated
 from uuid import UUID
 
@@ -25,6 +25,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.database import DbSession
+from app.core.file_scope import FileScope
 from app.core.jwt import (
     InvalidTokenError,
     TokenExpiredError,
@@ -108,6 +109,10 @@ class Actor:
     Built once per request by :func:`get_current_actor`. ``company_id`` is the EFFECTIVE company
     (ADR-443): today always the user's own, decided in that one function. New services take an
     ``Actor`` and check it with :func:`app.services.authorization.ensure`.
+
+    ``scope`` is which loan files the actor may see (LP-MB-Admin-06, ADR-446), decided when the actor
+    is built, at the start of the request: a later change in the same request (a user's ``_locked``
+    re-read unloads ``user.company``) cannot move it.
     """
 
     user: User
@@ -115,6 +120,10 @@ class Actor:
     roles: frozenset[UserRole]
     permissions: frozenset[Permission]
     is_owner: bool
+    scope: FileScope = field(init=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "scope", FileScope.for_actor(self))
 
 
 def get_current_actor(current_user: CurrentUser) -> Actor:
@@ -197,20 +206,26 @@ def get_current_company_id(actor: CurrentActor) -> UUID:
 CurrentCompanyId = Annotated[UUID, Depends(get_current_company_id)]
 
 
+def get_current_scope(actor: CurrentActor) -> FileScope:
+    """The loan files the request may see (ADR-446): every loan-file gate takes this, not a company id."""
+    return actor.scope
+
+
+CurrentScope = Annotated[FileScope, Depends(get_current_scope)]
+
+
 async def get_scoped_loan_file(
-    file_identifier: str, db: DbSession, current_user: CurrentUser
+    file_identifier: str, db: DbSession, scope: CurrentScope
 ) -> LoanFile:
-    """Resolve the loan file in the path, scoped to the caller's company.
+    """Resolve the loan file in the path, scoped to what the caller may see (ADR-446).
 
     This is the **tenant gate** for nested resources (borrowers, property,
     later documents): a child route declares it, so the parent file is fetched
-    via ``get_loan_file(company_id=current_user.company_id, ...)`` *first*. If
-    the file isn't the caller's (or doesn't exist) it raises ``404`` and the
-    child is never reached. ``file_identifier`` may be the UUID or the display id.
+    via ``get_loan_file(scope=...)`` *first*. If the file isn't the caller's
+    company's, or is on a team the caller is restricted away from, or doesn't
+    exist, it raises ``404`` and the child is never reached. ``file_identifier`` may be the UUID or the display id.
     """
-    loan_file = await get_loan_file(
-        db, company_id=current_user.company_id, identifier=file_identifier
-    )
+    loan_file = await get_loan_file(db, scope=scope, identifier=file_identifier)
     if loan_file is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan file not found")
     return loan_file

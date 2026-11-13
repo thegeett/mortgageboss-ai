@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
-from app.api.dependencies import CurrentUser
+from app.api.dependencies import CurrentScope, CurrentUser
 from app.core.config import settings
 from app.core.database import DbSession
 from app.core.run_limits import rule_engine_limits
@@ -362,7 +362,7 @@ def _enqueue_rule_engine(loan_file_id: UUID, run_id: UUID, *, document_count: in
 
 @router.post("/{identifier}/verification/run", response_model=VerificationRunPublic)
 async def run_verification(
-    identifier: str, db: DbSession, current_user: CurrentUser, force: bool = False
+    identifier: str, db: DbSession, scope: CurrentScope, force: bool = False
 ) -> VerificationRunPublic:
     """Trigger the cross-source verification pass for one of the caller's files.
 
@@ -377,7 +377,7 @@ async def run_verification(
     the AI pass on the worker; the client polls the status endpoint for completion. A
     failed enqueue marks the run FAILED rather than leaving it RUNNING.
     """
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
 
@@ -654,10 +654,10 @@ async def _build_status(
 
 @router.get("/{identifier}/verification", response_model=VerificationStatusPublic)
 async def get_verification(
-    identifier: str, db: DbSession, current_user: CurrentUser
+    identifier: str, db: DbSession, current_user: CurrentUser, scope: CurrentScope
 ) -> VerificationStatusPublic:
     """The file's verification status — staleness, the latest run, the findings + the dial."""
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     await _reconcile_stuck_run(db, loan_file)  # the stuck-RUNNING watchdog (LP-89)
@@ -666,7 +666,11 @@ async def get_verification(
 
 @router.put("/{identifier}/verification/aggression", response_model=VerificationStatusPublic)
 async def set_aggression(
-    identifier: str, payload: AggressionUpdate, db: DbSession, current_user: CurrentUser
+    identifier: str,
+    payload: AggressionUpdate,
+    db: DbSession,
+    current_user: CurrentUser,
+    scope: CurrentScope,
 ) -> VerificationStatusPublic:
     """Set (or clear) this file's aggression override and return the re-filtered status.
 
@@ -675,7 +679,7 @@ async def set_aggression(
     and NEVER recolors a finding (confidence ≠ severity). ``level = null`` clears the
     override (revert to the user default). Tenant-scoped (cross-company → 404).
     """
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
 
@@ -694,7 +698,7 @@ async def set_aggression(
     "/{identifier}/findings/{finding_id}/apply-preview", response_model=FindingImpactPreview
 )
 async def preview_finding_apply_endpoint(
-    identifier: str, finding_id: UUID, db: DbSession, current_user: CurrentUser
+    identifier: str, finding_id: UUID, db: DbSession, current_user: CurrentUser, scope: CurrentScope
 ) -> FindingImpactPreview:
     """The "View fix" DRY-RUN (LP-97) — the itemized before/after impact of applying a finding.
 
@@ -702,7 +706,7 @@ async def preview_finding_apply_endpoint(
     does but persists NOTHING (this endpoint never commits). Only for findings with an apply-spec
     (a 400 otherwise). Tenant-scoped.
     """
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     finding = await _get_finding(db, loan_file=loan_file, finding_id=finding_id)
@@ -732,7 +736,7 @@ async def preview_finding_apply_endpoint(
     response_model=list[SnapshotFindingPublic],
 )
 async def list_snapshot_findings_endpoint(
-    identifier: str, db: DbSession, current_user: CurrentUser
+    identifier: str, db: DbSession, scope: CurrentScope
 ) -> list[SnapshotFindingPublic]:
     """The snapshot-based AI cross-source findings for this file (LP-586).
 
@@ -740,7 +744,7 @@ async def list_snapshot_findings_endpoint(
     load would make the tab move whenever someone looked at it, which is the drift this pass exists
     to remove.
     """
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     rows = await list_snapshot_findings(db, loan_file_id=loan_file.id)
@@ -770,6 +774,7 @@ async def set_snapshot_finding_disposition_endpoint(
     body: SnapshotFindingDisposition,
     db: DbSession,
     current_user: CurrentUser,
+    scope: CurrentScope,
 ) -> SnapshotFindingPublic:
     """Record what a processor decided about one observation.
 
@@ -780,7 +785,7 @@ async def set_snapshot_finding_disposition_endpoint(
     Tenant-scoped through the loan file, and the finding must belong to it — a bare id lookup would
     be the cross-tenant read shape `document_borrower_links` records a removal for.
     """
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     row = await db.scalar(
@@ -819,6 +824,7 @@ async def apply_finding_endpoint(
     finding_id: UUID,
     db: DbSession,
     current_user: CurrentUser,
+    scope: CurrentScope,
     body: ApplyRequest | None = None,
 ) -> VerificationStatusPublic:
     """Resolve a finding as APPLIED — incorporate it into the structured data (LP-75).
@@ -826,7 +832,7 @@ async def apply_finding_endpoint(
     Fires the APPLY→recompute interlock (the DTI/LTV calculators recompute from the
     changed data; verification is marked stale to prompt a re-run). Tenant-scoped.
     """
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     finding = await _get_finding(db, loan_file=loan_file, finding_id=finding_id)
@@ -875,6 +881,7 @@ async def bulk_request_docs_endpoint(
     payload: BulkRequestDocsRequest,
     db: DbSession,
     current_user: CurrentUser,
+    scope: CurrentScope,
 ) -> VerificationStatusPublic:
     """Request every document a set of findings is waiting on — ONE needs item per DOCUMENT (LP-562).
 
@@ -886,7 +893,7 @@ async def bulk_request_docs_endpoint(
     uses the SAME `_missing_documents` the row renders, so the button and the card can never disagree
     about what is still outstanding.
     """
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
 
@@ -945,6 +952,7 @@ async def ratify_finding_endpoint(
     payload: RatifyRequest,
     db: DbSession,
     current_user: CurrentUser,
+    scope: CurrentScope,
 ) -> VerificationStatusPublic:
     """Record that a human reviewed an AI judgment and AGREED with it (LP-560).
 
@@ -953,7 +961,7 @@ async def ratify_finding_endpoint(
     optional; Override's reason is required because it contradicts the system, where this agrees with
     what the finding already says.
     """
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     finding = await _get_finding(db, loan_file=loan_file, finding_id=finding_id)
@@ -970,14 +978,14 @@ async def ratify_finding_endpoint(
 
 @router.post("/{identifier}/findings/{finding_id}/undo", response_model=VerificationStatusPublic)
 async def undo_finding_endpoint(
-    identifier: str, finding_id: UUID, db: DbSession, current_user: CurrentUser
+    identifier: str, finding_id: UUID, db: DbSession, current_user: CurrentUser, scope: CurrentScope
 ) -> VerificationStatusPublic:
     """Undo a finding's resolution (LP-98) — reverse Apply / Accept-risk / Override → OPEN.
 
     Undo-Applied REVERSES the data change (restores the recorded pre-apply state) + recomputes;
     Undo-Accept/Override just reopens. Audited; tenant-scoped. 400 if the finding isn't resolved.
     """
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     finding = await _get_finding(db, loan_file=loan_file, finding_id=finding_id)
@@ -1002,9 +1010,10 @@ async def override_finding_endpoint(
     payload: OverrideRequest,
     db: DbSession,
     current_user: CurrentUser,
+    scope: CurrentScope,
 ) -> VerificationStatusPublic:
     """Resolve a finding as OVERRIDDEN — dismissed with a **required** recorded reason."""
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     finding = await _get_finding(db, loan_file=loan_file, finding_id=finding_id)
@@ -1029,9 +1038,10 @@ async def add_finding_note_endpoint(
     payload: NoteRequest,
     db: DbSession,
     current_user: CurrentUser,
+    scope: CurrentScope,
 ) -> VerificationStatusPublic:
     """Add a free-text note to a finding (informational — does not resolve it)."""
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     finding = await _get_finding(db, loan_file=loan_file, finding_id=finding_id)
@@ -1061,6 +1071,7 @@ async def accept_risk_endpoint(
     payload: AcceptRiskRequest,
     db: DbSession,
     current_user: CurrentUser,
+    scope: CurrentScope,
 ) -> VerificationStatusPublic:
     """Resolve a finding as ACCEPTED_RISK — acknowledged, proceed with it (LP-88).
 
@@ -1068,7 +1079,7 @@ async def accept_risk_endpoint(
     FHA compensating-factors / subject-to-repair conditional model). An optional reason
     (the compensating factor) is recorded. Tenant-scoped.
     """
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     finding = await _get_finding(db, loan_file=loan_file, finding_id=finding_id)
@@ -1142,6 +1153,7 @@ async def request_docs_endpoint(
     payload: RequestDocsRequest,
     db: DbSession,
     current_user: CurrentUser,
+    scope: CurrentScope,
 ) -> VerificationStatusPublic:
     """Request documents from a finding (LP-88) — create a needs item; the finding stays open.
 
@@ -1149,7 +1161,7 @@ async def request_docs_endpoint(
     and marks the finding (``details.docs_requested``) so the tab shows the linkage. The
     finding is not resolved. Tenant-scoped.
     """
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     finding = await _get_finding(db, loan_file=loan_file, finding_id=finding_id)
@@ -1210,7 +1222,7 @@ _ATTENTION_OUTCOMES = frozenset(
 
 @router.get("/{identifier}/verification/runs", response_model=list[VerificationRunPublic])
 async def list_verification_runs(
-    identifier: str, db: DbSession, current_user: CurrentUser, limit: int = 20
+    identifier: str, db: DbSession, scope: CurrentScope, limit: int = 20
 ) -> list[VerificationRunPublic]:
     """The file's verification run history (newest first) — the version selector (LP-88).
 
@@ -1218,7 +1230,7 @@ async def list_verification_runs(
     show prior runs + their summary counts (and how the file's verification evolved across
     re-runs / applied findings / new docs). Tenant-scoped.
     """
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     stmt = (

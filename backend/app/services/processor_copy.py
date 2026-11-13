@@ -41,6 +41,7 @@ from app.models.company import Company
 from app.models.inbound_attachment import InboundAttachment
 from app.models.inbound_message import InboundMessage, InboundRoutingState
 from app.models.loan_file import LoanFile
+from app.models.loan_team import LoanTeamMember
 from app.models.user import User
 from app.services.inbound_mime import decoded_header, one_line
 
@@ -61,26 +62,43 @@ async def copy_recipient(db: AsyncSession, loan_file: LoanFile) -> User | None:
     app doesn't count. The approver is on the evidence record `send_draft` writes (LP-821, as the
     worker reads it in `tasks/outbound.py`). A deleted or inactive user, or one of another company,
     is passed over for the next most recent sender.
+
+    UNDER "RESTRICT LOAN FILES TO THEIR TEAM" (LP-MB-Admin-06) a sender who is no longer on the
+    file's team is passed over too: the copy is the file's mail, and they can no longer open the
+    file. Nobody on the team → None, and one log line naming the file only.
     """
-    return (
-        await db.execute(
-            select(User)
-            .join(CommunicationEvidence, CommunicationEvidence.approver_user_id == User.id)
-            .join(Communication, Communication.id == CommunicationEvidence.communication_id)
-            .where(
-                Communication.loan_file_id == loan_file.id,
-                Communication.direction == CommunicationDirection.OUTBOUND,
-                Communication.send_requested_at.is_not(None),
-                Communication.deleted_at.is_(None),
-                CommunicationEvidence.event == EvidenceEvent.SENT,
-                User.company_id == loan_file.company_id,
-                User.is_active.is_(True),
-                User.deleted_at.is_(None),
-            )
-            .order_by(Communication.send_requested_at.desc())
-            .limit(1)
+    stmt = (
+        select(User)
+        .join(CommunicationEvidence, CommunicationEvidence.approver_user_id == User.id)
+        .join(Communication, Communication.id == CommunicationEvidence.communication_id)
+        .where(
+            Communication.loan_file_id == loan_file.id,
+            Communication.direction == CommunicationDirection.OUTBOUND,
+            Communication.send_requested_at.is_not(None),
+            Communication.deleted_at.is_(None),
+            CommunicationEvidence.event == EvidenceEvent.SENT,
+            User.company_id == loan_file.company_id,
+            User.is_active.is_(True),
+            User.deleted_at.is_(None),
         )
-    ).scalar_one_or_none()
+        .order_by(Communication.send_requested_at.desc())
+        .limit(1)
+    )
+    company = await db.get(Company, loan_file.company_id)
+    restricted = company is not None and company.settings_model.restrict_loans_to_team
+    if restricted:
+        stmt = stmt.where(
+            User.id.in_(
+                select(LoanTeamMember.user_id).where(
+                    LoanTeamMember.loan_file_id == loan_file.id,
+                    LoanTeamMember.deleted_at.is_(None),
+                )
+            )
+        )
+    recipient: User | None = (await db.execute(stmt)).scalar_one_or_none()
+    if recipient is None and restricted:
+        logger.info("processor_copy_no_team_sender", loan_file_id=str(loan_file.id))
+    return recipient
 
 
 def _normalised(address: str) -> str:

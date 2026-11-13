@@ -21,6 +21,11 @@ export interface User {
   permissions: string[];
   /** The company's owner: the admin the app will not deactivate or demote. */
   is_owner: boolean;
+  /**
+   * Sees only the loan files they are on (LP-MB-Admin-06): their company restricts files to their
+   * team and they are neither an admin nor marked to see all. Optional: a backend from before it.
+   */
+  restricted?: boolean;
   company_id: string;
 }
 

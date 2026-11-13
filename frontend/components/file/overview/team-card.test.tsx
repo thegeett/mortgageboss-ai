@@ -5,12 +5,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), post: vi.fn(), delete: vi.fn() }));
 vi.mock("@/lib/api/client", () => ({ apiClient: api }));
+const router = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => router }));
 
+import { useAuthStore } from "@/lib/stores/auth-store";
 import { TeamCard } from "./team-card";
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.restoreAllMocks();
+  useAuthStore.setState({ user: null });
 });
 
 const ELENA = {
@@ -135,6 +140,109 @@ describe("TeamCard", () => {
     await waitFor(() =>
       expect(api.delete).toHaveBeenCalledWith("/api/v1/loan-files/LF-1/team/members/m-elena"),
     );
+  });
+
+  describe("a restricted loan officer handing their own file away (LP-MB-Admin-06)", () => {
+    function signIn({ id, restricted }: { id: string; restricted: boolean }) {
+      useAuthStore.setState({
+        user: {
+          id,
+          email: "daniel@x.com",
+          first_name: "Daniel",
+          last_name: "Okafor",
+          roles: ["loan_officer"],
+          permissions: ["loan.create", "loan.team.change"],
+          is_owner: false,
+          restricted,
+          company_id: "c-1",
+        },
+      });
+    }
+
+    async function pick(value: string) {
+      fireEvent.click(await screen.findByRole("button", { name: "Change" }));
+      fireEvent.change(await screen.findByLabelText("Choose the loan officer"), {
+        target: { value },
+      });
+    }
+
+    const AFTER = { loan_officer: null, processors: [], can_change: false };
+
+    it("asks first, and goes to the pipeline after the change", async () => {
+      signIn({ id: "u-daniel", restricted: true });
+      serve({ team: { loan_officer: DANIEL, processors: [], can_change: true } });
+      api.put.mockResolvedValue({ data: AFTER });
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderCard();
+
+      await pick("u-lena");
+
+      expect(confirm).toHaveBeenCalledWith("You will no longer see this file.");
+      await waitFor(() =>
+        expect(api.put).toHaveBeenCalledWith("/api/v1/loan-files/LF-1/team/loan-officer", {
+          user_id: "u-lena",
+        }),
+      );
+      await waitFor(() => expect(router.push).toHaveBeenCalledWith("/dashboard"));
+    });
+
+    it("asks when clearing the slot too", async () => {
+      signIn({ id: "u-daniel", restricted: true });
+      serve({ team: { loan_officer: DANIEL, processors: [], can_change: true } });
+      api.put.mockResolvedValue({ data: AFTER });
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderCard();
+
+      await pick("__none__");
+
+      expect(confirm).toHaveBeenCalledWith("You will no longer see this file.");
+      await waitFor(() =>
+        expect(api.put).toHaveBeenCalledWith("/api/v1/loan-files/LF-1/team/loan-officer", {
+          user_id: null,
+        }),
+      );
+      await waitFor(() => expect(router.push).toHaveBeenCalledWith("/dashboard"));
+    });
+
+    it("changes nothing when they say no", async () => {
+      signIn({ id: "u-daniel", restricted: true });
+      serve({ team: { loan_officer: DANIEL, processors: [], can_change: true } });
+      vi.spyOn(window, "confirm").mockReturnValue(false);
+      renderCard();
+
+      await pick("u-lena");
+
+      expect(api.put).not.toHaveBeenCalled();
+      expect(router.push).not.toHaveBeenCalled();
+    });
+
+    it("does not ask a loan officer who will still see it (the setting off)", async () => {
+      signIn({ id: "u-daniel", restricted: false });
+      serve({ team: { loan_officer: DANIEL, processors: [], can_change: true } });
+      api.put.mockResolvedValue({ data: AFTER });
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderCard();
+
+      await pick("u-lena");
+
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(confirm).not.toHaveBeenCalled();
+      expect(router.push).not.toHaveBeenCalled();
+    });
+
+    it("does not ask someone who is not the file's loan officer", async () => {
+      signIn({ id: "u-someone", restricted: true });
+      serve({ team: { loan_officer: DANIEL, processors: [], can_change: true } });
+      api.put.mockResolvedValue({ data: AFTER });
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderCard();
+
+      await pick("u-lena");
+
+      await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(confirm).not.toHaveBeenCalled();
+      expect(router.push).not.toHaveBeenCalled();
+    });
   });
 
   it("shows the server's refusal", async () => {

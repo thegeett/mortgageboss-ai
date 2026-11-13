@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 import pytest
 import pytest_asyncio
 from app.core.config import settings
+from app.core.file_scope import FileScope
 from app.models import Company, LoanProgram, User, UserRole
 from app.models.activity_log import ActivityLog, ActivityType
 from app.models.base import utcnow
@@ -609,7 +610,7 @@ async def test_move_to_file_sends_no_copy(
 
     moved = await move_unrouted_message(
         db_session,
-        company_id=file.company.id,
+        scope=FileScope.system(file.company.id),
         message_id=message.id,
         file_identifier=file.loan_file.display_id,
         actor_user_id=file.processor.id,

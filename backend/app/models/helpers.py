@@ -5,13 +5,16 @@ Services write explicit queries; these helpers cover the few patterns that
 would otherwise be repeated verbatim everywhere.
 """
 
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 from uuid import UUID
 
-from sqlalchemy import Select
+from sqlalchemy import Select, select
 from sqlalchemy.orm import InstrumentedAttribute
 
 from app.models.base import SoftDeleteMixin
+
+if TYPE_CHECKING:
+    from app.core.file_scope import FileScope
 
 
 # The statement type is a PEP 695 type parameter bound to Select, so the exact
@@ -76,3 +79,31 @@ def scope_to_company[SelectT: Select[Any]](
     # so name what it genuinely is at class access before building the filter.
     company_column = cast("InstrumentedAttribute[UUID]", model.company_id)
     return stmt.where(company_column == company_id)
+
+
+def scope_files[SelectT: Select[Any]](stmt: SelectT, scope: "FileScope") -> SelectT:
+    """Restrict a query on ``LoanFile`` to the files ``scope`` may see (LP-MB-Admin-06, ADR-446).
+
+    The company (:func:`scope_to_company`), live files (:func:`only_active`), and, when the scope is
+    restricted, only files where that user holds a live team row. The ONE place the team predicate
+    is written. ``LoanFile`` must be in the statement: selected, or joined from a child (a document,
+    a condition, a stated item), which is how a child-id gate applies the same rule.
+
+    THE PREDICATE IS IN THE QUERY. A row fetched and then refused is a row some later code touches
+    before the check; a row the statement cannot return is not.
+    """
+    from app.models.loan_file import LoanFile
+    from app.models.loan_team import LoanTeamMember
+
+    stmt = scope_to_company(stmt, LoanFile, scope.company_id)
+    stmt = only_active(stmt, LoanFile)
+    if scope.restricted_to_user_id is not None:
+        stmt = stmt.where(
+            LoanFile.id.in_(
+                select(LoanTeamMember.loan_file_id).where(
+                    LoanTeamMember.user_id == scope.restricted_to_user_id,
+                    LoanTeamMember.deleted_at.is_(None),
+                )
+            )
+        )
+    return stmt

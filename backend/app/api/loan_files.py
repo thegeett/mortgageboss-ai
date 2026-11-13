@@ -17,8 +17,9 @@ from uuid import UUID
 import structlog
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 
-from app.api.dependencies import CurrentActor, CurrentUser, require_permission
+from app.api.dependencies import CurrentActor, CurrentScope, CurrentUser, require_permission
 from app.core.database import DbSession
+from app.core.errors import CreatorWouldNotSeeFile
 from app.core.permissions import Permission
 from app.mismo.import_service import MismoImportError, create_loan_file_from_mismo
 from app.mismo.parser import MismoParseError, parse_mismo
@@ -42,7 +43,7 @@ from app.services.loan_files import (
     soft_delete_loan_file_with_activity,
     update_loan_file_with_activity,
 )
-from app.services.loan_teams import on_loan_file_created
+from app.services.loan_teams import creator_would_not_see, on_loan_file_created
 from app.services.reconciliation import ReconciliationRow, reconcile_loan_file
 from app.services.stated_financials import get_stated_financials
 from app.tasks.needs import propose_ai_needs
@@ -102,21 +103,25 @@ async def create(payload: LoanFileCreate, db: DbSession, actor: CurrentActor) ->
     and a ``FILE_CREATED`` activity. Reloads the new file scoped so the response
     is built with relationships loaded. The response contract is unchanged.
     """
-    loan_file = await create_loan_file_with_setup(
-        db,
-        company_id=actor.company_id,
-        actor_user_id=actor.user.id,
-        lender_id=payload.lender_id,
-        loan_program=payload.loan_program,
-        loan_purpose=payload.loan_purpose,
-        loan_officer_name=payload.loan_officer_name,
-        loan_officer_email=payload.loan_officer_email,
-    )
-    # LP-MB-Admin-05 — the creator joins the team (as loan officer or processor, by role).
-    await on_loan_file_created(db, actor, loan_file)
+    # A SAVEPOINT, so a creator refused below leaves nothing behind (LP-MB-Admin-06).
+    async with db.begin_nested():
+        loan_file = await create_loan_file_with_setup(
+            db,
+            company_id=actor.company_id,
+            actor_user_id=actor.user.id,
+            lender_id=payload.lender_id,
+            loan_program=payload.loan_program,
+            loan_purpose=payload.loan_purpose,
+            loan_officer_name=payload.loan_officer_name,
+            loan_officer_email=payload.loan_officer_email,
+        )
+        # LP-MB-Admin-05 — the creator joins the team (as loan officer or processor, by role).
+        await on_loan_file_created(db, actor, loan_file)
+        if await creator_would_not_see(db, actor, loan_file):
+            raise CreatorWouldNotSeeFile
     await db.commit()
 
-    created = await get_loan_file(db, company_id=actor.company_id, identifier=str(loan_file.id))
+    created = await get_loan_file(db, scope=actor.scope, identifier=str(loan_file.id))
     if created is None:  # pragma: no cover - just created, always found
         raise _NOT_FOUND
     return LoanFileDetail.from_model(created)
@@ -168,16 +173,21 @@ async def import_mismo(
         ) from exc
 
     try:
-        loan_file = await create_loan_file_from_mismo(
-            db,
-            parsed=parsed,
-            company_id=actor.company_id,
-            raw_content=raw,
-            source_format=parsed.source_format,
-            actor_user_id=actor.user.id,
-        )
-        # LP-MB-Admin-05 — the creator joins the team, as on the manual path.
-        await on_loan_file_created(db, actor, loan_file)
+        # A SAVEPOINT, as on the manual path: a refused creator leaves no file behind. The raw
+        # MISMO bytes already written to storage stay, unreferenced, as on the MismoImportError path.
+        async with db.begin_nested():
+            loan_file = await create_loan_file_from_mismo(
+                db,
+                parsed=parsed,
+                company_id=actor.company_id,
+                raw_content=raw,
+                source_format=parsed.source_format,
+                actor_user_id=actor.user.id,
+            )
+            # LP-MB-Admin-05 — the creator joins the team, as on the manual path.
+            await on_loan_file_created(db, actor, loan_file)
+            if await creator_would_not_see(db, actor, loan_file):
+                raise CreatorWouldNotSeeFile
     except MismoImportError as exc:
         raise HTTPException(
             status_code=422,  # Unprocessable Content (literal avoids a deprecation)
@@ -193,7 +203,7 @@ async def import_mismo(
 
     # Reload scoped, with relationships eager-loaded for the response (same as the
     # manual create path — MISMO and manual converge on the same response).
-    created = await get_loan_file(db, company_id=actor.company_id, identifier=str(loan_file.id))
+    created = await get_loan_file(db, scope=actor.scope, identifier=str(loan_file.id))
     if created is None:  # pragma: no cover - just created, always found
         raise _NOT_FOUND
 
@@ -230,6 +240,7 @@ def _assignee(raw: str | None, me: UUID) -> Assignee | None:
 async def list_files(
     db: DbSession,
     current_user: CurrentUser,
+    scope: CurrentScope,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     status: Annotated[list[LoanFileStatus] | None, Query()] = None,
@@ -248,7 +259,7 @@ async def list_files(
     """
     items, total = await list_loan_files(
         db,
-        company_id=current_user.company_id,
+        scope=scope,
         page=page,
         page_size=page_size,
         statuses=status,
@@ -268,10 +279,10 @@ async def list_files(
 
 
 @router.get("/{identifier}", response_model=LoanFileDetail)
-async def retrieve(identifier: str, db: DbSession, current_user: CurrentUser) -> LoanFileDetail:
+async def retrieve(identifier: str, db: DbSession, scope: CurrentScope) -> LoanFileDetail:
     """Retrieve one of the caller's files by UUID or display id; 404 if not in
     the caller's company."""
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     return LoanFileDetail.from_model(loan_file)
@@ -279,7 +290,7 @@ async def retrieve(identifier: str, db: DbSession, current_user: CurrentUser) ->
 
 @router.get("/{identifier}/stated-financials", response_model=StatedFinancialsResponse)
 async def stated_financials(
-    identifier: str, db: DbSession, current_user: CurrentUser
+    identifier: str, db: DbSession, scope: CurrentScope
 ) -> StatedFinancialsResponse:
     """The file's **stated** application data (LP-55) — read-only.
 
@@ -289,7 +300,7 @@ async def stated_financials(
     Tenant-scoped via the company-scoped file lookup (``404`` if not the
     caller's). SSN is masked. Display only — editing is LP-56.
     """
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     return await get_stated_financials(db, loan_file=loan_file)
@@ -297,14 +308,18 @@ async def stated_financials(
 
 @router.patch("/{identifier}", response_model=LoanFileDetail)
 async def update(
-    identifier: str, payload: LoanFileUpdate, db: DbSession, current_user: CurrentUser
+    identifier: str,
+    payload: LoanFileUpdate,
+    db: DbSession,
+    current_user: CurrentUser,
+    scope: CurrentScope,
 ) -> LoanFileDetail:
     """Partially update one of the caller's files; 404 if not in the company.
 
     Only provided fields change; identifiers/ownership are immutable (not in the
     update schema). Logs the change (LP-30): ``STATUS_CHANGED`` on a status
     transition, else ``FILE_UPDATED``."""
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     lender_named = "lender_id" in payload.model_fields_set
@@ -348,11 +363,13 @@ async def update(
 
 
 @router.delete("/{identifier}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete(identifier: str, db: DbSession, current_user: CurrentUser) -> None:
+async def delete(
+    identifier: str, db: DbSession, current_user: CurrentUser, scope: CurrentScope
+) -> None:
     """Soft-delete one of the caller's files; 404 if not in the company.
 
     Logs a ``FILE_DELETED`` activity with the acting user (LP-30)."""
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     await soft_delete_loan_file_with_activity(
@@ -363,14 +380,14 @@ async def delete(identifier: str, db: DbSession, current_user: CurrentUser) -> N
 
 @router.get("/{identifier}/reconciliation", response_model=list[ReconciliationRow])
 async def get_reconciliation(
-    identifier: str, db: DbSession, current_user: CurrentUser
+    identifier: str, db: DbSession, scope: CurrentScope
 ) -> list[ReconciliationRow]:
     """The file's reconciliation ledger — stated against found, with provenance.
 
     Tenant-scoped through the same `get_loan_file` gate every other file route
     uses, so an id from another company is a 404 before any row is built.
     """
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     return await reconcile_loan_file(db, loan_file)

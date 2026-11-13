@@ -35,7 +35,7 @@ from fastapi import (
 from kombu.exceptions import OperationalError
 from sqlalchemy import select
 
-from app.api.dependencies import CurrentUser
+from app.api.dependencies import CurrentScope, CurrentUser
 from app.core.config import settings
 from app.core.database import DbSession
 from app.models.condition import (
@@ -56,7 +56,7 @@ from app.models.condition_round import (
     ConditionSourceKind,
 )
 from app.models.condition_vocabulary import Performer, PlanOption
-from app.models.helpers import only_active
+from app.models.helpers import only_active, scope_files
 from app.models.loan_file import LoanFile
 from app.schemas.condition import (
     BulkRefusalPublic,
@@ -344,10 +344,11 @@ async def _enqueue_parse_or_fail(db: DbSession, round_: ConditionRound) -> None:
     )
 
 
-async def get_scoped_round(
-    round_id: UUID, db: DbSession, current_user: CurrentUser
-) -> ConditionRound:
-    """The round in the path, scoped to the caller's company.
+async def get_scoped_round(round_id: UUID, db: DbSession, scope: CurrentScope) -> ConditionRound:
+    """The round in the path, scoped to the files the caller may see (ADR-446).
+
+    Joined to its file and filtered by `scope_files`: the file's company, a live file, and the
+    caller's team when their company restricts files to their team.
 
     THE SCOPE IS IN THE QUERY, NOT IN A CHECK AFTER IT. Fetching by id and then comparing
     `company_id` gives the same answer but a different failure: for the window between the two the
@@ -357,12 +358,14 @@ async def get_scoped_round(
     404 is indistinguishable from a missing id.
     """
     round_ = await db.scalar(
-        only_active(
-            select(ConditionRound).where(
-                ConditionRound.id == round_id,
-                ConditionRound.company_id == current_user.company_id,
+        scope_files(
+            only_active(
+                select(ConditionRound)
+                .join(LoanFile, ConditionRound.loan_file_id == LoanFile.id)
+                .where(ConditionRound.id == round_id),
+                ConditionRound,
             ),
-            ConditionRound,
+            scope,
         )
     )
     if round_ is None:
@@ -373,31 +376,29 @@ async def get_scoped_round(
 ScopedRound = Annotated[ConditionRound, Depends(get_scoped_round)]
 
 
-async def get_scoped_condition(
-    condition_id: UUID, db: DbSession, current_user: CurrentUser
-) -> Condition:
-    """The condition in the path, scoped to the caller's company.
+async def get_scoped_condition(condition_id: UUID, db: DbSession, scope: CurrentScope) -> Condition:
+    """The condition in the path, scoped to the files the caller may see (ADR-446).
 
-    THE SCOPE IS IN THE QUERY, the same as `get_scoped_round` above — and deliberately written that
-    way rather than through `scope_to_company`, which is this repo's greppable helper for the same
-    filter. Two idioms one function apart would be worse than one unfashionable one: the two gates in
-    this module should read identically, because the thing a reader must be able to check at a glance
-    is that BOTH of them filter inside the statement rather than after it.
-
-    `Condition.company_id` is on the row for exactly this (`models/condition.py`: "a condition is
-    reached directly by id, so the scoping filter needs a column here"), and soft-deleted rows are
-    excluded — a deleted condition is not found rather than found and refused.
+    THE SCOPE IS IN THE QUERY, the same as `get_scoped_round` above, and through the same helper:
+    the condition is joined to its file and `scope_files` filters the file (its company, live, and
+    the caller's team when restricted). The two gates in this module read identically, because the
+    thing a reader must be able to check at a glance is that BOTH of them filter inside the statement
+    rather than after it. (`Condition.company_id` is still on the row; the file's company is the same
+    one, and `scope_files` is the one place the team rule lives, so the gate filters the file.)
+    Soft-deleted rows are excluded — a deleted condition is not found rather than found and refused.
 
     404, NEVER 403. Confirming that an id exists would be an oracle over another tenant's rows, which
     is why this is indistinguishable from a missing id.
     """
     condition = await db.scalar(
-        only_active(
-            select(Condition).where(
-                Condition.id == condition_id,
-                Condition.company_id == current_user.company_id,
+        scope_files(
+            only_active(
+                select(Condition)
+                .join(LoanFile, Condition.loan_file_id == LoanFile.id)
+                .where(Condition.id == condition_id),
+                Condition,
             ),
-            Condition,
+            scope,
         )
     )
     if condition is None:
@@ -409,9 +410,9 @@ ScopedCondition = Annotated[Condition, Depends(get_scoped_condition)]
 
 
 async def get_scoped_loan_file_by_id(
-    loan_file_id: str, db: DbSession, current_user: CurrentUser
+    loan_file_id: str, db: DbSession, scope: CurrentScope
 ) -> LoanFile:
-    """The loan file in the path, scoped to the caller's company.
+    """The loan file in the path, scoped to the files the caller may see (ADR-446).
 
     A DEPENDENCY RATHER THAN THE SAME SIX LINES IN EVERY HANDLER, which is what this router had.
     Both POSTs opened by calling `get_loan_file` and raising 404 themselves; §1 adds three reads, and
@@ -432,7 +433,7 @@ async def get_scoped_loan_file_by_id(
     line, and "The conditions couldn't be loaded" on staging. The tenant gate is `get_loan_file`'s
     `company_id` filter, not the path type, so accepting either form widens nothing.
     """
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=loan_file_id)
+    loan_file = await get_loan_file(db, scope=scope, identifier=loan_file_id)
     if loan_file is None:
         # The same 404 as a missing file: distinguishing them would confirm the id exists, an oracle
         # over another tenant's rows.

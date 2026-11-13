@@ -1,9 +1,10 @@
 """Loan file service — creation, core CRUD, and lifecycle orchestration.
 
-Every query that reads or mutates a loan file is **scoped to one company** via
-:func:`scope_to_company` and excludes soft-deleted rows via :func:`only_active`.
-Callers pass ``company_id`` (the authenticated user's company, LP-24); a file in
-another company is simply never returned — the endpoint maps that to a 404, so
+Every query that reads or mutates a loan file is scoped by
+:func:`app.models.helpers.scope_files`: one company, live rows, and, when the
+company restricts files to their team, the caller's team (ADR-446). Callers pass
+a ``FileScope`` (the request's, or ``FileScope.system`` for a job); a file outside
+it is simply never returned — the endpoint maps that to a 404, so
 existence is never revealed (anti-enumeration). Services ``flush``; the endpoint
 controls the transaction and commits.
 
@@ -23,10 +24,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.errors import LoanOfficerIsInternal
+from app.core.file_scope import FileScope
 from app.models.activity_log import ActivityType
 from app.models.base import utcnow
 from app.models.borrower import Borrower
-from app.models.helpers import only_active, scope_to_company
+from app.models.helpers import scope_files
 from app.models.lender import LoanProgram
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose
 from app.models.loan_team import LoanTeamMember
@@ -114,16 +116,14 @@ async def create_loan_file(
     return loan_file
 
 
-def _scoped(company_id: UUID) -> Select[tuple[LoanFile]]:
-    """A base ``select(LoanFile)`` already scoped to the company and active rows.
+def _scoped(scope: FileScope) -> Select[tuple[LoanFile]]:
+    """A base ``select(LoanFile)`` already scoped to what ``scope`` may see.
 
-    Centralizes the two filters every read must apply, so no call site can
-    forget tenant scoping or accidentally surface soft-deleted files.
+    Centralizes the filters every read must apply (the company, active rows, and the team when the
+    scope is restricted, ADR-446), so no call site can forget tenant scoping or accidentally surface
+    soft-deleted files.
     """
-    stmt = select(LoanFile)
-    stmt = scope_to_company(stmt, LoanFile, company_id)
-    stmt = only_active(stmt, LoanFile)
-    return stmt
+    return scope_files(select(LoanFile), scope)
 
 
 #: Who works a file, as a filter (LP-MB-Admin-05): a user's id (on the team in any slot), or
@@ -169,7 +169,7 @@ def _apply_filters(
 async def count_loan_files(
     db: AsyncSession,
     *,
-    company_id: UUID,
+    scope: FileScope,
     statuses: list[LoanFileStatus] | None = None,
     search: str | None = None,
     assignee: Assignee | None = None,
@@ -180,14 +180,14 @@ async def count_loan_files(
     mean one `pageSize: 1` request per view, which is exactly the StatsCards
     pattern LP-UI-013 deleted.
     """
-    base = _apply_filters(_scoped(company_id), statuses=statuses, search=search, assignee=assignee)
+    base = _apply_filters(_scoped(scope), statuses=statuses, search=search, assignee=assignee)
     return (await db.scalar(select(func.count()).select_from(base.subquery()))) or 0
 
 
 async def list_loan_files(
     db: AsyncSession,
     *,
-    company_id: UUID,
+    scope: FileScope,
     page: int = 1,
     page_size: int = 20,
     statuses: list[LoanFileStatus] | None = None,
@@ -205,7 +205,7 @@ async def list_loan_files(
     another company's files. Borrowers, lender, and property are eager-loaded so
     the summary fields are built without a lazy load.
     """
-    base = _apply_filters(_scoped(company_id), statuses=statuses, search=search, assignee=assignee)
+    base = _apply_filters(_scoped(scope), statuses=statuses, search=search, assignee=assignee)
 
     count_stmt = select(func.count()).select_from(base.subquery())
     total = (await db.scalar(count_stmt)) or 0
@@ -228,17 +228,17 @@ async def list_loan_files(
 async def get_loan_file(
     db: AsyncSession,
     *,
-    company_id: UUID,
+    scope: FileScope,
     identifier: str,
 ) -> LoanFile | None:
-    """Fetch one of the company's loan files by UUID **or** ``display_id``.
+    """Fetch one of the loan files ``scope`` may see by UUID **or** ``display_id``.
 
     Returns ``None`` if no active file with that identifier exists *in this
-    company* — including when it exists in another company (it's simply out of
-    scope). Borrowers, lender, and property are eager-loaded for the detail view
+    scope* — including when it exists in another company, or on a team the scope
+    is restricted away from (ADR-446): it's simply out of scope. Borrowers, lender, and property are eager-loaded for the detail view
     (the summary fields ``lender_name``/``property_address`` need lender/property).
     """
-    stmt = _scoped(company_id).options(
+    stmt = _scoped(scope).options(
         selectinload(LoanFile.borrowers),
         selectinload(LoanFile.lender),
         selectinload(LoanFile.property),

@@ -14,7 +14,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
-from app.api.dependencies import CurrentUser, ScopedLoanFile
+from app.api.dependencies import CurrentScope, CurrentUser, ScopedLoanFile
 from app.core.database import DbSession
 from app.models.reminder_snooze import ReminderKind
 from app.services.reminders import Suggestion, build_suggestions, snooze, unsnooze
@@ -67,19 +67,18 @@ class UnsnoozeRequest(BaseModel):
 
 
 @router.get("", response_model=list[SuggestionPublic])
-async def across_the_company(db: DbSession, current_user: CurrentUser) -> list[SuggestionPublic]:
-    """Everything worth a nudge, across every open file this company has, oldest problem first."""
-    suggestions = await build_suggestions(db, company_id=current_user.company_id)
+async def across_the_company(db: DbSession, scope: CurrentScope) -> list[SuggestionPublic]:
+    """Everything worth a nudge, across every open file the caller may see (ADR-446), oldest
+    problem first."""
+    suggestions = await build_suggestions(db, scope=scope)
     return [SuggestionPublic.of(suggestion) for suggestion in suggestions]
 
 
 @file_router.get("", response_model=list[SuggestionPublic])
 async def for_one_file(
-    loan_file: ScopedLoanFile, db: DbSession, current_user: CurrentUser
+    loan_file: ScopedLoanFile, db: DbSession, scope: CurrentScope
 ) -> list[SuggestionPublic]:
-    suggestions = await build_suggestions(
-        db, company_id=current_user.company_id, loan_file=loan_file
-    )
+    suggestions = await build_suggestions(db, scope=scope, loan_file=loan_file)
     return [SuggestionPublic.of(suggestion) for suggestion in suggestions]
 
 

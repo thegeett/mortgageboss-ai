@@ -154,3 +154,119 @@ decision is made once per request in `FileScope.for_actor` from the company sett
 and `sees_all_loans`. Background jobs declare `FileScope.system(...)`. Extends ADR-041/043 (tenant
 scoping) and ADR-443 (one function decides the company): the same object now decides the company and
 the visibility, and a caller cannot have one without the other.
+
+## Result
+
+**Built**
+- `app/core/file_scope.py`: `FileScope` (frozen; `company_id`, `restricted_to_user_id`), `.restricted`,
+  `FileScope.for_actor` (unrestricted when the setting is off, or `loan.view_all`, or
+  `sees_all_loans`; otherwise the actor's own id), `FileScope.system(company_id)`, and
+  `FileScope.for_user(user)` (the same decision from a `User`, for `UserPublic`). `Actor.scope` is set
+  when `get_current_actor` builds the actor, at the start of the request; `CurrentScope` is the route
+  dependency. `UserPublic.restricted`.
+- `models/helpers.scope_files(stmt, scope)`: `scope_to_company` + `only_active(LoanFile)` + the live
+  `loan_teams` sub-select when restricted. In the query everywhere; child gates join `LoanFile` and
+  apply the same helper.
+- Gates moved from `company_id` to `FileScope`, with no `company_id` overload left:
+  `services/loan_files._scoped`, `get_loan_file`, `list_loan_files`, `count_loan_files`;
+  `get_scoped_loan_file` (`CurrentScope`); `conditions.get_scoped_loan_file_by_id`,
+  `get_scoped_round`, `get_scoped_condition`; `services/documents.get_document` (renamed from
+  `get_document_for_company`); `stated_financials.get_stated_{liability,asset,income,employer}_scoped`;
+  `inbound_triage.list_triage_queue` (a message on a file only if the file is in scope; a message on
+  no file unchanged, ADR-421) and `move_unrouted_message` (the target through the scope);
+  `reminders._open_files` / `build_suggestions`. Every route passes `CurrentScope` or `actor.scope`.
+  Eight API files no longer read `current_user.company_id`, so LP-MB-Admin-02's allowlist went from
+  18 to 10.
+- `processor_copy.copy_recipient`: with the file's company setting on, the newest Send approver who
+  still has a live team row; none → `None` and one `processor_copy_no_team_sender` line with the file
+  id only.
+- Create path: `POST /loan-files` and `POST /loan-files/import-mismo` create inside a SAVEPOINT and,
+  after `on_loan_file_created`, refuse a restricted creator with no live team row:
+  `CreatorWouldNotSeeFile` (a `UserRuleError`, 422, the ticket's sentence). Nothing is left behind.
+- 404 bodies: every `detail=` string in `app/api` and `app/services` was compared before and after
+  (86 strings); none changed.
+- Frontend: `User.restricted` (optional, so an older backend reads as not restricted). The Team card
+  asks "You will no longer see this file." when a restricted user who is the file's loan officer picks
+  someone else or clears the slot, and goes to `/dashboard` after the change. Nothing else changed.
+- Dev seed: Harbor Mortgage Brokers (setting on), two loan officers with a file each, a processor on
+  Lena's file, a sees-all processor; logins in `seed_dev_data`'s docstring and its summary, cleared by
+  `--reset`.
+
+**The door test**
+- `tests/api/file_doors.py`: 200 doors (A 68, B 67, C 65) and 59 exemptions with reasons, together
+  every one of the 259 routes in `app/api`. `test_file_doors_guard.py` fails if a route in `app/api`
+  or a route the survey names is in neither list, if an entry is stale, or if group A's per-router
+  counts differ from the survey's.
+- `test_file_doors.py` sends every door as five callers (1000 cases), each on its own fixture: the
+  non-member gets exactly what a random id gets (status and body) or an empty list / zero count, and
+  `pg_stat_xact_user_tables` shows no row inserted, updated or deleted; the member, an admin, a
+  sees-all processor, and the non-member with the setting off get neither 404 nor 422 nor a server
+  error, and the list doors include the file.
+- Fixture kinds: the ticket's set plus `borrower`, `versioned_document`, `condition_item`,
+  `evidence`, `package`, `outbound_draft`, `snapshot_finding`, `attachment`, `participant`,
+  `dti_line`, `team_member`, `unrouted_message`, `routed_message`, `saved_view`, `received_need`,
+  `property`.
+
+**Counts covered versus the survey**
+| Group | Survey | Doors | Exempt (reason) |
+|---|---|---|---|
+| A | 64 + 4 addendum = 68 | 68 | 0 |
+| B | 69 | 67 | 2: the two create routes (no file to hide; the create-path tests) |
+| C | 68 + 2 addendum = 70 | 65 | 5: overlay blast radius (`overlays.manage`), `GET /users/assignable` and `POST /users/{id}/reassign-loans` (point 12), the two upload-token routes (the token is the credential) |
+| D | 16 tasks | n/a | not routes; the one that delivers mail to a person is point 11 |
+
+**Verification**
+- Backend, run 1 (everything but the door test; the setting off everywhere it is not set by a new
+  test): 10129 passed, 12 skipped, 1 xfailed: the previous 10101 plus the 28 new non-door tests, so
+  the existing suite is unchanged. Run 2 (with the door test): 11129 passed, the same plus 1000.
+  ruff and mypy strict (`app/`) clean; pre-commit clean on the 46 changed files.
+- Frontend: 2637 passed (5 new Team card tests); `tsc --noEmit` and Biome clean.
+- Mutations, each caught by its tests: `scope_files` without the team predicate; `for_actor`
+  ignoring `loan.view_all`, `sees_all_loans`, or the setting; `get_document`, `get_scoped_round`,
+  `get_scoped_condition`, `get_scoped_loan_file_by_id` and the stated-liability lookup each reverted
+  to company-only; the Inbox listing every routed message; move resolving its target company-wide;
+  reminders over every file; saved-view counts company-wide; no creator refusal; the refusal check
+  removed from the create path; the copy ignoring the team; `restricted` always false; a door
+  removed from the list (18 backend). Frontend: no confirm, no navigation, ignoring `restricted`,
+  ignoring who the loan officer is (4).
+
+**Classification the build disagreed with**
+- None of the survey's routes moved group. Two refinements: the two create routes in B2 are not
+  doors (there is no file to hide before it exists; the creator rule is their test), and
+  `POST /dev/documents/{id}/extract-text-layer` is a door in its own right (the dev router is mounted
+  in tests), not only "covered by C3".
+
+**Behaviour changes with the setting OFF** (the existing suite is unchanged by them)
+- A condition, a round, or a stated item on a soft-deleted file is now a 404 (the gates filter the
+  live file through `scope_files`; before, they filtered only the row's own company).
+- The Inbox no longer lists a routed message whose file was deleted.
+
+**Found by the door test, not fixed (outside this ticket)**
+- `GET /documents/{id}/versions` on a document never replaced answers 500 (`extractions` not loaded
+  for the standalone branch of `get_version_group_documents`). The documents drawer asks only when
+  `version_count > 1`, so only a direct API call reaches it; the door uses a versioned document.
+- `POST /needs/{id}/confirm-coverage` on a PENDING need answers 500 (`InvalidNeedTransition` is not
+  mapped). The door uses a RECEIVED need, the state the button is shown in.
+- `POST /messages/{id}/follow-up/stop` on a message whose follow-up was never on answers 500 (the
+  `follow_up_time_set` CHECK). The door uses a message with its follow-up on.
+- `POST /conditions/{id}/reading/confirm` on a condition with no reading answers 500 (`type_id`
+  missing). Every imported condition has a reading; the door's condition has one.
+
+**Assumptions**
+- `Actor.scope` is a `field(init=False)` set in `__post_init__`, so the scope exists exactly when the
+  actor does; `test_authorization_guards`' bare `Actor` was given a company with default settings.
+- No background job calls a gate (each reads its file by id), so `FileScope.system` has no app call
+  site today; tests use it. `processor_copy` reads the setting from the file's company, since a job
+  has no actor.
+- On a refused MISMO import, the raw bytes already written to storage stay unreferenced, as on the
+  existing `MismoImportError` path.
+- `_open_files` with a named file now re-reads it through `scope_files` (one query) instead of
+  comparing its company in Python.
+- Names across files (Decided 3): the routes that return a user's name are file-scoped (follow-ups,
+  condition events, the team) or admin-only (invites, People, audit), plus `GET /users/assignable`
+  (names and counts, by decision). Nothing else names a person across files.
+
+**Deferred**
+- Per-file sharing; the assistant slot, auto-assignment and notifications (Part 1's deferrals).
+- The four 500s above.
+- The remaining 10 files on the `current_user.company_id` allowlist.

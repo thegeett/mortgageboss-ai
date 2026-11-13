@@ -19,6 +19,7 @@ from __future__ import annotations
 from datetime import timedelta
 from uuid import uuid4
 
+from app.core.file_scope import FileScope
 from app.models import Company, LoanProgram
 from app.models.activity_log import ActivityType
 from app.models.base import utcnow
@@ -98,7 +99,7 @@ async def test_a_need_requested_four_days_ago_is_suggested(db_session: AsyncSess
     company, loan_file = await _company_and_file(db_session, slug="pending")
     await _need(db_session, loan_file, status=NeedsItemStatus.REQUESTED, requested_days_ago=4)
 
-    suggestions = await build_suggestions(db_session, company_id=company.id)
+    suggestions = await build_suggestions(db_session, scope=FileScope.system(company.id))
 
     assert ReminderKind.NEEDS_ITEM_PENDING in _kinds(suggestions)
 
@@ -109,7 +110,7 @@ async def test_a_need_nobody_has_asked_for_is_not_suggested(db_session: AsyncSes
     company, loan_file = await _company_and_file(db_session, slug="unasked")
     await _need(db_session, loan_file, status=NeedsItemStatus.PENDING, requested_days_ago=None)
 
-    suggestions = await build_suggestions(db_session, company_id=company.id)
+    suggestions = await build_suggestions(db_session, scope=FileScope.system(company.id))
 
     assert ReminderKind.NEEDS_ITEM_PENDING not in _kinds(suggestions)
 
@@ -131,7 +132,7 @@ async def test_a_bounced_request_produces_no_clock(db_session: AsyncSession) -> 
     need.requested_at = None
     await db_session.flush()
 
-    suggestions = await build_suggestions(db_session, company_id=company.id)
+    suggestions = await build_suggestions(db_session, scope=FileScope.system(company.id))
 
     assert ReminderKind.NEEDS_ITEM_PENDING not in _kinds(suggestions)
 
@@ -143,7 +144,7 @@ async def test_a_need_requested_yesterday_is_not_yet_suggested(
     company, loan_file = await _company_and_file(db_session, slug="fresh")
     await _need(db_session, loan_file, status=NeedsItemStatus.REQUESTED, requested_days_ago=1)
 
-    suggestions = await build_suggestions(db_session, company_id=company.id)
+    suggestions = await build_suggestions(db_session, scope=FileScope.system(company.id))
 
     assert ReminderKind.NEEDS_ITEM_PENDING not in _kinds(suggestions)
 
@@ -162,7 +163,7 @@ async def test_the_stamp_decides_and_not_the_creation_date(db_session: AsyncSess
     company, loan_file = await _company_and_file(db_session, slug="stamp")
     await _need(db_session, loan_file, status=NeedsItemStatus.REQUESTED, requested_days_ago=1)
 
-    suggestions = await build_suggestions(db_session, company_id=company.id)
+    suggestions = await build_suggestions(db_session, scope=FileScope.system(company.id))
 
     assert ReminderKind.NEEDS_ITEM_PENDING not in _kinds(suggestions)
 
@@ -182,7 +183,7 @@ async def test_a_requested_need_with_no_stamp_is_not_suggested(
     company, loan_file = await _company_and_file(db_session, slug="nostamp")
     await _need(db_session, loan_file, status=NeedsItemStatus.REQUESTED, requested_days_ago=None)
 
-    suggestions = await build_suggestions(db_session, company_id=company.id)
+    suggestions = await build_suggestions(db_session, scope=FileScope.system(company.id))
 
     assert ReminderKind.NEEDS_ITEM_PENDING not in _kinds(suggestions)
 
@@ -193,7 +194,7 @@ async def test_a_need_satisfied_another_way_is_not_suggested(db_session: AsyncSe
     company, loan_file = await _company_and_file(db_session, slug="satisfied")
     await _need(db_session, loan_file, status=NeedsItemStatus.RECEIVED, requested_days_ago=10)
 
-    suggestions = await build_suggestions(db_session, company_id=company.id)
+    suggestions = await build_suggestions(db_session, scope=FileScope.system(company.id))
 
     assert ReminderKind.NEEDS_ITEM_PENDING not in _kinds(suggestions)
 
@@ -232,7 +233,7 @@ async def test_a_message_unanswered_for_six_days_is_suggested(db_session: AsyncS
     await _sent(db_session, loan_file, days_ago=6)
 
     assert ReminderKind.NO_REPLY in _kinds(
-        await build_suggestions(db_session, company_id=company.id)
+        await build_suggestions(db_session, scope=FileScope.system(company.id))
     )
 
 
@@ -242,7 +243,7 @@ async def test_a_reply_after_the_send_clears_it(db_session: AsyncSession) -> Non
     await _received(db_session, loan_file, days_ago=2)
 
     assert ReminderKind.NO_REPLY not in _kinds(
-        await build_suggestions(db_session, company_id=company.id)
+        await build_suggestions(db_session, scope=FileScope.system(company.id))
     )
 
 
@@ -255,7 +256,7 @@ async def test_a_reply_BEFORE_the_send_does_not_clear_it(db_session: AsyncSessio
     await _sent(db_session, loan_file, days_ago=6)
 
     assert ReminderKind.NO_REPLY in _kinds(
-        await build_suggestions(db_session, company_id=company.id)
+        await build_suggestions(db_session, scope=FileScope.system(company.id))
     )
 
 
@@ -266,7 +267,7 @@ async def test_three_unanswered_sends_are_one_suggestion(db_session: AsyncSessio
     for days in (6, 10, 14):
         await _sent(db_session, loan_file, days_ago=days)
 
-    suggestions = await build_suggestions(db_session, company_id=company.id)
+    suggestions = await build_suggestions(db_session, scope=FileScope.system(company.id))
 
     assert len([s for s in suggestions if s.kind is ReminderKind.NO_REPLY]) == 1
 
@@ -285,7 +286,7 @@ async def test_a_draft_is_not_a_send(db_session: AsyncSession) -> None:
     await db_session.flush()
 
     assert ReminderKind.NO_REPLY not in _kinds(
-        await build_suggestions(db_session, company_id=company.id)
+        await build_suggestions(db_session, scope=FileScope.system(company.id))
     )
 
 
@@ -306,7 +307,7 @@ async def test_a_file_quiet_for_eight_days_is_suggested(db_session: AsyncSession
     await db_session.flush()
 
     assert ReminderKind.FILE_UNTOUCHED in _kinds(
-        await build_suggestions(db_session, company_id=company.id)
+        await build_suggestions(db_session, scope=FileScope.system(company.id))
     )
 
 
@@ -316,7 +317,7 @@ async def test_a_busy_file_is_not_suggested(db_session: AsyncSession) -> None:
     company, _loan_file = await _company_and_file(db_session, slug="busy")
 
     assert ReminderKind.FILE_UNTOUCHED not in _kinds(
-        await build_suggestions(db_session, company_id=company.id)
+        await build_suggestions(db_session, scope=FileScope.system(company.id))
     )
 
 
@@ -328,7 +329,7 @@ async def test_a_submitted_file_is_never_nagged_about(db_session: AsyncSession) 
     loan_file.status = LoanFileStatus.SUBMITTED
     await db_session.flush()
 
-    assert await build_suggestions(db_session, company_id=company.id) == []
+    assert await build_suggestions(db_session, scope=FileScope.system(company.id)) == []
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -339,8 +340,8 @@ async def test_another_companys_files_are_never_suggested(db_session: AsyncSessi
     mine, _my_file = await _company_and_file(db_session, slug="rem-mine")
     await _need(db_session, their_file, status=NeedsItemStatus.REQUESTED, requested_days_ago=10)
 
-    assert await build_suggestions(db_session, company_id=mine.id) == []
-    assert await build_suggestions(db_session, company_id=theirs.id) != []
+    assert await build_suggestions(db_session, scope=FileScope.system(mine.id)) == []
+    assert await build_suggestions(db_session, scope=FileScope.system(theirs.id)) != []
 
 
 async def test_a_named_file_from_another_company_yields_nothing(
@@ -352,7 +353,9 @@ async def test_a_named_file_from_another_company_yields_nothing(
     mine, _my_file = await _company_and_file(db_session, slug="named-mine")
     await _need(db_session, their_file, status=NeedsItemStatus.REQUESTED, requested_days_ago=10)
 
-    assert (await build_suggestions(db_session, company_id=mine.id, loan_file=their_file)) == []
+    assert (
+        await build_suggestions(db_session, scope=FileScope.system(mine.id), loan_file=their_file)
+    ) == []
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -373,12 +376,12 @@ async def test_a_snooze_hides_it_until_the_date(db_session: AsyncSession) -> Non
     )
 
     assert ReminderKind.NEEDS_ITEM_PENDING not in _kinds(
-        await build_suggestions(db_session, company_id=company.id)
+        await build_suggestions(db_session, scope=FileScope.system(company.id))
     )
     # AND COMES BACK. A snooze that never expired would be a dismissal wearing the wrong name.
     later = utcnow() + timedelta(days=3)
     assert ReminderKind.NEEDS_ITEM_PENDING in _kinds(
-        await build_suggestions(db_session, company_id=company.id, now=later)
+        await build_suggestions(db_session, scope=FileScope.system(company.id), now=later)
     )
 
 
@@ -398,7 +401,7 @@ async def test_a_dismissal_never_comes_back(db_session: AsyncSession) -> None:
 
     far_future = utcnow() + timedelta(days=400)
     assert ReminderKind.NEEDS_ITEM_PENDING not in _kinds(
-        await build_suggestions(db_session, company_id=company.id, now=far_future)
+        await build_suggestions(db_session, scope=FileScope.system(company.id), now=far_future)
     )
 
 
@@ -420,7 +423,7 @@ async def test_snoozing_one_kind_does_not_hide_another(db_session: AsyncSession)
     )
 
     assert ReminderKind.NO_REPLY in _kinds(
-        await build_suggestions(db_session, company_id=company.id)
+        await build_suggestions(db_session, scope=FileScope.system(company.id))
     )
 
 
@@ -441,7 +444,7 @@ async def test_a_file_level_snooze_works_at_all(db_session: AsyncSession) -> Non
     entry.created_at = utcnow() - timedelta(days=10)
     await db_session.flush()
     assert ReminderKind.FILE_UNTOUCHED in _kinds(
-        await build_suggestions(db_session, company_id=company.id)
+        await build_suggestions(db_session, scope=FileScope.system(company.id))
     )
 
     await snooze(
@@ -461,7 +464,7 @@ async def test_a_file_level_snooze_works_at_all(db_session: AsyncSession) -> Non
     )
 
     assert ReminderKind.FILE_UNTOUCHED not in _kinds(
-        await build_suggestions(db_session, company_id=company.id)
+        await build_suggestions(db_session, scope=FileScope.system(company.id))
     )
 
 
@@ -489,7 +492,7 @@ async def test_unsnoozing_brings_it_back(db_session: AsyncSession) -> None:
     )
 
     assert ReminderKind.NEEDS_ITEM_PENDING in _kinds(
-        await build_suggestions(db_session, company_id=company.id)
+        await build_suggestions(db_session, scope=FileScope.system(company.id))
     )
 
 
@@ -524,7 +527,7 @@ async def test_re_snoozing_after_an_unsnooze_takes_effect(db_session: AsyncSessi
     )
 
     assert ReminderKind.NEEDS_ITEM_PENDING not in _kinds(
-        await build_suggestions(db_session, company_id=company.id)
+        await build_suggestions(db_session, scope=FileScope.system(company.id))
     )
 
 
@@ -545,7 +548,7 @@ async def test_a_suggestion_carries_our_own_words(db_session: AsyncSession) -> N
 
     suggestion = next(
         s
-        for s in await build_suggestions(db_session, company_id=company.id)
+        for s in await build_suggestions(db_session, scope=FileScope.system(company.id))
         if s.kind is ReminderKind.NEEDS_ITEM_PENDING
     )
 
@@ -575,7 +578,7 @@ async def test_the_oldest_problem_comes_first(db_session: AsyncSession) -> None:
 
     suggestions = [
         s
-        for s in await build_suggestions(db_session, company_id=company.id)
+        for s in await build_suggestions(db_session, scope=FileScope.system(company.id))
         if s.kind is ReminderKind.NEEDS_ITEM_PENDING
     ]
 
@@ -601,7 +604,7 @@ async def test_a_dismissal_does_not_silence_a_later_request(db_session: AsyncSes
         requested_days_ago=10,
     )
 
-    assert len(await build_suggestions(db_session, company_id=company.id)) == 1
+    assert len(await build_suggestions(db_session, scope=FileScope.system(company.id))) == 1
 
     dismissal = await snooze(
         db_session,
@@ -615,7 +618,7 @@ async def test_a_dismissal_does_not_silence_a_later_request(db_session: AsyncSes
     # at `now`, failed against correct code for exactly that reason.
     dismissal.created_at = utcnow() - timedelta(days=9)
     await db_session.flush()
-    assert await build_suggestions(db_session, company_id=company.id) == []
+    assert await build_suggestions(db_session, scope=FileScope.system(company.id)) == []
 
     # LP-819 unwinds the bounced request, then a new one is sent and goes unanswered.
     need.status = NeedsItemStatus.PENDING
@@ -625,7 +628,7 @@ async def test_a_dismissal_does_not_silence_a_later_request(db_session: AsyncSes
     need.requested_at = utcnow() - timedelta(days=4)
     await db_session.flush()
 
-    again = await build_suggestions(db_session, company_id=company.id)
+    again = await build_suggestions(db_session, scope=FileScope.system(company.id))
     assert len(again) == 1
     assert again[0].subject_id == need.id
 
@@ -654,7 +657,7 @@ async def test_a_dismissal_still_silences_the_request_it_was_about(
     await db_session.flush()
 
     # Time passes; the SAME request is still outstanding.
-    assert await build_suggestions(db_session, company_id=company.id) == []
+    assert await build_suggestions(db_session, scope=FileScope.system(company.id)) == []
 
 
 async def test_a_timed_snooze_still_expires_on_its_own_terms(db_session: AsyncSession) -> None:
@@ -675,9 +678,9 @@ async def test_a_timed_snooze_still_expires_on_its_own_terms(db_session: AsyncSe
         until=utcnow() + timedelta(days=1),
     )
     await db_session.flush()
-    assert await build_suggestions(db_session, company_id=company.id) == []
+    assert await build_suggestions(db_session, scope=FileScope.system(company.id)) == []
 
     row.snoozed_until = utcnow() - timedelta(minutes=1)
     await db_session.flush()
 
-    assert len(await build_suggestions(db_session, company_id=company.id)) == 1
+    assert len(await build_suggestions(db_session, scope=FileScope.system(company.id))) == 1

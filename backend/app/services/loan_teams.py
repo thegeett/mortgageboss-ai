@@ -360,6 +360,22 @@ async def on_loan_file_created(db: AsyncSession, actor: "Actor", loan_file: Loan
         )
 
 
+async def creator_would_not_see(db: AsyncSession, actor: "Actor", loan_file: LoanFile) -> bool:
+    """True when the actor's scope is restricted (LP-MB-Admin-06) and they hold no live team row
+    on the file they just created: a loan officer who named another loan officer and holds no
+    PROCESSOR role. The create paths refuse it rather than add them to a slot (Decided 4)."""
+    if not actor.scope.restricted:
+        return False
+    on_team = await db.scalar(
+        select(LoanTeamMember.id).where(
+            LoanTeamMember.loan_file_id == loan_file.id,
+            LoanTeamMember.user_id == actor.user.id,
+            LoanTeamMember.deleted_at.is_(None),
+        )
+    )
+    return on_team is None
+
+
 # --------------------------------------------------------------------------- #
 # Handing someone's files to another person
 # --------------------------------------------------------------------------- #

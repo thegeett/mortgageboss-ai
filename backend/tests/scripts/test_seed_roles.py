@@ -8,9 +8,13 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from app.models import Company, UserRole
+from app.core.file_scope import FileScope
+from app.models import Company, LoanFile, User, UserRole
+from app.models.helpers import scope_files
 from app.scripts import seed_dev, seed_dev_data
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from tests.user_factory import make_user
 
 
@@ -60,3 +64,36 @@ async def test_a_rerun_adds_missing_roles_to_an_existing_user(
     # Stored, and a second re-run adds nothing (the unique index would refuse a duplicate).
     assert again.role_set == {UserRole.ADMIN, UserRole.PROCESSOR}
     assert len(again.roles) == 2
+
+
+async def test_the_restricted_demo_company_shows_each_login_what_its_docstring_says(
+    db_session: AsyncSession,
+) -> None:
+    """LP-MB-Admin-06 — the seed's Harbor logins see the files `seed_dev_data`'s docstring lists."""
+    assert await seed_dev_data._seed_restricted_company(db_session) is True
+    assert await seed_dev_data._seed_restricted_company(db_session) is False  # idempotent
+    db_session.expunge_all()
+    users = {
+        user.email: user
+        for user in await db_session.scalars(
+            select(User)
+            .join(Company, User.company_id == Company.id)
+            .where(Company.slug == seed_dev_data._RESTRICTED_SLUG)
+            .options(selectinload(User.company))
+        )
+    }
+
+    async def visible(email: str) -> int:
+        scope = FileScope.for_user(users[email])
+        return int(
+            await db_session.scalar(
+                select(func.count()).select_from(scope_files(select(LoanFile.id), scope).subquery())
+            )
+            or 0
+        )
+
+    assert await visible(seed_dev_data._RESTRICTED_ADMIN_EMAIL) == 2
+    assert await visible(seed_dev_data._RESTRICTED_LO_1_EMAIL) == 1
+    assert await visible(seed_dev_data._RESTRICTED_LO_2_EMAIL) == 1
+    assert await visible(seed_dev_data._RESTRICTED_PROCESSOR_EMAIL) == 1
+    assert await visible(seed_dev_data._RESTRICTED_SEES_ALL_EMAIL) == 2

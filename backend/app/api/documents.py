@@ -7,7 +7,7 @@ The first real consumer of the LP-35 storage layer. Two routers:
     parent file is company-scope-checked **first** (``404`` if not the caller's).
   * **Flat** — ``/documents/{document_id}`` — for get-one, download, and delete.
     A document has no ``company_id``, so every flat route resolves it via
-    :func:`get_document_for_company` (join through the loan file) and ``404``s
+    :func:`get_document` (join through the loan file) and ``404``s
     unless the file belongs to the caller's company. This is the cross-tenant
     gate: a Company A user can never get/download/delete a Company B document.
 
@@ -27,7 +27,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile, 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.ai.extraction import EXTRACTORS
-from app.api.dependencies import CurrentUser, ScopedLoanFile
+from app.api.dependencies import CurrentScope, CurrentUser, ScopedLoanFile
 from app.core.database import DbSession
 from app.documents.catalog import CATALOG, get_category, get_tier
 from app.models.activity_log import ActivityType
@@ -59,7 +59,7 @@ from app.services.documents import (
     build_document_responses,
     create_document,
     get_current_extraction,
-    get_document_for_company,
+    get_document,
     get_version_group_documents,
     list_documents,
     resolve_staleness,
@@ -607,12 +607,10 @@ async def list_document_types(_current_user: CurrentUser) -> list[DocumentTypeOp
 
 @flat_router.get("/{document_id}", response_model=DocumentDetailResponse)
 async def retrieve(
-    document_id: UUID, current_user: CurrentUser, db: DbSession
+    document_id: UUID, current_user: CurrentUser, scope: CurrentScope, db: DbSession
 ) -> DocumentDetailResponse:
     """Get one document + its current extraction (+ versioning/staleness); ``404`` if not the caller's."""
-    document = await get_document_for_company(
-        db, document_id=document_id, company_id=current_user.company_id
-    )
+    document = await get_document(db, document_id=document_id, scope=scope)
     if document is None:
         raise _NOT_FOUND
     return await build_document_detail(db, document=document)
@@ -620,12 +618,10 @@ async def retrieve(
 
 @flat_router.get("/{document_id}/versions", response_model=list[DocumentResponse])
 async def versions(
-    document_id: UUID, current_user: CurrentUser, db: DbSession
+    document_id: UUID, current_user: CurrentUser, scope: CurrentScope, db: DbSession
 ) -> list[DocumentResponse]:
     """The document's version group, oldest→newest (LP-71). A standalone doc → just itself."""
-    document = await get_document_for_company(
-        db, document_id=document_id, company_id=current_user.company_id
-    )
+    document = await get_document(db, document_id=document_id, scope=scope)
     if document is None:
         raise _NOT_FOUND
     group = await get_version_group_documents(db, document=document)
@@ -637,6 +633,7 @@ async def override_document_type(
     document_id: UUID,
     body: DocumentTypeOverrideRequest,
     current_user: CurrentUser,
+    scope: CurrentScope,
     db: DbSession,
 ) -> DocumentResponse:
     """Manually override a document's type, then re-extract for the corrected type (LP-44).
@@ -651,9 +648,7 @@ async def override_document_type(
     relabels classified-only). Tenant-scoped (``404`` for another company's
     document); re-extraction runs in the background and shows live in the UI.
     """
-    document = await get_document_for_company(
-        db, document_id=document_id, company_id=current_user.company_id
-    )
+    document = await get_document(db, document_id=document_id, scope=scope)
     if document is None:
         raise _NOT_FOUND
 
@@ -715,6 +710,7 @@ async def override_document_type(
 async def reprocess_document_from_scratch(
     document_id: UUID,
     current_user: CurrentUser,
+    scope: CurrentScope,
     db: DbSession,
     # Defaulted so a body-less POST works. FastAPI makes a Pydantic body parameter REQUIRED
     # regardless of every field on it having a default, so without this the natural call — a
@@ -742,9 +738,7 @@ async def reprocess_document_from_scratch(
     (409) for a superseded version and for a document the pipeline is already running on. The
     document returns to PENDING and moves through its statuses as the background pipeline runs.
     """
-    document = await get_document_for_company(
-        db, document_id=document_id, company_id=current_user.company_id
-    )
+    document = await get_document(db, document_id=document_id, scope=scope)
     if document is None:
         raise _NOT_FOUND
 
@@ -863,6 +857,7 @@ async def reprocess_document_from_scratch(
 async def replace(
     document_id: UUID,
     current_user: CurrentUser,
+    scope: CurrentScope,
     db: DbSession,
     file: Annotated[UploadFile, File(description="The new version of the document")],
 ) -> DocumentResponse:
@@ -874,9 +869,7 @@ async def replace(
     need the old satisfied re-evaluates against the new current version (via the new
     document's pipeline, LP-68 serialized). Tenant-scoped (``404``); audited.
     """
-    old = await get_document_for_company(
-        db, document_id=document_id, company_id=current_user.company_id
-    )
+    old = await get_document(db, document_id=document_id, scope=scope)
     if old is None:
         raise _NOT_FOUND
     if not old.is_current:
@@ -936,13 +929,12 @@ async def resolve_staleness_endpoint(
     document_id: UUID,
     body: StalenessResolveRequest,
     current_user: CurrentUser,
+    scope: CurrentScope,
     db: DbSession,
 ) -> DocumentResponse:
     """Resolve a flagged-stale document (LP-71): ``waive`` or ``accept`` (replace is its
     own flow). Clears the staleness flag; the processor decides. Tenant-scoped; audited."""
-    document = await get_document_for_company(
-        db, document_id=document_id, company_id=current_user.company_id
-    )
+    document = await get_document(db, document_id=document_id, scope=scope)
     if document is None:
         raise _NOT_FOUND
     action = "waive" if body.action == "waive" else "accept"
@@ -1024,16 +1016,14 @@ class FieldReviewPublic(BaseModel):
 
 @flat_router.get("/{document_id}/reviews", response_model=list[FieldReviewPublic])
 async def list_field_reviews(
-    document_id: UUID, current_user: CurrentUser, db: DbSession
+    document_id: UUID, current_user: CurrentUser, scope: CurrentScope, db: DbSession
 ) -> list[FieldReviewPublic]:
     """Every live verdict on this document's CURRENT extraction (LP-UI-033).
 
     Scoped to the current version deliberately: a verdict on a superseded
     extraction described a value that may no longer be there.
     """
-    document = await get_document_for_company(
-        db, document_id=document_id, company_id=current_user.company_id
-    )
+    document = await get_document(db, document_id=document_id, scope=scope)
     if document is None:
         raise _NOT_FOUND
     extraction = await get_current_extraction(db, document=document)
@@ -1045,16 +1035,18 @@ async def list_field_reviews(
 
 @flat_router.put("/{document_id}/reviews", response_model=FieldReviewPublic)
 async def record_field_review(
-    document_id: UUID, body: FieldReviewRequest, current_user: CurrentUser, db: DbSession
+    document_id: UUID,
+    body: FieldReviewRequest,
+    current_user: CurrentUser,
+    scope: CurrentScope,
+    db: DbSession,
 ) -> FieldReviewPublic:
     """Decide about one field: accept, correct, reject, remove or add (LP-UI-033, LP-703).
 
     PUT rather than POST: a field has at most one live verdict, and re-deciding is
     replacing it, not adding a second.
     """
-    document = await get_document_for_company(
-        db, document_id=document_id, company_id=current_user.company_id
-    )
+    document = await get_document(db, document_id=document_id, scope=scope)
     if document is None:
         raise _NOT_FOUND
     extraction = await get_current_extraction(db, document=document)
@@ -1100,12 +1092,10 @@ async def record_field_review(
 
 @flat_router.delete("/{document_id}/reviews/{field_key}", status_code=status.HTTP_204_NO_CONTENT)
 async def revert_field_review(
-    document_id: UUID, field_key: str, current_user: CurrentUser, db: DbSession
+    document_id: UUID, field_key: str, current_user: CurrentUser, scope: CurrentScope, db: DbSession
 ) -> Response:
     """Withdraw the verdict on one field. Idempotent — 204 whether or not there was one."""
-    document = await get_document_for_company(
-        db, document_id=document_id, company_id=current_user.company_id
-    )
+    document = await get_document(db, document_id=document_id, scope=scope)
     if document is None:
         raise _NOT_FOUND
     extraction = await get_current_extraction(db, document=document)
@@ -1123,16 +1113,14 @@ async def revert_field_review(
 
 @flat_router.get("/{document_id}/boxes", response_model=FieldBoxesResponse)
 async def field_boxes(
-    document_id: UUID, current_user: CurrentUser, db: DbSession
+    document_id: UUID, current_user: CurrentUser, scope: CurrentScope, db: DbSession
 ) -> FieldBoxesResponse:
     """Locate every extracted field's snippet in the document (LP-UI-031).
 
     Read-only, and behind the same tenant gate as the bytes — a box is derived
     from the document's own text, so it is as sensitive as the page it describes.
     """
-    document = await get_document_for_company(
-        db, document_id=document_id, company_id=current_user.company_id
-    )
+    document = await get_document(db, document_id=document_id, scope=scope)
     if document is None:
         raise _NOT_FOUND
     extraction = await get_current_extraction(db, document=document)
@@ -1179,6 +1167,7 @@ async def page_image(
     document_id: UUID,
     page_number: int,
     current_user: CurrentUser,
+    scope: CurrentScope,
     db: DbSession,
     zoom: float = DEFAULT_ZOOM,
 ) -> Response:
@@ -1205,9 +1194,7 @@ async def page_image(
     zoom that was APPLIED, which is not always the one asked for: a page larger
     than the render budget is scaled down (`MAX_RENDERED_EDGE`).
     """
-    document = await get_document_for_company(
-        db, document_id=document_id, company_id=current_user.company_id
-    )
+    document = await get_document(db, document_id=document_id, scope=scope)
     if document is None:
         raise _NOT_FOUND
     if document.mime_type not in RENDERABLE_TYPES:
@@ -1239,16 +1226,16 @@ async def page_image(
 
 
 @flat_router.get("/{document_id}/download")
-async def download(document_id: UUID, current_user: CurrentUser, db: DbSession) -> Response:
+async def download(
+    document_id: UUID, current_user: CurrentUser, scope: CurrentScope, db: DbSession
+) -> Response:
     """Stream the original bytes (auth'd). The only way to fetch a document's bytes.
 
-    Scoped via :func:`get_document_for_company` (``404`` for another company's
+    Scoped via :func:`get_document` (``404`` for another company's
     document). Returns the bytes with the stored content type and a
     ``Content-Disposition: attachment`` carrying the original filename.
     """
-    document = await get_document_for_company(
-        db, document_id=document_id, company_id=current_user.company_id
-    )
+    document = await get_document(db, document_id=document_id, scope=scope)
     if document is None:
         raise _NOT_FOUND
     storage = get_storage_backend()
@@ -1261,11 +1248,11 @@ async def download(document_id: UUID, current_user: CurrentUser, db: DbSession) 
 
 
 @flat_router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete(document_id: UUID, current_user: CurrentUser, db: DbSession) -> None:
+async def delete(
+    document_id: UUID, current_user: CurrentUser, scope: CurrentScope, db: DbSession
+) -> None:
     """Soft-delete a document (preserves the stored bytes); ``404`` if not the caller's."""
-    document = await get_document_for_company(
-        db, document_id=document_id, company_id=current_user.company_id
-    )
+    document = await get_document(db, document_id=document_id, scope=scope)
     if document is None:
         raise _NOT_FOUND
     await soft_delete_document(db, document=document)

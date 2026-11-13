@@ -26,7 +26,8 @@ class CompanySettings(BaseModel):
     processors_can_create_loans: bool = True
     #: Processors hold `borrower.invite`. Takes effect when the borrower portal ships.
     processors_can_invite_borrowers: bool = True
-    #: Stored and read back only; LP-MB-Admin-05 Part 2 enforces it. Changes nothing until then.
+    #: On: a loan officer or processor sees only the files they are on (LP-MB-Admin-06, ADR-446),
+    #: decided per request by `FileScope.for_actor`.
     restrict_loans_to_team: bool = False
 
 

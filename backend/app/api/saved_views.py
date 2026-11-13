@@ -18,7 +18,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import or_, select
 
-from app.api.dependencies import CurrentUser
+from app.api.dependencies import CurrentScope, CurrentUser
 from app.core.database import DbSession
 from app.models.base import utcnow
 from app.models.saved_view import SavedView
@@ -74,6 +74,7 @@ async def _get_scoped(db: DbSession, view_id: UUID, user: User) -> SavedView:
 async def list_saved_views(
     db: DbSession,
     current_user: CurrentUser,
+    scope: CurrentScope,
     with_counts: Annotated[bool, Query()] = False,
 ) -> list[SavedViewPublic]:
     """The caller's own views plus their company's shared ones, oldest first.
@@ -102,9 +103,10 @@ async def list_saved_views(
     out: list[SavedViewPublic] = []
     for view in views:
         filters = SavedViewFilters.model_validate(view.filters)
+        # The files this caller may see (ADR-446): under team restriction, "All files" is all theirs.
         count = await count_loan_files(
             db,
-            company_id=current_user.company_id,
+            scope=scope,
             statuses=list(filters.statuses) or None,
             search=filters.search,
             # "me" is whoever is looking, so a shared view counts each viewer's own files.

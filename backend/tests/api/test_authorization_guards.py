@@ -15,6 +15,7 @@ import pytest
 from app.api.dependencies import Actor
 from app.core.errors import register_exception_handlers
 from app.core.permissions import Permission, PermissionDeniedError
+from app.models.company import Company
 from app.models.user import User, UserRole
 from app.services.authorization import ensure
 from fastapi import FastAPI
@@ -25,27 +26,20 @@ _USE = re.compile(r"\bcurrent_user\.company_id\b")
 
 #: The files that used `current_user.company_id` when LP-MB-Admin-02 landed. LP-MB-Admin-05's
 #: follow-up moves them onto `CurrentCompanyId` and EMPTIES this set; nothing is ever added to it.
+#: LP-MB-Admin-06 took eight off: their file gates now take `CurrentScope` (ADR-446).
 #: `dependencies.py` is here because `get_current_actor` is where the effective company is decided.
 _ALLOWED = frozenset(
     {
-        "calculators.py",
         "capabilities.py",
-        "conditions.py",
         "dependencies.py",
-        "dev.py",
         "documents.py",
-        "dti.py",
         "inbound.py",
         "lenders.py",
         "loan_files.py",
-        "ltv.py",
         "mailbox_connections.py",
         "overlay_admin.py",
-        "reminders.py",
         "saved_views.py",
-        "stated_financials.py",
         "validation_aid.py",
-        "verification.py",
     }
 )
 
@@ -64,14 +58,15 @@ def test_no_new_file_reads_current_user_company_id() -> None:
 
 def test_the_allowlist_holds_only_files_that_still_need_it() -> None:
     """A file that stopped using it comes off the list, so the list only shrinks."""
-    assert len(_ALLOWED) == 18
+    assert len(_ALLOWED) == 10
     stale = sorted(_ALLOWED - _users())
     assert not stale, f"no longer read `current_user.company_id`; remove from _ALLOWED: {stale}"
 
 
 def _actor(*permissions: Permission) -> Actor:
     return Actor(
-        user=User(),
+        # A company with default settings: building an Actor decides its file scope (ADR-446).
+        user=User(company=Company(settings={})),
         company_id=uuid4(),
         roles=frozenset({UserRole.PROCESSOR}),
         permissions=frozenset(permissions),

@@ -17,6 +17,16 @@ plus a fourth file **imported from MISMO** (LP-57) through the real import servi
 real stated financials (income/employers/liabilities/assets) and a MismoImport
 record — exercising the MISMO path end to end.
 
+LP-MB-Admin-06 — a second company, **Harbor Mortgage Brokers**, with "restrict loan files to their
+team" ON, so team visibility can be seen locally. Two loan officers with one file each, a processor
+on Lena's file only, and a processor marked "sees all company loan files". Logins (same password):
+
+- ``harbor-admin@harbor-demo.com``: admin, sees both files.
+- ``lena@harbor-demo.com``: loan officer on HB file 1; sees only it.
+- ``marco@harbor-demo.com``: loan officer on HB file 2; sees only it.
+- ``pat@harbor-demo.com``: processor on Lena's file; sees only it.
+- ``sam@harbor-demo.com``: processor marked sees-all; sees both, on no team.
+
 Safety:
 - **Production guard** — refuses to run if ``settings`` says production.
 - **No real PII** — synthetic names/addresses and never-issued ``900-`` SSNs.
@@ -66,6 +76,7 @@ from app.models.extraction import ExtractionStatus
 from app.models.inbound_message import InboundMessage
 from app.models.lender import Lender, LoanProgram
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose
+from app.models.loan_team import LoanTeamMember, TeamRole
 from app.models.needs_item import (
     NeedsItem,
     NeedsItemOrigin,
@@ -101,6 +112,15 @@ _MISMO_FIXTURE = (
     Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "mismo" / "MISMO16940192.xml"
 )
 _SYNTHETIC_SSN = "900223344"  # pragma: allowlist secret  (never-issued 900- range)
+
+# LP-MB-Admin-06 — the company that restricts loan files to their team.
+_RESTRICTED_NAME = "Harbor Mortgage Brokers"
+_RESTRICTED_SLUG = "harbor"
+_RESTRICTED_ADMIN_EMAIL = "harbor-admin@harbor-demo.com"
+_RESTRICTED_LO_1_EMAIL = "lena@harbor-demo.com"
+_RESTRICTED_LO_2_EMAIL = "marco@harbor-demo.com"
+_RESTRICTED_PROCESSOR_EMAIL = "pat@harbor-demo.com"
+_RESTRICTED_SEES_ALL_EMAIL = "sam@harbor-demo.com"
 
 
 # --------------------------------------------------------------------------- #
@@ -989,7 +1009,84 @@ async def _add_completed_document(
 # --------------------------------------------------------------------------- #
 
 
+async def _seed_restricted_company(db: AsyncSession) -> bool:
+    """LP-MB-Admin-06 — Harbor, with "restrict loan files to their team" on. Returns whether it was
+    created; an existing Harbor is left as it is (``--reset`` rebuilds it)."""
+    if await db.scalar(select(Company).where(Company.slug == _RESTRICTED_SLUG)) is not None:
+        return False
+    company = Company(
+        name=_RESTRICTED_NAME,
+        slug=_RESTRICTED_SLUG,
+        is_active=True,
+        settings={"restrict_loans_to_team": True},
+    )
+    db.add(company)
+    await db.flush()
+
+    async def person(email: str, first: str, last: str, role: UserRole) -> User:
+        user, _ = await _get_or_create_user(
+            db, company_id=company.id, email=email, first_name=first, last_name=last, roles=[role]
+        )
+        return user
+
+    admin = await person(_RESTRICTED_ADMIN_EMAIL, "Hana", "Brooks", UserRole.ADMIN)
+    company.owner_user_id = admin.id
+    lena = await person(_RESTRICTED_LO_1_EMAIL, "Lena", "Park", UserRole.LOAN_OFFICER)
+    marco = await person(_RESTRICTED_LO_2_EMAIL, "Marco", "Silva", UserRole.LOAN_OFFICER)
+    pat = await person(_RESTRICTED_PROCESSOR_EMAIL, "Pat", "Nguyen", UserRole.PROCESSOR)
+    sam = await person(_RESTRICTED_SEES_ALL_EMAIL, "Sam", "Okoro", UserRole.PROCESSOR)
+    sam.sees_all_loans = True
+
+    for officer, borrower_first, team in (
+        (lena, "Harper", [pat]),
+        (marco, "Quinn", []),
+    ):
+        loan_file = await create_loan_file(
+            db,
+            company_id=company.id,
+            loan_program=LoanProgram.CONVENTIONAL,
+            loan_purpose=LoanPurpose.PURCHASE,
+            loan_officer_name=officer.full_name,
+            loan_officer_email=officer.email,
+        )
+        db.add(
+            LoanTeamMember(
+                loan_file_id=loan_file.id, user_id=officer.id, team_role=TeamRole.LOAN_OFFICER
+            )
+        )
+        for member in team:
+            db.add(
+                LoanTeamMember(
+                    loan_file_id=loan_file.id, user_id=member.id, team_role=TeamRole.PROCESSOR
+                )
+            )
+        db.add(
+            Borrower(
+                loan_file_id=loan_file.id,
+                first_name=borrower_first,
+                last_name="Example",
+                is_primary=True,
+            )
+        )
+    await db.flush()
+    return True
+
+
+async def _clear_restricted_company(db: AsyncSession) -> None:
+    company = await db.scalar(select(Company).where(Company.slug == _RESTRICTED_SLUG))
+    if company is None:
+        return
+    await db.execute(delete(LoanFile).where(LoanFile.company_id == company.id))
+    await db.execute(update(Company).where(Company.id == company.id).values(owner_user_id=None))
+    await db.execute(delete(CompanyAuditLog).where(CompanyAuditLog.company_id == company.id))
+    await db.execute(delete(User).where(User.company_id == company.id))
+    await db.execute(delete(Company).where(Company.id == company.id))
+    await db.flush()
+    _clear_company_storage(company.id)
+
+
 async def _clear_seed(db: AsyncSession) -> None:
+    await _clear_restricted_company(db)
     company = await db.scalar(select(Company).where(Company.slug == _COMPANY_SLUG))
     if company is None:
         logger.info("seed_reset_nothing_to_clear")
@@ -1090,6 +1187,7 @@ async def seed(*, reset: bool) -> None:
         # routed message is addressed to a file's own inbox token and there is nothing to route to
         # before they exist.
         mail_created = await _seed_inbound_mail(db, company=company)
+        restricted_created = await _seed_restricted_company(db)
         await db.commit()
 
     logger.info(
@@ -1102,6 +1200,7 @@ async def seed(*, reset: bool) -> None:
         sunwest_created=sunwest_created,
         loan_files_created=files_created,
         inbound_messages_created=mail_created,
+        restricted_company_created=restricted_created,
     )
     _print_summary(
         company_created=company_created,
@@ -1126,6 +1225,12 @@ def _print_summary(
     print(f"  Admin:     {_ADMIN_EMAIL} / {_SEED_PASSWORD}")
     print(f"  Processor: {_PROCESSOR_EMAIL} / {_SEED_PASSWORD}")
     print(f"  Loan officer: {_LOAN_OFFICER_EMAIL} / {_SEED_PASSWORD}")
+    print(f"{_RESTRICTED_NAME} restricts loan files to their team (same password):")
+    print(f"  Admin, sees both files:            {_RESTRICTED_ADMIN_EMAIL}")
+    print(f"  Loan officer, sees file 1:         {_RESTRICTED_LO_1_EMAIL}")
+    print(f"  Loan officer, sees file 2:         {_RESTRICTED_LO_2_EMAIL}")
+    print(f"  Processor on file 1, sees only it: {_RESTRICTED_PROCESSOR_EMAIL}")
+    print(f"  Processor who sees all files:      {_RESTRICTED_SEES_ALL_EMAIL}")
     print("Extractions are pre-canned (no AI); all PII is synthetic.")
 
 

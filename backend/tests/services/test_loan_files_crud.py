@@ -7,6 +7,7 @@ identifier lookup (UUID and display_id), partial update semantics
 the derived ``primary_borrower_name``.
 """
 
+from app.core.file_scope import FileScope
 from app.models import Borrower, Company
 from app.models.loan_file import LoanFile, LoanFileStatus
 from app.schemas.loan_file import LoanFileSummary, LoanFileUpdate
@@ -35,7 +36,7 @@ async def test_list_is_company_scoped(db_session: AsyncSession) -> None:
     await create_loan_file(db_session, company_id=a.id)
     await create_loan_file(db_session, company_id=b.id)
 
-    items, total = await list_loan_files(db_session, company_id=a.id)
+    items, total = await list_loan_files(db_session, scope=FileScope.system(a.id))
     assert total == 2
     assert len(items) == 2
     assert all(f.company_id == a.id for f in items)
@@ -47,10 +48,19 @@ async def test_get_other_companys_file_returns_none(db_session: AsyncSession) ->
     b = await _company(db_session, "company-b")
     b_file = await create_loan_file(db_session, company_id=b.id)
 
-    assert await get_loan_file(db_session, company_id=a.id, identifier=str(b_file.id)) is None
-    assert await get_loan_file(db_session, company_id=a.id, identifier=b_file.display_id) is None
+    assert (
+        await get_loan_file(db_session, scope=FileScope.system(a.id), identifier=str(b_file.id))
+        is None
+    )
+    assert (
+        await get_loan_file(db_session, scope=FileScope.system(a.id), identifier=b_file.display_id)
+        is None
+    )
     # The owning company can fetch it.
-    assert await get_loan_file(db_session, company_id=b.id, identifier=str(b_file.id)) is not None
+    assert (
+        await get_loan_file(db_session, scope=FileScope.system(b.id), identifier=str(b_file.id))
+        is not None
+    )
 
 
 async def test_get_by_uuid_and_display_id(db_session: AsyncSession) -> None:
@@ -58,8 +68,12 @@ async def test_get_by_uuid_and_display_id(db_session: AsyncSession) -> None:
     a = await _company(db_session, "acme")
     created = await create_loan_file(db_session, company_id=a.id)
 
-    by_uuid = await get_loan_file(db_session, company_id=a.id, identifier=str(created.id))
-    by_display = await get_loan_file(db_session, company_id=a.id, identifier=created.display_id)
+    by_uuid = await get_loan_file(
+        db_session, scope=FileScope.system(a.id), identifier=str(created.id)
+    )
+    by_display = await get_loan_file(
+        db_session, scope=FileScope.system(a.id), identifier=created.display_id
+    )
     assert by_uuid is not None
     assert by_display is not None
     assert by_uuid.id == by_display.id == created.id
@@ -106,8 +120,11 @@ async def test_soft_delete_excludes_from_reads(db_session: AsyncSession) -> None
     await soft_delete_loan_file(db_session, loan_file=created)
     assert created.deleted_at is not None
 
-    assert await get_loan_file(db_session, company_id=a.id, identifier=str(created.id)) is None
-    items, total = await list_loan_files(db_session, company_id=a.id)
+    assert (
+        await get_loan_file(db_session, scope=FileScope.system(a.id), identifier=str(created.id))
+        is None
+    )
+    items, total = await list_loan_files(db_session, scope=FileScope.system(a.id))
     assert total == 0
     assert items == []
 
@@ -151,15 +168,17 @@ async def test_status_filter_and_pagination(db_session: AsyncSession) -> None:
     )
 
     drafts, draft_total = await list_loan_files(
-        db_session, company_id=a.id, statuses=[LoanFileStatus.DRAFT]
+        db_session, scope=FileScope.system(a.id), statuses=[LoanFileStatus.DRAFT]
     )
     assert draft_total == 2
     assert all(f.status is LoanFileStatus.DRAFT for f in drafts)
 
-    page1, total = await list_loan_files(db_session, company_id=a.id, page=1, page_size=2)
+    page1, total = await list_loan_files(
+        db_session, scope=FileScope.system(a.id), page=1, page_size=2
+    )
     assert total == 3
     assert len(page1) == 2
-    page2, _ = await list_loan_files(db_session, company_id=a.id, page=2, page_size=2)
+    page2, _ = await list_loan_files(db_session, scope=FileScope.system(a.id), page=2, page_size=2)
     assert len(page2) == 1
 
 
@@ -187,7 +206,7 @@ async def test_primary_borrower_name_is_derived(db_session: AsyncSession) -> Non
     )
     await db_session.flush()
 
-    items, _ = await list_loan_files(db_session, company_id=a.id)
+    items, _ = await list_loan_files(db_session, scope=FileScope.system(a.id))
     summary = LoanFileSummary.from_model(items[0])
     assert summary.primary_borrower_name == "Pat Buyer"
 
@@ -204,7 +223,7 @@ async def test_statuses_filters_to_any_of_several(db_session: AsyncSession) -> N
 
     items, total = await list_loan_files(
         db_session,
-        company_id=a.id,
+        scope=FileScope.system(a.id),
         statuses=[LoanFileStatus.SUBMITTED, LoanFileStatus.READY_TO_SUBMIT],
     )
     assert total == 1
@@ -220,12 +239,16 @@ async def test_search_matches_display_id_and_is_company_scoped(db_session: Async
     b_file = await create_loan_file(db_session, company_id=b.id)
 
     # A searching A's display_id → found.
-    items, total = await list_loan_files(db_session, company_id=a.id, search=a_file.display_id)
+    items, total = await list_loan_files(
+        db_session, scope=FileScope.system(a.id), search=a_file.display_id
+    )
     assert total == 1
     assert items[0].id == a_file.id
 
     # A searching B's display_id → nothing (company-scoped).
-    _, total_cross = await list_loan_files(db_session, company_id=a.id, search=b_file.display_id)
+    _, total_cross = await list_loan_files(
+        db_session, scope=FileScope.system(a.id), search=b_file.display_id
+    )
     assert total_cross == 0
 
 
@@ -247,10 +270,12 @@ async def test_search_matches_borrower_name_and_is_company_scoped(db_session: As
     await db_session.flush()
 
     # B finds it (case-insensitive).
-    items_b, total_b = await list_loan_files(db_session, company_id=b.id, search="wanda")
+    items_b, total_b = await list_loan_files(
+        db_session, scope=FileScope.system(b.id), search="wanda"
+    )
     assert total_b == 1
     assert items_b[0].id == b_file.id
 
     # A cannot — the borrower is on B's file (the crux: search is scoped).
-    _, total_a = await list_loan_files(db_session, company_id=a.id, search="Wanda")
+    _, total_a = await list_loan_files(db_session, scope=FileScope.system(a.id), search="Wanda")
     assert total_a == 0

@@ -237,6 +237,17 @@ class LoanOfficerIsInternal(UserRuleError):
     message = "Change the loan officer on the Team card"
 
 
+class CreatorWouldNotSeeFile(UserRuleError):
+    """Under "restrict loan files to their team", a creator who would land in no team slot would
+    404 on the file they just made, so the create is refused (LP-MB-Admin-06, Decided 4)."""
+
+    status_code = 422
+    message = (
+        "You would not be able to see this file. Leave the loan officer blank to be its loan "
+        "officer, or ask an admin to create it."
+    )
+
+
 async def user_rule_handler(request: Request, exc: UserRuleError) -> JSONResponse:
     """A refused people-management change → its status and its own message."""
     error_type = _STATUS_TO_TYPE.get(exc.status_code, "http_error")

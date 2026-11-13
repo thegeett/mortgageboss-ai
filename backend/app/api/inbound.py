@@ -16,7 +16,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Response, status
 
-from app.api.dependencies import CurrentUser, ScopedLoanFile
+from app.api.dependencies import CurrentScope, CurrentUser, ScopedLoanFile
 from app.core.database import DbSession
 from app.core.logging import get_logger
 from app.models.inbound_attachment import InboundAttachment
@@ -167,9 +167,10 @@ def _message_public(
 
 
 @company_router.get("/queue", response_model=list[InboundMessagePublic])
-async def triage_queue(db: DbSession, current_user: CurrentUser) -> list[InboundMessagePublic]:
-    """This company's mail, and no other company's. See `list_triage_queue`."""
-    messages = await list_triage_queue(db, company_id=current_user.company_id)
+async def triage_queue(db: DbSession, scope: CurrentScope) -> list[InboundMessagePublic]:
+    """This company's mail, and no other company's; mail on a file only if the caller may see the
+    file (ADR-446). See `list_triage_queue`."""
+    messages = await list_triage_queue(db, scope=scope)
     return await _messages_public(db, messages)
 
 
@@ -194,8 +195,9 @@ async def move_to_file(
     payload: MoveMessageRequest,
     db: DbSession,
     current_user: CurrentUser,
+    scope: CurrentScope,
 ) -> InboundMessagePublic:
-    """Move an unmatched email of this company to one of this company's files (LP-1009).
+    """Move an unmatched email of this company to a file the caller may see (LP-1009).
 
     The same 404 for another company's message or file as for one that does not exist; 409 when it
     is already on a file.
@@ -203,7 +205,7 @@ async def move_to_file(
     try:
         message = await move_unrouted_message(
             db,
-            company_id=current_user.company_id,
+            scope=scope,
             message_id=message_id,
             file_identifier=payload.file_identifier,
             actor_user_id=current_user.id,

@@ -8,7 +8,7 @@ tenant-scoped (cross-company → 404). Overrides are audited in the service.
 
 from fastapi import APIRouter, HTTPException, status
 
-from app.api.dependencies import CurrentUser
+from app.api.dependencies import CurrentScope, CurrentUser
 from app.core.database import DbSession
 from app.schemas.ltv import LtvCalculation, LtvOverrideInput
 from app.services.aggression import active_cutoff
@@ -26,9 +26,11 @@ _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan f
 
 
 @router.get("/{identifier}/ltv", response_model=LtvCalculation)
-async def get_ltv(identifier: str, db: DbSession, current_user: CurrentUser) -> LtvCalculation:
+async def get_ltv(
+    identifier: str, db: DbSession, current_user: CurrentUser, scope: CurrentScope
+) -> LtvCalculation:
     """The auto-populated, itemized LTV calculation for one of the caller's files."""
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     return await build_ltv_calculation(
@@ -43,9 +45,10 @@ async def put_ltv_override(
     payload: LtvOverrideInput,
     db: DbSession,
     current_user: CurrentUser,
+    scope: CurrentScope,
 ) -> LtvCalculation:
     """Override one LTV input (audited, persisted) and return the recomputed result."""
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     try:
@@ -67,10 +70,10 @@ async def put_ltv_override(
 
 @router.delete("/{identifier}/ltv/overrides/{field_key}", response_model=LtvCalculation)
 async def delete_ltv_override(
-    identifier: str, field_key: str, db: DbSession, current_user: CurrentUser
+    identifier: str, field_key: str, db: DbSession, current_user: CurrentUser, scope: CurrentScope
 ) -> LtvCalculation:
     """Clear an override (revert to the auto value), audited; return the recompute."""
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     calculation = await clear_ltv_override(

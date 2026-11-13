@@ -2,13 +2,14 @@
 
 Cover the create/list/soft-delete service functions, the upload validator
 (size + type + magic bytes), and — the security crux — the flat-route scoping
-gate :func:`get_document_for_company`, which must return ``None`` for another
+gate :func:`get_document`, which must return ``None`` for another
 company's document.
 """
 
 from uuid import uuid4
 
 import pytest
+from app.core.file_scope import FileScope
 from app.core.security import hash_password
 from app.models import Company, User, UserRole
 from app.models.document import DocumentStatus, UploadSource
@@ -16,7 +17,7 @@ from app.services.documents import (
     MAX_FILE_SIZE_BYTES,
     DocumentValidationError,
     create_document,
-    get_document_for_company,
+    get_document,
     list_documents,
     soft_delete_document,
     validate_upload,
@@ -163,11 +164,11 @@ async def test_soft_delete_sets_deleted_at(db_session: AsyncSession) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# get_document_for_company — the flat-route scoping gate
+# get_document — the flat-route scoping gate
 # --------------------------------------------------------------------------- #
 
 
-async def test_get_document_for_company_returns_owned(db_session: AsyncSession) -> None:
+async def test_get_document_returns_owned(db_session: AsyncSession) -> None:
     company, user = await _company(db_session, slug="acme")
     loan_file = await create_loan_file(db_session, company_id=company.id)
     did = uuid4()
@@ -181,11 +182,11 @@ async def test_get_document_for_company_returns_owned(db_session: AsyncSession) 
         storage_path=f"{company.id}/{loan_file.id}/{did}.pdf",
         uploaded_by_user_id=user.id,
     )
-    found = await get_document_for_company(db_session, document_id=did, company_id=company.id)
+    found = await get_document(db_session, document_id=did, scope=FileScope.system(company.id))
     assert found is not None and found.id == did
 
 
-async def test_get_document_for_company_rejects_other_company(db_session: AsyncSession) -> None:
+async def test_get_document_rejects_other_company(db_session: AsyncSession) -> None:
     """The crux: another company's document is invisible by id (returns None)."""
     company_a, user_a = await _company(db_session, slug="company-a")
     company_b, _user_b = await _company(db_session, slug="company-b")
@@ -203,11 +204,12 @@ async def test_get_document_for_company_rejects_other_company(db_session: AsyncS
     )
     # Company B asking for Company A's document id → None.
     assert (
-        await get_document_for_company(db_session, document_id=did, company_id=company_b.id) is None
+        await get_document(db_session, document_id=did, scope=FileScope.system(company_b.id))
+        is None
     )
 
 
-async def test_get_document_for_company_excludes_soft_deleted(db_session: AsyncSession) -> None:
+async def test_get_document_excludes_soft_deleted(db_session: AsyncSession) -> None:
     company, user = await _company(db_session, slug="acme")
     loan_file = await create_loan_file(db_session, company_id=company.id)
     did = uuid4()
@@ -223,5 +225,5 @@ async def test_get_document_for_company_excludes_soft_deleted(db_session: AsyncS
     )
     await soft_delete_document(db_session, document=document)
     assert (
-        await get_document_for_company(db_session, document_id=did, company_id=company.id) is None
+        await get_document(db_session, document_id=did, scope=FileScope.system(company.id)) is None
     )

@@ -14,9 +14,10 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.file_scope import FileScope
 from app.mismo.schema import ParseWarning
 from app.models.borrower import Borrower
-from app.models.helpers import only_active
+from app.models.helpers import only_active, scope_files
 from app.models.loan_file import LoanFile
 from app.models.mismo_import import MismoImport
 from app.models.stated_financials import (
@@ -181,56 +182,61 @@ async def get_stated_financials(
 
 
 # --------------------------------------------------------------------------- #
-# Per-resource tenant scoping (LP-56) — resource → (borrower →) file → company.
-# Returns the row only if it belongs to the caller's company (else None → 404).
+# Per-resource scoping (LP-56; LP-MB-Admin-06) — resource → (borrower →) file →
+# `scope_files`. Returns the row only if its file is in the caller's scope (else
+# None → 404): the company, a live file, and its team when the scope is restricted.
 # --------------------------------------------------------------------------- #
 
 
-async def get_stated_liability_for_company(
-    db: AsyncSession, *, item_id: UUID, company_id: UUID
+async def get_stated_liability_scoped(
+    db: AsyncSession, *, item_id: UUID, scope: FileScope
 ) -> StatedLiability | None:
     stmt = (
         select(StatedLiability)
         .join(LoanFile, StatedLiability.loan_file_id == LoanFile.id)
-        .where(StatedLiability.id == item_id, LoanFile.company_id == company_id)
+        .where(StatedLiability.id == item_id)
     )
-    result: StatedLiability | None = await db.scalar(only_active(stmt, StatedLiability))
+    stmt = scope_files(only_active(stmt, StatedLiability), scope)
+    result: StatedLiability | None = await db.scalar(stmt)
     return result
 
 
-async def get_stated_asset_for_company(
-    db: AsyncSession, *, item_id: UUID, company_id: UUID
+async def get_stated_asset_scoped(
+    db: AsyncSession, *, item_id: UUID, scope: FileScope
 ) -> StatedAsset | None:
     stmt = (
         select(StatedAsset)
         .join(LoanFile, StatedAsset.loan_file_id == LoanFile.id)
-        .where(StatedAsset.id == item_id, LoanFile.company_id == company_id)
+        .where(StatedAsset.id == item_id)
     )
-    result: StatedAsset | None = await db.scalar(only_active(stmt, StatedAsset))
+    stmt = scope_files(only_active(stmt, StatedAsset), scope)
+    result: StatedAsset | None = await db.scalar(stmt)
     return result
 
 
-async def get_stated_income_for_company(
-    db: AsyncSession, *, item_id: UUID, company_id: UUID
+async def get_stated_income_scoped(
+    db: AsyncSession, *, item_id: UUID, scope: FileScope
 ) -> StatedIncomeItem | None:
     stmt = (
         select(StatedIncomeItem)
         .join(Borrower, StatedIncomeItem.borrower_id == Borrower.id)
         .join(LoanFile, Borrower.loan_file_id == LoanFile.id)
-        .where(StatedIncomeItem.id == item_id, LoanFile.company_id == company_id)
+        .where(StatedIncomeItem.id == item_id)
     )
-    result: StatedIncomeItem | None = await db.scalar(only_active(stmt, StatedIncomeItem))
+    stmt = scope_files(only_active(stmt, StatedIncomeItem), scope)
+    result: StatedIncomeItem | None = await db.scalar(stmt)
     return result
 
 
-async def get_stated_employer_for_company(
-    db: AsyncSession, *, item_id: UUID, company_id: UUID
+async def get_stated_employer_scoped(
+    db: AsyncSession, *, item_id: UUID, scope: FileScope
 ) -> StatedEmployer | None:
     stmt = (
         select(StatedEmployer)
         .join(Borrower, StatedEmployer.borrower_id == Borrower.id)
         .join(LoanFile, Borrower.loan_file_id == LoanFile.id)
-        .where(StatedEmployer.id == item_id, LoanFile.company_id == company_id)
+        .where(StatedEmployer.id == item_id)
     )
-    result: StatedEmployer | None = await db.scalar(only_active(stmt, StatedEmployer))
+    stmt = scope_files(only_active(stmt, StatedEmployer), scope)
+    result: StatedEmployer | None = await db.scalar(stmt)
     return result

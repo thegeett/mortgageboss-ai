@@ -9,7 +9,7 @@ audited in the service.
 
 from fastapi import APIRouter, HTTPException, status
 
-from app.api.dependencies import CurrentUser
+from app.api.dependencies import CurrentScope, CurrentUser
 from app.core.database import DbSession
 from app.schemas.calculators import CalcOverrideInput, CalculatorView
 from app.services.aggression import active_cutoff
@@ -39,11 +39,11 @@ def _check_calculator(calculator: str) -> None:
 
 @router.get("/{identifier}/calculators/{calculator}", response_model=CalculatorView)
 async def get_calculator(
-    identifier: str, calculator: str, db: DbSession, current_user: CurrentUser
+    identifier: str, calculator: str, db: DbSession, current_user: CurrentUser, scope: CurrentScope
 ) -> CalculatorView:
     """The auto-populated, transparent view for one calculator on one of the caller's files."""
     _check_calculator(calculator)
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     return await build_calculator(
@@ -65,10 +65,11 @@ async def put_calculator_override(
     payload: CalcOverrideInput,
     db: DbSession,
     current_user: CurrentUser,
+    scope: CurrentScope,
 ) -> CalculatorView:
     """Override one calculator input (audited, persisted); return the recomputed view."""
     _check_calculator(calculator)
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     try:
@@ -94,11 +95,16 @@ async def put_calculator_override(
     response_model=CalculatorView,
 )
 async def delete_calculator_override(
-    identifier: str, calculator: str, field_key: str, db: DbSession, current_user: CurrentUser
+    identifier: str,
+    calculator: str,
+    field_key: str,
+    db: DbSession,
+    current_user: CurrentUser,
+    scope: CurrentScope,
 ) -> CalculatorView:
     """Clear an override (revert to auto), audited; return the recompute."""
     _check_calculator(calculator)
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     view = await clear_calculator_override(

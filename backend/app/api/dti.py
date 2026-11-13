@@ -11,7 +11,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
 
-from app.api.dependencies import CurrentUser
+from app.api.dependencies import CurrentScope, CurrentUser
 from app.core.database import DbSession
 from app.schemas.dti import (
     DtiCalculation,
@@ -39,9 +39,11 @@ _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan f
 
 
 @router.get("/{identifier}/dti", response_model=DtiCalculation)
-async def get_dti(identifier: str, db: DbSession, current_user: CurrentUser) -> DtiCalculation:
+async def get_dti(
+    identifier: str, db: DbSession, current_user: CurrentUser, scope: CurrentScope
+) -> DtiCalculation:
     """The auto-populated, itemized DTI calculation for one of the caller's files."""
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     return gate_display_ratios(
@@ -57,6 +59,7 @@ async def add_dti_line(
     payload: DtiCustomLineInput,
     db: DbSession,
     current_user: CurrentUser,
+    scope: CurrentScope,
 ) -> DtiCalculation:
     """Add a processor's own line to a DTI section (audited, persisted); return the recompute.
 
@@ -64,7 +67,7 @@ async def add_dti_line(
     clear a gate: a gate says a required input is unknown, and an unrelated row does not make it
     known. Overriding the gated line itself remains the way to supply that figure.
     """
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     calculation = await add_dti_custom_line(
@@ -80,7 +83,7 @@ async def add_dti_line(
 
 @router.delete("/{identifier}/dti/lines/{line_id}", response_model=DtiCalculation)
 async def delete_dti_line(
-    identifier: str, line_id: UUID, db: DbSession, current_user: CurrentUser
+    identifier: str, line_id: UUID, db: DbSession, current_user: CurrentUser, scope: CurrentScope
 ) -> DtiCalculation:
     """Remove a line the PROCESSOR added, audited; return the recompute.
 
@@ -88,7 +91,7 @@ async def delete_dti_line(
     that should not count is an exclusion, which shows struck through with its reason rather than
     vanishing.
     """
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     try:
@@ -109,10 +112,10 @@ async def delete_dti_line(
 
 @router.get("/{identifier}/dti/ungate", response_model=DtiUngatePreview)
 async def get_dti_ungate_preview(
-    identifier: str, db: DbSession, current_user: CurrentUser
+    identifier: str, db: DbSession, current_user: CurrentUser, scope: CurrentScope
 ) -> DtiUngatePreview:
     """What an ungate would do, itemised — the confirmation popup's content. Persists nothing."""
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     return await preview_dti_ungate(
@@ -126,6 +129,7 @@ async def post_dti_ungate(
     payload: DtiOverrideInput | None,
     db: DbSession,
     current_user: CurrentUser,
+    scope: CurrentScope,
 ) -> DtiCalculation:
     """Record every gated housing input as $0.00, behind the caller's confirmation (audited).
 
@@ -133,7 +137,7 @@ async def post_dti_ungate(
     decision rather than a slip. Implemented as ordinary per-line overrides, so UNDO is the existing
     `DELETE .../overrides/{field_key}` rather than a second mechanism.
     """
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     calculation = await apply_dti_ungate(
@@ -154,9 +158,10 @@ async def put_dti_override(
     payload: DtiOverrideInput,
     db: DbSession,
     current_user: CurrentUser,
+    scope: CurrentScope,
 ) -> DtiCalculation:
     """Override one DTI input (audited, persisted) and return the recomputed result."""
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     try:
@@ -178,10 +183,10 @@ async def put_dti_override(
 
 @router.delete("/{identifier}/dti/overrides/{field_key}", response_model=DtiCalculation)
 async def delete_dti_override(
-    identifier: str, field_key: str, db: DbSession, current_user: CurrentUser
+    identifier: str, field_key: str, db: DbSession, current_user: CurrentUser, scope: CurrentScope
 ) -> DtiCalculation:
     """Clear an override (revert to the auto value), audited; return the recompute."""
-    loan_file = await get_loan_file(db, company_id=current_user.company_id, identifier=identifier)
+    loan_file = await get_loan_file(db, scope=scope, identifier=identifier)
     if loan_file is None:
         raise _NOT_FOUND
     calculation = await clear_dti_override(

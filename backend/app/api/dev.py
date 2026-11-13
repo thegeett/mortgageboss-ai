@@ -22,10 +22,10 @@ from uuid import UUID
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
-from app.api.dependencies import CurrentUser
+from app.api.dependencies import CurrentScope, CurrentUser
 from app.core.database import DbSession
 from app.core.logging import get_logger
-from app.services.documents import get_document_for_company
+from app.services.documents import get_document
 from app.services.inbound_ingest import process_raw_message
 from app.services.pdf_utils import extract_text_from_pdf
 from app.storage import get_storage_backend
@@ -56,19 +56,17 @@ class TextLayerExtractionResponse(BaseModel):
     response_model=TextLayerExtractionResponse,
 )
 async def extract_text_layer(
-    document_id: UUID, current_user: CurrentUser, db: DbSession
+    document_id: UUID, current_user: CurrentUser, scope: CurrentScope, db: DbSession
 ) -> TextLayerExtractionResponse:
     """Return a stored document's deterministic PDF text layer (dev comparison tool).
 
-    Tenant-scoped via :func:`get_document_for_company` (a Company A user gets
+    Tenant-scoped via :func:`get_document` (a Company A user gets
     ``404`` for a Company B document). PDF only — a non-PDF document returns a
     clear ``extraction_ok=False`` response rather than an error. Reads the bytes
     from storage and runs the deterministic extractor; does **not** touch the
     ``Document`` or the AI pipeline.
     """
-    document = await get_document_for_company(
-        db, document_id=document_id, company_id=current_user.company_id
-    )
+    document = await get_document(db, document_id=document_id, scope=scope)
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
