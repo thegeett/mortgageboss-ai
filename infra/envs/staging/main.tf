@@ -578,6 +578,14 @@ module "compute" {
       MAIL_TRANSPORT        = "ses"
       # LP-1006 — the hourly check and the setup command use real Route 53 and SES.
       DOMAIN_PROVIDER = "route53"
+      # LP-MB-Admin-04 — the system sender for staff invitations (and later password reset). It must
+      # be on an identity SES has verified; the only one this environment verifies is
+      # `mail.<domain_name>` (module `outbound_mail`, `send_domain`). The settings default,
+      # `noreply@mortgageboss.ai`, is on the ROOT domain, which nothing verifies, so SES refused every
+      # invite on staging while `MAIL_TRANSPORT` said sending was on. Tied to the module's own
+      # `send_domain` rather than retyped, so renaming the send domain moves this with it.
+      SMTP_FROM_EMAIL = "noreply@${module.outbound_mail[0].send_domain}"
+      SMTP_FROM_NAME  = "MortgageBoss"
     } : {},
   )
 
