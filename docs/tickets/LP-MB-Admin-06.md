@@ -66,7 +66,7 @@ what proves it covered its routes.
 | 7 | `services/inbound_triage.list_triage_queue` | C5 inbox | rows WITH a `loan_file_id` filtered by scope; rows with none stay (ADR-421) |
 | 8 | `services/inbound_triage.move_unrouted_message` | C5 move | target file through scope |
 | 9 | `services/reminders._open_files` | C5 reminders | `scope_files` |
-| 10 | `api/loan_files` create and MISMO import | B2 create | the creator joins the team (Part 1) BEFORE the re-read, else a restricted creator 404s on their own new file; an admin creator with no slot is unrestricted anyway |
+| 10 | `api/loan_files` create and MISMO import | B2 create | Part 1 already calls `on_loan_file_created` before the re-read (verified: `api/loan_files.py:116, 180`). The hole is a creator who gets NO slot: a loan officer who names another loan officer on intake (review fix 6 keeps the typed LO) and holds no PROCESSOR role would 404 on the file they just made. Under the setting, a creator who would land on no slot is refused at create with 422 "You would not be able to see this file. Leave the loan officer blank to be its loan officer, or ask an admin to create it." An admin creator is unrestricted and needs no slot. See open question 4. |
 | 11 | `services/processor_copy.copy_recipient` | D copy_to_processor | when the file's company has the setting on, the copy goes to the most recent sender who is STILL on the team; nobody on the team → no copy, one log line |
 | 12 | `api/users.assignable` counts, `api/overlay_admin` blast radius | C addendum, C5 | unchanged, documented: counts reveal a number not a file; blast radius is `overlays.manage`, admin-only |
 
@@ -88,14 +88,15 @@ and one processor on one of them, so the behaviour can be seen locally.
 ## Schema changes
 
 None. The setting (`companies.settings.restrict_loans_to_team`, LP-MB-Admin-02), `users.sees_all_loans`
-(03) and `loan_teams` (05) exist. One index: `loan_teams (user_id) WHERE deleted_at IS NULL` if the
-existing `ix_loan_teams_user_id` is not already partial; check.
+(03) and `loan_teams` (05) exist. `loan_teams.user_id` already has a plain index (`index=True` on the
+column), which serves the `IN (select loan_file_id … where user_id = ?)` predicate; no new index.
 
 ## API
 
-No new endpoints. Behaviour change under the setting: lists shrink, counts shrink, ids 404. The 404 body
-is the existing "Loan file not found" everywhere, including for a document, condition or round id, so a
-restricted file is indistinguishable from a missing one.
+No new endpoints. Behaviour change under the setting: lists shrink, counts shrink, ids 404. Each route
+keeps its EXISTING not-found body ("Loan file not found", "Document not found", "Condition not found",
+…): a restricted row must be indistinguishable from a missing one on that route, and a different sentence
+would be the tell. No route gains a new message.
 
 ## Tests
 
@@ -105,7 +106,13 @@ restricted file is indistinguishable from a missing one.
   soft-deleted team row does not count; unrestricted returns the company's files.
 - **The per-route test, the ticket's real deliverable.** One parametrised test over EVERY route in the
   survey's groups A, B and C (223 minus the excluded), generated from the survey table checked into
-  `tests/api/file_doors.py` as data (method, path template, how to create a fixture row for its child id).
+  `tests/api/file_doors.py` as data: method, path template, and a `fixture` kind from a closed set of
+  about a dozen (`file`, `document`, `condition`, `round`, `draft`, `stated_liability`, `stated_asset`,
+  `stated_income`, `stated_employer`, `message`, `needs_item`, `finding`, `upload_link`, `reminder`),
+  each with one factory in `tests/api/file_door_fixtures.py` that builds a file on company X with a team
+  of exactly one processor and the child row the route needs, and returns the path substitutions. A
+  body-taking POST/PUT/PATCH is sent with the minimal valid body the data file names, or `{}` where the
+  404 fires before validation (verify per route; a 422 is a failure of the test, not a pass).
   For each route, with the setting on: a processor not on the file's team → 404 (or an empty list / zero
   count for the list and count routes), and nothing written; a processor on the team → not 404; an admin
   → not 404; a `sees_all_loans` processor → not 404. With the setting off: the non-member → not 404. A
@@ -132,6 +139,14 @@ restricted file is indistinguishable from a missing one.
 3. **Timeline entries by non-members**: a document uploaded by a borrower via an upload link on a
    restricted file shows the uploader's name to the team; fine. An activity row's `actor` who has since
    been removed from the team still shows by name; fine. Confirm nothing else leaks a person across files.
+4. **A creator who would get no slot** (point 10): refuse at create with the 422 above, or let a loan
+   officer who names another LO become a processor on the file regardless of role? The refusal is the
+   rule-preserving choice; the second is friendlier and bends "who may hold a slot".
+5. **Scope is computed once per request, at the start.** `FileScope.for_actor` reads the company setting
+   and `sees_all_loans` from the actor's loaded rows. A request that changes those (an admin flipping the
+   setting, or editing their own `sees_all_loans`) sees the old scope until its next request; and after
+   LP-MB-Admin-03's `_locked` re-read, `actor.user.company` is unloaded, so `for_actor` must run before
+   any user change in that request. Both are fine; the build must not move the computation later.
 
 ## ADR note (ADR-446)
 
