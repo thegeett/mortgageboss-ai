@@ -114,3 +114,20 @@ describe("PersonSheet", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 });
+
+describe("PersonSheet — licensed states (review finding 9)", () => {
+  it("adds a real state code and refuses a made-up one as it is typed", () => {
+    renderSheet(person({ roles: ["loan_officer"] }));
+    const input = screen.getByLabelText("Licensed states");
+
+    fireEvent.change(input, { target: { value: "nj" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "XX" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(screen.getByText("NJ")).toBeTruthy();
+    expect(screen.getByText("XX is not a US state code.")).toBeTruthy();
+    expect(screen.queryByText("XX", { selector: "div" })).toBeNull();
+    expect((input as HTMLInputElement).value).toBe("XX");
+  });
+});

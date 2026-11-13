@@ -32,5 +32,6 @@ class AuditPage(BaseModel):
 
     items: list[AuditEntry]
     next_cursor: str | None
-    #: Rows matching the filters, all pages together.
-    total: int
+    #: Rows matching the filters, all pages together. On the first page only (no ``before``); a
+    #: later page is ``null`` rather than paying for the same count again.
+    total: int | None

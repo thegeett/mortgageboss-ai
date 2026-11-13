@@ -17,6 +17,7 @@ import {
   ROLES,
   ROLE_LABEL,
   type Role,
+  US_STATE_CODES,
 } from "@/lib/types/users";
 import { X } from "lucide-react";
 import Link from "next/link";
@@ -126,6 +127,7 @@ function PersonForm({
   const [details, setDetails] = useState<Details>(() => detailsOf(person));
   const [roles, setRoles] = useState<Role[]>(person.roles);
   const [stateDraft, setStateDraft] = useState("");
+  const [stateError, setStateError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const update = useUpdatePerson(person.id);
@@ -159,10 +161,17 @@ function PersonForm({
 
   function addState() {
     const code = stateDraft.trim().toUpperCase();
-    if (/^[A-Z]{2}$/.test(code) && !details.licensed_states.includes(code)) {
+    if (code === "") return;
+    if (!US_STATE_CODES.has(code)) {
+      // Kept in the box with the reason, so it can be corrected; nothing is added.
+      setStateError(`${code} is not a US state code.`);
+      return;
+    }
+    if (!details.licensed_states.includes(code)) {
       setDetails({ ...details, licensed_states: [...details.licensed_states, code].sort() });
     }
     setStateDraft("");
+    setStateError(null);
   }
 
   async function save() {
@@ -305,7 +314,11 @@ function PersonForm({
                     placeholder="Add state…"
                     value={stateDraft}
                     maxLength={2}
-                    onChange={(event) => setStateDraft(event.target.value)}
+                    aria-invalid={stateError !== null}
+                    onChange={(event) => {
+                      setStateDraft(event.target.value);
+                      setStateError(null);
+                    }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === ",") {
                         event.preventDefault();
@@ -317,6 +330,7 @@ function PersonForm({
                 </div>
               </div>
             </div>
+            {stateError ? <p className="text-xs text-destructive">{stateError}</p> : null}
             <p className="text-xs text-muted-foreground">
               Goes on pre-approval letters and the borrower&rsquo;s team card when the portal ships.
               Nothing here is validated against NMLS.

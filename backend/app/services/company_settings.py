@@ -11,6 +11,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.company_settings import CompanySettings
 from app.core.permissions import Permission
+from app.models.company import Company
 from app.schemas.company import CompanySettingsUpdate
 from app.services.activity_log import field_changes
 from app.services.authorization import ensure
@@ -34,7 +35,10 @@ async def update_company_settings(
     would silently undo the other, while the audit log recorded both.
     """
     ensure(actor, Permission.COMPANY_SETTINGS_MANAGE)
-    company = actor.user.company
+    # The EFFECTIVE company (ADR-443), not the actor's own row's: today the same one.
+    company = await db.get(Company, actor.company_id)
+    if company is None:  # the actor's company always exists; a guard, not a case
+        raise LookupError(f"company {actor.company_id} not found")
     await db.refresh(company, attribute_names=["settings"], with_for_update=True)
     current = company.settings_model
     sent = update.model_dump(exclude_unset=True)

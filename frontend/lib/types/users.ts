@@ -5,6 +5,68 @@ export type Role = "admin" | "loan_officer" | "processor";
 /** Every role, in the order the People sheet lists them. */
 export const ROLES: readonly Role[] = ["admin", "loan_officer", "processor"];
 
+/**
+ * The codes the server accepts for `licensed_states`: the 50 states, DC, PR, GU and VI. The same
+ * list as the backend's `US_STATE_CODES`, so a bad code is refused as it is typed rather than on
+ * Save, where it would take the other edits down with it.
+ */
+export const US_STATE_CODES: ReadonlySet<string> = new Set([
+  "AL",
+  "AK",
+  "AZ",
+  "AR",
+  "CA",
+  "CO",
+  "CT",
+  "DE",
+  "FL",
+  "GA",
+  "HI",
+  "ID",
+  "IL",
+  "IN",
+  "IA",
+  "KS",
+  "KY",
+  "LA",
+  "ME",
+  "MD",
+  "MA",
+  "MI",
+  "MN",
+  "MS",
+  "MO",
+  "MT",
+  "NE",
+  "NV",
+  "NH",
+  "NJ",
+  "NM",
+  "NY",
+  "NC",
+  "ND",
+  "OH",
+  "OK",
+  "OR",
+  "PA",
+  "RI",
+  "SC",
+  "SD",
+  "TN",
+  "TX",
+  "UT",
+  "VT",
+  "VA",
+  "WA",
+  "WV",
+  "WI",
+  "WY",
+  "DC",
+  "PR",
+  "GU",
+  "VI",
+]);
+
 export const ROLE_LABEL: Record<Role, string> = {
   admin: "Admin",
   loan_officer: "Loan officer",

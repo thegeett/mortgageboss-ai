@@ -1,10 +1,17 @@
 """People as the admin API reads and writes them (LP-MB-Admin-03)."""
 
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from app.models.user import User, UserRole
 
@@ -58,6 +65,11 @@ class UserAdminView(BaseModel):
         )
 
 
+#: A name: surrounding spaces dropped, then at least one character, so " " is refused (review
+#: finding 5) rather than shown as a blank row and a blank name in every audit line.
+_Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
+
+
 class UserDetailsUpdate(BaseModel):
     """``PATCH /users/{id}``: only what is sent changes. Email is not here (ADR-042).
 
@@ -67,8 +79,8 @@ class UserDetailsUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    first_name: str | None = Field(default=None, min_length=1, max_length=64)
-    last_name: str | None = Field(default=None, min_length=1, max_length=64)
+    first_name: _Name | None = None
+    last_name: _Name | None = None
     phone: str | None = Field(default=None, max_length=32)
     title: str | None = Field(default=None, max_length=100)
     nmls_id: str | None = Field(default=None, max_length=16)

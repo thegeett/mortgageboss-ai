@@ -15,6 +15,7 @@ from sqlalchemy import DateTime, Select, Uuid, func, literal, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permissions import Permission
+from app.models.company import Company
 from app.models.company_audit_log import CompanyAuditLog
 from app.schemas.audit import AuditActor, AuditEntry, AuditPage
 from app.services.authorization import ensure
@@ -112,7 +113,13 @@ async def list_audit_log(
         filtered = filtered.where(CompanyAuditLog.actor_user_id == actor_user_id)
     if since is not None:
         filtered = filtered.where(CompanyAuditLog.created_at >= since)
-    total = await db.scalar(select(func.count()).select_from(filtered.subquery())) or 0
+    # Counted on the first page only: the page shows the first page's count, and every "Load more"
+    # recounting the whole filtered log would cost more as the log grows.
+    total = (
+        (await db.scalar(select(func.count()).select_from(filtered.subquery())) or 0)
+        if before is None
+        else None
+    )
 
     page = filtered
     if before is not None:
@@ -130,7 +137,8 @@ async def list_audit_log(
     people = {row.actor_user_id for row in rows if row.actor_user_id is not None}
     people |= {row.target_id for row in rows if row.target_type == "user" and row.target_id}
     names = await resolve_user_names(db, people)
-    company_name = actor.user.company.name
+    # The effective company (ADR-443), not the actor's own row's company.
+    company_name = await db.scalar(select(Company.name).where(Company.id == actor.company_id))
 
     def target_name(row: CompanyAuditLog) -> str | None:
         if row.target_type == "company":

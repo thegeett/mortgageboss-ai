@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NoRoles, OwnerProtected, SelfDeactivation, SelfRoleChange
 from app.core.permissions import Permission
+from app.models.company import Company
 from app.models.user import User, UserRole, UserRoleAssignment
 from app.services.activity_log import field_changes
 from app.services.authorization import ensure
@@ -47,8 +48,14 @@ def _scoped(actor: "Actor") -> Any:
     return select(User).where(User.company_id == actor.company_id, User.deleted_at.is_(None))
 
 
-def _owner_id(actor: "Actor") -> UUID | None:
-    return actor.user.company.owner_user_id
+async def company_owner_id(db: AsyncSession, actor: "Actor") -> UUID | None:
+    """The owner of the actor's EFFECTIVE company (ADR-443), not of the company the actor's own
+    user row belongs to. Today they are the same; reading the effective one keeps the owner rule
+    attached to the company whose people are being changed if that ever stops being true."""
+    owner: UUID | None = await db.scalar(
+        select(Company.owner_user_id).where(Company.id == actor.company_id)
+    )
+    return owner
 
 
 async def list_users(
@@ -78,6 +85,29 @@ async def get_user(db: AsyncSession, actor: "Actor", user_id: UUID) -> User | No
     return user
 
 
+async def _locked(db: AsyncSession, actor: "Actor", user_id: UUID) -> User | None:
+    """The person, row-locked and re-read, for a change (LP-MB-Admin-03 review).
+
+    Every change reads the person, decides, then writes. Without the lock two admins acting at
+    once both decide from the same old state: two adds of one role collide on the unique index
+    (a 500), and two deactivations each write an audit row. ``populate_existing`` because the
+    session may already hold this person (the actor, for their own details) from before the lock.
+
+    A CONSEQUENCE: when the person is the actor, re-populating their row unloads ``actor.user``'s
+    eager-loaded ``company``, and reading it afterwards would lazy-load (an error under async). So
+    nothing after a ``_locked`` reads ``actor.user.company``: the owner and the company name are
+    queried (``company_owner_id``, ``list_audit_log``).
+    """
+    ensure(actor, Permission.USERS_MANAGE)
+    user: User | None = await db.scalar(
+        _scoped(actor)
+        .where(User.id == user_id)
+        .with_for_update(of=User)
+        .execution_options(populate_existing=True)
+    )
+    return user
+
+
 async def _audit(
     db: AsyncSession,
     actor: "Actor",
@@ -103,7 +133,7 @@ async def update_user_details(
 ) -> User | None:
     """Apply the fields in ``patch`` (only what was sent). Anyone's details, the actor's own and
     the owner's included."""
-    user = await get_user(db, actor, user_id)
+    user = await _locked(db, actor, user_id)
     if user is None:
         return None
     sent = {field: value for field, value in patch.items() if field in DETAIL_FIELDS}
@@ -129,14 +159,14 @@ async def set_user_roles(
     db: AsyncSession, actor: "Actor", user_id: UUID, roles: set[UserRole]
 ) -> User | None:
     """Replace the person's roles with ``roles``: removed rows deleted, added rows granted by the actor."""
-    user = await get_user(db, actor, user_id)
+    user = await _locked(db, actor, user_id)
     if user is None:
         return None
     if user.id == actor.user.id:
         raise SelfRoleChange()
     if not roles:
         raise NoRoles()
-    if user.id == _owner_id(actor) and UserRole.ADMIN not in roles:
+    if user.id == await company_owner_id(db, actor) and UserRole.ADMIN not in roles:
         raise OwnerProtected()
     before, after = sorted(user.role_set), sorted(roles)
     if before == after:
@@ -164,12 +194,12 @@ async def deactivate_user(db: AsyncSession, actor: "Actor", user_id: UUID) -> Us
 
     Roles, history and authorship stay. Already inactive: nothing happens.
     """
-    user = await get_user(db, actor, user_id)
+    user = await _locked(db, actor, user_id)
     if user is None:
         return None
     if user.id == actor.user.id:
         raise SelfDeactivation()
-    if user.id == _owner_id(actor):
+    if user.id == await company_owner_id(db, actor):
         raise OwnerProtected()
     if not user.is_active:
         return user
@@ -188,7 +218,7 @@ async def deactivate_user(db: AsyncSession, actor: "Actor", user_id: UUID) -> Us
 
 async def reactivate_user(db: AsyncSession, actor: "Actor", user_id: UUID) -> User | None:
     """Give the person access again, with the roles they had. Already active: nothing happens."""
-    user = await get_user(db, actor, user_id)
+    user = await _locked(db, actor, user_id)
     if user is None:
         return None
     if user.is_active:

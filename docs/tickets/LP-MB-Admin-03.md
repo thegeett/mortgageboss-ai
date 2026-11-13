@@ -161,3 +161,31 @@ None new. Applies ADR-440 to ADR-442.
 - Invitations (LP-MB-Admin-04; the tab is a disabled stub), the Files column and the deactivate
   dialog's file section (LP-MB-Admin-05), email change, password reset, export, folding the lender,
   overlay and email audits into this log.
+
+**Review fixes (after `21a32911`)**
+1. The owner rule and the audit log's company name read the EFFECTIVE company (ADR-443) by query,
+   not the actor's own loaded company; so do the company-settings GET and PATCH from LP-MB-Admin-02,
+   which had the same read. No test can fail on this today: the two companies are always the same.
+   The test named for it pins that an ownership change is honoured, and measured: a stale cached read
+   passes it too. It says so in its docstring.
+2. Each change locks the person's row and re-reads it (`FOR UPDATE`, `populate_existing`), so two
+   admins acting at once cannot both decide from the old state (a duplicate role row's 500, a second
+   deactivation row). Side effect, documented on `_locked`: re-reading the actor's own row unloads
+   `actor.user.company`, so nothing after a change reads it.
+4. Login writes `last_login_at` with a Core UPDATE that leaves `updated_at` alone.
+5. Names are stripped and must keep a character: `" "` is a 422.
+6. The audit log counts only on its first page; later pages carry `total: null`.
+8. Audit times carry the year once it is not this year.
+9. The sheet checks a licensed state against the same list as the server as it is typed, and keeps
+   a bad code in the box with the reason instead of failing the whole Save.
+Mutations: removing the lock, the `updated_at` guard, the first-page count, the year and the state
+check are each caught.
+
+Not changed, by decision:
+- 3. An admin may tick "Sees all company loan files" on themselves. Only admins hold `users.manage`,
+  and admins already hold `loan.view_all`, so it grants nothing. Revisit if a non-admin role ever
+  gets `users.manage`.
+- 7. Audit names come from users whether or not soft-deleted. No code path soft-deletes a user today
+  (deactivation is `is_active`); revisit with user deletion.
+- 10. `GET /users`'s `status` and `role` filters stay: the brief asked for them and they are tested,
+  though the page filters its one list client-side.

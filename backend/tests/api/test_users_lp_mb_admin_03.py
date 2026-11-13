@@ -584,3 +584,122 @@ async def test_last_login_at_is_set_on_login_and_not_by_refresh(
     assert after_login is not None
     assert refresh.status_code == 200
     assert after_refresh == after_login
+
+
+# --------------------------------------------------------------------------- #
+# Review fixes (after 21a32911)
+# --------------------------------------------------------------------------- #
+
+
+async def test_the_owner_rule_reads_the_company_row_not_a_loaded_copy(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """An ownership change is honoured by the next request: the new owner is protected, the old is not.
+
+    NOT a test of review finding 1 (the owner read from the EFFECTIVE company rather than the actor's
+    own). The two companies are always the same today, so no request can tell them apart, and
+    measured: replacing the read with the session's cached `Company` also passes here.
+    """
+    shop = await _shop(db_session)
+    # Ownership moves to the processor-made-admin (as `transfer_owner` would) after the shop loaded.
+    await client.put(
+        f"{API}/users/{shop.processor}/roles", json={"roles": ["admin"]}, headers=_as(shop.admin)
+    )
+    await db_session.execute(
+        text("UPDATE companies SET owner_user_id = :u WHERE id = :c"),
+        {"u": shop.processor, "c": shop.company_id},
+    )
+
+    new_owner = await client.post(
+        f"{API}/users/{shop.processor}/deactivate", headers=_as(shop.admin)
+    )
+    old_owner = await client.post(f"{API}/users/{shop.owner}/deactivate", headers=_as(shop.admin))
+
+    assert new_owner.status_code == 409
+    assert old_owner.status_code == 200
+
+
+async def test_a_change_decides_from_the_row_as_it_is_now(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Finding 2: the person is locked and re-read, so a change another admin already made is seen.
+
+    Simulated in one session: the row is deactivated behind the session's back after it loaded the
+    person. Deciding from the stale copy would deactivate again and write a second audit row.
+    """
+    shop = await _shop(db_session)
+    pat = await db_session.get(User, shop.processor)
+    assert pat is not None and pat.is_active is True  # the session now holds an active copy
+    await db_session.execute(
+        text("UPDATE users SET is_active = false WHERE id = :u"), {"u": shop.processor}
+    )
+
+    resp = await client.post(f"{API}/users/{shop.processor}/deactivate", headers=_as(shop.admin))
+
+    assert resp.status_code == 200
+    assert resp.json()["is_active"] is False
+    assert await _audit_rows(db_session, shop.company_id) == []
+
+
+async def test_signing_in_does_not_move_updated_at(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Finding 4: `updated_at` keeps meaning "last edited", not "last signed in"."""
+    shop = await _shop(db_session)
+    before = (
+        await db_session.execute(
+            select(User.email, User.updated_at).where(User.id == shop.processor)
+        )
+    ).one()
+
+    login = await client.post(
+        f"{API}/auth/login", json={"email": before.email, "password": PASSWORD}
+    )
+
+    db_session.expunge_all()
+    after = (
+        await db_session.execute(
+            select(User.updated_at, User.last_login_at).where(User.id == shop.processor)
+        )
+    ).one()
+    assert login.status_code == 200
+    assert after.last_login_at is not None
+    assert after.updated_at == before.updated_at
+
+
+@pytest.mark.parametrize("body", [{"first_name": " "}, {"last_name": "\t"}])
+async def test_a_blank_name_is_refused(
+    client: AsyncClient, db_session: AsyncSession, body: dict[str, Any]
+) -> None:
+    """Finding 5: spaces only would show as a blank row and a blank name in the audit log."""
+    shop = await _shop(db_session)
+    resp = await client.patch(f"{API}/users/{shop.processor}", json=body, headers=_as(shop.admin))
+    assert resp.status_code == 422
+
+
+async def test_a_name_is_stored_trimmed(client: AsyncClient, db_session: AsyncSession) -> None:
+    shop = await _shop(db_session)
+    resp = await client.patch(
+        f"{API}/users/{shop.processor}", json={"first_name": "  Patricia "}, headers=_as(shop.admin)
+    )
+    assert resp.json()["first_name"] == "Patricia"
+
+
+async def test_only_the_first_page_carries_the_count(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Finding 6: "Load more" does not recount the whole log."""
+    shop = await _shop(db_session)
+    await _three_changes(client, shop)
+
+    first = (await client.get(f"{API}/audit-log?limit=2", headers=_as(shop.admin))).json()
+    second = (
+        await client.get(
+            f"{API}/audit-log",
+            params={"limit": 2, "before": first["next_cursor"]},
+            headers=_as(shop.admin),
+        )
+    ).json()
+
+    assert first["total"] == 3
+    assert second["total"] is None

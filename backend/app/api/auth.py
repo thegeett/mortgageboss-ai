@@ -15,6 +15,7 @@ CSRF posture, stateless / no server-side revocation).
 """
 
 from fastapi import APIRouter, Cookie, HTTPException, Response, status
+from sqlalchemy import update
 
 from app.api.dependencies import CurrentUser
 from app.core.config import settings
@@ -29,6 +30,7 @@ from app.core.jwt import (
     verify_token,
 )
 from app.models.base import utcnow
+from app.models.user import User
 from app.schemas.auth import LoginRequest, TokenResponse, UserPublic
 from app.services.auth import (
     AuthenticationError,
@@ -106,7 +108,13 @@ async def login(payload: LoginRequest, db: DbSession, response: Response) -> Tok
 
     # A sign-in, so here and not in `refresh` (LP-MB-Admin-03): People's "last sign-in" means the
     # person typed their password, not that a tab kept its session alive.
-    user.last_login_at = utcnow()
+    # A Core UPDATE that names `updated_at` as itself: setting the attribute on the object would fire
+    # `TimestampMixin`'s onupdate, and `updated_at` would then mean "last signed in" for everyone.
+    await db.execute(
+        update(User)
+        .where(User.id == user.id)
+        .values(last_login_at=utcnow(), updated_at=User.updated_at)
+    )
     await db.commit()
 
     _set_refresh_cookie(response, create_refresh_token(user.id))

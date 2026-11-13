@@ -26,10 +26,10 @@ router = APIRouter(
 _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
 
 
-def _view(user: User | None, actor: CurrentActor) -> UserAdminView:
+async def _view(db: DbSession, actor: CurrentActor, user: User | None) -> UserAdminView:
     if user is None:
         raise _NOT_FOUND
-    return UserAdminView.of(user, owner_user_id=actor.user.company.owner_user_id)
+    return UserAdminView.of(user, owner_user_id=await service.company_owner_id(db, actor))
 
 
 @router.get("", response_model=list[UserAdminView])
@@ -42,12 +42,13 @@ async def list_people(
 ) -> list[UserAdminView]:
     """The company's people, active and inactive. No pagination: a company's people fit a page."""
     people = await service.list_users(db, actor, status=status_, role=role)
-    return [_view(user, actor) for user in people]
+    owner = await service.company_owner_id(db, actor)
+    return [UserAdminView.of(user, owner_user_id=owner) for user in people]
 
 
 @router.get("/{user_id}", response_model=UserAdminView)
 async def get_person(user_id: UUID, db: DbSession, actor: CurrentActor) -> UserAdminView:
-    return _view(await service.get_user(db, actor, user_id), actor)
+    return await _view(db, actor, await service.get_user(db, actor, user_id))
 
 
 @router.patch("/{user_id}", response_model=UserAdminView)
@@ -58,7 +59,7 @@ async def update_person(
     user = await service.update_user_details(
         db, actor, user_id, payload.model_dump(exclude_unset=True)
     )
-    view = _view(user, actor)
+    view = await _view(db, actor, user)
     await db.commit()
     return view
 
@@ -69,7 +70,7 @@ async def set_roles(
 ) -> UserAdminView:
     """Replace the person's roles with the sent set."""
     user = await service.set_user_roles(db, actor, user_id, set(payload.roles))
-    view = _view(user, actor)
+    view = await _view(db, actor, user)
     await db.commit()
     return view
 
@@ -77,13 +78,13 @@ async def set_roles(
 @router.post("/{user_id}/deactivate", response_model=UserAdminView)
 async def deactivate(user_id: UUID, db: DbSession, actor: CurrentActor) -> UserAdminView:
     """End the person's access from their next request."""
-    view = _view(await service.deactivate_user(db, actor, user_id), actor)
+    view = await _view(db, actor, await service.deactivate_user(db, actor, user_id))
     await db.commit()
     return view
 
 
 @router.post("/{user_id}/reactivate", response_model=UserAdminView)
 async def reactivate(user_id: UUID, db: DbSession, actor: CurrentActor) -> UserAdminView:
-    view = _view(await service.reactivate_user(db, actor, user_id), actor)
+    view = await _view(db, actor, await service.reactivate_user(db, actor, user_id))
     await db.commit()
     return view
