@@ -132,3 +132,33 @@ describe("SavedViews", () => {
     expect(screen.getByRole("link", { name: /all files/i })).toBeDefined();
   });
 });
+
+describe("SavedViews — My files and Unassigned (LP-MB-Admin-05)", () => {
+  it("offers both as built-in views that link to the assignee filter", () => {
+    views.data = [];
+    render(<SavedViews activeViewId={null} />);
+    expect(screen.getByRole("link", { name: "My files" }).getAttribute("href")).toBe(
+      "/dashboard?assignee=me",
+    );
+    expect(screen.getByRole("link", { name: "Unassigned" }).getAttribute("href")).toBe(
+      "/dashboard?assignee=unassigned",
+    );
+  });
+
+  it("marks the current one, and not All files", () => {
+    views.data = [];
+    render(<SavedViews activeViewId={null} filtered assignee="me" />);
+    expect(screen.getByRole("link", { name: "My files" }).getAttribute("aria-current")).toBe(
+      "page",
+    );
+    expect(screen.getByRole("link", { name: "All files" }).getAttribute("aria-current")).toBeNull();
+  });
+
+  it("carries a saved view's assignee into its link", () => {
+    views.data = [view({ filters: { statuses: [], search: null, assignee: "me" } })];
+    render(<SavedViews activeViewId={null} />);
+    expect(screen.getByRole("link", { name: /Blocked to submit/ }).getAttribute("href")).toContain(
+      "assignee=me",
+    );
+  });
+});

@@ -107,6 +107,8 @@ async def list_saved_views(
             company_id=current_user.company_id,
             statuses=list(filters.statuses) or None,
             search=filters.search,
+            # "me" is whoever is looking, so a shared view counts each viewer's own files.
+            assignee=current_user.id if filters.assignee == "me" else filters.assignee,
         )
         out.append(_to_public(view, current_user, count))
     return out

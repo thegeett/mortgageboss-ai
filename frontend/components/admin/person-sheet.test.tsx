@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({ get: vi.fn(), patch: vi.fn(), put: vi.fn(), post: vi.fn() }));
@@ -129,5 +129,64 @@ describe("PersonSheet — licensed states (review finding 9)", () => {
     expect(screen.getByText("XX is not a US state code.")).toBeTruthy();
     expect(screen.queryByText("XX", { selector: "div" })).toBeNull();
     expect((input as HTMLInputElement).value).toBe("XX");
+  });
+});
+
+describe("PersonSheet — deactivating someone who works files (LP-MB-Admin-05)", () => {
+  it("shows no file section for someone with no files", async () => {
+    renderSheet(person({ id: "p-x", file_count: 0 }));
+    fireEvent.click(screen.getByRole("button", { name: "Deactivate" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByText(/They are on/)).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "Deactivate" })).toBeTruthy();
+  });
+
+  it("moves their files first, then deactivates", async () => {
+    const calls: string[] = [];
+    api.get.mockImplementation(async (url: string) =>
+      url === "/api/v1/users/assignable"
+        ? { data: [{ id: "p-tom", name: "Tom Becker", roles: ["processor"], file_count: 6 }] }
+        : { data: EMPTY_PAGE },
+    );
+    api.post.mockImplementation(async (url: string) => {
+      calls.push(url);
+      return url.endsWith("/reassign-loans")
+        ? { data: { moved: 14 } }
+        : { data: { ...ELENA, is_active: false, file_count: 0 } };
+    });
+    renderSheet(person({ file_count: 14 }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Deactivate" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("They are on 14 loan files")).toBeTruthy();
+    const picker = within(dialog).getByLabelText("Move their files to");
+    await waitFor(() =>
+      expect(within(picker).getByText("Tom Becker · 6 files now, 20 after")).toBeTruthy(),
+    );
+    fireEvent.change(picker, { target: { value: "p-tom" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Deactivate and move 14 files" }));
+
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls).toEqual([
+      `/api/v1/users/${ELENA.id}/reassign-loans`,
+      `/api/v1/users/${ELENA.id}/deactivate`,
+    ]);
+    expect(api.post.mock.calls[0]?.[1]).toEqual({ to_user_id: "p-tom" });
+  });
+
+  it("leaves their files when asked, and only deactivates", async () => {
+    api.get.mockImplementation(async (url: string) =>
+      url === "/api/v1/users/assignable" ? { data: [] } : { data: EMPTY_PAGE },
+    );
+    api.post.mockResolvedValue({ data: { ...ELENA, is_active: false } });
+    renderSheet(person({ file_count: 3 }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Deactivate" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByLabelText(/Leave their files as they are/));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Deactivate" }));
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    expect(api.post).toHaveBeenCalledWith(`/api/v1/users/${ELENA.id}/deactivate`);
   });
 });

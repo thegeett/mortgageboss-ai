@@ -55,6 +55,7 @@ if TYPE_CHECKING:
     from app.models.document import Document
     from app.models.finding import Finding
     from app.models.lender import Lender
+    from app.models.loan_team import LoanTeamMember
     from app.models.mismo_import import MismoImport
     from app.models.needs_item import NeedsItem
     from app.models.property import Property
@@ -265,7 +266,10 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         str_enum(AggressionLevel, name="submitted_aggression_level"), nullable=True
     )
 
-    # --- Originating loan officer (free-text; the LO is not a system user) --
+    # --- Originating loan officer --------------------------------------------
+    # Free text when the loan officer is not a user (a processing company's LO works at the broker).
+    # When the file's team has an internal loan officer (LP-MB-Admin-05, ADR-445), these hold that
+    # user's name and email, written by `services.loan_teams`, and cannot be edited directly.
     loan_officer_name: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
     loan_officer_email: Mapped[str | None] = mapped_column(String(MEDIUM_STRING), nullable=True)
 
@@ -300,6 +304,14 @@ class LoanFile(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         back_populates="loan_file",
         order_by="Borrower.borrower_position",
         cascade="all, delete-orphan",
+    )
+    # Who works the file (LP-MB-Admin-05): LIVE members only, read-only here. Every change goes
+    # through `services.loan_teams`, which writes `LoanTeamMember` rows and the timeline entry.
+    team: Mapped[list["LoanTeamMember"]] = relationship(
+        primaryjoin="and_(LoanFile.id == LoanTeamMember.loan_file_id, "
+        "LoanTeamMember.deleted_at.is_(None))",
+        order_by="LoanTeamMember.created_at",
+        viewonly=True,
     )
     property: Mapped["Property | None"] = relationship(
         back_populates="loan_file",

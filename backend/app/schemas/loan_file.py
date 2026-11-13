@@ -28,8 +28,10 @@ from app.models.loan_file import (
     LoanPurpose,
     RefinanceType,
 )
+from app.models.loan_team import TeamRole
 from app.models.property import OccupancyType, PropertyType
 from app.services.attention import FileAttention
+from app.services.loan_teams import team_view
 
 
 class LoanFileCreate(BaseModel):
@@ -115,6 +117,47 @@ def _primary_borrower_name(loan_file: LoanFile, borrowers: list[Borrower]) -> st
     return None
 
 
+class TeamMemberPublic(BaseModel):
+    """One person on a file's team (LP-MB-Admin-05). `id` is the membership, for removal."""
+
+    id: UUID
+    user_id: UUID
+    name: str
+    email: str
+    team_role: TeamRole
+    #: The loan officer's licensing; empty for a processor.
+    nmls_id: str | None = None
+    licensed_states: list[str] = []
+
+
+class TeamPublic(BaseModel):
+    """Who works the file: at most one loan officer who is a user, and the processors."""
+
+    loan_officer: TeamMemberPublic | None
+    processors: list[TeamMemberPublic]
+
+
+class LoanOfficerDisplay(BaseModel):
+    """The loan officer as the pipeline shows it: the internal user's name, or the free text
+    (``external``: someone at a broker who is not a user)."""
+
+    name: str
+    external: bool
+
+
+def _team(loan_file: LoanFile) -> TeamPublic:
+    """``team`` must be eager-loaded (``get_loan_file`` / ``list_loan_files`` do)."""
+    return TeamPublic.model_validate(team_view(list(loan_file.team)))
+
+
+def _loan_officer_display(loan_file: LoanFile, team: TeamPublic) -> LoanOfficerDisplay | None:
+    if team.loan_officer is not None:
+        return LoanOfficerDisplay(name=team.loan_officer.name, external=False)
+    if loan_file.loan_officer_name:
+        return LoanOfficerDisplay(name=loan_file.loan_officer_name, external=True)
+    return None
+
+
 class LoanFileSummary(BaseModel):
     """Lean list item. No ``inbox_token``. ``primary_borrower_name`` is derived.
 
@@ -137,6 +180,9 @@ class LoanFileSummary(BaseModel):
     created_at: datetime
     updated_at: datetime
     attention: FileAttention | None = None
+    #: Who works the file (LP-MB-Admin-05).
+    team: TeamPublic | None = None
+    loan_officer_display: LoanOfficerDisplay | None = None
 
     @classmethod
     def list_item(cls, loan_file: LoanFile, attention: "FileAttention | None") -> Self:
@@ -170,6 +216,8 @@ class LoanFileSummary(BaseModel):
             primary_borrower_name=_primary_borrower_name(loan_file, list(loan_file.borrowers)),
             created_at=loan_file.created_at,
             updated_at=loan_file.updated_at,
+            team=(team := _team(loan_file)),
+            loan_officer_display=_loan_officer_display(loan_file, team),
         )
 
 
@@ -217,6 +265,8 @@ class LoanFileDetail(LoanFileSummary):
             primary_borrower_name=_primary_borrower_name(loan_file, borrowers),
             created_at=loan_file.created_at,
             updated_at=loan_file.updated_at,
+            team=(team := _team(loan_file)),
+            loan_officer_display=_loan_officer_display(loan_file, team),
             loan_officer_name=loan_file.loan_officer_name,
             loan_officer_email=loan_file.loan_officer_email,
             refinance_type=loan_file.refinance_type,

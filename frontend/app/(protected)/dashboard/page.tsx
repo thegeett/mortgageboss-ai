@@ -4,8 +4,10 @@ import { FileTable } from "@/components/dashboard/file-table";
 import { SearchInput } from "@/components/dashboard/search-input";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useLoanFiles } from "@/lib/api/loan-files";
+import { useAssignable } from "@/lib/api/loan-teams";
 import { useSavedViews } from "@/lib/api/saved-views";
 import { useCan } from "@/lib/auth/permissions";
 import { byAttention } from "@/lib/loan-files/attention";
@@ -90,7 +92,7 @@ export default function DashboardPage() {
   // first request would otherwise ask for the unsearched list after a refresh,
   // or for the previous user's term after a reload (LP-933 review).
   const { data, isPending, isError } = useLoanFiles(
-    { page, pageSize: PAGE_SIZE, statuses, search },
+    { page, pageSize: PAGE_SIZE, statuses, search, assignee: urlState.assignee },
     { enabled: trusted },
   );
   // Default order is "what needs me first" (LP-UI-013), not most-recently-
@@ -164,7 +166,17 @@ export default function DashboardPage() {
             {total} {total === 1 ? "file" : "files"}
             {filtered ? " matching" : ""}
           </p>
-          <SearchInput value={searchInput} onChange={setSearchInput} />
+          <div className="flex flex-wrap items-center gap-2">
+            <AssigneeSelect
+              value={urlState.assignee ?? ""}
+              onChange={(assignee) =>
+                router.replace(
+                  `/dashboard${writePipelineUrl({ ...urlState, viewId: null, assignee: assignee || null })}`,
+                )
+              }
+            />
+            <SearchInput value={searchInput} onChange={setSearchInput} />
+          </div>
         </div>
 
         <FileTable
@@ -288,4 +300,34 @@ function useStripSearchTermFromUrl(urlState: ReturnType<typeof usePipelineUrl>):
   useEffect(() => {
     if (stray) router.replace(`/dashboard${writePipelineUrl(urlState)}`);
   }, [stray, urlState, router]);
+}
+
+/**
+ * "Assigned to" (LP-MB-Admin-05, mockup 14): anyone, me, nobody, or one person. The people are
+ * everyone who can be on a team (loan officers and processors), each once.
+ */
+function AssigneeSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const officers = useAssignable("loan_officer");
+  const processors = useAssignable("processor");
+  const people = new Map<string, string>();
+  for (const person of [...(officers.data ?? []), ...(processors.data ?? [])]) {
+    people.set(person.id, person.name);
+  }
+  return (
+    <Select
+      aria-label="Assigned to"
+      className="w-44"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      <option value="">Anyone</option>
+      <option value="me">Me</option>
+      <option value="unassigned">Unassigned</option>
+      {[...people].map(([id, name]) => (
+        <option key={id} value={id}>
+          {name}
+        </option>
+      ))}
+    </Select>
+  );
 }

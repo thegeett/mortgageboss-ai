@@ -115,7 +115,8 @@ async def test_create_takes_owner_and_company_from_the_caller(
     )
     assert view["owner_user_id"] == str(user.id)
     assert view["is_mine"] is True
-    assert view["filters"] == {"statuses": ["in_processing"], "search": "smith"}
+    # `assignee` (LP-MB-Admin-05) is part of every view's filters now; unset here.
+    assert view["filters"] == {"statuses": ["in_processing"], "search": "smith", "assignee": None}
 
     row = await db.execute(
         text("SELECT company_id FROM saved_views WHERE id = :id"), {"id": view["id"]}
@@ -222,7 +223,7 @@ async def test_updating_one_field_leaves_the_others_alone(
     assert patched.status_code == 200
     body = patched.json()
     assert body["name"] == "Renamed"
-    assert body["filters"] == {"statuses": ["draft"], "search": None}
+    assert body["filters"] == {"statuses": ["draft"], "search": None, "assignee": None}
     assert body["sort"] == "amount_desc"
     assert body["is_shared"] is True
 

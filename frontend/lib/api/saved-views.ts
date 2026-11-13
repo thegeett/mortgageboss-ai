@@ -16,15 +16,14 @@ const API_V1 = "/api/v1";
 export type SavedViewSort = "attention" | "updated_desc" | "updated_asc" | "amount_desc";
 
 /**
- * What a view filters on.
- *
- * Deliberately the same vocabulary the list endpoint accepts. Note what is NOT
- * here: an assignee filter. LP-UI-014 asks for "current user" as a value, and a
- * loan file has no owner in the data model — see docs/tickets/LP-UI-015.md.
+ * What a view filters on: the same vocabulary the list endpoint accepts.
+ * `assignee` (LP-MB-Admin-05): "me" is whoever is looking, so one shared view
+ * serves a whole team.
  */
 export interface SavedViewFilters {
   statuses: LoanFileStatus[];
   search: string | null;
+  assignee?: string | null;
 }
 
 export interface SavedView {

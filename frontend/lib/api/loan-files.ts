@@ -25,6 +25,8 @@ export interface LoanFilesQuery {
   pageSize?: number;
   statuses?: LoanFileStatus[];
   search?: string;
+  /** `me`, `unassigned`, or a user id (LP-MB-Admin-05). */
+  assignee?: string | null;
 }
 
 export async function fetchLoanFiles(query: LoanFilesQuery): Promise<PaginatedLoanFiles> {
@@ -36,6 +38,9 @@ export async function fetchLoanFiles(query: LoanFilesQuery): Promise<PaginatedLo
   }
   if (query.search) {
     params.set("search", query.search);
+  }
+  if (query.assignee) {
+    params.set("assignee", query.assignee);
   }
   const response = await apiClient.get<PaginatedLoanFiles>(`${LOAN_FILES_PATH}?${params}`);
   return response.data;
@@ -50,6 +55,7 @@ export function loanFilesQueryKey(query: LoanFilesQuery) {
       pageSize: query.pageSize ?? 20,
       statuses: query.statuses ?? [],
       search: query.search ?? "",
+      assignee: query.assignee ?? null,
     },
   ] as const;
 }

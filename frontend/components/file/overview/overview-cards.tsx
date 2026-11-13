@@ -301,6 +301,11 @@ export function LoanCard({
           />
           <Row label="Loan officer" value={file.loan_officer_name || "—"} />
           <Row label="LO email" value={file.loan_officer_email || "—"} />
+          {file.team?.loan_officer ? (
+            <p className="text-xs text-muted-foreground">
+              Filled from the loan officer&rsquo;s account
+            </p>
+          ) : null}
           <UnderwriterPicker file={file} />
         </div>
       )}

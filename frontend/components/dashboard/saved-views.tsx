@@ -32,8 +32,11 @@ import Link from "next/link";
 export function SavedViews({
   activeViewId,
   filtered = false,
+  assignee = null,
 }: {
   activeViewId: string | null;
+  /** The pipeline's assignee filter, so "My files" / "Unassigned" can show as current. */
+  assignee?: string | null;
   /** True when a filter is applied that is not one of these views. */
   filtered?: boolean;
 }) {
@@ -54,6 +57,18 @@ export function SavedViews({
         active={activeViewId === null && !filtered}
         onSelect={() => usePipelineSearchStore.getState().applyView(null, "")}
       />
+      {/* Built in, like "All files" (LP-MB-Admin-05): not rows anyone saved, so every
+          company has them and nobody can delete them. */}
+      {(["me", "unassigned"] as const).map((value) => (
+        <ViewLink
+          key={value}
+          href={`/dashboard${writePipelineUrl({ statuses: [], viewId: null, assignee: value })}`}
+          label={value === "me" ? "My files" : "Unassigned"}
+          count={null}
+          active={activeViewId === null && assignee === value}
+          onSelect={() => usePipelineSearchStore.getState().applyView(null, "")}
+        />
+      ))}
 
       {isPending ? <Hint>Loading…</Hint> : null}
       {isError ? <Hint>Views unavailable</Hint> : null}
@@ -86,6 +101,7 @@ function Group({
           key={view.id}
           href={`/dashboard${writePipelineUrl({
             statuses: view.filters.statuses,
+            assignee: view.filters.assignee ?? null,
             viewId: view.id,
           })}`}
           label={view.name}

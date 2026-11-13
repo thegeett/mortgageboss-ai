@@ -21,7 +21,7 @@ describe("People page", () => {
     api.get.mockImplementation(async (url: string) =>
       url === "/api/v1/users"
         ? { data: [OWNER, ME, ELENA] }
-        : url === "/api/v1/invites"
+        : url === "/api/v1/invites" || url === "/api/v1/users/assignable"
           ? { data: [] }
           : { data: EMPTY_PAGE },
     );

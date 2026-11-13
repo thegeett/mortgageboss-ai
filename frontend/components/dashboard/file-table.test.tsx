@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { LoanFileSummary } from "@/lib/types/loan-file";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // The dialog has its own tests; stub it so the table test stays focused on wiring.
@@ -9,6 +9,7 @@ vi.mock("@/components/file/delete-file-dialog", () => ({
     open ? <div data-testid="delete-dialog">deleting {file?.display_id}</div> : null,
 }));
 
+import { useAuthStore } from "@/lib/stores/auth-store";
 import { COLUMNS, FileTable } from "./file-table";
 
 const FILE: LoanFileSummary = {
@@ -169,10 +170,10 @@ describe("FileTable — grid keyboard navigation (LP-UI-007)", () => {
     renderTable({ files: files(3) });
     const grid = screen.getByRole("grid", { name: /loan files/i });
     expect(grid.getAttribute("aria-rowcount")).toBe("4"); // 3 rows + header
-    expect(grid.getAttribute("aria-colcount")).toBe("10");
+    expect(grid.getAttribute("aria-colcount")).toBe(String(COLUMNS.length + 1)); // + actions
     expect(row(0).getAttribute("aria-rowindex")).toBe("2"); // header is row 1
     const cells = row(0).querySelectorAll("[aria-colindex]");
-    expect(cells).toHaveLength(10);
+    expect(cells).toHaveLength(COLUMNS.length + 1);
     expect(cells[0]?.getAttribute("aria-colindex")).toBe("1");
   });
 
@@ -365,5 +366,54 @@ describe("FileTable — an empty pipeline and loan.create (LP-MB-Admin-02 review
     expect(screen.queryByRole("button", { name: "Create your first file" })).toBeNull();
     expect(screen.queryByText(/Create one/)).toBeNull();
     expect(screen.getByText(/admins and loan officers create them/)).toBeTruthy();
+  });
+});
+
+describe("FileTable — who works the file (LP-MB-Admin-05)", () => {
+  const member = (id: string, name: string) => ({
+    id: `m-${id}`,
+    user_id: id,
+    name,
+    email: `${id}@x.com`,
+    team_role: "processor" as const,
+    nmls_id: null,
+    licensed_states: [],
+  });
+
+  it("shows an internal loan officer plainly and an external one marked, with processors as chips", () => {
+    renderTable({
+      files: [
+        {
+          ...FILE,
+          id: "a",
+          display_id: "LF-A",
+          loan_officer_display: { name: "Daniel Okafor", external: false },
+          team: { loan_officer: null, processors: [member("u-pat", "Pat Lee")] },
+        },
+        {
+          ...FILE,
+          id: "b",
+          display_id: "LF-B",
+          loan_officer_display: { name: "Rita Gomez", external: true },
+          team: { loan_officer: null, processors: [] },
+        },
+      ],
+    });
+    const rowA = screen.getByText("LF-A").closest("tr") as HTMLElement;
+    const rowB = screen.getByText("LF-B").closest("tr") as HTMLElement;
+    expect(within(rowA).getByText("Daniel Okafor")).toBeTruthy();
+    expect(within(rowA).queryByText("(external)")).toBeNull();
+    expect(within(rowA).getByText("Pat Lee")).toBeTruthy();
+    expect(rowB.textContent).toContain("Rita Gomez (external)");
+  });
+
+  it("calls the current user's chip You", () => {
+    useAuthStore.setState({ user: { id: "u-pat" } as never });
+    renderTable({
+      files: [{ ...FILE, team: { loan_officer: null, processors: [member("u-pat", "Pat Lee")] } }],
+    });
+    expect(screen.getByText("You")).toBeTruthy();
+    expect(screen.queryByText("Pat Lee")).toBeNull();
+    useAuthStore.setState({ user: null });
   });
 });

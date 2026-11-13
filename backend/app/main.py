@@ -33,6 +33,7 @@ from app.api.invites import router as invites_router
 from app.api.lenders import file_router as lender_file_router
 from app.api.lenders import router as lenders_router
 from app.api.loan_files import router as loan_files_router
+from app.api.loan_teams import router as loan_teams_router
 from app.api.ltv import router as ltv_router
 from app.api.mailbox_connections import router as mailbox_connections_router
 from app.api.needs import router as needs_router
@@ -47,6 +48,7 @@ from app.api.stated_financials import router as stated_financials_router
 from app.api.timeline import router as timeline_router
 from app.api.upload_links import public_router as upload_public_router
 from app.api.upload_links import router as upload_links_router
+from app.api.users import assignable_router as users_assignable_router
 from app.api.users import router as users_router
 from app.api.validation_aid import router as validation_aid_router
 from app.api.verification import router as verification_router
@@ -191,7 +193,10 @@ app.include_router(reminders_router, prefix=API_V1_PREFIX)
 app.include_router(reminders_file_router, prefix=API_V1_PREFIX)
 app.include_router(mailbox_connections_router, prefix=API_V1_PREFIX)
 app.include_router(company_router, prefix=API_V1_PREFIX)
+# Before `users_router`: `/users/{user_id}` would otherwise take `/users/assignable`.
+app.include_router(users_assignable_router, prefix=API_V1_PREFIX)
 app.include_router(users_router, prefix=API_V1_PREFIX)
+app.include_router(loan_teams_router, prefix=API_V1_PREFIX)
 app.include_router(audit_log_router, prefix=API_V1_PREFIX)
 app.include_router(invites_router, prefix=API_V1_PREFIX)
 app.include_router(invites_public_router, prefix=API_V1_PREFIX)

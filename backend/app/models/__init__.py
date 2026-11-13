@@ -95,6 +95,7 @@ from app.models.lender_condition_code import LenderCodeStatus, LenderConditionCo
 from app.models.lender_contact import LenderContact, LenderContactRole
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose, RefinanceType
 from app.models.loan_file_participant import LoanFileParticipant, ParticipantRole
+from app.models.loan_team import LoanTeamMember, TeamRole
 from app.models.ltv_override import LtvOverride
 from app.models.mailbox_connection import (
     MailboxConnection,
@@ -224,6 +225,7 @@ __all__ = [
     "LoanFileStatus",
     "LoanProgram",
     "LoanPurpose",
+    "LoanTeamMember",
     "LongStr",
     "LtvOverride",
     "MailDomainStatus",
@@ -276,6 +278,7 @@ __all__ = [
     "TagCacheEntry",
     "TagCacheKind",
     "TagDependency",
+    "TeamRole",
     "Tier",
     "TimestampMixin",
     "UUIDMixin",

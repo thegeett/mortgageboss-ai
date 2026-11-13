@@ -41,6 +41,8 @@ export function LoanEditor({ file }: { file: LoanFileDetail }) {
   // when the MISMO import left it undetermined) only when the purpose is refinance (LP-99).
   const isRefinance = file.loan_purpose === "refinance";
 
+  const internalLo = Boolean(file.team?.loan_officer);
+
   const fields: FieldDef[] = [
     { key: "loan_amount", label: "Amount", kind: "money" },
     { key: "loan_purpose", label: "Purpose", kind: "select", options: LOAN_PURPOSE_OPTIONS },
@@ -61,8 +63,14 @@ export function LoanEditor({ file }: { file: LoanFileDetail }) {
       kind: "select",
       options: (lenders.data ?? []).map((l) => ({ value: l.id, label: l.name })),
     },
-    { key: "loan_officer_name", label: "Loan officer", kind: "text" },
-    { key: "loan_officer_email", label: "LO email", kind: "text" },
+    // LP-MB-Admin-05 — while the loan officer is a user, the contact follows their account and the
+    // server refuses an edit; it is shown read-only below instead of offered here.
+    ...(internalLo
+      ? []
+      : [
+          { key: "loan_officer_name", label: "Loan officer", kind: "text" as const },
+          { key: "loan_officer_email", label: "LO email", kind: "text" as const },
+        ]),
   ];
 
   function commit(changed: Record<string, unknown>) {
@@ -99,12 +107,27 @@ export function LoanEditor({ file }: { file: LoanFileDetail }) {
           ...(isRefinance ? { refinance_type: file.refinance_type ?? "" } : {}),
           loan_program: file.loan_program ?? "",
           lender_id: file.lender_id ?? "",
-          loan_officer_name: file.loan_officer_name ?? "",
-          loan_officer_email: file.loan_officer_email ?? "",
+          ...(internalLo
+            ? {}
+            : {
+                loan_officer_name: file.loan_officer_name ?? "",
+                loan_officer_email: file.loan_officer_email ?? "",
+              }),
         }}
         onSave={onSave}
         busy={update.isPending}
       />
+      {internalLo ? (
+        <div className="mt-3 space-y-0.5 text-sm">
+          <p className="text-foreground">
+            {file.loan_officer_name}{" "}
+            <span className="text-muted-foreground">{file.loan_officer_email}</span>
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Filled from the loan officer&rsquo;s account
+          </p>
+        </div>
+      ) : null}
 
       <Dialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
         <DialogContent className="sm:max-w-md">

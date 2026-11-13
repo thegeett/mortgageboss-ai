@@ -1,6 +1,6 @@
 # LP-MB-Admin-05 — Loan teams, and the loan officer as a user
 
-Admin and roles, ticket 5 of 5. **Status: planned, not built.** Needs LP-MB-Admin-02, LP-MB-Admin-03.
+Admin and roles, ticket 5 of 5. **Status: Part 1 built, not committed; Part 2 surveyed only (see Result).** Needs LP-MB-Admin-02, LP-MB-Admin-03.
 
 ## What and why
 
@@ -116,3 +116,84 @@ different things: a participant is an address that may write to the file (LP-805
 user who works it. The internal LO is the source of truth when present and is copied into the text
 fields; the text fields are the source of truth when there is none. Team membership decides who sees a
 file only when the company turns `restrict_loans_to_team` on.
+
+## Result
+
+**Part 1: built**
+- Migration `14e94a531fce` on `6316da7fe522`: `loan_teams` as the schema section (CHECK on
+  `team_role`, partial unique indexes on live rows: one person per slot, one loan officer per file);
+  `activity_type` CHECK swapped to all 37 values (`loan_team_changed` added; the 36 taken from the enum
+  at runtime; `tests/test_activity_type_migrations.py` green before and after); the backfill (a file's
+  FILE_CREATED actor, if active, not deleted, in the file's company and holding PROCESSOR, joins as
+  processor, added by the system); `readonly.loan_teams` with every column. Model `LoanTeamMember`;
+  `LoanFile.team` (live rows, view-only), eager-loaded by `get_loan_file` and `list_loan_files`.
+- `app/services/loan_teams.py`: `can_change_team`, eligibility (`NotEligible`, 422, naming the missing
+  role), `set_loan_officer` (replaces; write-through of name and email; clearing blanks only text that
+  still matches that user; re-seeds participants through `inbound_participants.seed_participants`),
+  `add_processor` (no-op if already there), `remove_member` (removing the LO is clearing the slot),
+  `on_loan_file_created` (called on the manual and MISMO create paths), `reassign_user_loans`
+  (`users.manage`; target checked for every slot before anything moves; one `loans_reassigned` audit
+  row; one timeline entry per file). Every change writes one `LOAN_TEAM_CHANGED` entry. Concurrent
+  writes to one slot are caught in a SAVEPOINT (409 "Someone else just changed this team").
+- Text-field guard in `services/loan_files.update_loan_file`: a CHANGED `loan_officer_name` / `_email`
+  while an internal LO is set is 422 "Change the loan officer on the Team card"; re-sending the same
+  value with a form is not a change.
+- `assignee` (`me` / `unassigned` / user id) in `list_loan_files`, `count_loan_files` and
+  `SavedViewFilters` together (docstring updated); the saved-view count resolves `me` per viewer.
+- API: `/loan-files/{id}/team` (GET with `can_change`, PUT `/loan-officer`, POST `/members`, DELETE
+  `/members/{member_id}`); `GET /users/assignable` (any signed-in user, a separate router mounted
+  before `/users/{user_id}`); `POST /users/{id}/reassign-loans`; list and detail carry `team`, and
+  `loan_officer_display` with `external`; People rows carry `file_count`.
+- Frontend: Team card on the overview (mockup 13), controls only when `can_change`, LO slot hidden
+  when nobody holds the Loan officer role and none is set; LO contact read-only with "Filled from the
+  loan officer's account" on the overview and on intake for a loan officer creating a file; pipeline
+  "Assigned to" select, Loan officer (with "(external)") and Processors ("You") columns, "My files" and
+  "Unassigned" built-in views, `assignee` in the URL; deactivate dialog's file section (move to someone,
+  "N files now, M after", or leave), reassign then deactivate; People Files column.
+- Tests: backend 22 API tests and a migration test (every rule allowed and refused; eligibility 422s;
+  write-through, the manual-text exception, participants via `is_participant`; text PATCH 422 / 200;
+  creator joins on create and MISMO import by role, nobody for an admin; `assignee` with status and
+  search, in a saved view and its per-viewer count; one activity per change with its summary and
+  detail; reassign moves every row, audits once, refuses an ineligible target, is tenant-scoped and
+  Admin-only; 403/200 by role; one LO under a staged concurrent PUT; backfill: active processor yes,
+  inactive / deleted / admin / no FILE_CREATED no). Frontend: Team card read-only and editable, LO slot
+  hidden, change LO, add and remove processor, a refusal; LoanEditor read-only and free-text; the list
+  query's `assignee`; columns internal / external / "You"; built-in views; the deactivate file section
+  only with files, reassign before deactivate, leave; Files column.
+- Mutations, each caught: 12 backend (the own-files scope, the role check, write-through, the
+  manual-text exception, the participants re-seed, the text guard, the MISMO creator join, the
+  unassigned filter, the per-viewer `me`, the reassign role check, the concurrency catch, the
+  backfill's active check) and 8 frontend.
+- Backend: 10093 passed; ruff, mypy strict clean. Frontend: 2627 passed (218 files); tsc, biome clean.
+
+**Part 2: survey only** (`docs/tickets/LP-MB-Admin-05-survey.md`, read from `app/api` and `app/tasks`):
+A (through `ScopedLoanFile`) 64 routes, B (`get_loan_file` / `list_loan_files` / `count_loan_files`,
+incl. the conditions router's own `ScopedLoanFileById`) 69, C (child id, token or company-wide query)
+68, D (background jobs) 16: 217, plus 6 routes this ticket adds (addendum): 223. **The ticket's "98
+uses, one fix covers them" is wrong**: 64 routes use `ScopedLoanFile` and 29 more use
+`ScopedLoanFileById`, which calls `get_loan_file` itself, so a fix only in `get_scoped_loan_file` would
+miss them (measured by an AST count, matching the survey). Riskiest group C: the inbound queue (lists
+mail on other teams' files), the 13 `/documents/{id}` routes (download by id), the 24
+`/conditions/{id}` and 15 `/condition-rounds/{id}` routes, reminders and saved-view counts. Also: the
+processor-copy job emails a file's mail to its last sender, who may have left the team. No
+enforcement code was written and `restrict_loans_to_team` was not touched.
+
+**Assumptions and deviations**
+- WHO MAY CHANGE A TEAM. The brief's rule ("`loan.team.change` OR the actor is the file's LO") would let
+  every loan officer change every file, because the matrix gives LOAN_OFFICER that key ("own files").
+  It is encoded instead as data in `core/permissions.py` (`OWN_FILES_ONLY`) with one pure function,
+  `may_change_team`: Admin anywhere, the LO on their own file. This also makes the brief's own test
+  (LO 403 on another's file) pass.
+- Eligibility compares roles (LOAN_OFFICER / PROCESSOR) in the team service: it is who may HOLD a slot,
+  not an authorization decision.
+- A loan officer creating a file becomes its LO, and their account overwrites any typed LO text.
+- `GET /users/assignable` returns roles and a file count, as asked; the count is company-wide.
+- Saved views store `assignee`; two existing saved-view tests now expect `"assignee": None` in the
+  stored filters.
+- The deactivate dialog's picker offers loan officers when the person holds the Loan officer role,
+  else processors; the server still checks every slot and its refusal is shown.
+- A concurrent second LO assignment is a 409, not silently last-write-wins.
+
+**Deferred**
+- Part 2 enforcement (gated on reviewing the survey), auto-assignment, notifications, the assistant
+  slot in the UI, a team filter in saved-view creation UI (no UI creates saved views yet).

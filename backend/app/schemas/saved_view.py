@@ -9,6 +9,7 @@ filters on is worse than no saved view.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -20,23 +21,20 @@ from app.models.saved_view import DEFAULT_SORT, SavedViewSort
 class SavedViewFilters(BaseModel):
     """What a view filters on.
 
-    Deliberately the same vocabulary the list endpoint already accepts — statuses
-    and a search string — because a filter the endpoint cannot apply is a lie.
-    New filters land here and in `list_loan_files` together, never separately.
+    Deliberately the same vocabulary the list endpoint already accepts — statuses,
+    a search string and an assignee — because a filter the endpoint cannot apply is
+    a lie. New filters land here and in `list_loan_files` together, never separately.
 
-    **Not present, and not an oversight:** an assignee filter. LP-UI-014 asks for
-    "current user" as a filter value so one shared view serves a whole team, and
-    the mockup shows "My files" and "Unassigned". Neither is expressible: a loan
-    file has no owner in the data model — no `assigned_to_user_id`, no
-    association table. `loan_officer_name` is free text for an external contact
-    and `uploaded_by_user_id` is per document. File assignment is its own
-    feature; see docs/tickets/LP-UI-015.md.
+    `assignee` (LP-MB-Admin-05, the filter LP-UI-014 could not build): "me" is
+    whoever is looking, so one shared view serves a whole team; "unassigned" is a
+    file with nobody on its team; a user id is a file that person works in any slot.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     statuses: list[LoanFileStatus] = Field(default_factory=list)
     search: str | None = Field(default=None, max_length=128)
+    assignee: Literal["me", "unassigned"] | UUID | None = None
 
     @field_validator("search")
     @classmethod

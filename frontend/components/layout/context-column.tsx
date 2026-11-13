@@ -46,7 +46,11 @@ export function ContextColumn() {
         className="hidden w-nav shrink-0 overflow-hidden border-r border-border bg-card transition-[width] duration-150 md:block"
         data-context-column
       >
-        <SavedViews activeViewId={urlState.viewId} filtered={isFiltered(urlState, search)} />
+        <SavedViews
+          activeViewId={urlState.viewId}
+          filtered={isFiltered(urlState, search)}
+          assignee={urlState.assignee ?? null}
+        />
       </div>
     );
   }

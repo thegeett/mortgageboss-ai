@@ -221,8 +221,11 @@ Optional loan attributes are **nullable** because a file can be created manually
 before its details are known and filled in later (e.g. from a MISMO import or by
 the processor): `lender_id`, `loan_program`, `loan_purpose`, and `loan_amount`
 (`Money`, `NUMERIC(14,2)`) may all be unset at creation. The originating loan
-officer is stored as free text (`loan_officer_name`, `loan_officer_email`) — the
-LO is an external party, not a system user.
+officer is stored as text (`loan_officer_name`, `loan_officer_email`). For a
+processing company the LO is an external party and the text is typed in. Since
+LP-MB-Admin-05 the LO may instead be a user on the file's team (`loan_teams`):
+then the text holds that user's name and email, written by the team service and
+not editable directly (ADR-445).
 
 ### The three-identifier design (ADR-036)
 

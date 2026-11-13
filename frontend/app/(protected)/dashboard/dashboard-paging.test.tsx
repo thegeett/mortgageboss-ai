@@ -57,6 +57,8 @@ vi.mock("@/lib/stores/auth-store", () => ({
   }),
 }));
 // The page looks a selected view's search term up from the saved views (LP-933).
+// LP-MB-Admin-05 — the "Assigned to" select lists people; no one is needed here.
+vi.mock("@/lib/api/loan-teams", () => ({ useAssignable: () => ({ data: [] }) }));
 vi.mock("@/lib/api/saved-views", () => ({
   useSavedViews: () => ({ data: [], isPending: false, isError: false }),
 }));

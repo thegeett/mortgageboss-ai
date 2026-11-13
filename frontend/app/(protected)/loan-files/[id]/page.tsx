@@ -6,6 +6,7 @@ import { MismoWarnings } from "@/components/file/overview/mismo-warnings";
 import { BorrowerCard, LoanCard, PropertyCard } from "@/components/file/overview/overview-cards";
 import { ReconciliationLedger } from "@/components/file/overview/reconciliation-ledger";
 import { StatedFinancialsSection } from "@/components/file/overview/stated-financials-section";
+import { TeamCard } from "@/components/file/overview/team-card";
 import {
   ACTIVITY_PAGE,
   useLoanFile,
@@ -64,6 +65,9 @@ export default function OverviewPage() {
           onRetry={() => void file.refetch()}
         />
       </div>
+
+      {/* Who works this file (LP-MB-Admin-05). */}
+      <TeamCard fileId={id} />
 
       {/* The data MISMO import populated (LP-55) — hidden for files without it. */}
       <StatedFinancialsSection fileId={id} />

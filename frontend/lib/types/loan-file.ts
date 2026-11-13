@@ -28,6 +28,30 @@ export interface FileAttention {
   needs_satisfied: number;
 }
 
+/** One person on a file's team (LP-MB-Admin-05). `id` is the membership, used to remove it. */
+export interface TeamMember {
+  id: string;
+  user_id: string;
+  name: string;
+  email: string;
+  team_role: "loan_officer" | "processor" | "assistant";
+  /** The loan officer's licensing; empty for a processor. */
+  nmls_id: string | null;
+  licensed_states: string[];
+}
+
+/** Who works the file: at most one loan officer who is a user, and the processors. */
+export interface FileTeam {
+  loan_officer: TeamMember | null;
+  processors: TeamMember[];
+}
+
+/** The pipeline's loan officer: the internal user's name, or the free text (`external`). */
+export interface LoanOfficerDisplay {
+  name: string;
+  external: boolean;
+}
+
 export interface LoanFileSummary {
   id: string;
   display_id: string;
@@ -43,6 +67,9 @@ export interface LoanFileSummary {
   updated_at: string;
   /** Optional: a version-skewed backend may not send it. */
   attention?: FileAttention | null;
+  /** Who works the file (LP-MB-Admin-05). Optional for a version-skewed server. */
+  team?: FileTeam | null;
+  loan_officer_display?: LoanOfficerDisplay | null;
 }
 
 export interface PaginatedLoanFiles {

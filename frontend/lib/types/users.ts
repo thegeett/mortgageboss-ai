@@ -89,6 +89,8 @@ export interface Person {
   is_active: boolean;
   last_login_at: string | null;
   created_at: string;
+  /** Live loan files this person is on the team of (LP-MB-Admin-05). */
+  file_count?: number;
 }
 
 /** `PATCH /users/{id}`: only the fields that changed. */

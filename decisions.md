@@ -17076,3 +17076,32 @@ that may hold Admin, so a copied access log must not be enough to use one. Conve
 the fragment is a separate decision and not made here.
 
 *Status.* Accepted (LP-MB-Admin-04).
+
+## ADR-445
+
+**A file's staff are `loan_teams`; its correspondents are `loan_file_participants`.**
+
+*Context.* A loan file had no owner: nothing said who works it, there was no "My files", and the loan
+officer was two free-text fields (LP-MB-Admin-05).
+
+*Decision (LP-MB-Admin-05).*
+- `loan_teams` holds the file's STAFF: at most one loan officer who is a user, and any number of
+  processors, each an active user of the file's company holding the slot's role. A participant
+  (LP-805) is different: an address that may write to the file. The two are not merged.
+- The internal loan officer is the source of truth when present and is copied into
+  `loan_officer_name` / `loan_officer_email`, so every reader of those fields keeps working; the text
+  cannot be edited while an internal loan officer is set, and clearing them blanks only text that
+  still matches that user. With no internal loan officer the text fields are the source of truth,
+  permanently: that is the processing company's broker-side LO.
+- An Admin may change any file's team; a loan officer only a file where they are the loan officer
+  (`OWN_FILES_ONLY` in `core/permissions.py`); a processor none.
+- Team membership decides who SEES a file only when the company turns `restrict_loans_to_team` on.
+  That is Part 2 of LP-MB-Admin-05 and is not built; its survey is
+  `docs/tickets/LP-MB-Admin-05-survey.md`.
+
+*Consequences.*
+- The pipeline filters by `assignee` (`me`, `unassigned`, a user id) in the list and in saved views
+  together; "My files" and "Unassigned" are built-in views.
+- A departing person's places move to another eligible person in one action, audited once.
+
+*Status.* Accepted (LP-MB-Admin-05, Part 1).

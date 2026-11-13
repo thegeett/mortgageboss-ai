@@ -22,9 +22,16 @@ import type { LoanFileStatus } from "@/lib/types/loan-file";
 import { useSearchParams } from "next/navigation";
 import { useMemo } from "react";
 
+/**
+ * Who works the file (LP-MB-Admin-05): `me`, `unassigned`, or a user's id. In the URL because it
+ * names nobody (an id, or a word), so a pasted link shows a colleague the same list.
+ */
+export type Assignee = "me" | "unassigned" | (string & {});
+
 export interface PipelineUrlState {
   statuses: LoanFileStatus[];
   viewId: string | null;
+  assignee?: Assignee | null;
 }
 
 export const EMPTY_STATE: PipelineUrlState = { statuses: [], viewId: null };
@@ -50,6 +57,8 @@ export function readPipelineUrl(params: URLSearchParams): PipelineUrlState {
     // otherwise start failing rather than quietly widening.
     statuses: params.getAll("status").filter(isKnownStatus),
     viewId: params.get("view"),
+    // Only when present, so a URL without it reads exactly as it did before (LP-MB-Admin-05).
+    ...(params.get("assignee") ? { assignee: params.get("assignee") } : {}),
   };
 }
 
@@ -86,6 +95,7 @@ export function usePipelineUrl(): PipelineUrlState {
 export function writePipelineUrl(state: PipelineUrlState): string {
   const params = new URLSearchParams();
   for (const status of state.statuses) params.append("status", status);
+  if (state.assignee) params.set("assignee", state.assignee);
   if (state.viewId) params.set("view", state.viewId);
   const query = params.toString();
   return query ? `?${query}` : "";
@@ -97,5 +107,5 @@ export function writePipelineUrl(state: PipelineUrlState): string {
  * URL; leaving it out made "All files" look current while a search was active.
  */
 export function isFiltered(state: PipelineUrlState, search = ""): boolean {
-  return state.statuses.length > 0 || search.trim() !== "";
+  return state.statuses.length > 0 || Boolean(state.assignee) || search.trim() !== "";
 }

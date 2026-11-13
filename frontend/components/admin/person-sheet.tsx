@@ -9,6 +9,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { auditTimeLabel, shortDate, signInLabel } from "@/lib/admin-time";
 import { useAuditLog } from "@/lib/api/audit-log";
+import { reassignLoans } from "@/lib/api/loan-teams";
 import { useSetActive, useSetRoles, useUpdatePerson } from "@/lib/api/users";
 import { getErrorMessage } from "@/lib/errors/api-error";
 import {
@@ -19,6 +20,7 @@ import {
   type Role,
   US_STATE_CODES,
 } from "@/lib/types/users";
+import { useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -130,6 +132,8 @@ function PersonForm({
   const [stateError, setStateError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const queryClient = useQueryClient();
   const update = useUpdatePerson(person.id);
   const setRoleSet = useSetRoles(person.id);
   const setActive = useSetActive(person.id);
@@ -185,12 +189,22 @@ function PersonForm({
     }
   }
 
-  async function changeActive(active: boolean) {
+  async function changeActive(active: boolean, moveTo: string | null = null) {
     setError(null);
     try {
+      // Hand the files over FIRST (LP-MB-Admin-05): a refused move leaves the person active, so
+      // nobody ends up deactivated with files that were meant to move.
+      if (moveTo) {
+        setMoving(true);
+        await reassignLoans(person.id, moveTo);
+        void queryClient.invalidateQueries({ queryKey: ["loan-files"] });
+        void queryClient.invalidateQueries({ queryKey: ["assignable"] });
+      }
       await setActive.mutateAsync(active);
+      setMoving(false);
       setConfirming(false);
     } catch (failure) {
+      setMoving(false);
       setConfirming(false);
       setError(getErrorMessage(failure));
     }
@@ -424,11 +438,14 @@ function PersonForm({
       </div>
 
       <DeactivateDialog
+        personId={person.id}
         name={name}
+        fileCount={person.file_count ?? 0}
+        isLoanOfficer={person.roles.includes("loan_officer")}
         open={confirming}
-        pending={setActive.isPending}
+        pending={moving || setActive.isPending}
         onOpenChange={setConfirming}
-        onConfirm={() => changeActive(false)}
+        onConfirm={(moveTo) => changeActive(false, moveTo)}
       />
     </div>
   );

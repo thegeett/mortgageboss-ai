@@ -17,7 +17,7 @@ from uuid import UUID
 import structlog
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 
-from app.api.dependencies import CurrentUser, require_permission
+from app.api.dependencies import CurrentActor, CurrentUser, require_permission
 from app.core.database import DbSession
 from app.core.permissions import Permission
 from app.mismo.import_service import MismoImportError, create_loan_file_from_mismo
@@ -34,6 +34,7 @@ from app.schemas.mismo import MismoImportResponse
 from app.schemas.stated_financials import StatedFinancialsResponse
 from app.services.attention import attention_for_files
 from app.services.loan_files import (
+    Assignee,
     FileBlockedError,
     create_loan_file_with_setup,
     get_loan_file,
@@ -41,6 +42,7 @@ from app.services.loan_files import (
     soft_delete_loan_file_with_activity,
     update_loan_file_with_activity,
 )
+from app.services.loan_teams import on_loan_file_created
 from app.services.reconciliation import ReconciliationRow, reconcile_loan_file
 from app.services.stated_financials import get_stated_financials
 from app.tasks.needs import propose_ai_needs
@@ -92,9 +94,7 @@ async def _read_capped(upload: UploadFile, *, max_bytes: int) -> bytes:
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_permission(Permission.LOAN_CREATE))],
 )
-async def create(
-    payload: LoanFileCreate, db: DbSession, current_user: CurrentUser
-) -> LoanFileDetail:
+async def create(payload: LoanFileCreate, db: DbSession, actor: CurrentActor) -> LoanFileDetail:
     """Create a loan file in the caller's company (status DRAFT).
 
     ``company_id`` is taken from the authenticated user, never the body. Creation
@@ -104,19 +104,19 @@ async def create(
     """
     loan_file = await create_loan_file_with_setup(
         db,
-        company_id=current_user.company_id,
-        actor_user_id=current_user.id,
+        company_id=actor.company_id,
+        actor_user_id=actor.user.id,
         lender_id=payload.lender_id,
         loan_program=payload.loan_program,
         loan_purpose=payload.loan_purpose,
         loan_officer_name=payload.loan_officer_name,
         loan_officer_email=payload.loan_officer_email,
     )
+    # LP-MB-Admin-05 — the creator joins the team (as loan officer or processor, by role).
+    await on_loan_file_created(db, actor, loan_file)
     await db.commit()
 
-    created = await get_loan_file(
-        db, company_id=current_user.company_id, identifier=str(loan_file.id)
-    )
+    created = await get_loan_file(db, company_id=actor.company_id, identifier=str(loan_file.id))
     if created is None:  # pragma: no cover - just created, always found
         raise _NOT_FOUND
     return LoanFileDetail.from_model(created)
@@ -130,7 +130,7 @@ async def create(
     dependencies=[Depends(require_permission(Permission.LOAN_CREATE))],
 )
 async def import_mismo(
-    current_user: CurrentUser,
+    actor: CurrentActor,
     db: DbSession,
     file: Annotated[UploadFile, File(description="A MISMO 3.4 XML (or HTML-wrapped) file")],
 ) -> MismoImportResponse:
@@ -171,11 +171,13 @@ async def import_mismo(
         loan_file = await create_loan_file_from_mismo(
             db,
             parsed=parsed,
-            company_id=current_user.company_id,
+            company_id=actor.company_id,
             raw_content=raw,
             source_format=parsed.source_format,
-            actor_user_id=current_user.id,
+            actor_user_id=actor.user.id,
         )
+        # LP-MB-Admin-05 — the creator joins the team, as on the manual path.
+        await on_loan_file_created(db, actor, loan_file)
     except MismoImportError as exc:
         raise HTTPException(
             status_code=422,  # Unprocessable Content (literal avoids a deprecation)
@@ -191,9 +193,7 @@ async def import_mismo(
 
     # Reload scoped, with relationships eager-loaded for the response (same as the
     # manual create path — MISMO and manual converge on the same response).
-    created = await get_loan_file(
-        db, company_id=current_user.company_id, identifier=str(loan_file.id)
-    )
+    created = await get_loan_file(db, company_id=actor.company_id, identifier=str(loan_file.id))
     if created is None:  # pragma: no cover - just created, always found
         raise _NOT_FOUND
 
@@ -210,6 +210,22 @@ async def import_mismo(
     )
 
 
+def _assignee(raw: str | None, me: UUID) -> Assignee | None:
+    """`me` is the caller; `unassigned` and a user id pass through; anything else is a 422."""
+    if raw is None or raw == "":
+        return None
+    if raw == "me":
+        return me
+    if raw == "unassigned":
+        return "unassigned"
+    try:
+        return UUID(raw)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422, detail="assignee must be me, unassigned or a user id"
+        ) from exc
+
+
 @router.get("", response_model=PaginatedLoanFiles)
 async def list_files(
     db: DbSession,
@@ -218,6 +234,10 @@ async def list_files(
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     status: Annotated[list[LoanFileStatus] | None, Query()] = None,
     search: Annotated[str | None, Query(max_length=128)] = None,
+    assignee: Annotated[
+        str | None,
+        Query(description="`me`, `unassigned`, or a user id: who works the file (LP-MB-Admin-05)"),
+    ] = None,
 ) -> PaginatedLoanFiles:
     """List the caller's company's loan files (newest first), paginated.
 
@@ -233,6 +253,7 @@ async def list_files(
         page_size=page_size,
         statuses=status,
         search=search,
+        assignee=_assignee(assignee, current_user.id),
     )
     # One derivation for the whole page — three aggregates, not three per row.
     # The user is what fixes the confidence cutoff each file's blocking count is

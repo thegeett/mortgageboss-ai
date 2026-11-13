@@ -87,3 +87,37 @@ describe("LoanEditor", () => {
     expect(updateMutate.mock.calls[0]?.[0]).toEqual({ refinance_type: "cash_out" });
   });
 });
+
+describe("LoanEditor — an internal loan officer (LP-MB-Admin-05)", () => {
+  const INTERNAL = {
+    ...FILE,
+    loan_officer_name: "Daniel Okafor",
+    loan_officer_email: "daniel@summit.example",
+    team: {
+      loan_officer: {
+        id: "m1",
+        user_id: "u1",
+        name: "Daniel Okafor",
+        email: "daniel@summit.example",
+        team_role: "loan_officer",
+        nmls_id: null,
+        licensed_states: [],
+      },
+      processors: [],
+    },
+  } as unknown as LoanFileDetail;
+
+  it("shows the contact read-only, filled from the account, with no inputs for it", () => {
+    render(<LoanEditor file={INTERNAL} />);
+    expect(screen.queryByLabelText("Loan officer")).toBeNull();
+    expect(screen.queryByLabelText("LO email")).toBeNull();
+    expect(screen.getByText("Daniel Okafor")).toBeTruthy();
+    expect(screen.getByText("Filled from the loan officer’s account")).toBeTruthy();
+  });
+
+  it("keeps the free-text inputs when the loan officer is external", () => {
+    render(<LoanEditor file={FILE} />);
+    expect(screen.getByLabelText("Loan officer")).toBeTruthy();
+    expect(screen.getByLabelText("LO email")).toBeTruthy();
+  });
+});

@@ -16,6 +16,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { type BorrowerPayload, type PropertyPayload, submitIntake } from "@/lib/api/intake";
 import { useLenders } from "@/lib/api/lenders";
 import { normalizeError } from "@/lib/errors/api-error";
+import { useAuthStore } from "@/lib/stores/auth-store";
 import { notifyPartial, notifySuccess } from "@/lib/toast";
 import {
   INTAKE_DEFAULTS,
@@ -139,6 +140,10 @@ export function IntakeForm() {
   const queryClient = useQueryClient();
   const { data: lenders, isPending: lendersLoading } = useLenders();
   const [formError, setFormError] = useState<string | null>(null);
+  const me = useAuthStore((state) => state.user);
+  // The creator's role decides where they join the team (the server's rule): shown, not compared
+  // for permission.
+  const creatorIsLoanOfficer = me?.roles?.includes("loan_officer") ?? false;
 
   const form = useForm<IntakeFormValues>({
     resolver: zodResolver(intakeSchema),
@@ -349,13 +354,33 @@ export function IntakeForm() {
               </FormItem>
             )}
           />
-          <TextField control={form.control} name="loan_officer_name" label="Loan officer name" />
-          <TextField
-            control={form.control}
-            name="loan_officer_email"
-            label="Loan officer email"
-            type="email"
-          />
+          {/* LP-MB-Admin-05 — a loan officer who creates a file becomes its loan officer, and the
+              contact is then filled from their account; anyone else types the (external) one. */}
+          {creatorIsLoanOfficer && me ? (
+            <div className="space-y-0.5 text-sm sm:col-span-2">
+              <p className="text-foreground">
+                {me.first_name} {me.last_name}{" "}
+                <span className="text-muted-foreground">{me.email}</span>
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Filled from the loan officer&rsquo;s account
+              </p>
+            </div>
+          ) : (
+            <>
+              <TextField
+                control={form.control}
+                name="loan_officer_name"
+                label="Loan officer name"
+              />
+              <TextField
+                control={form.control}
+                name="loan_officer_email"
+                label="Loan officer email"
+                type="email"
+              />
+            </>
+          )}
         </Section>
 
         <div className="flex items-center justify-end gap-3">

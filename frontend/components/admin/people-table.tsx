@@ -95,6 +95,7 @@ export function PeopleTable({
             <TableHead>Name</TableHead>
             <TableHead>Email</TableHead>
             <TableHead>Roles</TableHead>
+            <TableHead className="text-right">Files</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Last sign-in</TableHead>
           </TableRow>
@@ -102,7 +103,7 @@ export function PeopleTable({
         <TableBody>
           {shown.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={5} className="text-sm text-muted-foreground">
+              <TableCell colSpan={6} className="text-sm text-muted-foreground">
                 Nobody matches.
               </TableCell>
             </TableRow>
@@ -140,6 +141,13 @@ export function PeopleTable({
                       <span className="text-xs text-muted-foreground">· owner</span>
                     ) : null}
                   </div>
+                </TableCell>
+                <TableCell className="tabular text-right">
+                  {/* Files they are on the team of (LP-MB-Admin-05); "—" for someone who
+                      cannot be on a team (an Admin with neither team role). */}
+                  {person.roles.includes("processor") || person.roles.includes("loan_officer")
+                    ? (person.file_count ?? 0)
+                    : "—"}
                 </TableCell>
                 <TableCell>
                   <span className="flex items-center gap-1.5">

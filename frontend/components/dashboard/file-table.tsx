@@ -7,6 +7,7 @@ import {
 } from "@/components/dashboard/attention-cell";
 import { DeleteFileDialog } from "@/components/file/delete-file-dialog";
 import { StatusBadge } from "@/components/status-badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -25,7 +26,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatMoney } from "@/lib/format";
-import type { LoanFileSummary } from "@/lib/types/loan-file";
+import { useAuthStore } from "@/lib/stores/auth-store";
+import type { FileTeam, LoanFileSummary } from "@/lib/types/loan-file";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { FolderPlus, MoreHorizontal, SearchX, Trash2, TriangleAlert } from "lucide-react";
@@ -63,6 +65,9 @@ export const COLUMNS = [
   { label: "Attention", hideBelow: null },
   { label: "Needs", hideBelow: "lg" },
   { label: "Lender", hideBelow: "xl" },
+  // LP-MB-Admin-05: who works the file. With Lender: identifying, rarely the reason to open it here.
+  { label: "Loan officer", hideBelow: "xl" },
+  { label: "Processors", hideBelow: "xl" },
   { label: "Touched", hideBelow: "2xl" },
 ] as const;
 
@@ -317,6 +322,7 @@ export function FileTable({
   /** Absent when the user may not create files (`loan.create`): no button, and no invitation to. */
   onNewFile?: () => void;
 }) {
+  const currentUserId = useAuthStore((state) => state.user?.id);
   // The file pending deletion drives the confirmation dialog; the mutation invalidates
   // the list query on success, so the deleted row simply drops out on the next render.
   const [pendingDelete, setPendingDelete] = useState<LoanFileSummary | null>(null);
@@ -474,14 +480,29 @@ export function FileTable({
               <TableCell aria-colindex={8} className={cn("text-foreground-2", columnClassAt(8))}>
                 {file.lender_name ?? "—"}
               </TableCell>
+              <TableCell aria-colindex={9} className={cn("text-foreground-2", columnClassAt(9))}>
+                {file.loan_officer_display ? (
+                  <>
+                    {file.loan_officer_display.name}
+                    {file.loan_officer_display.external ? (
+                      <span className="text-muted-foreground"> (external)</span>
+                    ) : null}
+                  </>
+                ) : (
+                  "—"
+                )}
+              </TableCell>
+              <TableCell aria-colindex={10} className={columnClassAt(10)}>
+                <ProcessorChips team={file.team} currentUserId={currentUserId} />
+              </TableCell>
               <TableCell
-                aria-colindex={9}
-                className={cn("whitespace-nowrap text-muted-foreground", columnClassAt(9))}
+                aria-colindex={11}
+                className={cn("whitespace-nowrap text-muted-foreground", columnClassAt(11))}
               >
                 {lastActivity(file.updated_at)}
               </TableCell>
               <TableCell
-                aria-colindex={10}
+                aria-colindex={COLUMNS.length + 1}
                 onKeyDown={(event) => onCellKeyDown(event, index)}
                 className="text-right"
                 // The row navigates on click; the menu must not. Stop propagation for
@@ -529,5 +550,26 @@ export function FileTable({
         }}
       />
     </>
+  );
+}
+
+/** The file's processors as chips; the current user's reads "You" (LP-MB-Admin-05, mockup 14). */
+function ProcessorChips({
+  team,
+  currentUserId,
+}: {
+  team: FileTeam | null | undefined;
+  currentUserId: string | undefined;
+}) {
+  const processors = team?.processors ?? [];
+  if (processors.length === 0) return <span className="text-muted-foreground">—</span>;
+  return (
+    <span className="flex flex-wrap gap-1">
+      {processors.map((member) => (
+        <Badge key={member.id} variant="outline">
+          {member.user_id === currentUserId ? "You" : member.name}
+        </Badge>
+      ))}
+    </span>
   );
 }

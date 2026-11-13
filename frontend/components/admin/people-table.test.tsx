@@ -51,3 +51,22 @@ describe("PeopleTable", () => {
     expect(onOpen).toHaveBeenCalledWith(ELENA);
   });
 });
+
+describe("PeopleTable — the Files column (LP-MB-Admin-05)", () => {
+  it("shows how many files each person works, and a dash for someone who cannot be on a team", () => {
+    render(
+      <PeopleTable
+        people={[
+          { ...ELENA, file_count: 6 },
+          { ...ME, file_count: 0 },
+        ]}
+        currentUserId={ME.id}
+        onOpen={vi.fn()}
+      />,
+    );
+    const elena = screen.getByText("Elena Ruiz").closest("tr") as HTMLElement;
+    const me = screen.getByText("Marcus Hill").closest("tr") as HTMLElement;
+    expect(within(elena).getByText("6")).toBeTruthy();
+    expect(within(me).getByText("—")).toBeTruthy(); // an Admin with neither team role
+  });
+});

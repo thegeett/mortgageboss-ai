@@ -44,6 +44,8 @@ vi.mock("@/lib/api/loan-files", () => ({
 }));
 
 const views = vi.hoisted(() => ({ data: [] as unknown[] }));
+// LP-MB-Admin-05 — the "Assigned to" select lists people; no one is needed here.
+vi.mock("@/lib/api/loan-teams", () => ({ useAssignable: () => ({ data: [] }) }));
 vi.mock("@/lib/api/saved-views", () => ({
   useSavedViews: () => ({ data: views.data, isPending: false, isError: false }),
 }));

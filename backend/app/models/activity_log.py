@@ -123,6 +123,7 @@ class ActivityType(StrEnum):
     CONDITION_IMPORTED = "condition_imported"
     CONDITION_PLAN_READY = "condition_plan_ready"
     CONDITION_PLAN_CONFIRMED = "condition_plan_confirmed"
+    LOAN_TEAM_CHANGED = "loan_team_changed"  # who works the file changed (LP-MB-Admin-05)
 
 
 class ActivityLog(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):

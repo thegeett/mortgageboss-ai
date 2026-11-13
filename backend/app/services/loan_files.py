@@ -15,18 +15,21 @@ wrappers that record the audit trail (the first adoption of ``log_activity``,
 ADR-073) while the pure mutators stay logging-free for internal/test callers.
 """
 
+from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.errors import LoanOfficerIsInternal
 from app.models.activity_log import ActivityType
 from app.models.base import utcnow
 from app.models.borrower import Borrower
 from app.models.helpers import only_active, scope_to_company
 from app.models.lender import LoanProgram
 from app.models.loan_file import LoanFile, LoanFileStatus, LoanPurpose
+from app.models.loan_team import LoanTeamMember
 from app.models.needs_item import NeedsItem, NeedsItemOrigin
 from app.models.user import User
 from app.schemas.loan_file import LoanFileUpdate
@@ -123,11 +126,17 @@ def _scoped(company_id: UUID) -> Select[tuple[LoanFile]]:
     return stmt
 
 
+#: Who works a file, as a filter (LP-MB-Admin-05): a user's id (on the team in any slot), or
+#: "unassigned" (no live team row). "me" is resolved to the caller's id by the API before it gets here.
+Assignee = UUID | Literal["unassigned"]
+
+
 def _apply_filters(
     base: Select[tuple[LoanFile]],
     *,
     statuses: list[LoanFileStatus] | None,
     search: str | None,
+    assignee: Assignee | None = None,
 ) -> Select[tuple[LoanFile]]:
     """The pipeline's filter vocabulary, in one place.
 
@@ -148,6 +157,12 @@ def _apply_filters(
             .where((Borrower.first_name + " " + Borrower.last_name).ilike(pattern))
         )
         base = base.where(or_(LoanFile.display_id.ilike(pattern), LoanFile.id.in_(borrower_match)))
+    if assignee is not None:
+        on_team = select(LoanTeamMember.loan_file_id).where(LoanTeamMember.deleted_at.is_(None))
+        if assignee == "unassigned":
+            base = base.where(LoanFile.id.not_in(on_team))
+        else:
+            base = base.where(LoanFile.id.in_(on_team.where(LoanTeamMember.user_id == assignee)))
     return base
 
 
@@ -157,6 +172,7 @@ async def count_loan_files(
     company_id: UUID,
     statuses: list[LoanFileStatus] | None = None,
     search: str | None = None,
+    assignee: Assignee | None = None,
 ) -> int:
     """How many files match these filters — the same predicate `list_loan_files` uses.
 
@@ -164,7 +180,7 @@ async def count_loan_files(
     mean one `pageSize: 1` request per view, which is exactly the StatsCards
     pattern LP-UI-013 deleted.
     """
-    base = _apply_filters(_scoped(company_id), statuses=statuses, search=search)
+    base = _apply_filters(_scoped(company_id), statuses=statuses, search=search, assignee=assignee)
     return (await db.scalar(select(func.count()).select_from(base.subquery()))) or 0
 
 
@@ -176,6 +192,7 @@ async def list_loan_files(
     page_size: int = 20,
     statuses: list[LoanFileStatus] | None = None,
     search: str | None = None,
+    assignee: Assignee | None = None,
 ) -> tuple[list[LoanFile], int]:
     """List a company's loan files, newest first, paginated.
 
@@ -188,7 +205,7 @@ async def list_loan_files(
     another company's files. Borrowers, lender, and property are eager-loaded so
     the summary fields are built without a lazy load.
     """
-    base = _apply_filters(_scoped(company_id), statuses=statuses, search=search)
+    base = _apply_filters(_scoped(company_id), statuses=statuses, search=search, assignee=assignee)
 
     count_stmt = select(func.count()).select_from(base.subquery())
     total = (await db.scalar(count_stmt)) or 0
@@ -198,6 +215,7 @@ async def list_loan_files(
             selectinload(LoanFile.borrowers),
             selectinload(LoanFile.lender),
             selectinload(LoanFile.property),
+            selectinload(LoanFile.team),
         )
         .order_by(LoanFile.created_at.desc())
         .offset((page - 1) * page_size)
@@ -224,6 +242,7 @@ async def get_loan_file(
         selectinload(LoanFile.borrowers),
         selectinload(LoanFile.lender),
         selectinload(LoanFile.property),
+        selectinload(LoanFile.team),
     )
     try:
         stmt = stmt.where(LoanFile.id == UUID(identifier))
@@ -256,7 +275,19 @@ async def update_loan_file(
     here rather than in the endpoint because every caller of this function has the same problem.
     """
     previous_lender_id = loan_file.lender_id
-    for field, value in data.model_dump(exclude_unset=True).items():
+    provided = data.model_dump(exclude_unset=True)
+    # LP-MB-Admin-05 — WHILE THE LOAN OFFICER IS A USER, THE TEXT FOLLOWS THEIR ACCOUNT. A changed
+    # value is refused (an unchanged one re-sent with the rest of a form is not a change).
+    text_changed = any(
+        field in provided and provided[field] != getattr(loan_file, field)
+        for field in ("loan_officer_name", "loan_officer_email")
+    )
+    if text_changed:
+        from app.services.loan_teams import has_internal_loan_officer
+
+        if await has_internal_loan_officer(db, loan_file.id):
+            raise LoanOfficerIsInternal()
+    for field, value in provided.items():
         setattr(loan_file, field, value)
     from app.services.lender_contacts import clear_underwriter_if_lender_changed
 

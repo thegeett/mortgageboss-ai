@@ -151,7 +151,10 @@ class UserRuleError(Exception):
     status_code: int = status.HTTP_409_CONFLICT
     message: str = "That change is not allowed."
 
-    def __init__(self) -> None:
+    def __init__(self, message: str | None = None) -> None:
+        # A subclass may need a sentence about this case (which role is missing); most use theirs.
+        if message is not None:
+            self.message = message
         super().__init__(self.message)
 
 
@@ -210,6 +213,21 @@ class InviteThrottled(UserRuleError):
 
     status_code = status.HTTP_429_TOO_MANY_REQUESTS
     message = "Try again in a minute"
+
+
+class NotEligible(UserRuleError):
+    """A person cannot take this team slot (LP-MB-Admin-05): not active, not in the file's company,
+    or missing the slot's role. The sentence says which."""
+
+    status_code = 422
+    message = "This person can't be added to the team"
+
+
+class LoanOfficerIsInternal(UserRuleError):
+    """The file's loan officer is a user, so the text fields follow their account (LP-MB-Admin-05)."""
+
+    status_code = 422
+    message = "Change the loan officer on the Team card"
 
 
 async def user_rule_handler(request: Request, exc: UserRuleError) -> JSONResponse:

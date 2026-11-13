@@ -76,3 +76,26 @@ def resolve_permissions(
             if getattr(settings, setting):
                 granted.add(permission)
     return frozenset(granted)
+
+
+#: Grants a role holds only on files where its holder is the loan officer: the matrix's "own files"
+#: cell (LP-MB-Admin-05). The same key held through another role is not limited.
+OWN_FILES_ONLY: dict[UserRole, frozenset[Permission]] = {
+    UserRole.LOAN_OFFICER: frozenset({Permission.LOAN_TEAM_CHANGE}),
+}
+
+
+def may_change_team(roles: frozenset[UserRole], *, is_files_loan_officer: bool) -> bool:
+    """Whether someone holding ``roles`` may change this file's team.
+
+    Admin: any file. A loan officer: only a file where they are the loan officer. Holding
+    `loan.team.change` alone is not enough, because the loan officer's grant is scoped to their files.
+    """
+    for role in roles:
+        if Permission.LOAN_TEAM_CHANGE not in ROLE_PERMISSIONS[role]:
+            continue
+        if Permission.LOAN_TEAM_CHANGE not in OWN_FILES_ONLY.get(role, frozenset()):
+            return True
+        if is_files_loan_officer:
+            return True
+    return False

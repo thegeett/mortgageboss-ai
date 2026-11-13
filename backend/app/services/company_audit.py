@@ -49,6 +49,8 @@ class AuditAction(StrEnum):
     INVITE_ACCEPTED = "invite_accepted"
     #: An admin tried to invite an address that is a user of another company (ADR-444).
     INVITE_REFUSED_FOREIGN_EMAIL = "invite_refused_foreign_email"
+    #: A departing person's file places moved to someone else (LP-MB-Admin-05).
+    LOANS_REASSIGNED = "loans_reassigned"
 
 
 async def log_company_action(
