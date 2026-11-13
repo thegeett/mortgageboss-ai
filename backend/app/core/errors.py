@@ -141,6 +141,51 @@ async def validation_exception_handler(
     )
 
 
+class UserRuleError(Exception):
+    """A people-management rule refused the change (LP-MB-Admin-03).
+
+    Each subclass carries its status and the sentence the admin reads; the handler below sends both
+    in the standard envelope, so the People sheet shows the server's own words inline.
+    """
+
+    status_code: int = status.HTTP_409_CONFLICT
+    message: str = "That change is not allowed."
+
+    def __init__(self) -> None:
+        super().__init__(self.message)
+
+
+class SelfRoleChange(UserRuleError):
+    """Nobody changes their own roles."""
+
+    message = "You can't change your own roles"
+
+
+class SelfDeactivation(UserRuleError):
+    """Nobody deactivates themselves."""
+
+    message = "You can't deactivate yourself"
+
+
+class OwnerProtected(UserRuleError):
+    """The owner cannot be deactivated or lose ADMIN from inside the app (ADR-440)."""
+
+    message = "This is the account owner. Contact MortgageBoss to change their access."
+
+
+class NoRoles(UserRuleError):
+    """A person holds at least one role."""
+
+    status_code = 422
+    message = "A person needs at least one role"
+
+
+async def user_rule_handler(request: Request, exc: UserRuleError) -> JSONResponse:
+    """A refused people-management change → its status and its own message."""
+    error_type = _STATUS_TO_TYPE.get(exc.status_code, "http_error")
+    return JSONResponse(status_code=exc.status_code, content=error_body(error_type, exc.message))
+
+
 async def permission_denied_handler(request: Request, exc: PermissionDeniedError) -> JSONResponse:
     """A service's ``ensure`` refusal → the same 403 ``require_permission`` gives (ADR-442).
 
@@ -161,4 +206,5 @@ def register_exception_handlers(app: Any) -> None:
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(PermissionDeniedError, permission_denied_handler)
+    app.add_exception_handler(UserRuleError, user_rule_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.activity import router as activity_router
+from app.api.audit_log import router as audit_log_router
 from app.api.auth import router as auth_router
 from app.api.borrowers import router as borrowers_router
 from app.api.calculators import router as calculators_router
@@ -44,6 +45,7 @@ from app.api.stated_financials import router as stated_financials_router
 from app.api.timeline import router as timeline_router
 from app.api.upload_links import public_router as upload_public_router
 from app.api.upload_links import router as upload_links_router
+from app.api.users import router as users_router
 from app.api.validation_aid import router as validation_aid_router
 from app.api.verification import router as verification_router
 from app.core.config import settings
@@ -187,6 +189,8 @@ app.include_router(reminders_router, prefix=API_V1_PREFIX)
 app.include_router(reminders_file_router, prefix=API_V1_PREFIX)
 app.include_router(mailbox_connections_router, prefix=API_V1_PREFIX)
 app.include_router(company_router, prefix=API_V1_PREFIX)
+app.include_router(users_router, prefix=API_V1_PREFIX)
+app.include_router(audit_log_router, prefix=API_V1_PREFIX)
 app.include_router(upload_links_router, prefix=API_V1_PREFIX)
 # LP-815 — THE ONE UNAUTHENTICATED SURFACE. The token in the path is the credential; see
 # `api/upload_links.py` for why every failure on it is one answer.

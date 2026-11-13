@@ -28,6 +28,7 @@ from app.core.jwt import (
     create_refresh_token,
     verify_token,
 )
+from app.models.base import utcnow
 from app.schemas.auth import LoginRequest, TokenResponse, UserPublic
 from app.services.auth import (
     AuthenticationError,
@@ -102,6 +103,11 @@ async def login(payload: LoginRequest, db: DbSession, response: Response) -> Tok
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="User account is inactive"
         ) from exc
+
+    # A sign-in, so here and not in `refresh` (LP-MB-Admin-03): People's "last sign-in" means the
+    # person typed their password, not that a tab kept its session alive.
+    user.last_login_at = utcnow()
+    await db.commit()
 
     _set_refresh_cookie(response, create_refresh_token(user.id))
     return TokenResponse(

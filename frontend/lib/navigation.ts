@@ -23,6 +23,7 @@ import {
   ScrollText,
   ShieldCheck,
   SlidersHorizontal,
+  Users,
 } from "lucide-react";
 
 export interface NavItem {
@@ -123,10 +124,12 @@ const ADMIN_SECTION: ContextSection = {
   title: "Administration",
   items: [
     { label: "Overview", href: "/admin", icon: ShieldCheck },
+    { label: "People", href: "/admin/people", icon: Users },
     { label: "Lenders", href: "/admin/lenders", icon: Building2 },
     { label: "Validation", href: "/admin/validation", icon: SlidersHorizontal },
     // LP-1011 — "Email" (/admin/email, LP-808's Route B mailbox connections) is hidden: Route B is
     // superseded by docs/email-communication/loan-email.md. The page and its code stay.
+    { label: "Audit log", href: "/admin/audit", icon: ScrollText },
   ],
 };
 

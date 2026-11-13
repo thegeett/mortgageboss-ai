@@ -35,6 +35,10 @@ def audit_value(value: Any) -> Any:
         return value.value
     if isinstance(value, date | datetime):
         return value.isoformat()
+    # A list stays a list (LP-MB-Admin-03: a user's roles and licensed states), each item encoded.
+    # It used to fall through to `str()`, which stored Python's repr ("['NJ']") rather than JSON.
+    if isinstance(value, list | tuple):
+        return [audit_value(item) for item in value]
     return str(value)
 
 

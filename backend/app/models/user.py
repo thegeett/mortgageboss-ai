@@ -15,7 +15,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import JSON, DateTime, ForeignKey, String, UniqueConstraint, false, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin, utcnow
@@ -142,6 +142,22 @@ class User(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     mail_client: Mapped[MailClient | None] = mapped_column(
         str_enum(MailClient), nullable=True, default=None
     )
+
+    # The profile an admin edits on People (LP-MB-Admin-03).
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    #: A loan officer's licensing. Accepted for anyone; the UI shows it for loan officers.
+    nmls_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    #: Two-letter US state codes, validated in the request schema.
+    licensed_states: Mapped[list[str]] = mapped_column(
+        JSON, default=list, server_default=text("'[]'"), nullable=False
+    )
+    #: Sees every company file when files are restricted to their team (read by LP-MB-Admin-05).
+    sees_all_loans: Mapped[bool] = mapped_column(
+        default=False, server_default=false(), nullable=False
+    )
+    #: Set on a successful login, not on refresh. NULL: never signed in.
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     # `foreign_keys` because `companies.owner_user_id` points back here, so the two tables are joined

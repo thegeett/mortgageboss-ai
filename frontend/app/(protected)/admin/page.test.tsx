@@ -10,6 +10,12 @@ vi.mock("@/lib/stores/auth-store", () => ({
 vi.mock("@/lib/api/overlay-admin", () => ({
   useOverlayLenders: () => ({ data: [], isPending: false, isError: false }),
 }));
+vi.mock("@/lib/api/users", () => ({
+  usePeople: () => ({ data: [{ is_active: true }, { is_active: false }], isError: false }),
+}));
+vi.mock("@/lib/api/audit-log", () => ({
+  useAuditLog: () => ({ data: { pages: [{ items: [] }] }, isError: false }),
+}));
 vi.mock("./company-settings-card", () => ({
   CompanySettingsCard: () => <p>settings card</p>,
 }));
@@ -23,10 +29,12 @@ afterEach(() => {
 
 describe("AdminPage", () => {
   it("shows an admin every section", () => {
-    held.permissions = ["users.manage", "overlays.manage", "company.settings.manage"];
+    held.permissions = ["users.manage", "audit.view", "overlays.manage", "company.settings.manage"];
     render(<AdminPage />);
     expect(screen.getByText("Lender overlays")).toBeTruthy();
     expect(screen.getByText("settings card")).toBeTruthy();
+    expect(screen.getByText("1 active, 1 inactive")).toBeTruthy();
+    expect(screen.getByText("No changes recorded yet")).toBeTruthy();
   });
 
   it("shows only the sections whose key the user holds", () => {
@@ -34,5 +42,7 @@ describe("AdminPage", () => {
     render(<AdminPage />);
     expect(screen.getByText("Lender overlays")).toBeTruthy();
     expect(screen.queryByText("settings card")).toBeNull();
+    expect(screen.getByText("People")).toBeTruthy();
+    expect(screen.queryByText("Audit log")).toBeNull();
   });
 });

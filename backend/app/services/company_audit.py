@@ -6,13 +6,22 @@ counterpart of :func:`app.services.activity_log.log_activity`. ``detail`` carrie
 the same :func:`~app.services.activity_log.field_changes` the activity log uses.
 """
 
+from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from sqlalchemy import DateTime, Select, Uuid, func, literal, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.permissions import Permission
 from app.models.company_audit_log import CompanyAuditLog
+from app.schemas.audit import AuditActor, AuditEntry, AuditPage
+from app.services.authorization import ensure
+from app.services.override_attribution import resolve_user_names
+
+if TYPE_CHECKING:
+    from app.api.dependencies import Actor
 
 
 class AuditAction(StrEnum):
@@ -27,6 +36,11 @@ class AuditAction(StrEnum):
     ROLE_BACKFILLED = "role_backfilled"
     #: An admin changed `companies.settings` (`PATCH /company/settings`, LP-MB-Admin-02).
     COMPANY_SETTINGS_CHANGED = "company_settings_changed"
+    #: People (LP-MB-Admin-03): an admin changed a person's details, roles or access.
+    USER_DETAILS_CHANGED = "user_details_changed"
+    USER_ROLES_CHANGED = "user_roles_changed"
+    USER_DEACTIVATED = "user_deactivated"
+    USER_REACTIVATED = "user_reactivated"
 
 
 async def log_company_action(
@@ -57,3 +71,95 @@ async def log_company_action(
     db.add(entry)
     await db.flush()
     return entry
+
+
+def encode_cursor(created_at: datetime, entry_id: UUID) -> str:
+    """The position after a row, as an opaque string: ``<iso time>_<id>``."""
+    return f"{created_at.isoformat()}_{entry_id}"
+
+
+def decode_cursor(cursor: str) -> tuple[datetime, UUID]:
+    """Inverse of :func:`encode_cursor`. Raises ``ValueError`` on anything else."""
+    at, _, entry_id = cursor.rpartition("_")
+    return datetime.fromisoformat(at), UUID(entry_id)
+
+
+async def list_audit_log(
+    db: AsyncSession,
+    actor: "Actor",
+    *,
+    target_type: str | None = None,
+    target_id: UUID | None = None,
+    actor_user_id: UUID | None = None,
+    since: datetime | None = None,
+    before: tuple[datetime, UUID] | None = None,
+    limit: int = 50,
+) -> AuditPage:
+    """The actor's company's audit rows, newest first (``audit.view``).
+
+    Paged by cursor, ``(created_at, id)`` of the last row returned, so a row written while someone
+    is paging neither repeats nor skips. Actor and target names are resolved here, in one query.
+    """
+    ensure(actor, Permission.AUDIT_VIEW)
+    filtered: Select[Any] = select(CompanyAuditLog).where(
+        CompanyAuditLog.company_id == actor.company_id
+    )
+    if target_type is not None:
+        filtered = filtered.where(CompanyAuditLog.target_type == target_type)
+    if target_id is not None:
+        filtered = filtered.where(CompanyAuditLog.target_id == target_id)
+    if actor_user_id is not None:
+        filtered = filtered.where(CompanyAuditLog.actor_user_id == actor_user_id)
+    if since is not None:
+        filtered = filtered.where(CompanyAuditLog.created_at >= since)
+    total = await db.scalar(select(func.count()).select_from(filtered.subquery())) or 0
+
+    page = filtered
+    if before is not None:
+        at, entry_id = before
+        page = page.where(
+            tuple_(CompanyAuditLog.created_at, CompanyAuditLog.id)
+            < tuple_(literal(at, DateTime(timezone=True)), literal(entry_id, Uuid()))
+        )
+    page = page.order_by(CompanyAuditLog.created_at.desc(), CompanyAuditLog.id.desc())
+    # One extra row says whether another page exists without a second count.
+    rows = list(await db.scalars(page.limit(limit + 1)))
+    more = len(rows) > limit
+    rows = rows[:limit]
+
+    people = {row.actor_user_id for row in rows if row.actor_user_id is not None}
+    people |= {row.target_id for row in rows if row.target_type == "user" and row.target_id}
+    names = await resolve_user_names(db, people)
+    company_name = actor.user.company.name
+
+    def target_name(row: CompanyAuditLog) -> str | None:
+        if row.target_type == "company":
+            return company_name
+        if row.target_type == "user" and row.target_id is not None:
+            return names.get(row.target_id)
+        return None
+
+    items = [
+        AuditEntry(
+            id=row.id,
+            created_at=row.created_at,
+            actor=(
+                AuditActor(id=row.actor_user_id, name=names.get(row.actor_user_id, "A former user"))
+                if row.actor_user_id is not None
+                else None
+            ),
+            action=row.action,
+            target_type=row.target_type,
+            target_id=row.target_id,
+            target_name=target_name(row),
+            summary=row.summary,
+            detail=row.detail,
+        )
+        for row in rows
+    ]
+    last = rows[-1] if rows and more else None
+    return AuditPage(
+        items=items,
+        next_cursor=encode_cursor(last.created_at, last.id) if last is not None else None,
+        total=total,
+    )

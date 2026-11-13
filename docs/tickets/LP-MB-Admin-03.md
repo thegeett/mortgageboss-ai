@@ -1,6 +1,6 @@
 # LP-MB-Admin-03 — User management API and `/admin/people`
 
-Admin and roles, ticket 3 of 5. **Status: planned, not built.** Needs LP-MB-Admin-01, LP-MB-Admin-02. Next: LP-MB-Admin-04.
+Admin and roles, ticket 3 of 5. **Status: built, not committed (see Result).** Needs LP-MB-Admin-01, LP-MB-Admin-02. Next: LP-MB-Admin-04.
 
 ## What and why
 
@@ -88,3 +88,76 @@ radii follow the palette and radius conventions in `CLAUDE.md`.
 ## ADR note
 
 None new. Applies ADR-440 to ADR-442.
+
+## Result
+
+**Built**
+- Migration `c5874fbee899` on `0a7332974687`: `users.phone` VARCHAR(32), `title` VARCHAR(100),
+  `nmls_id` VARCHAR(16), `licensed_states` JSON default `[]`, `sees_all_loans` default false,
+  `last_login_at`. `readonly.users` gains `title`, `licensed_states`, `sees_all_loans`,
+  `last_login_at`; `phone` and `nmls_id` are excluded (each identifies one person) and listed in
+  `tests/test_readonly_query.py`. `docs/querying-staging.md` updated.
+- `last_login_at` is set in the login endpoint on success (a commit there now), not on refresh.
+- `app/services/users.py`: `list_users`, `get_user`, `update_user_details`, `set_user_roles`,
+  `deactivate_user`, `reactivate_user`, each `ensure(actor, users.manage)` and scoped to
+  `actor.company_id`. The rules as the table, no "last admin" rule. `set_user_roles` deletes removed
+  rows and inserts added ones with `granted_by_user_id`. One audit row per change
+  (`user_details_changed`, `user_roles_changed`, `user_deactivated`, `user_reactivated`), nothing for a
+  no-op (a PATCH that changes nothing, the same role set, deactivating someone already inactive).
+- Refusals: `SelfRoleChange`, `SelfDeactivation`, `OwnerProtected` (409) and `NoRoles` (422) in
+  `app/core/errors.py`, under one `UserRuleError` base with one handler that sends each class's status
+  and sentence in the standard envelope.
+- `company_audit.list_audit_log`: `audit.view`, newest first, cursor `(created_at, id)`, filters
+  `target_type`, `target_id`, `actor_user_id`, plus `since` (for the page's "Last 30 days"), and a
+  `total`. Actor and target names resolved in one query with `resolve_user_names`; a company target
+  takes the company's name.
+- API: `app/api/users.py` (`/users`, `users.manage` on the router) and `app/api/audit_log.py`
+  (`/audit-log`, `audit.view`); schemas in `app/schemas/users.py` (with the state-code check) and
+  `app/schemas/audit.py`.
+- Frontend: `lib/types/users.ts`, `lib/api/users.ts`, `lib/api/audit-log.ts` (infinite query on the
+  cursor), `lib/admin-time.ts`; `/admin/people` and `/admin/audit`; People and Audit log in the admin
+  column; "What you can manage" rows for both on the overview. `components/admin/people-table.tsx`,
+  `person-sheet.tsx`, `deactivate-dialog.tsx`, `audit-table.tsx`, built to the mockups' copy.
+- Tests, backend (36 in `tests/api/test_users_lp_mb_admin_03.py`, one migration test): 403 for
+  PROCESSOR and LO on every endpoint; another company's user 404 everywhere with nothing changed; list
+  and its filters; details PATCH (only what is sent, audited, no-op writes nothing, bad input 422,
+  clearing an optional field); self, owner, at-least-one-role, admins make and unmake admins; role
+  audit with both sorted lists; deactivation ends access on the next request and on refresh;
+  reactivation keeps roles; no audit row holds a password or any user's hash; log order, names,
+  cursor, filters, bad cursor; `last_login_at` on login and not on refresh; migration defaults on an
+  existing row and the view's columns. Frontend: table rows, inactive toggle, search and role filter;
+  Licensing only with Loan officer ticked; the three disabled states with their reasons; only changed
+  fields PATCHed; roles PUT with the full set; the 409 inline; deactivate dialog through to an inactive
+  row; audit from → to, system rows, Load more, a filter refetch; overview rows by key.
+- Mutations, each caught: removing the self check, the owner deactivate check, the owner ADMIN check,
+  the tenant scope, the at-least-one-role check; not setting `last_login_at`; dropping the cursor
+  (backend). Removing the own-row and owner disables, sending every field, always showing Licensing,
+  not writing a change into the list, and ignoring the cursor (frontend).
+- Backend: 10019 passed, 12 skipped; ruff, mypy strict clean. Frontend: 2587 passed (212 files);
+  `tsc --noEmit` and `biome check` clean.
+
+**Assumptions and deviations**
+- `audit_value` now keeps a list as a JSON list (each item encoded) instead of `str(list)`, so a role
+  change holds two sorted lists. The full suite showed no caller relied on the old repr.
+- "At least one role" is enforced for every user, not only active ones: reactivation keeps the roles a
+  person had, so an inactive person with none could not be brought back usefully.
+- Deactivation is audited as `status: active → inactive`, matching the mockup's Change column.
+- `licensed_states` accepts the 50 states, DC, PR, GU and VI, stored sorted.
+- `phone`, `title` and `nmls_id` may be cleared by sending `null`; the names, the states list and
+  `sees_all_loans` may not.
+- The People page filters (search, role, show inactive) work on the one list the server returns; the
+  API's `status` and `role` filters exist and are tested but the page does not need them.
+- The mockup's deactivate copy says "he"; the dialog says "they".
+- A disabled control's reason is a tooltip on hover and an `sr-only` sentence beside the control. It
+  is not reachable by keyboard focus (Biome refuses a `tabIndex` on the wrapper); the server's message
+  still appears inline if a refused change is attempted another way.
+- The existing LP-MB-Admin-01 migration test queried `information_schema` without a schema and passed
+  or failed depending on order once `readonly.users` had a `role` column again after a downgrade; it now
+  names `public`.
+- During the first mutation run, one run with the self check removed hung in a later test rather than
+  failing; with `-x` it fails at `test_self` as expected. Not investigated further.
+
+**Deferred**
+- Invitations (LP-MB-Admin-04; the tab is a disabled stub), the Files column and the deactivate
+  dialog's file section (LP-MB-Admin-05), email change, password reset, export, folding the lender,
+  overlay and email audits into this log.

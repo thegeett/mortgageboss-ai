@@ -142,16 +142,18 @@ async def test_backfill_owner_and_downgrade(migrated_db: MigratedDb) -> None:
             }
             nullable = await conn.scalar(
                 text(
+                    # `public` named: `readonly.users` has a `role` column too once downgraded, and
+                    # a view's columns read as nullable, so an unqualified query was a coin toss.
                     "SELECT is_nullable FROM information_schema.columns "
-                    "WHERE table_name = 'users' AND column_name = 'role'"
+                    "WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role'"
                 )
             )
             assert nullable == "NO"
             left = await conn.scalar(
                 text(
-                    "SELECT count(*) FROM information_schema.columns WHERE "
-                    "(table_name = 'companies' AND column_name = 'owner_user_id') "
-                    "OR table_name IN ('user_roles', 'company_audit_log')"
+                    "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' "
+                    "AND ((table_name = 'companies' AND column_name = 'owner_user_id') "
+                    "OR table_name IN ('user_roles', 'company_audit_log'))"
                 )
             )
             assert left == 0

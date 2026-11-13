@@ -77,7 +77,7 @@ Dropped entirely, because there is no useful redaction of them:
 | `borrowers` name / DOB / email / phone / declarations | Direct identifiers. |
 | `properties.address_line`, `address_line_2`, `postal_code` | The subject property street address. |
 | `findings.source_snippet` | A literal quote lifted from the document — where a name or address appears verbatim. |
-| `users.hashed_password`, `email`, names | A credential, and staff identifiers. |
+| `users.hashed_password`, `email`, names, `phone`, `nmls_id` | A credential, and staff identifiers (an NMLS ID is public but names one person). |
 | `loan_files.inbox_token` | A capability: whoever holds it can post documents to the file. |
 | `loan_files.loan_officer_name` / `_email` | A named individual. |
 | `communications.body` / `subject` / `sender` / `recipient` | Outbound email to borrowers. |
@@ -88,6 +88,9 @@ Dropped entirely, because there is no useful redaction of them:
 `users.role` is also gone from `readonly.users`, for a different reason: since LP-MB-Admin-01 a
 user holds a set of roles and the app no longer writes that column. Read roles from
 `readonly.user_roles` (one row per role a user holds).
+
+Since LP-MB-Admin-03 `readonly.users` also carries `title`, `licensed_states`, `sees_all_loans` and
+`last_login_at` (set on a successful login, not on refresh; NULL means never signed in).
 
 The full list, with the reasoning for each, is in `docs/tickets/C7-query-stage-result.md`
 and in comments beside each view in the migration.

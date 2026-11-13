@@ -404,6 +404,10 @@ EXCLUDED: dict[str, frozenset[str]] = {
             "last_name",
             "reviewer_pane_split",
             "mail_client",
+            # LP-MB-Admin-03: each identifies one person, like `email` and the names. An NMLS ID is
+            # public, but public is not anonymous: it names exactly one individual.
+            "phone",
+            "nmls_id",
         }
     ),
     # LP-904 adds `condition_handling_notes`: free-form prose an admin typed about how a lender

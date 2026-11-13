@@ -1,6 +1,9 @@
 "use client";
 
+import { auditTimeLabel } from "@/lib/admin-time";
+import { useAuditLog } from "@/lib/api/audit-log";
 import { useOverlayLenders } from "@/lib/api/overlay-admin";
+import { usePeople } from "@/lib/api/users";
 import { useCan } from "@/lib/auth/permissions";
 import { formatDistanceToNow } from "date-fns";
 import Link from "next/link";
@@ -23,22 +26,70 @@ import { CompanySettingsCard } from "./company-settings-card";
  * UX only; each API route checks the same key.
  */
 export default function AdminPage() {
+  const canPeople = useCan("users.manage");
+  const canAudit = useCan("audit.view");
   const canOverlays = useCan("overlays.manage");
   const canSettings = useCan("company.settings.manage");
 
   return (
     <div className="space-y-6">
+      {canPeople || canAudit ? (
+        <section aria-labelledby="admin-manage-heading" className="space-y-2">
+          <h2 id="admin-manage-heading" className="text-label uppercase text-muted-foreground">
+            What you can manage
+          </h2>
+          <ul className="divide-y divide-border border-y border-border">
+            {canPeople ? <PeopleRow /> : null}
+            {canAudit ? <AuditRow /> : null}
+          </ul>
+        </section>
+      ) : null}
       {canOverlays ? <OverlaySummary /> : null}
       {canSettings ? <CompanySettingsCard /> : null}
 
-      {/* Kept, and kept small. It is still true, and dropping it would leave an
-          admin wondering where user management is. */}
+      {/* Inviting is the next release (LP-MB-Admin-04); until then MortgageBoss adds people. */}
       <p className="max-w-prose border-t border-border pt-4 text-xs text-muted-foreground">
-        Inviting and managing processors arrives in a later phase — accounts are seed or admin
-        provisioned for now.
+        Inviting new people arrives in the next release. Until then, ask MortgageBoss to add an
+        account.
       </p>
     </div>
   );
+}
+
+function ManageRow({ label, href, summary }: { label: string; href: string; summary: string }) {
+  return (
+    <li className="flex items-baseline gap-6 py-2 text-sm">
+      <span className="w-28 shrink-0 font-medium text-foreground">{label}</span>
+      <span className="flex-1 text-muted-foreground">{summary}</span>
+      <Link href={href} className="text-primary hover:underline">
+        Open
+      </Link>
+    </li>
+  );
+}
+
+function PeopleRow() {
+  const { data, isError } = usePeople();
+  const active = data?.filter((person) => person.is_active).length ?? 0;
+  const summary = isError
+    ? "Unavailable"
+    : data === undefined
+      ? "Loading…"
+      : `${active} active, ${data.length - active} inactive`;
+  return <ManageRow label="People" href="/admin/people" summary={summary} />;
+}
+
+function AuditRow() {
+  const { data, isError } = useAuditLog({}, 1);
+  const last = data?.pages[0]?.items[0];
+  const summary = isError
+    ? "Unavailable"
+    : data === undefined
+      ? "Loading…"
+      : last
+        ? `Last change ${auditTimeLabel(last.created_at)}: ${last.summary}`
+        : "No changes recorded yet";
+  return <ManageRow label="Audit log" href="/admin/audit" summary={summary} />;
 }
 
 function OverlaySummary() {
