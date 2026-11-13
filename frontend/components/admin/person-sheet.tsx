@@ -191,12 +191,15 @@ function PersonForm({
 
   async function changeActive(active: boolean, moveTo: string | null = null) {
     setError(null);
+    let moved: number | null = null;
     try {
       // Hand the files over FIRST (LP-MB-Admin-05): a refused move leaves the person active, so
       // nobody ends up deactivated with files that were meant to move.
       if (moveTo) {
         setMoving(true);
-        await reassignLoans(person.id, moveTo);
+        moved = await reassignLoans(person.id, moveTo);
+        // Counts changed for both people and every file list (review finding 5).
+        void queryClient.invalidateQueries({ queryKey: ["users"] });
         void queryClient.invalidateQueries({ queryKey: ["loan-files"] });
         void queryClient.invalidateQueries({ queryKey: ["assignable"] });
       }
@@ -206,7 +209,12 @@ function PersonForm({
     } catch (failure) {
       setMoving(false);
       setConfirming(false);
-      setError(getErrorMessage(failure));
+      // A move that succeeded is said, so a failed deactivation does not hide it (finding 5).
+      setError(
+        moved === null
+          ? getErrorMessage(failure)
+          : `Their ${moved} ${moved === 1 ? "file was" : "files were"} moved, but they could not be deactivated: ${getErrorMessage(failure)}`,
+      );
     }
   }
 
@@ -441,7 +449,7 @@ function PersonForm({
         personId={person.id}
         name={name}
         fileCount={person.file_count ?? 0}
-        isLoanOfficer={person.roles.includes("loan_officer")}
+        slots={person.team_slots ?? []}
         open={confirming}
         pending={moving || setActive.isPending}
         onOpenChange={setConfirming}

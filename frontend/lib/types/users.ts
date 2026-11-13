@@ -91,6 +91,8 @@ export interface Person {
   created_at: string;
   /** Live loan files this person is on the team of (LP-MB-Admin-05). */
   file_count?: number;
+  /** The slots they hold on those files; whoever takes them over needs each slot's role. */
+  team_slots?: ("loan_officer" | "processor" | "assistant")[];
 }
 
 /** `PATCH /users/{id}`: only the fields that changed. */

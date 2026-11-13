@@ -18,7 +18,7 @@ from app.core.permissions import Permission
 from app.models.user import User, UserRole, UserRoleAssignment
 from app.schemas.users import UserAdminView, UserDetailsUpdate, UserRolesUpdate
 from app.services import users as service
-from app.services.loan_teams import live_place_counts, reassign_user_loans
+from app.services.loan_teams import live_place_counts, live_slots, reassign_user_loans
 
 router = APIRouter(
     prefix="/users",
@@ -89,11 +89,14 @@ _NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person
 async def _view(db: DbSession, actor: CurrentActor, user: User | None) -> UserAdminView:
     if user is None:
         raise _NOT_FOUND
-    counts = await live_place_counts(db, actor.company_id)
+    # This person only: a single-person answer need not count the whole company (finding 10).
+    counts = await live_place_counts(db, actor.company_id, user_id=user.id)
+    slots = await live_slots(db, actor.company_id, user_id=user.id)
     return UserAdminView.of(
         user,
         owner_user_id=await service.company_owner_id(db, actor),
         file_count=counts.get(user.id, 0),
+        team_slots=[slot.value for slot in slots.get(user.id, {})],
     )
 
 
@@ -109,8 +112,14 @@ async def list_people(
     people = await service.list_users(db, actor, status=status_, role=role)
     owner = await service.company_owner_id(db, actor)
     counts = await live_place_counts(db, actor.company_id)
+    slots = await live_slots(db, actor.company_id)
     return [
-        UserAdminView.of(user, owner_user_id=owner, file_count=counts.get(user.id, 0))
+        UserAdminView.of(
+            user,
+            owner_user_id=owner,
+            file_count=counts.get(user.id, 0),
+            team_slots=[slot.value for slot in slots.get(user.id, {})],
+        )
         for user in people
     ]
 

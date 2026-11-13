@@ -21,7 +21,13 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import NoRoles, OwnerProtected, SelfDeactivation, SelfRoleChange
+from app.core.errors import (
+    NoRoles,
+    OwnerProtected,
+    RoleStillInUse,
+    SelfDeactivation,
+    SelfRoleChange,
+)
 from app.core.permissions import Permission
 from app.models.company import Company
 from app.models.user import User, UserRole, UserRoleAssignment
@@ -143,6 +149,12 @@ async def update_user_details(
     for field, value in sent.items():
         setattr(user, field, value)
     await db.flush()
+    if {"first_name", "last_name"} & sent.keys():
+        # Their name is copied onto every file they are loan officer on, and locked there: follow
+        # the rename (LP-MB-Admin-05 review, finding 1).
+        from app.services.loan_teams import refresh_loan_officer_text
+
+        await refresh_loan_officer_text(db, user)
     fields = ", ".join(change["field"].replace("_", " ") for change in changes)
     await _audit(
         db,
@@ -168,6 +180,22 @@ async def set_user_roles(
         raise NoRoles()
     if user.id == await company_owner_id(db, actor) and UserRole.ADMIN not in roles:
         raise OwnerProtected()
+    # A role a person still uses on files cannot be taken away (LP-MB-Admin-05 review, finding 3):
+    # they would stay in slots they are no longer eligible for, with nobody able to hand them on.
+    from app.models.loan_team import TeamRole
+    from app.services.loan_teams import live_slots
+
+    held = (await live_slots(db, actor.company_id, user_id=user.id)).get(user.id, {})
+    for slot, role, word in (
+        (TeamRole.LOAN_OFFICER, UserRole.LOAN_OFFICER, "loan officer"),
+        (TeamRole.PROCESSOR, UserRole.PROCESSOR, "processor"),
+    ):
+        count = held.get(slot, 0)
+        if count and role in user.role_set and role not in roles:
+            files = "file" if count == 1 else "files"
+            raise RoleStillInUse(
+                f"{user.full_name} is {word} on {count} {files}; move them to someone else first"
+            )
     before, after = sorted(user.role_set), sorted(roles)
     if before == after:
         return user

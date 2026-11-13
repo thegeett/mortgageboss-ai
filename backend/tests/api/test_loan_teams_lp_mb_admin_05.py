@@ -645,3 +645,141 @@ async def test_assignable_lists_eligible_people_with_their_load(
     assert counts == {"Elena Test": 0, "Pat Test": 1}
     people = (await client.get(f"{API}/users", headers=_as(shop.admin))).json()
     assert next(p for p in people if p["id"] == str(shop.proc))["file_count"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# Review fixes (after 1c88c391)
+# --------------------------------------------------------------------------- #
+
+
+async def test_renaming_a_loan_officer_updates_their_files(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Finding 1: the copied name follows the person; nothing else could correct it."""
+    shop = await _shop(db_session)
+    await _set_lo(client, shop, shop.lo)
+
+    await client.patch(
+        f"{API}/users/{shop.lo}", json={"first_name": "Louis"}, headers=_as(shop.admin)
+    )
+
+    assert (await _file(db_session, shop)).loan_officer_name == "Louis Test"
+
+
+async def test_replacing_the_loan_officer_retires_the_old_participant(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Finding 4: a replaced loan officer's address stops matching the file's mail."""
+    shop = await _shop(db_session)
+    lou = await db_session.get(User, shop.lo)
+    assert lou is not None
+    lou_email = lou.email
+    await _set_lo(client, shop, shop.lo)
+    assert await is_participant(db_session, loan_file_id=shop.file, address=lou_email)
+
+    await _set_lo(client, shop, shop.lo2)
+
+    assert not await is_participant(db_session, loan_file_id=shop.file, address=lou_email)
+
+
+async def test_a_trusted_old_loan_officer_is_left_alone(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    shop = await _shop(db_session)
+    lou = await db_session.get(User, shop.lo)
+    assert lou is not None
+    lou_email = lou.email
+    await _set_lo(client, shop, shop.lo)
+    await db_session.execute(
+        text("UPDATE loan_file_participants SET is_trusted_sender = true WHERE loan_file_id = :f"),
+        {"f": shop.file},
+    )
+
+    await _set_lo(client, shop, None)
+
+    assert await is_participant(db_session, loan_file_id=shop.file, address=lou_email)
+
+
+async def test_a_role_still_used_on_files_cannot_be_removed(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Finding 3: refused with how many files, until they are moved."""
+    shop = await _shop(db_session)
+    await _set_lo(client, shop, shop.lo)
+    url = f"{API}/users/{shop.lo}/roles"
+
+    refused = await client.put(url, json={"roles": ["processor"]}, headers=_as(shop.admin))
+    await _set_lo(client, shop, None)
+    allowed = await client.put(url, json={"roles": ["processor"]}, headers=_as(shop.admin))
+
+    assert (refused.status_code, refused.json()["error"]["message"]) == (
+        409,
+        "Lou Test is loan officer on 1 file; move them to someone else first",
+    )
+    assert allowed.status_code == 200
+
+
+async def test_a_creator_who_typed_someone_else_as_loan_officer_keeps_them(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Finding 6: an Admin + LO creating a file for a broker's LO does not overwrite the broker."""
+    shop = await _shop(db_session)
+    both = await _person(db_session, shop.company_id, "Bea", A, LO)
+
+    typed = await client.post(
+        f"{API}/loan-files",
+        json={"loan_officer_name": "Dana Broker", "loan_officer_email": "dana@broker.com"},
+        headers=_as(both.id),
+    )
+    blank = await client.post(f"{API}/loan-files", json={}, headers=_as(both.id))
+
+    assert typed.json()["loan_officer_email"] == "dana@broker.com"
+    assert typed.json()["team"]["loan_officer"] is None
+    assert blank.json()["team"]["loan_officer"]["user_id"] == str(both.id)
+
+
+async def test_adding_a_processor_twice_at_once_is_done_not_refused(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finding 9: staged: the duplicate check misses the row another request just inserted, so the
+    insert meets the index. That is "already added", not "someone else changed this team"."""
+    from app.api.dependencies import get_current_actor
+
+    shop = await _shop(db_session)
+    await client.post(
+        f"{_team(shop)}/members", json={"user_id": str(shop.proc)}, headers=_as(shop.admin)
+    )
+    admin = await db_session.get(User, shop.admin)
+    assert admin is not None
+    await db_session.refresh(admin, attribute_names=["company"])
+    actor = get_current_actor(admin)
+    loan_file = await db_session.get(LoanFile, shop.file)
+    assert loan_file is not None
+
+    async def _looked_too_soon(*_: Any) -> list[LoanTeamMember]:
+        return []
+
+    monkeypatch.setattr(team_service, "live_members", _looked_too_soon)
+    await team_service.add_processor(db_session, actor, loan_file, shop.proc)  # no raise
+    monkeypatch.undo()
+
+    team = (await client.get(_team(shop), headers=_as(shop.admin))).json()
+    assert [p["user_id"] for p in team["processors"]] == [str(shop.proc)]
+    assert await _changes(db_session, shop.file) == ["Ada Test added Pat Test as processor"]
+
+
+async def test_people_rows_carry_the_slots_a_person_holds(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Finding 2: what anyone taking over their files must be eligible for."""
+    shop = await _shop(db_session)
+    both = await _person(db_session, shop.company_id, "Bo", LO, P)
+    await _set_lo(client, shop, both.id)
+    await client.post(f"{API}/loan-files", json={"loan_officer_name": "X"}, headers=_as(both.id))
+
+    people = (await client.get(f"{API}/users", headers=_as(shop.admin))).json()
+    one = (await client.get(f"{API}/users/{both.id}", headers=_as(shop.admin))).json()
+
+    row = next(p for p in people if p["id"] == str(both.id))
+    assert row["team_slots"] == ["loan_officer", "processor"]
+    assert (one["team_slots"], one["file_count"]) == (["loan_officer", "processor"], 2)

@@ -186,7 +186,7 @@ enforcement code was written and `restrict_loans_to_team` was not touched.
   (LO 403 on another's file) pass.
 - Eligibility compares roles (LOAN_OFFICER / PROCESSOR) in the team service: it is who may HOLD a slot,
   not an authorization decision.
-- A loan officer creating a file becomes its LO, and their account overwrites any typed LO text.
+- A loan officer creating a file becomes its LO only when no OTHER loan officer was typed (or named by the MISMO); see review fix 6.
 - `GET /users/assignable` returns roles and a file count, as asked; the count is company-wide.
 - Saved views store `assignee`; two existing saved-view tests now expect `"assignee": None` in the
   stored filters.
@@ -197,3 +197,28 @@ enforcement code was written and `restrict_loans_to_team` was not touched.
 **Deferred**
 - Part 2 enforcement (gated on reviewing the survey), auto-assignment, notifications, the assistant
   slot in the UI, a team filter in saved-view creation UI (no UI creates saved views yet).
+
+**Review fixes (after `1c88c391`)**
+1. Renaming a person updates the loan-officer name on every live file where they are the LO
+   (`loan_teams.refresh_loan_officer_text`, called from `users.update_user_details`); the field is
+   locked there, so nothing else could correct it.
+2. People rows carry `team_slots`; the deactivate dialog offers only people eligible for EVERY slot the
+   departing person's files need (the intersection of the assignable lists), as the server requires.
+3. Removing a role a person still uses on files is refused (409, "Lou Test is loan officer on 1 file;
+   move them to someone else first"), rather than leaving them in slots they are no longer eligible for.
+4. Replacing or clearing a loan officer soft-deletes the previous one's LOAN_OFFICER participant row,
+   unless someone marked it trusted by hand; `seed_participants` only adds, so a departed LO still
+   matched the file's mail.
+5. If the files moved but the deactivation then fails, the sheet says "Their N files were moved, but
+   they could not be deactivated: …"; the People list and counts are refreshed after a move.
+6. A creator holding the Loan officer role becomes the file's LO only when the file names no OTHER loan
+   officer (a typed or MISMO-named LO whose email is not theirs is kept); intake shows the LO inputs to
+   them too, with "Leave blank to be this file's loan officer yourself".
+7. A team change refreshes the file's timeline query.
+8. `condition_drafts.set_address` no longer writes the loan-officer contact while an internal LO is
+   set (it is not missing then).
+9. Adding a processor who was just added by another request is a no-op, not "Someone else just changed
+   this team" (the per-slot unique index is the only one a processor insert can meet); the same in
+   reassign.
+10. Single-person People responses count only that person's files; reassign loads its files in one query.
+Each fix's mutation is caught (7 backend, the draft guard, 4 frontend).

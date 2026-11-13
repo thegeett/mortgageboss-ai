@@ -354,33 +354,21 @@ export function IntakeForm() {
               </FormItem>
             )}
           />
-          {/* LP-MB-Admin-05 — a loan officer who creates a file becomes its loan officer, and the
-              contact is then filled from their account; anyone else types the (external) one. */}
+          <TextField control={form.control} name="loan_officer_name" label="Loan officer name" />
+          <TextField
+            control={form.control}
+            name="loan_officer_email"
+            label="Loan officer email"
+            type="email"
+          />
+          {/* LP-MB-Admin-05 review, finding 6: a loan officer can still enter a broker's LO; left
+              blank, they become the file's loan officer themselves. */}
           {creatorIsLoanOfficer && me ? (
-            <div className="space-y-0.5 text-sm sm:col-span-2">
-              <p className="text-foreground">
-                {me.first_name} {me.last_name}{" "}
-                <span className="text-muted-foreground">{me.email}</span>
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Filled from the loan officer&rsquo;s account
-              </p>
-            </div>
-          ) : (
-            <>
-              <TextField
-                control={form.control}
-                name="loan_officer_name"
-                label="Loan officer name"
-              />
-              <TextField
-                control={form.control}
-                name="loan_officer_email"
-                label="Loan officer email"
-                type="email"
-              />
-            </>
-          )}
+            <p className="text-xs text-muted-foreground sm:col-span-2">
+              Leave blank to be this file&rsquo;s loan officer yourself ({me.first_name}{" "}
+              {me.last_name}).
+            </p>
+          ) : null}
         </Section>
 
         <div className="flex items-center justify-end gap-3">

@@ -215,6 +215,13 @@ class InviteThrottled(UserRuleError):
     message = "Try again in a minute"
 
 
+class RoleStillInUse(UserRuleError):
+    """Removing a role the person still holds team places with (LP-MB-Admin-05). The sentence says
+    which role and on how many files."""
+
+    message = "This role is still used on loan files; move them to someone else first"
+
+
 class NotEligible(UserRuleError):
     """A person cannot take this team slot (LP-MB-Admin-05): not active, not in the file's company,
     or missing the slot's role. The sentence says which."""

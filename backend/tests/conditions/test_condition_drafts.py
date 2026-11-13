@@ -560,3 +560,47 @@ async def test_the_due_date_is_editable_in_the_draft(db_session: AsyncSession) -
         await db_session.execute(select(ConditionItem).where(ConditionItem.draft_id == draft.id))
     ).scalars()
     assert {item.due_date.isoformat() for item in items if item.due_date} == {"2026-09-04"}
+
+
+async def test_a_users_loan_officer_contact_is_not_overwritten_by_a_draft_address(
+    db_session: AsyncSession,
+) -> None:
+    """LP-MB-Admin-05 review, finding 8: the contact follows the internal loan officer's account."""
+    from app.models.loan_team import LoanTeamMember, TeamRole
+    from app.models.user import UserRole
+    from tests.user_factory import make_user
+
+    loan_file, _, _, actor = await _confirmed(db_session, people=False)
+    lo = make_user(
+        company_id=loan_file.company_id,
+        email="daniel@summit.example",
+        hashed_password="x",  # pragma: allowlist secret
+        first_name="Daniel",
+        last_name="Okafor",
+        roles=[UserRole.LOAN_OFFICER],
+    )
+    db_session.add(lo)
+    await db_session.flush()
+    db_session.add(
+        LoanTeamMember(loan_file_id=loan_file.id, user_id=lo.id, team_role=TeamRole.LOAN_OFFICER)
+    )
+    loan_file.loan_officer_name, loan_file.loan_officer_email = (
+        "Daniel Okafor",
+        "daniel@summit.example",
+    )
+    await db_session.flush()
+    draft, _ = (await _drafts(db_session, loan_file))["lo"]
+
+    await condition_drafts.set_address(
+        db_session,
+        loan_file=loan_file,
+        draft=draft,
+        email="someone.else@example.com",
+        name="Someone Else",
+        actor_user_id=actor,
+    )
+
+    assert (loan_file.loan_officer_name, loan_file.loan_officer_email) == (
+        "Daniel Okafor",
+        "daniel@summit.example",
+    )

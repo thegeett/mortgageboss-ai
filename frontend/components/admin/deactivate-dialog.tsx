@@ -25,7 +25,7 @@ export function DeactivateDialog({
   personId,
   name,
   fileCount,
-  isLoanOfficer,
+  slots,
   open,
   pending,
   onOpenChange,
@@ -35,8 +35,8 @@ export function DeactivateDialog({
   name: string;
   /** Live files this person works (`file_count` on the People row). */
   fileCount: number;
-  /** Picks the loan officers rather than the processors as candidates. */
-  isLoanOfficer: boolean;
+  /** The slots their files need (review finding 2): a candidate must be eligible for every one. */
+  slots: ("loan_officer" | "processor" | "assistant")[];
   open: boolean;
   pending: boolean;
   onOpenChange: (open: boolean) => void;
@@ -45,11 +45,20 @@ export function DeactivateDialog({
 }) {
   const [choice, setChoice] = useState<"move" | "leave">("move");
   const [moveTo, setMoveTo] = useState("");
-  // Asked only while open: every person's sheet renders this dialog, closed.
-  const candidates = useAssignable(isLoanOfficer ? "loan_officer" : "processor", {
-    enabled: open && fileCount > 0,
-  });
-  const others = (candidates.data ?? []).filter((person) => person.id !== personId);
+  // Asked only while open (every person's sheet renders this dialog, closed), and only for the
+  // slots their files need.
+  const needsLo = slots.includes("loan_officer");
+  const needsProcessor = slots.includes("processor");
+  const officers = useAssignable("loan_officer", { enabled: open && needsLo });
+  const processors = useAssignable("processor", { enabled: open && needsProcessor });
+  // Eligible for EVERY slot their files need: the server refuses anyone who is not.
+  const pools = [needsLo ? officers.data : null, needsProcessor ? processors.data : null].filter(
+    (pool) => pool !== null,
+  );
+  const others = (pools[0] ?? []).filter(
+    (person) =>
+      person.id !== personId && pools.every((pool) => pool?.some((p) => p.id === person.id)),
+  );
   const moving = fileCount > 0 && choice === "move" && moveTo !== "";
 
   return (

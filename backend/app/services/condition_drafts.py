@@ -1695,9 +1695,14 @@ async def set_address(
     from app.services.party_requests import add_participant
 
     if draft.recipient is DraftRecipient.LO:
-        loan_file.loan_officer_email = email
-        if name:
-            loan_file.loan_officer_name = name
+        from app.services.loan_teams import has_internal_loan_officer
+
+        # LP-MB-Admin-05 review, finding 8: while the loan officer is a user, the contact follows
+        # their account and is not this path's to write. (It is not missing, either.)
+        if not await has_internal_loan_officer(db, loan_file.id):
+            loan_file.loan_officer_email = email
+            if name:
+                loan_file.loan_officer_name = name
     elif draft.recipient is DraftRecipient.BORROWER:
         from app.services.email_draft import primary_borrower
 

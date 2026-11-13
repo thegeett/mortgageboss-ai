@@ -46,9 +46,18 @@ class UserAdminView(BaseModel):
     created_at: datetime
     #: Live loan files this person is on the team of (LP-MB-Admin-05).
     file_count: int = 0
+    #: The slots they hold on those files: whoever takes their files over needs each one's role.
+    team_slots: list[str] = []
 
     @classmethod
-    def of(cls, user: User, *, owner_user_id: UUID | None, file_count: int = 0) -> "UserAdminView":
+    def of(
+        cls,
+        user: User,
+        *,
+        owner_user_id: UUID | None,
+        file_count: int = 0,
+        team_slots: list[str] | None = None,
+    ) -> "UserAdminView":
         return cls(
             id=user.id,
             email=user.email,
@@ -65,6 +74,7 @@ class UserAdminView(BaseModel):
             last_login_at=user.last_login_at,
             created_at=user.created_at,
             file_count=file_count,
+            team_slots=sorted(team_slots or []),
         )
 
 

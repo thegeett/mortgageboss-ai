@@ -154,7 +154,7 @@ describe("PersonSheet — deactivating someone who works files (LP-MB-Admin-05)"
         ? { data: { moved: 14 } }
         : { data: { ...ELENA, is_active: false, file_count: 0 } };
     });
-    renderSheet(person({ file_count: 14 }));
+    renderSheet(person({ file_count: 14, team_slots: ["processor"] }));
 
     fireEvent.click(screen.getByRole("button", { name: "Deactivate" }));
     const dialog = await screen.findByRole("dialog");
@@ -179,7 +179,7 @@ describe("PersonSheet — deactivating someone who works files (LP-MB-Admin-05)"
       url === "/api/v1/users/assignable" ? { data: [] } : { data: EMPTY_PAGE },
     );
     api.post.mockResolvedValue({ data: { ...ELENA, is_active: false } });
-    renderSheet(person({ file_count: 3 }));
+    renderSheet(person({ file_count: 3, team_slots: ["processor"] }));
 
     fireEvent.click(screen.getByRole("button", { name: "Deactivate" }));
     const dialog = await screen.findByRole("dialog");
@@ -188,5 +188,70 @@ describe("PersonSheet — deactivating someone who works files (LP-MB-Admin-05)"
 
     await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
     expect(api.post).toHaveBeenCalledWith(`/api/v1/users/${ELENA.id}/deactivate`);
+  });
+});
+
+describe("PersonSheet — review fixes (LP-MB-Admin-05)", () => {
+  it("offers only people eligible for every slot the files need (finding 2)", async () => {
+    api.get.mockImplementation(
+      async (url: string, config?: { params?: { team_role?: string } }) => {
+        if (url !== "/api/v1/users/assignable") return { data: EMPTY_PAGE };
+        return config?.params?.team_role === "loan_officer"
+          ? {
+              data: [
+                { id: "p-lo-only", name: "Lo Only", roles: ["loan_officer"], file_count: 0 },
+                {
+                  id: "p-both",
+                  name: "Both Roles",
+                  roles: ["loan_officer", "processor"],
+                  file_count: 1,
+                },
+              ],
+            }
+          : {
+              data: [
+                { id: "p-proc-only", name: "Proc Only", roles: ["processor"], file_count: 0 },
+                {
+                  id: "p-both",
+                  name: "Both Roles",
+                  roles: ["loan_officer", "processor"],
+                  file_count: 1,
+                },
+              ],
+            };
+      },
+    );
+    renderSheet(person({ file_count: 4, team_slots: ["loan_officer", "processor"] }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Deactivate" }));
+    const picker = within(await screen.findByRole("dialog")).getByLabelText("Move their files to");
+
+    await waitFor(() => expect(within(picker).getByText(/Both Roles/)).toBeTruthy());
+    expect(within(picker).queryByText(/Lo Only/)).toBeNull();
+    expect(within(picker).queryByText(/Proc Only/)).toBeNull();
+  });
+
+  it("says the files moved when the deactivation then fails (finding 5)", async () => {
+    api.get.mockImplementation(async (url: string) =>
+      url === "/api/v1/users/assignable"
+        ? { data: [{ id: "p-tom", name: "Tom Becker", roles: ["processor"], file_count: 0 }] }
+        : { data: EMPTY_PAGE },
+    );
+    api.post.mockImplementation(async (url: string) => {
+      if (url.endsWith("/reassign-loans")) return { data: { moved: 3 } };
+      throw refusal(409, "This is the account owner. Contact MortgageBoss to change their access.");
+    });
+    renderSheet(person({ file_count: 3, team_slots: ["processor"] }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Deactivate" }));
+    const dialog = await screen.findByRole("dialog");
+    const picker = within(dialog).getByLabelText("Move their files to");
+    await waitFor(() => expect(within(picker).getByText(/Tom Becker/)).toBeTruthy());
+    fireEvent.change(picker, { target: { value: "p-tom" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Deactivate and move 3 files" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Their 3 files were moved, but they could not be deactivated: This is the account owner. Contact MortgageBoss to change their access.",
+    );
   });
 });

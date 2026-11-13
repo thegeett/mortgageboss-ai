@@ -53,6 +53,8 @@ function useTeamChange<T>(fileId: string, run: (body: T) => Promise<TeamView>) {
     onSuccess: (team) => {
       queryClient.setQueryData(["loan-team", fileId], team);
       void queryClient.invalidateQueries({ queryKey: ["loan-file", fileId] });
+      // The change is on the file's timeline (review finding 7).
+      void queryClient.invalidateQueries({ queryKey: ["loan-file-activity", fileId] });
       void queryClient.invalidateQueries({ queryKey: ["loan-files"] });
       void queryClient.invalidateQueries({ queryKey: ["assignable"] });
     },
