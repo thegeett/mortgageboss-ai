@@ -255,11 +255,9 @@ the visibility, and a caller cannot have one without the other.
 **Assumptions**
 - `Actor.scope` is a `field(init=False)` set in `__post_init__`, so the scope exists exactly when the
   actor does; `test_authorization_guards`' bare `Actor` was given a company with default settings.
-- No background job calls a gate (each reads its file by id), so `FileScope.system` has no app call
-  site today; tests use it. `processor_copy` reads the setting from the file's company, since a job
-  has no actor.
-- On a refused MISMO import, the raw bytes already written to storage stay unreferenced, as on the
-  existing `MismoImportError` path.
+- No background job calls a gate (each reads its file by id and shows nothing to a person), so
+  `FileScope.system` has no app call site today; tests use it. `processor_copy`, the one job that
+  delivers a file's content to a person, reads the setting from the file's company itself.
 - `_open_files` with a named file now re-reads it through `scope_files` (one query) instead of
   comparing its company in Python.
 - Names across files (Decided 3): the routes that return a user's name are file-scoped (follow-ups,
@@ -270,3 +268,23 @@ the visibility, and a caller cannot have one without the other.
 - Per-file sharing; the assistant slot, auto-assignment and notifications (Part 1's deferrals).
 - The four 500s above.
 - The remaining 10 files on the `current_user.company_id` allowlist.
+
+**Review fixes (after `495a6135`)**
+1. A refused MISMO import no longer leaves the raw MISMO (the borrower's SSN and income) in storage.
+   The import writes it before the refusal check, and the rollback removed only the row pointing at
+   it; the refusal now deletes the bytes (best effort, logged by kind if the delete fails). The
+   comment that said this matched the `MismoImportError` path was wrong: that error is raised before
+   anything is stored. The test asserts storage is empty after a refusal, with the accepted import as
+   its positive control; removing the delete fails it.
+2. "A grep for `.system(` lists every unrestricted read" was false: jobs read files by id without the
+   gates. The module docstring and ADR-446 now say what `.system` marks (an unrestricted call to a
+   gate, none in `app` today) and that jobs bypass the gates because they show nothing to a person,
+   except the processor's copy, which applies the rule itself.
+3. The door test has a positive control for its write counter (`POST /needs` as the member raises
+   it). With `_writes` mutated to a constant, the control fails while a hidden-caller door still
+   passes, which is the gap it closes.
+4. The Team card re-reads the signed-in user (`/auth/me`) before deciding whether a loan officer
+   handing their file away is restricted, so a setting turned on since sign-in is honoured; if the
+   read fails, the stored flag decides. Mutations caught: ignoring the fresh read, ignoring a "no",
+   ignoring `restricted`.
+5. Every line this ticket added is within 100 characters (23 comment and docstring lines rewrapped).

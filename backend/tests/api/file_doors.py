@@ -87,7 +87,7 @@ CD = f"{V}/conditions/{{condition_id}}"
 TODAY = "2026-11-13"
 
 DOORS: tuple[Door, ...] = (
-    # ------------------------------------------------------------------ Group A (ScopedLoanFile)
+    # ---------------------------------------------------------- Group A (ScopedLoanFile)
     Door("A", "GET", f"{F}/activity"),
     Door("A", "GET", f"{F}/borrowers"),
     Door("A", "POST", f"{F}/borrowers", body={"first_name": "Dee", "last_name": "Door"}),
@@ -184,7 +184,7 @@ DOORS: tuple[Door, ...] = (
     Door("A", "PUT", f"{F}/team/loan-officer", body={"user_id": None}),
     Door("A", "POST", f"{F}/team/members", body={"user_id": "{processor_2}"}),
     Door("A", "DELETE", f"{F}/team/members/{{member_id}}", "team_member"),
-    # ------------------------------------------------------------------ Group B1 (ScopedLoanFileById)
+    # ---------------------------------------------------------- Group B1 (ScopedLoanFileById)
     Door("B", "POST", f"{C}/condition-rounds/uploads", upload=("file", "pdf")),
     Door("B", "GET", f"{C}/condition-rounds"),
     Door("B", "PUT", f"{C}/lender-processing", body={"on": True}),
@@ -254,14 +254,14 @@ DOORS: tuple[Door, ...] = (
     Door("B", "GET", f"{C}/condition-package/download", "package"),
     Door("B", "POST", f"{C}/conditions/{{condition_id}}/restore", "condition"),
     Door("B", "GET", f"{C}/withdrawn-conditions"),
-    # ------------------------------------------------------------------ Group B2 (loan files)
+    # ---------------------------------------------------------- Group B2 (loan files)
     Door("B", "GET", f"{V}/loan-files", empty="page"),
     Door("B", "GET", I),
     Door("B", "GET", f"{I}/stated-financials"),
     Door("B", "PATCH", I, body={}),
     Door("B", "DELETE", I),
     Door("B", "GET", f"{I}/reconciliation"),
-    # ------------------------------------------------------------------ Group B3 (calculators, DTI, LTV)
+    # ---------------------------------------------------------- Group B3 (calculators, DTI, LTV)
     Door("B", "GET", f"{I}/calculators/{{calculator}}", params={"calculator": "reserves"}),
     Door(
         "B",
@@ -310,7 +310,7 @@ DOORS: tuple[Door, ...] = (
     Door(
         "B", "DELETE", f"{I}/ltv/overrides/{{field_key}}", params={"field_key": "ltv.second_loan"}
     ),
-    # ------------------------------------------------------------------ Group B4 (verification)
+    # ---------------------------------------------------------- Group B4 (verification)
     Door("B", "POST", f"{I}/verification/run"),
     Door("B", "GET", f"{I}/verification"),
     Door("B", "PUT", f"{I}/verification/aggression", body={"level": "balanced"}),
@@ -334,12 +334,12 @@ DOORS: tuple[Door, ...] = (
     Door("B", "POST", f"{I}/findings/{{finding_id}}/accept-risk", "finding", body={}),
     Door("B", "POST", f"{I}/findings/{{finding_id}}/request-docs", "finding", body={}),
     Door("B", "GET", f"{I}/verification/runs"),
-    # ------------------------------------------------------------------ Group B5 (stated, add)
+    # ---------------------------------------------------------- Group B5 (stated, add)
     Door("B", "POST", f"{F}/stated-liabilities", body={}),
     Door("B", "POST", f"{F}/stated-assets", body={}),
     Door("B", "POST", f"{F}/borrowers/{{borrower_id}}/stated-income", "borrower", body={}),
     Door("B", "POST", f"{F}/borrowers/{{borrower_id}}/stated-employers", "borrower", body={}),
-    # ------------------------------------------------------------------ Group C1 (rounds by id)
+    # ---------------------------------------------------------- Group C1 (rounds by id)
     Door("C", "GET", f"{RD}/plan", "round"),
     Door("C", "POST", f"{RD}/plan/confirm", "round"),
     Door("C", "GET", RD, "round"),
@@ -367,7 +367,7 @@ DOORS: tuple[Door, ...] = (
         body={"old_id": "{round_id}", "new_id": "{round_id}", "same": True},
     ),
     Door("C", "PUT", f"{RD}/completeness", "round", body={"completeness": "partial"}),
-    # ------------------------------------------------------------------ Group C2 (conditions by id)
+    # ---------------------------------------------------------- Group C2 (conditions by id)
     Door("C", "PUT", f"{CD}/next-step", "condition", body={"next_step": "ask_borrower"}),
     Door("C", "PUT", f"{CD}/route", "condition", body={"route": "borrower"}),
     Door("C", "GET", f"{CD}/items/{{item_id}}/link-candidates", "condition_item"),
@@ -424,7 +424,7 @@ DOORS: tuple[Door, ...] = (
         body={"index": 0, "answer": "explained"},
     ),
     Door("C", "POST", f"{CD}/withdraw", "condition", body={"reason": "Entered in error"}),
-    # ------------------------------------------------------------------ Group C3 (documents by id)
+    # ---------------------------------------------------------- Group C3 (documents by id)
     Door("C", "GET", f"{V}/documents/{{document_id}}", "document"),
     Door("C", "GET", f"{V}/documents/{{document_id}}/versions", "versioned_document"),
     Door(
@@ -468,7 +468,7 @@ DOORS: tuple[Door, ...] = (
     ),
     Door("C", "GET", f"{V}/documents/{{document_id}}/download", "document"),
     Door("C", "DELETE", f"{V}/documents/{{document_id}}", "document"),
-    # ------------------------------------------------------------------ Group C4 (stated by item id)
+    # ---------------------------------------------------------- Group C4 (stated by item id)
     Door("C", "PATCH", f"{V}/stated-liabilities/{{item_id}}", "stated_liability", body={}),
     Door("C", "DELETE", f"{V}/stated-liabilities/{{item_id}}", "stated_liability"),
     Door("C", "PATCH", f"{V}/stated-assets/{{item_id}}", "stated_asset", body={}),
@@ -477,7 +477,7 @@ DOORS: tuple[Door, ...] = (
     Door("C", "DELETE", f"{V}/stated-income-items/{{item_id}}", "stated_income"),
     Door("C", "PATCH", f"{V}/stated-employers/{{item_id}}", "stated_employer", body={}),
     Door("C", "DELETE", f"{V}/stated-employers/{{item_id}}", "stated_employer"),
-    # ------------------------------------------------------------------ Group C5 (company-wide)
+    # ---------------------------------------------------------- Group C5 (company-wide)
     Door("C", "GET", f"{V}/inbound/queue", "routed_message", empty="list"),
     Door(
         "C",
@@ -490,7 +490,7 @@ DOORS: tuple[Door, ...] = (
     Door(
         "C", "GET", f"{V}/saved-views", "saved_view", query={"with_counts": "true"}, empty="counts"
     ),
-    # ------------------------------------------------------------------ Group C6 (dev)
+    # ---------------------------------------------------------- Group C6 (dev)
     Door("C", "POST", f"{V}/dev/documents/{{document_id}}/extract-text-layer", "document"),
 )
 

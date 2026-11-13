@@ -273,6 +273,7 @@ async def test_a_mismo_import_that_names_another_loan_officer_is_refused(
     client: AsyncClient,
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     names_another: bool,
 ) -> None:
     """The import path refuses the same creator. The fixture MISMO names no loan officer, so the
@@ -295,13 +296,19 @@ async def test_a_mismo_import_that_names_another_loan_officer_is_refused(
         files={"file": ("loan.xml", MISMO.read_bytes(), "application/xml")},
         headers=_as(lou),
     )
+    stored = [p for p in (tmp_path / "storage").rglob("*") if p.is_file()]
     if not names_another:
         assert resp.status_code == 201, resp.text
         assert resp.json()["loan_file"]["team"]["loan_officer"]["user_id"] == str(lou.id)
+        # The positive control for the check below: an import does write the raw MISMO.
+        assert len(stored) == 1, stored
         return
     assert resp.status_code == 422, resp.text
     assert resp.json()["error"]["message"] == REFUSAL
     assert await _file_count(db_session, company) == before
+    # The raw MISMO (the borrower's SSN and income) is not left in storage with nothing pointing at
+    # it.
+    assert stored == []
 
 
 # --------------------------------------------------------------------------- #

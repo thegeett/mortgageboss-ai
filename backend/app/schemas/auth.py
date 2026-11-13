@@ -40,7 +40,8 @@ class UserPublic(BaseModel):
     so the UI and the boundary cannot disagree. The single derived ``role`` is gone
     (LP-MB-Admin-02). ``restricted`` is whether the user sees only the files they are on
     (LP-MB-Admin-06): the same decision the API's ``FileScope`` makes, so the Team card can warn a
-    loan officer who is about to hand their own file away. The user's company must be loaded (``get_user_by_id`` and
+    loan officer who is about to hand their own file away. The user's company must be loaded
+    (``get_user_by_id`` and
     ``authenticate_user`` load it).
     """
 

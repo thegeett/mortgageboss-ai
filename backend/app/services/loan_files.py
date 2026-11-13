@@ -235,8 +235,9 @@ async def get_loan_file(
 
     Returns ``None`` if no active file with that identifier exists *in this
     scope* — including when it exists in another company, or on a team the scope
-    is restricted away from (ADR-446): it's simply out of scope. Borrowers, lender, and property are eager-loaded for the detail view
-    (the summary fields ``lender_name``/``property_address`` need lender/property).
+    is restricted away from (ADR-446): it's simply out of scope. Borrowers, lender, and property are
+    eager-loaded for the detail view (the summary fields ``lender_name``/``property_address`` need
+    lender/property).
     """
     stmt = _scoped(scope).options(
         selectinload(LoanFile.borrowers),

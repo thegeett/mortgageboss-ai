@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
+import { fetchCurrentUser } from "@/lib/api/auth";
 import {
   type AssignablePerson,
   useAddProcessor,
@@ -58,8 +59,21 @@ export function TeamCard({ fileId }: { fileId: string }) {
   const addable = (processors.data ?? []).filter((person) => !onTeam.has(person.id));
   const iAmTheLo = Boolean(me && data?.loan_officer?.user_id === me.id);
 
-  function pickLoanOfficer(userId: string | null) {
-    const handingAway = Boolean(me?.restricted) && iAmTheLo && userId !== me?.id;
+  async function pickLoanOfficer(userId: string | null) {
+    const leaving = iAmTheLo && userId !== me?.id;
+    let restricted = Boolean(me?.restricted);
+    if (leaving) {
+      // `restricted` was read at sign-in, and an admin may have turned the setting on since: ask the
+      // server now. Best effort: if it cannot answer, the flag in the store decides.
+      try {
+        const fresh = await fetchCurrentUser();
+        useAuthStore.setState({ user: fresh });
+        restricted = Boolean(fresh.restricted);
+      } catch {
+        // Keep the stored flag.
+      }
+    }
+    const handingAway = leaving && restricted;
     if (handingAway && !window.confirm("You will no longer see this file.")) return;
     return run(async () => {
       await setLo.mutateAsync(userId);

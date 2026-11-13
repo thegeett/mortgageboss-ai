@@ -16,6 +16,7 @@ from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from sqlalchemy import select
 
 from app.api.dependencies import CurrentActor, CurrentScope, CurrentUser, require_permission
 from app.core.database import DbSession
@@ -24,6 +25,7 @@ from app.core.permissions import Permission
 from app.mismo.import_service import MismoImportError, create_loan_file_from_mismo
 from app.mismo.parser import MismoParseError, parse_mismo
 from app.models.loan_file import LoanFileStatus
+from app.models.mismo_import import MismoImport
 from app.schemas.loan_file import (
     LoanFileCreate,
     LoanFileDetail,
@@ -46,6 +48,7 @@ from app.services.loan_files import (
 from app.services.loan_teams import creator_would_not_see, on_loan_file_created
 from app.services.reconciliation import ReconciliationRow, reconcile_loan_file
 from app.services.stated_financials import get_stated_financials
+from app.storage import get_storage_backend
 from app.tasks.needs import propose_ai_needs
 
 log = structlog.get_logger(__name__)
@@ -172,9 +175,11 @@ async def import_mismo(
             detail="This file couldn't be parsed as a MISMO file.",
         ) from exc
 
+    refused_raw: str | None = None
     try:
-        # A SAVEPOINT, as on the manual path: a refused creator leaves no file behind. The raw
-        # MISMO bytes already written to storage stay, unreferenced, as on the MismoImportError path.
+        # A SAVEPOINT, as on the manual path: a refused creator leaves no file behind. The import
+        # has already written the raw MISMO (the borrower's SSN and income) to storage by then, and
+        # the rollback removes only the row that points at it, so the refusal deletes the bytes too.
         async with db.begin_nested():
             loan_file = await create_loan_file_from_mismo(
                 db,
@@ -187,7 +192,16 @@ async def import_mismo(
             # LP-MB-Admin-05 — the creator joins the team, as on the manual path.
             await on_loan_file_created(db, actor, loan_file)
             if await creator_would_not_see(db, actor, loan_file):
+                refused_raw = await db.scalar(
+                    select(MismoImport.raw_file_path).where(
+                        MismoImport.loan_file_id == loan_file.id
+                    )
+                )
                 raise CreatorWouldNotSeeFile
+    except CreatorWouldNotSeeFile:
+        if refused_raw is not None:
+            await _delete_refused_raw(refused_raw)
+        raise
     except MismoImportError as exc:
         raise HTTPException(
             status_code=422,  # Unprocessable Content (literal avoids a deprecation)
@@ -218,6 +232,15 @@ async def import_mismo(
         loan_file=LoanFileDetail.from_model(created),
         warnings=parsed.parse_warnings,
     )
+
+
+async def _delete_refused_raw(storage_path: str) -> None:
+    """Best effort: a failed delete is logged by kind, never raised over the 422 the caller
+    reads."""
+    try:
+        await get_storage_backend().delete(storage_path)
+    except Exception as exc:
+        log.warning("mismo_refused_raw_not_deleted", error_type=type(exc).__name__)
 
 
 def _assignee(raw: str | None, me: UUID) -> Assignee | None:

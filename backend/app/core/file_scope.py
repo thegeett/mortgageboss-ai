@@ -5,10 +5,15 @@ take a bare ``company_id``, so a caller cannot have the company without the visi
 gate called with a UUID is a mypy error. :func:`app.models.helpers.scope_files` is the one place the
 predicate is written.
 
-The decision is made once per request, in :meth:`FileScope.for_actor`, when the request's ``Actor`` is
-built (``get_current_actor``): before anything in the request changes a user, so an admin who turns the
-setting on sees the effect on their next request. Background jobs have no actor and declare
-:meth:`FileScope.system`, so ``grep '.system('`` lists every unrestricted read.
+The decision is made once per request, in :meth:`FileScope.for_actor`, when the request's ``Actor``
+is built (``get_current_actor``): before anything in the request changes a user, so an admin who
+turns the setting on sees the effect on their next request.
+
+Background jobs do not go through these gates: each reads its file by id (``db.get(LoanFile, ...)``)
+and shows nothing to a person, except the processor's copy, which applies the team rule itself
+(``services/processor_copy``). :meth:`FileScope.system` is for a caller with no actor that does call
+a gate; ``grep '.system('`` lists those unrestricted gate calls, and there are none in ``app``
+today.
 
 Pure: no database.
 """
@@ -24,7 +29,8 @@ if TYPE_CHECKING:
 
 
 class _Subject(Protocol):
-    """What the decision reads: ``Actor`` satisfies it (read-only, as a frozen dataclass's fields are)."""
+    """What the decision reads: ``Actor`` satisfies it (read-only, as a frozen dataclass's fields
+    are)."""
 
     @property
     def user(self) -> "User": ...
@@ -51,7 +57,7 @@ class FileScope:
 
     @classmethod
     def system(cls, company_id: UUID) -> Self:
-        """Unrestricted, for a job or a system path with no person behind it."""
+        """Unrestricted, for a gate called with no person behind it (a job, a script, a test)."""
         return cls(company_id=company_id, restricted_to_user_id=None)
 
     @classmethod

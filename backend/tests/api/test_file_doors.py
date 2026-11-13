@@ -3,7 +3,8 @@
 For each route in `file_doors.DOORS`, on a company with the setting ON and a file whose team is one
 processor:
 
-- a processor NOT on the team gets exactly what a missing id gets (the same status and body; an empty
+- a processor NOT on the team gets exactly what a missing id gets (the same status and body; an
+empty
   answer from a list or count), and the request writes nothing;
 - the processor on the team, an admin, and a processor marked `sees_all_loans` get past the gate;
 - with the setting OFF, the processor not on the team gets past it too.
@@ -156,3 +157,23 @@ async def test_door(
         assert all(view["count"] == 1 for view in response.json()), response.text
     elif door.empty is not None:
         assert _shows_the_file(response, shop), response.text
+
+
+async def test_the_write_counter_sees_a_write(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """The positive control for every "nothing written" above: a door that writes moves the count.
+
+    Without it, a database with `track_counts` off would leave `_writes` at a constant and every
+    hidden-caller assertion green without measuring anything.
+    """
+    shop = await build(db_session, client, "file")
+    db_session.expunge_all()
+    before = await _writes(db_session)
+    response = await client.post(
+        f"/api/v1/loan-files/{shop.subs['file_identifier']}/needs",
+        json={"title": "Two months of statements"},
+        headers=bearer(shop.member),
+    )
+    assert response.status_code == 201, response.text
+    assert await _writes(db_session) > before

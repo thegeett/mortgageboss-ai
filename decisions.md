@@ -17128,8 +17128,10 @@ optional team check beside the company id would leave the next route free to pas
   (`actor.scope`, `CurrentScope`): unrestricted when the setting is off, or the actor holds
   `loan.view_all`, or `sees_all_loans`; otherwise the actor's own id. `UserPublic.restricted` is the
   same decision, for the Team card.
-- Background jobs and system paths declare `FileScope.system(company_id)`, so a grep for `.system(`
-  lists every unrestricted read.
+- A caller with no actor that calls a gate declares `FileScope.system(company_id)`, so a grep for
+  `.system(` lists every unrestricted gate call (none in `app` today). Background jobs do not use the
+  gates at all: they read files by id and show nothing to a person, except the processor's copy,
+  which applies the team rule itself.
 - A hidden file is the same 404, with the same body, as a missing id on that route. A creator who
   would land in no team slot is refused at create (422), not added to one.
 

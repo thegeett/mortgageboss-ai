@@ -103,7 +103,8 @@ async def list_saved_views(
     out: list[SavedViewPublic] = []
     for view in views:
         filters = SavedViewFilters.model_validate(view.filters)
-        # The files this caller may see (ADR-446): under team restriction, "All files" is all theirs.
+        # The files this caller may see (ADR-446): under team restriction, "All files" is all
+        # theirs.
         count = await count_loan_files(
             db,
             scope=scope,

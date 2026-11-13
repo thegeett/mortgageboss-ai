@@ -110,9 +110,9 @@ class Actor:
     (ADR-443): today always the user's own, decided in that one function. New services take an
     ``Actor`` and check it with :func:`app.services.authorization.ensure`.
 
-    ``scope`` is which loan files the actor may see (LP-MB-Admin-06, ADR-446), decided when the actor
-    is built, at the start of the request: a later change in the same request (a user's ``_locked``
-    re-read unloads ``user.company``) cannot move it.
+    ``scope`` is which loan files the actor may see (LP-MB-Admin-06, ADR-446), decided when the
+    actor is built, at the start of the request: a later change in the same request (a user's
+    ``_locked`` re-read unloads ``user.company``) cannot move it.
     """
 
     user: User
@@ -207,7 +207,8 @@ CurrentCompanyId = Annotated[UUID, Depends(get_current_company_id)]
 
 
 def get_current_scope(actor: CurrentActor) -> FileScope:
-    """The loan files the request may see (ADR-446): every loan-file gate takes this, not a company id."""
+    """The loan files the request may see (ADR-446): every loan-file gate takes this, not a company
+    id."""
     return actor.scope
 
 
@@ -223,7 +224,8 @@ async def get_scoped_loan_file(
     later documents): a child route declares it, so the parent file is fetched
     via ``get_loan_file(scope=...)`` *first*. If the file isn't the caller's
     company's, or is on a team the caller is restricted away from, or doesn't
-    exist, it raises ``404`` and the child is never reached. ``file_identifier`` may be the UUID or the display id.
+    exist, it raises ``404`` and the child is never reached. ``file_identifier``
+    may be the UUID or the display id.
     """
     loan_file = await get_loan_file(db, scope=scope, identifier=file_identifier)
     if loan_file is None:

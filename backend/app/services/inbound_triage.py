@@ -587,8 +587,8 @@ async def move_unrouted_message(
 
     None when the message is not this company's, the file is outside ``scope`` (another company's,
     or on a team the caller is restricted away from, ADR-446), or either does not exist: the caller
-    answers 404 for all of them, so the answer says nothing about rows the caller cannot see. Locked, so two
-    people moving one message cannot write two correspondence records.
+    answers 404 for all of them, so the answer says nothing about rows the caller cannot see.
+    Locked, so two people moving one message cannot write two correspondence records.
     """
     from app.services.inbound_routing import move_message_to_file
     from app.services.loan_files import get_loan_file
@@ -658,8 +658,8 @@ async def list_triage_queue(db: AsyncSession, *, scope: FileScope) -> list[Inbou
 
     A MESSAGE ON A FILE IS LISTED ONLY IF THE FILE IS IN ``scope`` (LP-MB-Admin-06): under "restrict
     loan files to their team", mail on another team's file is not this caller's to see, and on a
-    deleted file it is nobody's. A message on NO file stays for everyone in the company: the Inbox is
-    where unmatched mail gets a file, and nobody is on a team for mail with none (ADR-421).
+    deleted file it is nobody's. A message on NO file stays for everyone in the company: the Inbox
+    is where unmatched mail gets a file, and nobody is on a team for mail with none (ADR-421).
 
     A MESSAGE WITH NO COMPANY IS RETURNED TO NOBODY (LP-1008). It used to be returned to every
     company with the sender's words stripped, which still showed one company a trace of another's

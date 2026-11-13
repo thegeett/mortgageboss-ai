@@ -382,10 +382,11 @@ async def get_scoped_condition(condition_id: UUID, db: DbSession, scope: Current
     THE SCOPE IS IN THE QUERY, the same as `get_scoped_round` above, and through the same helper:
     the condition is joined to its file and `scope_files` filters the file (its company, live, and
     the caller's team when restricted). The two gates in this module read identically, because the
-    thing a reader must be able to check at a glance is that BOTH of them filter inside the statement
-    rather than after it. (`Condition.company_id` is still on the row; the file's company is the same
-    one, and `scope_files` is the one place the team rule lives, so the gate filters the file.)
-    Soft-deleted rows are excluded — a deleted condition is not found rather than found and refused.
+    thing a reader must be able to check at a glance is that BOTH of them filter inside the
+    statement rather than after it. (`Condition.company_id` is still on the row; the file's company
+    is the same one, and `scope_files` is the one place the team rule lives, so the gate filters the
+    file.) Soft-deleted rows are excluded — a deleted condition is not found rather than found and
+    refused.
 
     404, NEVER 403. Confirming that an id exists would be an oracle over another tenant's rows, which
     is why this is indistinguishable from a missing id.
