@@ -802,6 +802,10 @@ EXCLUDED_TABLES: dict[str, str] = {
         "whose readonly view already carries the send metadata). Only ids, a recipient and "
         "timestamps, which that view answers; excluded rather than a second view of the same sends."
     ),
+    "user_invites": (
+        "LP-MB-Admin-04 — staff invitations. Excluded whole: `email` identifies the person invited, "
+        "and the rest (roles, dates, a send count, a token HASH) answers nothing asked of staging yet."
+    ),
     "company_audit_log": (
         "LP-MB-Admin-01 — admin actions per company. No view yet: out of the ticket's scope. When one "
         "is added, `summary` and `detail` are prose and before/after values, so they need the scrub."

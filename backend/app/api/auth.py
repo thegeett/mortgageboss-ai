@@ -117,6 +117,15 @@ async def login(payload: LoginRequest, db: DbSession, response: Response) -> Tok
     )
     await db.commit()
 
+    return issue_session(response, user)
+
+
+def issue_session(response: Response, user: User) -> TokenResponse:
+    """Sign ``user`` in: the refresh cookie on ``response``, the access token and user in the body.
+
+    Login's ending, shared with accepting an invitation (LP-MB-Admin-04) so a new account is signed
+    in exactly as a returning one is. ``user.company`` must be loaded (``UserPublic`` reads it).
+    """
     _set_refresh_cookie(response, create_refresh_token(user.id))
     return TokenResponse(
         access_token=create_access_token(user.id),

@@ -19,7 +19,11 @@ describe("People page", () => {
   it("deactivates a person after the dialog confirms, and their row goes inactive", async () => {
     useAuthStore.setState({ user: { id: ME.id } as never, accessToken: "t" });
     api.get.mockImplementation(async (url: string) =>
-      url === "/api/v1/users" ? { data: [OWNER, ME, ELENA] } : { data: EMPTY_PAGE },
+      url === "/api/v1/users"
+        ? { data: [OWNER, ME, ELENA] }
+        : url === "/api/v1/invites"
+          ? { data: [] }
+          : { data: EMPTY_PAGE },
     );
     api.post.mockResolvedValue({ data: { ...ELENA, is_active: false } });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

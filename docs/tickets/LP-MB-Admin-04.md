@@ -1,6 +1,6 @@
 # LP-MB-Admin-04 — Staff invites and the accept flow
 
-Admin and roles, ticket 4 of 5. **Status: planned, not built.** Needs LP-MB-Admin-03. Next: LP-MB-Admin-05.
+Admin and roles, ticket 4 of 5. **Status: built, not committed (see Result).** Needs LP-MB-Admin-03. Next: LP-MB-Admin-05.
 
 ## What and why
 
@@ -110,3 +110,87 @@ invite to an address that is already a user elsewhere is refused with a generic 
 an authenticated admin that the address exists somewhere on the platform; the alternative (accepting
 the invite and sending nothing) leaves the admin waiting for a person who can never join. The refusal
 is audit-logged and open invites are capped. A person who works for two companies cannot be modelled yet; cross-company access is out of scope.
+
+## Result
+
+**SES: is `noreply@mortgageboss.ai` a verified identity in staging? No, as far as the repository
+shows.** Answered from the code only, without calling AWS:
+- Staging's Terraform (`infra/modules/outbound_mail`, used by `infra/envs/staging/main.tf`) verifies ONE
+  domain identity, `mail.staging.mortgageboss.ai` (plus each customer's own domain through
+  `set_up_mail_domain`). Nothing verifies `mortgageboss.ai` or the address `noreply@mortgageboss.ai`,
+  and SES does not let a verified subdomain cover its parent.
+- `SMTP_FROM_EMAIL` is not set anywhere in `infra/`, so staging sends from the default,
+  `noreply@mortgageboss.ai`.
+- An identity created by hand in the console would not show in the repository; only AWS can rule
+  that out.
+- **The consequence is not copy-the-link mode.** Staging sets `MAIL_TRANSPORT=ses`
+  (`infra/envs/staging/main.tf`), so `get_mail_sender()` is NOT None there: the API returns no
+  `accept_url`, and the email task's send will be refused by SES (an unverified From). Until an INFRA
+  ticket fixes it, an admin on staging gets neither an email nor a link; the person cannot be invited
+  except by `scripts/add_user`. The smallest fix is one line in the staging task's environment,
+  `SMTP_FROM_EMAIL = "noreply@mail.${var.domain_name}"`, an address on the already-verified domain;
+  the alternative is verifying `mortgageboss.ai`. Not changed here (deploy configuration).
+
+**Built**
+- `app/core/tokens.py`: `generate_token`, `hash_token`, `tokens_match`.
+- Migration `6316da7fe522` on `c5874fbee899`: `user_invites` as the schema section, with the partial
+  unique index on `(company_id, email)` where not accepted and not revoked. Model `UserInvite` with
+  `is_open` and `is_expired`. No readonly view; listed as excluded with the reason.
+- `app/services/invites.py`: `create_invite`, `resend_invite`, `revoke_invite`, `list_invites` (each
+  `ensure(actor, users.manage)`, scoped to `actor.company_id`), and the public `lookup_invite` and
+  `accept_invite`. Refusals in `app/core/errors.py` under `UserRuleError`: `AlreadyOnTeam`,
+  `DeactivatedOnTeam`, `ForeignEmail` (audited as `invite_refused_foreign_email`, without the other
+  company), `TooManyInvites` (50 open), `InviteThrottled` (429, under a minute); no roles is
+  `NoRoles` (422). Re-inviting an open address resends it (200); an expired or revoked row is
+  reused. Audit actions `invite_sent`, `invite_resent`, `invite_revoked`, `invite_accepted`.
+  `accept_invite` locks the row, re-checks it, validates the password, refuses an address that is
+  now a user anywhere, and creates the user, roles (granted by the inviter), acceptance and audit row
+  inside a SAVEPOINT, so a failure after the user insert leaves nothing.
+- `app/tasks/invites.py`: `send_invite_email(invite_id, token)`, plain text from
+  `smtp_from_name <smtp_from_email>`, the subject and body as specified. It sends only if the token
+  is still the invite's current one (a resend or cancel since queueing skips it). Logs carry the
+  invite id only. Registered in `celery_app._TASK_MODULES`.
+- `app/api/invites.py`: the admin router (`users.manage`) and a public router (`/invites/lookup`,
+  `/invites/accept`) with no auth; `accept` signs in through a new `auth.issue_session`, which login
+  now uses too. Any failing link is one 404 sentence.
+- Frontend: `lib/types/invites.ts`, `lib/api/invites.ts`; People page tabs with counts, an Invite
+  person button, `components/admin/invite-dialog.tsx` (mockup 07, no owner note),
+  `invitations-panel.tsx` (mockup 08: link state, Resend, Cancel, the copy-link card),
+  `app/(auth)/accept-invite/page.tsx` (mockup 09, both states).
+- Tests: backend 26 API tests and 8 task tests (every rule allowed and refused; the stored value is a
+  hash and the raw token is in no table, audit row or captured log line; atomic accept; single use;
+  old token dead after resend; foreign-email bodies byte-identical across two companies and the
+  refusal committed; one body for expired, revoked, used and garbage tokens; throttle on resend and
+  re-POST; the cap; reuse of expired and revoked rows; tenant isolation; 403 for PROCESSOR and LO; the
+  task with a fake sender, with none, with a stale token, with a refused send), plus a migration test
+  on `migrated_db`. Frontend: dialog (defaults, payload, inline 409, no owner), panel (link states,
+  Resend, Cancel, the 429), copy-link card (only with `accept_url`), accept page (fragment read, body,
+  fragment cleared, happy path, 422 rule, invalid link three ways).
+- Mutations, each caught: the throttle, the cap, the open check on accept, the SAVEPOINT, the
+  "became a user" check, the commit of the foreign-email audit row (missed at first: the shared test
+  session kept a flushed row; the test now asserts the commit), the task's current-token check,
+  `accept_url` only without a transport; on the frontend the fragment read, the fragment clear, the
+  copy card's condition and the dialog's inline error.
+- Backend: 10061 passed; ruff, mypy strict clean. Frontend: 2605 passed (216 files); tsc and biome
+  clean.
+
+**Assumptions and deviations**
+- The link's origin is `settings.upload_link_base_url` (already the frontend origin, set in staging),
+  through `usable_link_origin()`; no `frontend_url` setting was added.
+- The service returns the raw token and the API enqueues the email after its commit, rather than the
+  service enqueueing: a worker that ran before the commit would not find the invite.
+- The raw token is a Celery task argument, so it sits in the Redis broker until the worker takes it.
+- The foreign-email refusal commits its audit row before answering 409; without that the request's
+  rollback would drop it.
+- No rate limit on the public routes: the upload-link public routes have none to follow.
+- The accept page clears the fragment from the address bar once read (`history.replaceState`).
+- The password hint is static ("At least 8 characters.", the server's minimum); the server's own
+  sentence replaces it on a 422.
+- Concurrency: the create path locks the address's pending row; two first-time invites of the same
+  address at the same instant can still meet the partial unique index (a 500), which is rare enough
+  to leave.
+
+**Deferred**
+- The staging From address (above): an INFRA ticket.
+- Bounce handling ("not delivered" on the pending list), password reset, borrower invites, bulk
+  invite, custom message, reminders, rate limiting the public routes.

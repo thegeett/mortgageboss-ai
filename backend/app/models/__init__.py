@@ -138,6 +138,7 @@ from app.models.types import (
 )
 from app.models.upload_link import UploadLink
 from app.models.user import User, UserRole, UserRoleAssignment
+from app.models.user_invite import UserInvite
 from app.models.validation_verdict import ValidationVerdict, VerdictKind
 from app.models.verification import (
     Verification,
@@ -281,6 +282,7 @@ __all__ = [
     "UploadLink",
     "UploadSource",
     "User",
+    "UserInvite",
     "UserRole",
     "UserRoleAssignment",
     "ValidationVerdict",

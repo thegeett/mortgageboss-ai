@@ -42,6 +42,13 @@ class AuditAction(StrEnum):
     USER_ROLES_CHANGED = "user_roles_changed"
     USER_DEACTIVATED = "user_deactivated"
     USER_REACTIVATED = "user_reactivated"
+    #: Invitations (LP-MB-Admin-04). Never the token, raw or hashed.
+    INVITE_SENT = "invite_sent"
+    INVITE_RESENT = "invite_resent"
+    INVITE_REVOKED = "invite_revoked"
+    INVITE_ACCEPTED = "invite_accepted"
+    #: An admin tried to invite an address that is a user of another company (ADR-444).
+    INVITE_REFUSED_FOREIGN_EMAIL = "invite_refused_foreign_email"
 
 
 async def log_company_action(

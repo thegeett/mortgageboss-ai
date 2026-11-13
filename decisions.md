@@ -17048,3 +17048,31 @@ token still carries identity only (LP-22 unchanged).
   the follow-up that moves them empties the list.
 
 *Status.* Accepted (LP-MB-Admin-02).
+
+## ADR-444
+
+**Invites are per company; identity stays global.**
+
+*Context.* A person is one user in one company, and the email is the global identity (ADR-042). An
+admin can now invite people by email (LP-MB-Admin-04).
+
+*Decision (LP-MB-Admin-04).* An invite to an address that is already a user in ANOTHER company is
+refused with a generic message ("This address can't be invited; contact support"), the same bytes
+whatever that company is. The refusal is written to the inviting company's audit log, without the
+other company's name, and open invites are capped at 50 per company.
+
+*Consequences.*
+- The refusal tells an authenticated admin that the address exists somewhere on the platform. The
+  alternative, accepting the invite and sending nothing, leaves the admin waiting for a person who can
+  never join. The audit row and the cap bound the probing an admin could do.
+- A person who works for two companies cannot be modelled yet; cross-company access is out of scope.
+
+*Where the token travels.* An invite token is put in the URL FRAGMENT of the emailed link
+(`/accept-invite#<token>`) and posted in request BODIES; it never appears in a path or a query string,
+so no server, proxy or access log records it and no Referer carries it. Upload links (LP-815) put their
+token in a PATH SEGMENT (`/upload/{token}`), on the page and the API alike. The difference is
+deliberate: an upload link is a write-only drop box into one file, while an invite creates an account
+that may hold Admin, so a copied access log must not be enough to use one. Converting upload links to
+the fragment is a separate decision and not made here.
+
+*Status.* Accepted (LP-MB-Admin-04).

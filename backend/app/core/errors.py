@@ -180,6 +180,38 @@ class NoRoles(UserRuleError):
     message = "A person needs at least one role"
 
 
+class AlreadyOnTeam(UserRuleError):
+    """The address is an active user of this company (LP-MB-Admin-04)."""
+
+    message = "Already on your team"
+
+
+class DeactivatedOnTeam(UserRuleError):
+    """The address is an inactive user of this company: reactivate rather than invite."""
+
+    message = "Deactivated — reactivate them from the People list"
+
+
+class ForeignEmail(UserRuleError):
+    """The address is a user of another company (ADR-444). Generic on purpose: the same body
+    whatever that company is, and never its name."""
+
+    message = "This address can't be invited; contact support"
+
+
+class TooManyInvites(UserRuleError):
+    """The company has the maximum number of open invitations."""
+
+    message = "At most 50 open invitations"
+
+
+class InviteThrottled(UserRuleError):
+    """A link was (re)sent for this invitation less than a minute ago."""
+
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+    message = "Try again in a minute"
+
+
 async def user_rule_handler(request: Request, exc: UserRuleError) -> JSONResponse:
     """A refused people-management change → its status and its own message."""
     error_type = _STATUS_TO_TYPE.get(exc.status_code, "http_error")

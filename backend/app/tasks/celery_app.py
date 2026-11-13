@@ -33,6 +33,7 @@ _TASK_MODULES = [
     "app.tasks.outbound",  # LP-994 — the worker sends a person's approved email
     "app.tasks.mail_domains",  # LP-1006 — the hourly check of customer mail domains
     "app.tasks.follow_ups",  # LP-1013 — automatic follow-up reminders
+    "app.tasks.invites",  # LP-MB-Admin-04 — the staff invitation email
 ]
 
 celery_app = Celery(

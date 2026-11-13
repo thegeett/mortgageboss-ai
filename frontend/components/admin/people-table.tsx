@@ -21,8 +21,8 @@ import { useMemo, useState } from "react";
  * The company's people (LP-MB-Admin-03, mockup 03).
  *
  * Search, the role select and "Show inactive" all filter the one list the server sent: a company's
- * people fit a page, so there is nothing to ask the server again. The Invitations tab is a disabled
- * stub until LP-MB-Admin-04, and the Files column waits for LP-MB-Admin-05.
+ * people fit a page, so there is nothing to ask the server again. The tabs (People, Invitations)
+ * are the page's; the Files column waits for LP-MB-Admin-05.
  */
 export function PeopleTable({
   people,
@@ -54,28 +54,6 @@ export function PeopleTable({
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-6 border-b border-border text-sm" role="tablist">
-        <button
-          type="button"
-          role="tab"
-          aria-selected="true"
-          className="-mb-px border-b-2 border-primary px-1 pb-2 text-primary"
-        >
-          People <span className="text-muted-foreground">{active}</span>
-        </button>
-        {/* A stub until invitations ship (LP-MB-Admin-04). */}
-        <button
-          type="button"
-          role="tab"
-          aria-selected="false"
-          disabled
-          title="Invitations arrive with the next release"
-          className="px-1 pb-2 text-muted-foreground"
-        >
-          Invitations
-        </button>
-      </div>
-
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative w-64">
           <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />

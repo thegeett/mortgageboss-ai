@@ -50,11 +50,4 @@ describe("PeopleTable", () => {
     fireEvent.click(screen.getByText("Elena Ruiz"));
     expect(onOpen).toHaveBeenCalledWith(ELENA);
   });
-
-  it("keeps the Invitations tab as a disabled stub", () => {
-    renderTable();
-    expect((screen.getByRole("tab", { name: "Invitations" }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
-  });
 });
