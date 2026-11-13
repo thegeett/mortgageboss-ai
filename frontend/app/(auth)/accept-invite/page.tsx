@@ -26,6 +26,9 @@ import { useEffect, useState } from "react";
 type State =
   | { kind: "loading" }
   | { kind: "invalid" }
+  // The server could not be reached or failed: NOT a dead link (review finding 9). The token is
+  // kept in memory, since the fragment has already left the address bar, so Try again works.
+  | { kind: "unreachable"; token: string }
   | { kind: "ready"; token: string; invite: InviteLookup };
 
 function Brand() {
@@ -75,10 +78,22 @@ export default function AcceptInvitePage() {
       setState({ kind: "invalid" });
       return;
     }
-    lookupInvite(token)
-      .then((invite) => setState({ kind: "ready", token, invite }))
-      .catch(() => setState({ kind: "invalid" }));
+    void check(token);
   }, []);
+
+  async function check(token: string) {
+    setState({ kind: "loading" });
+    try {
+      setState({ kind: "ready", token, invite: await lookupInvite(token) });
+    } catch (failure) {
+      // Only the server's own "no longer valid" (404) is a dead link.
+      setState(
+        normalizeError(failure).status === 404
+          ? { kind: "invalid" }
+          : { kind: "unreachable", token },
+      );
+    }
+  }
 
   async function submit() {
     if (state.kind !== "ready") return;
@@ -112,6 +127,16 @@ export default function AcceptInvitePage() {
           </p>
         ) : state.kind === "invalid" ? (
           <Invalid />
+        ) : state.kind === "unreachable" ? (
+          <Card className="space-y-3 p-6">
+            <h1 className="text-xl font-semibold">We couldn&rsquo;t check your invitation</h1>
+            <p className="text-sm text-muted-foreground">
+              MortgageBoss didn&rsquo;t answer. Your link has not been used; try again in a moment.
+            </p>
+            <Button type="button" className="w-full" onClick={() => void check(state.token)}>
+              Try again
+            </Button>
+          </Card>
         ) : (
           <Card className="p-6">
             <form

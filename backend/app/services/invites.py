@@ -13,10 +13,12 @@ meantime" are all ``None`` to the caller, which the API turns into one 404 sente
 """
 
 from datetime import timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from email_validator import EmailNotValidError, validate_email
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import (
@@ -33,6 +35,7 @@ from app.core.tokens import generate_token, hash_token
 from app.models.base import utcnow
 from app.models.user import User, UserRole, UserRoleAssignment
 from app.models.user_invite import INVITE_VALID_DAYS, UserInvite
+from app.services.activity_log import field_changes
 from app.services.authorization import ensure
 from app.services.company_audit import AuditAction, log_company_action
 from app.services.upload_links import usable_link_origin
@@ -63,7 +66,23 @@ def roles_in_words(roles: list[str]) -> str:
 
 
 def _normalise_email(email: str) -> str:
-    return email.strip().lower()
+    """The address in the form login looks it up (review finding 5).
+
+    NOT lowercased whole: login matches `User.email` exactly against the address as `EmailStr`
+    normalises it, which lowercases the domain and KEEPS the local part's case. Lowercasing here
+    created `alice.smith@` for an admin who typed `Alice.Smith@`, and her own typing then failed to
+    sign in. Same form as the provisioning scripts (`_provisioning.normalize_email`). Duplicates are
+    found case-insensitively instead (`_same_address`).
+    """
+    try:
+        return validate_email(email.strip(), check_deliverability=False).normalized
+    except EmailNotValidError:
+        return email.strip()
+
+
+def _same_address(column: Any, address: str) -> Any:
+    """`column` holds `address`, ignoring case: one person whichever way it was typed."""
+    return func.lower(column) == address.lower()
 
 
 def _issue(invite: UserInvite) -> str:
@@ -133,7 +152,7 @@ async def create_invite(
     if not wanted:
         raise NoRoles()
 
-    existing_user = await db.scalar(select(User).where(func.lower(User.email) == address))
+    existing_user = await db.scalar(select(User).where(_same_address(User.email, address)))
     if existing_user is not None:
         if existing_user.company_id == actor.company_id:
             raise DeactivatedOnTeam() if not existing_user.is_active else AlreadyOnTeam()
@@ -155,15 +174,19 @@ async def create_invite(
         select(UserInvite)
         .where(
             UserInvite.company_id == actor.company_id,
-            UserInvite.email == address,
+            _same_address(UserInvite.email, address),
             UserInvite.accepted_at.is_(None),
             UserInvite.revoked_at.is_(None),
         )
         .with_for_update()
     )
     if current is not None and current.is_open:
-        # Inviting the same address again resends the open invite, under the same throttle.
+        # Inviting the same address again resends the open invite, under the same throttle, WITH
+        # the roles now asked for (review finding 2: keeping the old ones ignored the admin's
+        # correction without a word). The change is in the audit row.
         _throttle(current)
+        before = list(current.roles)
+        current.roles = wanted
         token = _issue(current)
         await db.flush()
         await _audit(
@@ -172,8 +195,12 @@ async def create_invite(
             actor.company_id,
             AuditAction.INVITE_RESENT,
             current,
-            f"Resent the invitation to {address}",
-            {"email": address, "roles": current.roles},
+            f"Resent the invitation to {current.email}",
+            {
+                "email": current.email,
+                "roles": wanted,
+                "changes": field_changes({"roles": before}, {"roles": wanted}),
+            },
         )
         return current, token, False
 
@@ -187,7 +214,7 @@ async def create_invite(
             select(UserInvite)
             .where(
                 UserInvite.company_id == actor.company_id,
-                UserInvite.email == address,
+                _same_address(UserInvite.email, address),
                 UserInvite.accepted_at.is_(None),
                 UserInvite.revoked_at.is_not(None),
             )
@@ -197,7 +224,6 @@ async def create_invite(
         )
     if invite is None:
         invite = UserInvite(company_id=actor.company_id, email=address, send_count=0)
-        db.add(invite)
     else:
         # An expired or revoked row: a fresh invitation in the same row.
         invite.accepted_at = None
@@ -207,7 +233,15 @@ async def create_invite(
     invite.roles = wanted
     invite.invited_by_user_id = actor.user.id
     token = _issue(invite)
-    await db.flush()
+    try:
+        # A SAVEPOINT: two admins inviting the same NEW address at once both find no row to lock,
+        # and the second insert meets the one-open-invite index (review finding 1). An invitation
+        # was just sent, so that admin hears what a resend too soon would say, not a 500.
+        async with db.begin_nested():
+            db.add(invite)
+            await db.flush()
+    except IntegrityError as exc:
+        raise InviteThrottled() from exc
     await _audit(
         db,
         actor.user.id,
@@ -248,6 +282,9 @@ async def resend_invite(
     if invite is None:
         return None
     _throttle(invite)
+    # Reopening an expired invitation adds an open one, so the cap applies (review finding 7).
+    if invite.is_expired and await _open_count(db, actor.company_id) >= MAX_OPEN_INVITES:
+        raise TooManyInvites()
     token = _issue(invite)
     await db.flush()
     await _audit(
@@ -327,10 +364,22 @@ async def accept_invite(
     if invite is None or not invite.is_open:
         return None
     validate_password_strength(password)
-    taken = await db.scalar(select(User.id).where(func.lower(User.email) == invite.email))
+    taken = await db.scalar(select(User.id).where(_same_address(User.email, invite.email)))
     if taken is not None:
         return None
 
+    try:
+        user = await _create_accepted_user(db, invite, first_name, last_name, password)
+    except IntegrityError:
+        # The address became a user between the check above and the insert (two companies'
+        # invitations accepted at the same moment, review finding 6): the same answer as a dead link.
+        return None
+    return user
+
+
+async def _create_accepted_user(
+    db: AsyncSession, invite: UserInvite, first_name: str, last_name: str, password: str
+) -> User:
     async with db.begin_nested():
         user = User(
             company_id=invite.company_id,
@@ -339,6 +388,8 @@ async def accept_invite(
             first_name=first_name,
             last_name=last_name,
             is_active=True,
+            # Accepting signs the person in, so it is a sign-in (review finding 8).
+            last_login_at=utcnow(),
             roles=[
                 UserRoleAssignment(
                     role=UserRole(role), granted_by_user_id=invite.invited_by_user_id

@@ -49,3 +49,48 @@ describe("People page", () => {
     expect(row && within(row).getByText("Inactive")).toBeTruthy();
   });
 });
+
+describe("People page — the copy-link card (LP-MB-Admin-04 review, finding 10)", () => {
+  it("shows a newly resent link as not yet copied", async () => {
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    useAuthStore.setState({ user: { id: ME.id } as never, accessToken: "t" });
+    const invite = {
+      id: "i1",
+      email: "sam@x.com",
+      roles: ["processor"],
+      invited_by_name: "Marcus Hill",
+      created_at: "2026-11-13T10:00:00Z",
+      last_sent_at: "2026-11-13T10:00:00Z",
+      expires_at: "2099-11-20T10:00:00Z",
+      send_count: 1,
+      expired: false,
+    };
+    api.get.mockImplementation(async (url: string) =>
+      url === "/api/v1/invites" ? { data: [invite] } : { data: [OWNER, ME, ELENA] },
+    );
+    api.post
+      .mockResolvedValueOnce({ data: { invite, accept_url: "http://l/accept-invite#first" } })
+      .mockResolvedValueOnce({ data: { invite, accept_url: "http://l/accept-invite#second" } });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <PeoplePage />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Invitations/ }));
+    const row = (await screen.findByText("sam@x.com")).closest("tr") as HTMLElement;
+    fireEvent.click(within(row).getByRole("button", { name: "Resend" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Copy link" }));
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
+
+    fireEvent.click(within(row).getByRole("button", { name: "Resend" }));
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("Invitation link") as HTMLInputElement).value).toBe(
+        "http://l/accept-invite#second",
+      ),
+    );
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeTruthy();
+  });
+});

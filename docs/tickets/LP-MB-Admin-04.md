@@ -186,11 +186,29 @@ shows.** Answered from the code only, without calling AWS:
 - The accept page clears the fragment from the address bar once read (`history.replaceState`).
 - The password hint is static ("At least 8 characters.", the server's minimum); the server's own
   sentence replaces it on a 422.
-- Concurrency: the create path locks the address's pending row; two first-time invites of the same
-  address at the same instant can still meet the partial unique index (a 500), which is rare enough
-  to leave.
 
 **Deferred**
 - The staging From address (above): an INFRA ticket.
 - Bounce handling ("not delivered" on the pending list), password reset, borrower invites, bulk
   invite, custom message, reminders, rate limiting the public routes.
+
+**Review fixes (after `e2beeadc`)**
+5. The invite address is stored the way login looks it up (domain lowercased, local part as typed,
+   as `scripts/add_user` stores it), and duplicates are found ignoring case. Before, `Alice.Smith@`
+   became `alice.smith@` and the person could not sign in typing their own address. The original
+   test asserted the lowercased form, i.e. it pinned the defect; it now asserts the login form.
+2. Re-inviting an address with an open invite updates its roles (and audits the change) instead of
+   silently keeping the old ones.
+3. The link is built before the commit, so a misconfigured origin saves nothing; a queue that
+   refuses the email after the commit is a 503 "saved but not sent, use Resend".
+4. The email task logs a misconfigured origin as a failed send instead of crashing.
+7. Resending an expired invitation counts toward the 50-open cap.
+8. Accepting records `last_login_at`: it signs the person in.
+9. The accept page shows "no longer valid" only for the server's 404; a network error or 5xx shows
+   "We couldn't check your invitation" with Try again, keeping the token in memory.
+10. The copy-link card is keyed by its link, so a new link starts at "Copy link", never "Copied";
+    tested on the People page, where the bug was.
+1, 6. The two races (two admins inviting the same new address at once; two companies' invitations
+   for one address accepted at once) are caught in their SAVEPOINTs: the first answers 429 "Try again
+   in a minute", the second the usual dead-link 404. Staged in tests by making the lookup miss.
+Each fix's mutation is caught.

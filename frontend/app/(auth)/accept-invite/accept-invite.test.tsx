@@ -122,3 +122,27 @@ describe("Accept invite page", () => {
     expect(await screen.findByText("This invitation is no longer valid")).toBeTruthy();
   });
 });
+
+describe("Accept invite page — an unreachable server is not a dead link (review finding 9)", () => {
+  it("offers Try again, keeps the token, and recovers", async () => {
+    post
+      .mockRejectedValueOnce({ isAxiosError: true, message: "Network Error" })
+      .mockResolvedValueOnce({ data: LOOKUP });
+    render(<AcceptInvitePage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByText("Join Summit Mortgage Processing")).toBeTruthy();
+    expect(screen.queryByText("This invitation is no longer valid")).toBeNull();
+    expect(post).toHaveBeenLastCalledWith("/api/v1/invites/lookup", { token: TOKEN });
+  });
+
+  it("treats a 500 the same way", async () => {
+    post.mockRejectedValueOnce({
+      isAxiosError: true,
+      response: { status: 500, data: { error: { type: "internal_error", message: "x" } } },
+    });
+    render(<AcceptInvitePage />);
+    expect(await screen.findByText("We couldn’t check your invitation")).toBeTruthy();
+  });
+});

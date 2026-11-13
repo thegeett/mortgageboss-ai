@@ -83,7 +83,13 @@ export default function PeoplePage() {
       </div>
 
       {issued ? (
-        <CopyLinkCard issued={issued.value} verb={issued.verb} onDismiss={() => setIssued(null)} />
+        <CopyLinkCard
+          // Keyed by the link, so a new link starts as "Copy link", never as "Copied" (finding 10).
+          key={issued.value.accept_url ?? ""}
+          issued={issued.value}
+          verb={issued.verb}
+          onDismiss={() => setIssued(null)}
+        />
       ) : null}
 
       {tab === "people" ? (

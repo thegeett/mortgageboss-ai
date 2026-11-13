@@ -10,6 +10,7 @@ case answers the same 404 sentence.
 
 from uuid import UUID
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -37,6 +38,8 @@ from app.services import invites as service
 from app.services.mail_sender import get_mail_sender
 from app.services.override_attribution import resolve_user_names
 from app.tasks.invites import send_invite_email
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(
     prefix="/invites",
@@ -71,13 +74,29 @@ async def _public(db: DbSession, invites: list[UserInvite]) -> list[InvitePublic
 
 
 async def _issued(db: DbSession, invite: UserInvite, token: str) -> InviteIssued:
-    """Commit, then hand the email to the worker (it must find the committed row)."""
+    """Commit, then hand the email to the worker (it must find the committed row).
+
+    The link is built BEFORE the commit (review finding 3): a misconfigured origin then fails the
+    request with nothing saved, rather than saving an invitation whose link nobody was given. A
+    queue that refuses the email AFTER the commit is a 503 saying so, and Resend recovers it.
+    """
+    link = service.accept_url(token)
     await db.commit()
     sender = get_mail_sender()
     if sender is not None:
-        send_invite_email.delay(str(invite.id), token)
+        try:
+            send_invite_email.delay(str(invite.id), token)
+        except Exception as exc:
+            logger.warning(
+                "invite_email_not_queued", invite_id=str(invite.id), error=type(exc).__name__
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="The invitation was saved but its email could not be sent. "
+                "Use Resend in a minute.",
+            ) from exc
     [view] = await _public(db, [invite])
-    return InviteIssued(invite=view, accept_url=None if sender else service.accept_url(token))
+    return InviteIssued(invite=view, accept_url=None if sender else link)
 
 
 @router.post("", response_model=InviteIssued, status_code=status.HTTP_201_CREATED)

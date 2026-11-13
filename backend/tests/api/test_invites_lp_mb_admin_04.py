@@ -162,8 +162,9 @@ async def test_an_admin_invites_with_any_roles_admin_included(
     body, token = await _invite(client, shop, "Lena.Park@Acme.com ", ["admin", "processor"])
 
     invite = body["invite"]
+    # The form login looks up: domain lowercased, local part as typed (review finding 5).
     assert (invite["email"], invite["roles"], invite["expired"]) == (
-        "lena.park@acme.com",
+        "Lena.Park@acme.com",
         ["admin", "processor"],
         False,
     )
@@ -699,3 +700,218 @@ async def test_with_a_transport_the_link_is_emailed_not_returned(
     assert invite_id == resp.json()["invite"]["id"]
     row = await db_session.get(UserInvite, UUID(invite_id))
     assert row is not None and row.token_hash == hash_token(token)
+
+
+# --------------------------------------------------------------------------- #
+# Review fixes (after e2beeadc)
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_capitalised_address_can_sign_in_as_typed(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Finding 5: the account is stored in the form login looks up, and duplicates ignore case."""
+    shop = await _shop(db_session)
+    _, token = await _invite(client, shop, "Alice.Smith@Corp.com")
+    again = await client.post(
+        f"{API}/invites",
+        json={"email": "alice.smith@corp.com", "roles": ["processor"]},
+        headers=_as(shop.admin),
+    )
+    await client.post(
+        f"{API}/invites/accept",
+        json={"token": token, "first_name": "A", "last_name": "S", "password": GOOD_PASSWORD},
+    )
+
+    login = await client.post(
+        f"{API}/auth/login", json={"email": "Alice.Smith@corp.com", "password": GOOD_PASSWORD}
+    )
+
+    assert again.status_code == 429  # the same person, so a resend (too soon), not a second invite
+    assert login.status_code == 200
+
+
+async def test_re_inviting_with_new_roles_changes_them(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Finding 2: a corrected re-invite is not silently ignored."""
+    shop = await _shop(db_session)
+    body, _ = await _invite(client, shop, roles=["processor"])
+    await _age_last_sent(db_session, body["invite"]["id"])
+
+    again = await client.post(
+        f"{API}/invites",
+        json={"email": "new@person.com", "roles": ["admin"]},
+        headers=_as(shop.admin),
+    )
+
+    assert again.status_code == 200
+    assert again.json()["invite"]["roles"] == ["admin"]
+    db_session.expunge_all()
+    resent = await db_session.scalar(
+        select(CompanyAuditLog).where(CompanyAuditLog.action == "invite_resent")
+    )
+    assert resent is not None
+    assert resent.detail["changes"] == [{"field": "roles", "from": ["processor"], "to": ["admin"]}]
+
+
+async def test_a_bad_link_origin_saves_nothing(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finding 3: the link is built before the commit, so a misconfiguration leaves no orphan."""
+    from app.services.upload_links import LinkOriginNotConfigured
+
+    def _refuse() -> str:
+        raise LinkOriginNotConfigured("misconfigured")
+
+    monkeypatch.setattr(invite_service, "usable_link_origin", _refuse)
+    shop = await _shop(db_session)
+    commits: list[None] = []
+    real_commit = db_session.commit
+
+    async def _counting_commit() -> None:
+        commits.append(None)
+        await real_commit()
+
+    monkeypatch.setattr(db_session, "commit", _counting_commit)
+
+    # Unhandled, so a 500 in production; this test client re-raises it instead.
+    with pytest.raises(LinkOriginNotConfigured):
+        await client.post(
+            f"{API}/invites",
+            json={"email": "x@y.com", "roles": ["processor"]},
+            headers=_as(shop.admin),
+        )
+
+    assert commits == []
+
+
+async def test_a_queue_that_refuses_the_email_is_a_clear_503(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finding 3: the invitation is saved, the admin is told, and Resend recovers it."""
+    from app.api import invites as invites_api
+
+    def _down(*_: Any) -> None:
+        raise ConnectionError("broker down")
+
+    monkeypatch.setattr(settings, "mail_transport", "smtp")
+    monkeypatch.setattr(invites_api.send_invite_email, "delay", _down)
+    shop = await _shop(db_session)
+
+    resp = await client.post(
+        f"{API}/invites", json={"email": "q@x.com", "roles": ["processor"]}, headers=_as(shop.admin)
+    )
+
+    assert resp.status_code == 503
+    assert "Use Resend" in resp.json()["error"]["message"]
+    listed = (await client.get(f"{API}/invites", headers=_as(shop.admin))).json()
+    assert [row["email"] for row in listed] == ["q@x.com"]
+
+
+async def test_resending_an_expired_invitation_respects_the_cap(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Finding 7: reopening an expired invitation adds an open one."""
+    shop = await _shop(db_session)
+    now = utcnow()
+    for n in range(50):
+        db_session.add(
+            UserInvite(
+                company_id=shop.company_id,
+                email=f"p{n}@many.com",
+                roles=["processor"],
+                token_hash=hash_token(f"t{n}-{uuid4()}"),
+                expires_at=now + timedelta(days=7),
+                last_sent_at=now,
+                send_count=1,
+            )
+        )
+    expired = UserInvite(
+        company_id=shop.company_id,
+        email="old@many.com",
+        roles=["processor"],
+        token_hash=hash_token(f"old-{uuid4()}"),
+        expires_at=now - timedelta(days=1),
+        last_sent_at=now - timedelta(days=8),
+        send_count=1,
+    )
+    db_session.add(expired)
+    await db_session.flush()
+
+    resp = await client.post(f"{API}/invites/{expired.id}/resend", headers=_as(shop.admin))
+
+    assert (resp.status_code, resp.json()["error"]["message"]) == (
+        409,
+        "At most 50 open invitations",
+    )
+
+
+async def test_accepting_records_a_sign_in(client: AsyncClient, db_session: AsyncSession) -> None:
+    """Finding 8: the new person is signed in, so People does not say "Never"."""
+    shop = await _shop(db_session)
+    _, token = await _invite(client, shop)
+    await client.post(
+        f"{API}/invites/accept",
+        json={"token": token, "first_name": "A", "last_name": "B", "password": GOOD_PASSWORD},
+    )
+    db_session.expunge_all()
+    signed_in = await db_session.scalar(
+        select(User.last_login_at).where(User.email == "new@person.com")
+    )
+    assert signed_in is not None
+
+
+async def test_two_admins_inviting_the_same_new_address_at_once(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finding 1: the loser of the race hears "Try again in a minute", not a 500.
+
+    The race is staged: the open invite exists, but this request's lookup is made to miss it, as it
+    would if the other admin's insert committed between the lookup and this insert.
+    """
+    shop = await _shop(db_session)
+    await _invite(client, shop, "race@x.com")
+    real = invite_service._same_address
+
+    def _miss_invites(column: Any, address: str) -> Any:
+        return UserInvite.id.is_(None) if column is UserInvite.email else real(column, address)
+
+    monkeypatch.setattr(invite_service, "_same_address", _miss_invites)
+
+    resp = await client.post(
+        f"{API}/invites",
+        json={"email": "race@x.com", "roles": ["processor"]},
+        headers=_as(shop.admin),
+    )
+
+    assert (resp.status_code, resp.json()["error"]["message"]) == (429, "Try again in a minute")
+
+
+async def test_an_address_taken_at_the_moment_of_accepting_is_a_dead_link(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finding 6: two companies' invitations accepted at once; the second is the usual 404.
+
+    Staged like the test above: the address is already a user, but the check is made to miss it.
+    """
+    shop = await _shop(db_session)
+    _, token = await _invite(client, shop)
+    other = await _shop(db_session, "Late")
+    await _person(db_session, other.company_id, "new@person.com", UserRole.PROCESSOR)
+    real = invite_service._same_address
+
+    def _miss_users(column: Any, address: str) -> Any:
+        return User.id.is_(None) if column is User.email else real(column, address)
+
+    monkeypatch.setattr(invite_service, "_same_address", _miss_users)
+
+    resp = await client.post(
+        f"{API}/invites/accept",
+        json={"token": token, "first_name": "A", "last_name": "B", "password": GOOD_PASSWORD},
+    )
+
+    assert (resp.status_code, resp.json()) == (404, INVALID)
+    db_session.expunge_all()
+    invite = await db_session.scalar(select(UserInvite).where(UserInvite.email == "new@person.com"))
+    assert invite is not None and invite.accepted_at is None

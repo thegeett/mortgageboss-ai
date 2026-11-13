@@ -134,3 +134,26 @@ async def test_the_user_model_is_not_touched(db_session: AsyncSession) -> None:
     from sqlalchemy import select
 
     assert await db_session.scalar(select(User.id).where(User.email == invite.email)) is None
+
+
+async def test_a_misconfigured_link_origin_is_a_logged_failure_not_a_crash(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review finding 4."""
+    from app.services import invites as invite_service
+    from app.services.upload_links import LinkOriginNotConfigured
+
+    def _refuse() -> str:
+        raise LinkOriginNotConfigured("misconfigured")
+
+    sender = FakeSender()
+    monkeypatch.setattr(task, "get_mail_sender", lambda: sender)
+    monkeypatch.setattr(invite_service, "usable_link_origin", _refuse)
+    invite, token = await _open_invite(db_session)
+
+    with structlog.testing.capture_logs() as logs:
+        outcome = await task._send(db_session, invite.id, token)
+
+    assert outcome == "failed"
+    assert sender.sent == []
+    assert any(log.get("error_code") == "link_origin_not_configured" for log in logs)

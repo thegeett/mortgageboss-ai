@@ -128,3 +128,22 @@ describe("CopyLinkCard", () => {
     expect(container.innerHTML).toBe("");
   });
 });
+
+describe("CopyLinkCard — a new link is not already copied (review finding 10)", () => {
+  it("starts as Copy link for each new link when keyed by it, as the page does", async () => {
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    const first: InviteIssued = { invite: OPEN, accept_url: "http://l/accept-invite#a" };
+    const second: InviteIssued = { invite: EXPIRED, accept_url: "http://l/accept-invite#b" };
+    const { rerender } = render(
+      <CopyLinkCard key={first.accept_url} issued={first} verb="created" onDismiss={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
+
+    rerender(
+      <CopyLinkCard key={second.accept_url} issued={second} verb="resent" onDismiss={vi.fn()} />,
+    );
+
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeTruthy();
+  });
+});

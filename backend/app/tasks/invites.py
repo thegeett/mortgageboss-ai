@@ -24,6 +24,7 @@ from app.models.user import User
 from app.models.user_invite import INVITE_VALID_DAYS, UserInvite
 from app.services.invites import accept_url, roles_in_words
 from app.services.mail_sender import SendError, get_mail_sender
+from app.services.upload_links import LinkOriginNotConfigured
 from app.tasks.base import BaseTask, run_async, task_session
 from app.tasks.celery_app import celery_app
 
@@ -63,13 +64,20 @@ async def _send(db: AsyncSession, invite_id: UUID, token: str) -> str:
         return "skipped"
     company = await db.get(Company, invite.company_id)
     inviter = await db.get(User, invite.invited_by_user_id) if invite.invited_by_user_id else None
-    message = build_invite_email(
-        to=invite.email,
-        company_name=company.name if company else "your company",
-        inviter_name=inviter.full_name if inviter else "Your administrator",
-        roles=invite.roles,
-        token=token,
-    )
+    try:
+        message = build_invite_email(
+            to=invite.email,
+            company_name=company.name if company else "your company",
+            inviter_name=inviter.full_name if inviter else "Your administrator",
+            roles=invite.roles,
+            token=token,
+        )
+    except LinkOriginNotConfigured:
+        # A misconfigured origin is a failed send, logged like one (review finding 4), not a crash.
+        logger.warning(
+            "invite_email_failed", invite_id=str(invite_id), error_code="link_origin_not_configured"
+        )
+        return "failed"
     try:
         await asyncio.to_thread(sender.send, message)
     except SendError as exc:
