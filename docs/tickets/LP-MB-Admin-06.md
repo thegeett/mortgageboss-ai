@@ -70,7 +70,7 @@ what proves it covered its routes.
 | 11 | `services/processor_copy.copy_recipient` | D copy_to_processor | when the file's company has the setting on, the copy goes to the most recent sender who is STILL on the team; nobody on the team → no copy, one log line |
 | 12 | `api/users.assignable` counts, `api/overlay_admin` blast radius | C addendum, C5 | unchanged, documented: counts reveal a number not a file; blast radius is `overlays.manage`, admin-only |
 
-Frontend: nothing to build. A restricted user's pipeline simply has fewer rows, "All files" means "all I
+Frontend: one confirm line on the Team card (Decided, 1). Otherwise nothing: a restricted user's pipeline simply has fewer rows, "All files" means "all I
 can see", and a 404 on a deep link shows the existing not-found state. One copy change: the overview's
 setting hint already says what the switch does.
 
@@ -129,24 +129,22 @@ would be the tell. No route gains a new message.
 - The whole existing suite with the setting off: unchanged (it is the default, so this is the normal run).
 - mypy: a gate called with a bare UUID is a type error (no runtime test needed; it is the design).
 
-## Open before build
+## Decided (2026-11-13)
 
-1. **A restricted LO who removes themselves as LO** (hands the file to another LO) loses the file on the
-   next request. Correct by the rules, surprising in the UI. Decide: confirm dialog on the Team card
-   ("You will no longer see this file"), or nothing.
-2. **The `me` assignee filter and `sees_all_loans`**: a `sees_all_loans` processor's "My files" is still
-   files they are on, "All files" is everything. Confirm that reading.
-3. **Timeline entries by non-members**: a document uploaded by a borrower via an upload link on a
-   restricted file shows the uploader's name to the team; fine. An activity row's `actor` who has since
-   been removed from the team still shows by name; fine. Confirm nothing else leaks a person across files.
-4. **A creator who would get no slot** (point 10): refuse at create with the 422 above, or let a loan
-   officer who names another LO become a processor on the file regardless of role? The refusal is the
-   rule-preserving choice; the second is friendlier and bends "who may hold a slot".
-5. **Scope is computed once per request, at the start.** `FileScope.for_actor` reads the company setting
-   and `sees_all_loans` from the actor's loaded rows. A request that changes those (an admin flipping the
-   setting, or editing their own `sees_all_loans`) sees the old scope until its next request; and after
-   LP-MB-Admin-03's `_locked` re-read, `actor.user.company` is unloaded, so `for_actor` must run before
-   any user change in that request. Both are fine; the build must not move the computation later.
+1. **An LO who hands off their own file** loses it on the next request. The Team card shows a one-line
+   confirm, only when the person changing the loan officer is removing themselves AND is restricted:
+   "You will no longer see this file." The card decides from `can_change`, the current LO, and a new
+   `restricted: bool` on `UserPublic` (`FileScope.for_actor(actor).restricted_to_user_id is not None`),
+   so the API needs no new endpoint. This is the ticket's one frontend change.
+2. **"My files" vs "All files" for a `sees_all_loans` processor**: My files = files they are on; All
+   files = every file in the company.
+3. **Names across files**: an activity actor keeps their name after leaving the team; an upload-link
+   uploader's name shows to the team. The build checks nothing else names a person across files.
+4. **A creator who would get no slot** is refused at create with the 422 in point 10. Not added as a
+   processor regardless of role.
+5. **Scope is computed once per request, at the start**, before any user change in that request
+   (LP-MB-Admin-03's `_locked` re-read unloads `actor.user.company`). An admin who flips the setting
+   sees the effect on their next request.
 
 ## ADR note (ADR-446)
 
